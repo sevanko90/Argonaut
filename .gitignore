@@ -1,0 +1,102 @@
+############################
+# .NET / C# build output
+############################
+bin/
+obj/
+out/
+*.user
+*.suo
+*.userprefs
+*.csproj.user
+
+# Visual Studio / MSBuild
+*.vs/
+*.vscode/
+
+############################
+# Rider / IntelliJ
+############################
+.idea/
+*.iml
+*.iws
+.idea_modules/
+.idea/workspace.xml
+.idea/tasks.xml
+.idea/dictionaries/
+.idea/httpRequests/
+.idea/assetWizardSettings.xml
+
+# JetBrains caches
+.idea/.idea/
+.idea/system/
+.idea/caches/
+.idea/modules/
+.idea/gradle.xml
+.idea/libraries/
+
+############################
+# Avalonia
+############################
+# Avalonia XAML compiler cache
+*.axaml.g.cs
+*.xaml.g.cs
+*.g.cs
+
+# Avalonia resources
+*.pdb
+*.dll
+*.deps.json
+
+############################
+# NuGet
+############################
+*.nupkg
+packages/
+.nuget/
+project.lock.json
+project.fragment.lock.json
+
+############################
+# Logs
+############################
+*.log
+logs/
+
+############################
+# OS-specific
+############################
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+.cache/
+.config/
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+############################
+# Temporary files
+############################
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+
+############################
+# Rider solution-level settings
+############################
+.idea/.idea/*
+
+############################
+# Memory-mapped file viewer artifacts (your project)
+############################
+*.mmap
+*.index

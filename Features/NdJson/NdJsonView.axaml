@@ -5,43 +5,74 @@
              xmlns:json="clr-namespace:JsonViewerCore.Features.NdJson"
              x:Class="JsonViewerCore.Features.NdJson.NdJsonView"
              x:DataType="json:NdJsonViewModel">
-    <ScrollViewer x:Name="MainScrollViewer"
-                  VerticalScrollBarVisibility="Auto"
-                  HorizontalScrollBarVisibility="Disabled"
-                  ScrollChanged="OnScrollChanged">
-        <Grid>
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="*" />
-                <RowDefinition Height="Auto" />
-            </Grid.RowDefinitions>
+    <Grid ColumnDefinitions="*,5,*">
+        <ScrollViewer x:Name="MainScrollViewer"
+                      Grid.Column="0"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled"
+                      ScrollChanged="OnScrollChanged">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
 
-            <Border Grid.Row="0" Height="{Binding TopSpacerHeight}" />
+                <Border Grid.Row="0" Height="{Binding TopSpacerHeight}" />
 
-            <ListBox x:Name="JsonLinesListBox"
-                     Grid.Row="1"
-                     ItemsSource="{Binding VisibleLines}"
-                     SelectionMode="Single">
-                <ListBox.Styles>
-                    <Style Selector="ListBoxItem">
-                        <Setter Property="Padding" Value="0" />
-                        <Setter Property="MinHeight" Value="20" />
-                        <Setter Property="Height" Value="20" />
-                    </Style>
-                </ListBox.Styles>
-                <ListBox.ItemTemplate>
-                    <DataTemplate>
-                        <TextBlock Text="{Binding .}" TextWrapping="NoWrap" />
-                    </DataTemplate>
-                </ListBox.ItemTemplate>
-                <ListBox.ItemsPanel>
-                    <ItemsPanelTemplate>
-                        <VirtualizingStackPanel />
-                    </ItemsPanelTemplate>
-                </ListBox.ItemsPanel>
-            </ListBox>
+                <ListBox x:Name="JsonLinesListBox"
+                         Grid.Row="1"
+                         ItemsSource="{Binding VisibleLines}"
+                         SelectionMode="Single">
+                    <ListBox.Styles>
+                        <Style Selector="ListBoxItem">
+                            <Setter Property="Padding" Value="0" />
+                            <Setter Property="MinHeight" Value="20" />
+                            <Setter Property="Height" Value="20" />
+                        </Style>
+                    </ListBox.Styles>
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <Grid ColumnDefinitions="72,*">
+                                <TextBlock Grid.Column="0"
+                                           Text="{Binding LineNumber}"
+                                           HorizontalAlignment="Right"
+                                           Margin="0,0,12,0"
+                                           Foreground="#9A9A9A"
+                                           FontFamily="Consolas, Monaco, 'Courier New', monospace" />
+                                <TextBlock Grid.Column="1"
+                                           Text="{Binding Text}"
+                                           TextWrapping="NoWrap"
+                                           FontFamily="Consolas, Monaco, 'Courier New', monospace" />
+                            </Grid>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                    <ListBox.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <VirtualizingStackPanel />
+                        </ItemsPanelTemplate>
+                    </ListBox.ItemsPanel>
+                </ListBox>
 
-            <Border Grid.Row="2" Height="{Binding BottomSpacerHeight}" />
-        </Grid>
-    </ScrollViewer>
+                <Border Grid.Row="2" Height="{Binding BottomSpacerHeight}" />
+            </Grid>
+        </ScrollViewer>
+
+        <GridSplitter Grid.Column="1"
+                      Width="1"
+                      HorizontalAlignment="Stretch"
+                      VerticalAlignment="Stretch"
+                      Background="#5A5A5A" />
+
+        <Border Grid.Column="2" Padding="8">
+            <TextBox Text="{Binding SelectedLineText, Mode=OneWay}"
+                     AcceptsReturn="True"
+                     IsReadOnly="True"
+                     TextWrapping="NoWrap"
+                     FontFamily="Consolas, Monaco, 'Courier New', monospace"
+                     ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                     ScrollViewer.VerticalScrollBarVisibility="Auto"
+                     BorderThickness="0" />
+        </Border>
+    </Grid>
 </UserControl>

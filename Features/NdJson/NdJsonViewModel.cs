@@ -13,11 +13,15 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
 {
     private const double LineHeight = 20;
     private const int WindowMultiplier = 3;
+    private const int InitialViewportLineCount = 50;
+    private const int InitialIndexedLineTarget = InitialViewportLineCount * WindowMultiplier;
 
     private MMapFile? mmap;
     private NdJsonOffsetIndex? index;
     private int currentWindowStart = -1;
     private int currentWindowCount = -1;
+    private int lastFirstVisibleIndex;
+    private int lastViewportLineCount = InitialViewportLineCount;
     private double topSpacerHeight;
     private double bottomSpacerHeight;
     private int? selectedLineNumber;
@@ -33,6 +37,8 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
     public string FilePath { get; private set; } = string.Empty;
 
     public int LineCount => this.index?.LineCount ?? 0;
+
+    public Task IndexingTask { get; private set; } = Task.CompletedTask;
 
     public double TopSpacerHeight
     {
@@ -64,27 +70,20 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
     {
         FilePath = path;
 
-        var loaded = await Task.Run(() =>
-        {
-            var mmap = new MMapFile(path);
-            try
-            {
-                var index = NdJsonOffsetIndex.Build(mmap, progressReporter);
-                return (mmap, index);
-            }
-            catch
-            {
-                mmap.Dispose();
-                throw;
-            }
-        });
+        var mmap = new MMapFile(path);
+        var index = NdJsonOffsetIndex.Start(mmap, progressReporter);
+        this.mmap = mmap;
+        this.index = index;
+        IndexingTask = index.IndexingTask;
 
-        this.mmap = loaded.mmap;
-        this.index = loaded.index;
+        await index.WaitForLineCountAsync(InitialIndexedLineTarget);
+
         currentWindowStart = -1;
         currentWindowCount = -1;
+        lastFirstVisibleIndex = 0;
+        lastViewportLineCount = InitialViewportLineCount;
         SelectedLineNumber = null;
-        EnsureWindow(0, 50);
+        EnsureWindow(0, InitialViewportLineCount);
     }
 
     public void EnsureWindow(int firstVisibleIndex, int viewportLineCount)
@@ -98,9 +97,15 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
         }
 
         viewportLineCount = Math.Max(1, viewportLineCount);
+        lastFirstVisibleIndex = firstVisibleIndex;
+        lastViewportLineCount = viewportLineCount;
 
         int pageIndex = firstVisibleIndex / viewportLineCount;
         int startIndex = Math.Max(0, (pageIndex - 1) * viewportLineCount);
+        int lineCount = this.index.LineCount;
+        if (startIndex >= lineCount)
+            startIndex = Math.Max(0, lineCount - viewportLineCount * WindowMultiplier);
+
         int remaining = this.index.LineCount - startIndex;
         int count = Math.Min(viewportLineCount * WindowMultiplier, remaining);
 
@@ -117,6 +122,11 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
         TopSpacerHeight = startIndex * LineHeight;
         BottomSpacerHeight = (this.index.LineCount - startIndex - count) * LineHeight;
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CurrentWindowStart)));
+    }
+
+    public void RefreshWindow()
+    {
+        EnsureWindow(lastFirstVisibleIndex, lastViewportLineCount);
     }
 
     private string ReadLine(int lineIndex)

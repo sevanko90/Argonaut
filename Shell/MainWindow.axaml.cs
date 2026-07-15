@@ -104,7 +104,7 @@ public partial class MainWindow : Window
                 ContentArea.Content = new NdJsonView { DataContext = vm };
                 RecentFileHistory.Add(normalizedPath);
                 ReloadRecentFiles();
-                UpdateNdJsonStatus(vm);
+                _ = MonitorNdJsonCompletionAsync(vm, requestId);
                 break;
             }
             default:
@@ -151,6 +151,34 @@ public partial class MainWindow : Window
 
         var percent = (int)Math.Min(100, (bytesProcessed * 100L) / totalBytes);
         StatusText.Text = $"Indexing {path}… {percent}%";
+    }
+
+    private async Task MonitorNdJsonCompletionAsync(NdJsonViewModel vm, int requestId)
+    {
+        try
+        {
+            await vm.IndexingTask;
+        }
+        catch
+        {
+            if (requestId != openRequestId)
+                return;
+
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                StatusText.Text = $"{vm.FilePath} — indexing failed";
+            });
+            return;
+        }
+
+        if (requestId != openRequestId)
+            return;
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            vm.RefreshWindow();
+            UpdateNdJsonStatus(vm);
+        });
     }
 
     private void ReloadRecentFiles()

@@ -5,11 +5,17 @@
              xmlns:json="clr-namespace:JsonViewerCore.Features.NdJson"
              x:Class="JsonViewerCore.Features.NdJson.NdJsonView"
              x:DataType="json:NdJsonViewModel">
-    <ListBox ItemsSource="{Binding Lines}">
-        <ListBox.ItemsPanel>
-            <ItemsPanelTemplate>
-                <VirtualizingStackPanel />
-            </ItemsPanelTemplate>
-        </ListBox.ItemsPanel>
-    </ListBox>
+        <ListBox ItemsSource="{Binding VisibleLines}" x:Name="JsonLinesListBox" >
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <TextBlock Text="{Binding}" Height="20" TextWrapping="NoWrap"/>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+            
+            <ListBox.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <VirtualizingStackPanel />
+                </ItemsPanelTemplate>
+            </ListBox.ItemsPanel>
+        </ListBox>
 </UserControl>

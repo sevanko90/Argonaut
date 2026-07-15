@@ -46,4 +46,33 @@ public static class NdjsonIndexer
 
         return list;
     }
+    
+    public static List<long> BuildOffsets(MMapFile file)
+    {
+        var offsets = new List<long>(capacity: 10000);
+        offsets.Add(0);
+
+        const int ChunkSize = 64 * 1024;
+        byte[] buf = new byte[ChunkSize];
+
+        long offset = 0;
+        long length = file.Length;
+
+        while (offset < length)
+        {
+            int read = file.Read(offset, buf);
+            if (read == 0) break;
+
+            for (int i = 0; i < read; i++)
+            {
+                if (buf[i] == (byte)'\n')
+                    offsets.Add(offset + i + 1);
+            }
+
+            offset += read;
+        }
+
+        return offsets;
+    }
+
 }

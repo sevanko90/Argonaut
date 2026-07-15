@@ -1,4 +1,5 @@
 ﻿using System;
+using System.ComponentModel;
 using System.IO;
 using Avalonia.Controls;
 using Avalonia.Layout;
@@ -11,6 +12,8 @@ namespace JsonViewerCore.Shell;
 
 public partial class MainWindow : Window
 {
+    private NdJsonViewModel? currentNdJsonViewModel;
+
     public MainWindow()
     {
         InitializeComponent();
@@ -65,6 +68,7 @@ public partial class MainWindow : Window
                 // can't do anything with it
                 break;
             case FileTypeDetector.FileKind.Json:
+                DetachNdJsonViewModel();
                 ContentArea.Content = new JsonView { DataContext = new JsonViewModel(normalizedPath) };
                 RecentFileHistory.Add(normalizedPath);
                 ReloadRecentFiles();
@@ -72,16 +76,48 @@ public partial class MainWindow : Window
                 break;
             case FileTypeDetector.FileKind.Ndjson:
             {
+                DetachNdJsonViewModel();
                 var vm = new NdJsonViewModel(normalizedPath);
+                currentNdJsonViewModel = vm;
+                currentNdJsonViewModel.PropertyChanged += OnNdJsonViewModelPropertyChanged;
                 ContentArea.Content = new NdJsonView { DataContext = vm };
                 RecentFileHistory.Add(normalizedPath);
                 ReloadRecentFiles();
-                StatusText.Text = $"{vm.FilePath} — {vm.LineCount:N0} lines";
+                UpdateNdJsonStatus(vm);
                 break;
             }
             default:
                 throw new ArgumentOutOfRangeException();
         }
+    }
+
+    private void OnNdJsonViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (sender is not NdJsonViewModel vm)
+            return;
+
+        if (e.PropertyName is null or nameof(NdJsonViewModel.SelectedLineNumber))
+            UpdateNdJsonStatus(vm);
+    }
+
+    private void UpdateNdJsonStatus(NdJsonViewModel vm)
+    {
+        if (vm.SelectedLineNumber is null)
+        {
+            StatusText.Text = $"{vm.FilePath} — {vm.LineCount:N0} lines";
+            return;
+        }
+
+        StatusText.Text = $"{vm.FilePath} — {vm.LineCount:N0} lines — Selected line: {vm.SelectedLineNumber:N0}";
+    }
+
+    private void DetachNdJsonViewModel()
+    {
+        if (currentNdJsonViewModel is null)
+            return;
+
+        currentNdJsonViewModel.PropertyChanged -= OnNdJsonViewModelPropertyChanged;
+        currentNdJsonViewModel = null;
     }
 
     private void ReloadRecentFiles()

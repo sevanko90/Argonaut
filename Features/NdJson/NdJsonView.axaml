@@ -18,13 +18,28 @@
 
             <Border Grid.Row="0" Height="{Binding TopSpacerHeight}" />
 
-            <ItemsControl Grid.Row="1" ItemsSource="{Binding VisibleLines}">
-                <ItemsControl.ItemTemplate>
+            <ListBox x:Name="JsonLinesListBox"
+                     Grid.Row="1"
+                     ItemsSource="{Binding VisibleLines}"
+                     SelectionMode="Single">
+                <ListBox.Styles>
+                    <Style Selector="ListBoxItem">
+                        <Setter Property="Padding" Value="0" />
+                        <Setter Property="MinHeight" Value="20" />
+                        <Setter Property="Height" Value="20" />
+                    </Style>
+                </ListBox.Styles>
+                <ListBox.ItemTemplate>
                     <DataTemplate>
-                        <TextBlock Text="{Binding .}" Height="20" TextWrapping="NoWrap" />
+                        <TextBlock Text="{Binding .}" TextWrapping="NoWrap" />
                     </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
+                </ListBox.ItemTemplate>
+                <ListBox.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <VirtualizingStackPanel />
+                    </ItemsPanelTemplate>
+                </ListBox.ItemsPanel>
+            </ListBox>
 
             <Border Grid.Row="2" Height="{Binding BottomSpacerHeight}" />
         </Grid>

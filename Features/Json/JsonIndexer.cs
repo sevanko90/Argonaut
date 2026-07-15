@@ -49,43 +49,53 @@ public static class JsonIndexer
         while (offset < length)
         {
             int size = (int)Math.Min(ChunkSize, length - offset);
-            var buffer = new byte[size];
-            file.Read(offset, buffer);
-
-            var reader = new Utf8JsonReader(buffer, offset + size >= length, state);
-
-            while (reader.Read())
+            var buffer = ArrayPool<byte>.Shared.Rent(size);
+            JsonReaderState nextState = state;
+            try
             {
-                var kind = Map(reader.TokenType);
-                long tokenOffset = offset + reader.TokenStartIndex;
-                int tokenLength = reader.HasValueSequence
-                    ? (int)reader.ValueSequence.Length
-                    : reader.ValueSpan.Length;
+                int bytesRead = file.Read(offset, buffer);
 
-                string? text = reader.TokenType switch
+                var reader = new Utf8JsonReader(buffer.AsSpan(0, bytesRead), offset + bytesRead >= length, state);
+
+                while (reader.Read())
                 {
-                    JsonTokenType.PropertyName => reader.GetString(),
-                    JsonTokenType.String => reader.GetString(),
-                    JsonTokenType.Number => reader.HasValueSequence
-                        ? Encoding.UTF8.GetString(reader.ValueSequence.ToArray())
-                        : Encoding.UTF8.GetString(reader.ValueSpan),
+                    var kind = Map(reader.TokenType);
+                    long tokenOffset = offset + reader.TokenStartIndex;
+                    int tokenLength = reader.HasValueSequence
+                        ? (int)reader.ValueSequence.Length
+                        : reader.ValueSpan.Length;
 
-                    JsonTokenType.True or JsonTokenType.False or JsonTokenType.Null => reader.HasValueSequence
-                        ? Encoding.UTF8.GetString(reader.ValueSequence.ToArray())
-                        : Encoding.UTF8.GetString(reader.ValueSpan),
-                    _ => null
-                };
+                    string? text = reader.TokenType switch
+                    {
+                        JsonTokenType.PropertyName => reader.GetString(),
+                        JsonTokenType.String => reader.GetString(),
+                        JsonTokenType.Number => reader.HasValueSequence
+                            ? Encoding.UTF8.GetString(reader.ValueSequence.ToArray())
+                            : Encoding.UTF8.GetString(reader.ValueSpan),
 
-                if (reader.TokenType is JsonTokenType.StartObject or JsonTokenType.StartArray)
-                    depth++;
+                        JsonTokenType.True or JsonTokenType.False or JsonTokenType.Null => reader.HasValueSequence
+                            ? Encoding.UTF8.GetString(reader.ValueSequence.ToArray())
+                            : Encoding.UTF8.GetString(reader.ValueSpan),
+                        _ => null
+                    };
 
-                tokens.Add(new JsonToken(kind, depth, tokenOffset, tokenLength, text));
+                    if (reader.TokenType is JsonTokenType.StartObject or JsonTokenType.StartArray)
+                        depth++;
 
-                if (reader.TokenType is JsonTokenType.EndObject or JsonTokenType.EndArray)
-                    depth--;
+                    tokens.Add(new JsonToken(kind, depth, tokenOffset, tokenLength, text));
+
+                    if (reader.TokenType is JsonTokenType.EndObject or JsonTokenType.EndArray)
+                        depth--;
+                }
+
+                nextState = reader.CurrentState;
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(buffer);
             }
 
-            state = reader.CurrentState;
+            state = nextState;
             offset += size;
         }
 

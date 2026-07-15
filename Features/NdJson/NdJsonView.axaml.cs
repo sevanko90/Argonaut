@@ -11,6 +11,7 @@ public partial class NdJsonView : UserControl
 
         Loaded += OnLoaded;
         DetachedFromVisualTree += OnDetachedFromVisualTree;
+        JsonLinesListBox.SelectionChanged += OnSelectionChanged;
     }
 
     private void OnLoaded(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
@@ -20,8 +21,25 @@ public partial class NdJsonView : UserControl
 
     private void OnDetachedFromVisualTree(object? sender, Avalonia.VisualTreeAttachmentEventArgs e)
     {
+        JsonLinesListBox.SelectionChanged -= OnSelectionChanged;
+
         if (DataContext is IDisposable d)
             d.Dispose();
+    }
+
+    private void OnSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (DataContext is not NdJsonViewModel vm)
+            return;
+
+        var selectedIndex = JsonLinesListBox.SelectedIndex;
+        if (selectedIndex < 0)
+        {
+            vm.SelectedLineNumber = null;
+            return;
+        }
+
+        vm.SelectedLineNumber = vm.CurrentWindowStart + selectedIndex + 1;
     }
 
     private void OnScrollChanged(object? sender, ScrollChangedEventArgs e)

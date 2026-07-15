@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Text;
 using System.ComponentModel;
@@ -18,6 +19,7 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
     private int currentWindowCount = -1;
     private double topSpacerHeight;
     private double bottomSpacerHeight;
+    private int? selectedLineNumber;
 
     private IReadOnlyList<string> visibleLines = Array.Empty<string>();
 
@@ -41,6 +43,14 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
     {
         get => bottomSpacerHeight;
         private set => SetField(ref bottomSpacerHeight, value);
+    }
+
+    public int CurrentWindowStart => currentWindowStart;
+
+    public int? SelectedLineNumber
+    {
+        get => selectedLineNumber;
+        set => SetField(ref selectedLineNumber, value);
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -83,17 +93,25 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
         currentWindowCount = count;
         TopSpacerHeight = startIndex * LineHeight;
         BottomSpacerHeight = (this.index.LineCount - startIndex - count) * LineHeight;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CurrentWindowStart)));
     }
-
+    
     private string ReadLine(int lineIndex)
     {
         long offset = this.index.GetOffset(lineIndex);
         long length = this.index.GetLength(lineIndex, this.mmap.Length);
 
-        var buf = new byte[length];
-        this.mmap.Read(offset, buf);
+        var buffer = ArrayPool<byte>.Shared.Rent((int)length);
+        try
+        {
+            int bytesRead = this.mmap.Read(offset, buffer);
 
-        return Encoding.UTF8.GetString(buf).TrimEnd('\r', '\n');
+            return Encoding.UTF8.GetString(buffer, 0, bytesRead).TrimEnd('\r', '\n');
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
     }
 
     public void Dispose()

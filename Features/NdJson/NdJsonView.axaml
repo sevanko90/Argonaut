@@ -10,7 +10,8 @@
                       Grid.Column="0"
                       VerticalScrollBarVisibility="Auto"
                       HorizontalScrollBarVisibility="Disabled"
-                      ScrollChanged="OnScrollChanged">
+                      ScrollChanged="OnScrollChanged"
+                      ClipToBounds="True">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
@@ -57,6 +58,23 @@
                 <Border Grid.Row="2" Height="{Binding BottomSpacerHeight}" />
             </Grid>
         </ScrollViewer>
+
+        <Border Grid.Column="0"
+                IsHitTestVisible="False"
+                IsVisible="{Binding IsLoading}"
+                HorizontalAlignment="Stretch"
+                VerticalAlignment="Stretch">
+            <StackPanel HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Spacing="8">
+                <ProgressBar IsIndeterminate="True"
+                             Width="140"
+                             Height="4" />
+                <TextBlock Text="Loading…"
+                           HorizontalAlignment="Center"
+                           Foreground="#9A9A9A" />
+            </StackPanel>
+        </Border>
 
         <GridSplitter Grid.Column="1"
                       Width="1"

@@ -6,7 +6,6 @@ namespace JsonViewerCore.Features.NdJson;
 public partial class NdJsonView : UserControl
 {
     private bool suppressSelectionEvents;
-    private bool ignoreNextScrollChanged;
 
     public NdJsonView()
     {
@@ -17,8 +16,16 @@ public partial class NdJsonView : UserControl
         JsonLinesListBox.SelectionChanged += OnSelectionChanged;
     }
 
+    private NdJsonViewModel? subscribedViewModel;
+
     private void OnLoaded(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
+        if (DataContext is NdJsonViewModel vm && subscribedViewModel != vm)
+        {
+            subscribedViewModel = vm;
+            vm.WindowApplied += OnWindowApplied;
+        }
+
         UpdateWindow();
     }
 
@@ -26,8 +33,32 @@ public partial class NdJsonView : UserControl
     {
         JsonLinesListBox.SelectionChanged -= OnSelectionChanged;
 
+        if (subscribedViewModel is not null)
+        {
+            subscribedViewModel.WindowApplied -= OnWindowApplied;
+            subscribedViewModel = null;
+        }
+
         if (DataContext is IDisposable d)
             d.Dispose();
+    }
+
+    // A window loaded in the background has just been applied on the UI thread; the
+    // items were replaced wholesale, so restore the selection highlight for the row.
+    private void OnWindowApplied()
+    {
+        if (DataContext is not NdJsonViewModel vm)
+            return;
+
+        suppressSelectionEvents = true;
+        try
+        {
+            SyncVisualSelection(vm);
+        }
+        finally
+        {
+            suppressSelectionEvents = false;
+        }
     }
 
     private void OnSelectionChanged(object? sender, SelectionChangedEventArgs e)
@@ -47,26 +78,13 @@ public partial class NdJsonView : UserControl
 
     private void OnScrollChanged(object? sender, ScrollChangedEventArgs e)
     {
-        if (ignoreNextScrollChanged)
-        {
-            // Console.WriteLine(
-             //   $"ScrollChanged: ignored follow-up event offset={MainScrollViewer.Offset.Y}, offsetDelta={e.OffsetDelta.Y}, extentDelta={e.ExtentDelta.Y}, viewportDelta={e.ViewportDelta.Y}");
-            ignoreNextScrollChanged = false;
+        // Only react to genuine offset changes. Re-layout caused by loading a new
+        // window keeps the offset fixed (the extent is constant), so those follow-up
+        // events have offsetDelta ~= 0 and are ignored here. EnsureWindow is idempotent,
+        // so there is no need to suppress the "next" event — doing so would drop real
+        // scroll movements while dragging the scrollbar and leave the window stranded.
+        if (Math.Abs(e.OffsetDelta.Y) < double.Epsilon)
             return;
-        }
-
-        var offsetDelta = e.OffsetDelta.Y;
-        var extentDelta = e.ExtentDelta.Y;
-        var viewportDelta = e.ViewportDelta.Y;
-
-        //Console.WriteLine(
-        //    $"ScrollChanged: offset={MainScrollViewer.Offset.Y}, offsetDelta={offsetDelta}, extentDelta={extentDelta}, viewportDelta={viewportDelta}");
-
-        if (Math.Abs(offsetDelta) < double.Epsilon)
-        {
-          //  Console.WriteLine("ScrollChanged: ignoring non-offset scroll change.");
-            return;
-        }
 
         UpdateWindow();
     }
@@ -85,7 +103,7 @@ public partial class NdJsonView : UserControl
         suppressSelectionEvents = true;
         try
         {
-            ignoreNextScrollChanged = vm.EnsureWindow(firstVisibleIndex, viewportLines);
+            vm.EnsureWindow(firstVisibleIndex, viewportLines);
             SyncVisualSelection(vm);
         }
         finally

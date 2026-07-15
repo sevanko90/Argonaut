@@ -5,17 +5,28 @@
              xmlns:json="clr-namespace:JsonViewerCore.Features.NdJson"
              x:Class="JsonViewerCore.Features.NdJson.NdJsonView"
              x:DataType="json:NdJsonViewModel">
-        <ListBox ItemsSource="{Binding VisibleLines}" x:Name="JsonLinesListBox" >
-            <ListBox.ItemTemplate>
-                <DataTemplate>
-                    <TextBlock Text="{Binding}" Height="20" TextWrapping="NoWrap"/>
-                </DataTemplate>
-            </ListBox.ItemTemplate>
-            
-            <ListBox.ItemsPanel>
-                <ItemsPanelTemplate>
-                    <VirtualizingStackPanel />
-                </ItemsPanelTemplate>
-            </ListBox.ItemsPanel>
-        </ListBox>
+    <ScrollViewer x:Name="MainScrollViewer"
+                  VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled"
+                  ScrollChanged="OnScrollChanged">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Border Grid.Row="0" Height="{Binding TopSpacerHeight}" />
+
+            <ItemsControl Grid.Row="1" ItemsSource="{Binding VisibleLines}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding .}" Height="20" TextWrapping="NoWrap" />
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <Border Grid.Row="2" Height="{Binding BottomSpacerHeight}" />
+        </Grid>
+    </ScrollViewer>
 </UserControl>

@@ -1,7 +1,5 @@
 using System;
-using System.Linq;
 using Avalonia.Controls;
-using Avalonia.VisualTree;
 
 namespace JsonViewerCore.Features.NdJson;
 
@@ -10,36 +8,38 @@ public partial class NdJsonView : UserControl
     public NdJsonView()
     {
         InitializeComponent();
-        
-        this.DetachedFromVisualTree += (_, __) =>
-        {
-            if (DataContext is IDisposable d)
-                d.Dispose();
-        };
-        
-        this.AttachedToVisualTree += (_, __) =>
-        {
-            // Force template creation
-            JsonLinesListBox.ApplyTemplate();
 
-            // Find internal ScrollViewer
-            var sv = JsonLinesListBox.GetVisualDescendants()
-                                     .OfType<ScrollViewer>()
-                                     .FirstOrDefault();
+        Loaded += OnLoaded;
+        DetachedFromVisualTree += OnDetachedFromVisualTree;
+    }
 
-            if (sv != null)
-            {
-                sv.ScrollChanged += (_, e) =>
-                {
-                    
-                    var vm = (NdJsonViewModel)DataContext;
+    private void OnLoaded(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        UpdateWindow();
+    }
 
-                    double lineHeight = 20;
-                    int firstVisibleIndex = (int)(e.ViewportDelta.Y / lineHeight);
+    private void OnDetachedFromVisualTree(object? sender, Avalonia.VisualTreeAttachmentEventArgs e)
+    {
+        if (DataContext is IDisposable d)
+            d.Dispose();
+    }
 
-                    vm.LoadWindow(firstVisibleIndex, 50);
-                };
-            }
-        };
+    private void OnScrollChanged(object? sender, ScrollChangedEventArgs e)
+    {
+        UpdateWindow();
+    }
+
+    private void UpdateWindow()
+    {
+        if (DataContext is not NdJsonViewModel vm)
+            return;
+
+        const double lineHeight = 20;
+        var viewportLines = (int)Math.Ceiling(MainScrollViewer.Viewport.Height / lineHeight);
+        if (viewportLines <= 0)
+            viewportLines = 50;
+
+        var firstVisibleIndex = Math.Max(0, (int)Math.Floor(MainScrollViewer.Offset.Y / lineHeight));
+        vm.EnsureWindow(firstVisibleIndex, viewportLines);
     }
 }

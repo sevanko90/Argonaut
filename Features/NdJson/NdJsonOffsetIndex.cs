@@ -26,7 +26,7 @@ public sealed class NdJsonOffsetIndex
         return end - start;
     }
 
-    public static NdJsonOffsetIndex Build(MMapFile file)
+    public static NdJsonOffsetIndex Build(MMapFile file, IProgressReporter? progressReporter = null)
     {
         var lineStarts = new List<long>();
 
@@ -56,7 +56,15 @@ public sealed class NdJsonOffsetIndex
             }
 
             offset += bytesRead;
+            
+            var indexedPercentage = (int)Math.Min(100, (offset * 100L) / length);
+            if (indexedPercentage % 5 == 0)
+            {
+                progressReporter?.Report(offset, length);
+            }
         }
+
+        progressReporter?.Report(length, length);
 
         return new NdJsonOffsetIndex(lineStarts);
     }

@@ -1,9 +1,10 @@
 using System;
 using System.Buffers;
 using System.Collections.Generic;
-using System.Text;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System.Text;
+using System.Threading.Tasks;
 using JsonViewerCore.Infrastructure;
 
 namespace JsonViewerCore.Features.NdJson;
@@ -13,8 +14,8 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
     private const double LineHeight = 20;
     private const int WindowMultiplier = 3;
 
-    private readonly MMapFile mmap;
-    private readonly NdJsonOffsetIndex index;
+    private MMapFile? mmap;
+    private NdJsonOffsetIndex? index;
     private int currentWindowStart = -1;
     private int currentWindowCount = -1;
     private double topSpacerHeight;
@@ -29,9 +30,9 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
         private set => SetField(ref visibleLines, value);
     }
 
-    public string FilePath { get; }
+    public string FilePath { get; private set; } = string.Empty;
 
-    public int LineCount => this.index.LineCount;
+    public int LineCount => this.index?.LineCount ?? 0;
 
     public double TopSpacerHeight
     {
@@ -55,18 +56,40 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
-    public NdJsonViewModel(string path)
+    public NdJsonViewModel()
+    {
+    }
+
+    public async Task LoadAsync(string path, IProgressReporter? progressReporter = null)
     {
         FilePath = path;
-        this.mmap = new MMapFile(path);
-        this.index = NdJsonOffsetIndex.Build(mmap);
 
+        var loaded = await Task.Run(() =>
+        {
+            var mmap = new MMapFile(path);
+            try
+            {
+                var index = NdJsonOffsetIndex.Build(mmap, progressReporter);
+                return (mmap, index);
+            }
+            catch
+            {
+                mmap.Dispose();
+                throw;
+            }
+        });
+
+        this.mmap = loaded.mmap;
+        this.index = loaded.index;
+        currentWindowStart = -1;
+        currentWindowCount = -1;
+        SelectedLineNumber = null;
         EnsureWindow(0, 50);
     }
 
     public void EnsureWindow(int firstVisibleIndex, int viewportLineCount)
     {
-        if (this.index.LineCount == 0)
+        if (this.index is null || this.mmap is null || this.index.LineCount == 0)
         {
             VisibleLines = Array.Empty<string>();
             TopSpacerHeight = 0;
@@ -95,16 +118,18 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
         BottomSpacerHeight = (this.index.LineCount - startIndex - count) * LineHeight;
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CurrentWindowStart)));
     }
-    
+
     private string ReadLine(int lineIndex)
     {
-        long offset = this.index.GetOffset(lineIndex);
-        long length = this.index.GetLength(lineIndex, this.mmap.Length);
+        var index = this.index!;
+        var mmap = this.mmap!;
+        long offset = index.GetOffset(lineIndex);
+        long length = index.GetLength(lineIndex, mmap.Length);
 
         var buffer = ArrayPool<byte>.Shared.Rent((int)length);
         try
         {
-            int bytesRead = this.mmap.Read(offset, buffer);
+            int bytesRead = mmap.Read(offset, buffer);
 
             return Encoding.UTF8.GetString(buffer, 0, bytesRead).TrimEnd('\r', '\n');
         }
@@ -116,7 +141,7 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
 
     public void Dispose()
     {
-        this.mmap.Dispose();
+        this.mmap?.Dispose();
     }
 
     private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)

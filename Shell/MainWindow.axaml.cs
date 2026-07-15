@@ -4,15 +4,18 @@ using System.IO;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
 using JsonViewerCore.Features.Json;
 using JsonViewerCore.Features.NdJson;
 using JsonViewerCore.Infrastructure;
+using System.Threading.Tasks;
 
 namespace JsonViewerCore.Shell;
 
 public partial class MainWindow : Window
 {
     private NdJsonViewModel? currentNdJsonViewModel;
+    private int openRequestId;
 
     public MainWindow()
     {
@@ -36,18 +39,19 @@ public partial class MainWindow : Window
             return;
 
         PathBox.Text = path;
-        OpenPath(path);
+        await OpenPath(path);
     }
 
-    private void OnOpen(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    private async void OnOpen(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        OpenPath(PathBox.Text);
+        await OpenPath(PathBox.Text);
     }
 
-    private void OpenPath(string? path)
+    private async Task OpenPath(string? path)
     {
         if (string.IsNullOrWhiteSpace(path)) return;
 
+        var requestId = ++openRequestId;
         var normalizedPath = Path.GetFullPath(path);
         if (!File.Exists(normalizedPath))
             return;
@@ -68,16 +72,33 @@ public partial class MainWindow : Window
                 // can't do anything with it
                 break;
             case FileTypeDetector.FileKind.Json:
+            {
                 DetachNdJsonViewModel();
-                ContentArea.Content = new JsonView { DataContext = new JsonViewModel(normalizedPath) };
+                StatusText.Text = $"Indexing {normalizedPath}… 0%";
+
+                var reporter = new StatusProgressReporter(this, normalizedPath, requestId);
+                var vm = new JsonViewModel();
+                await vm.LoadAsync(normalizedPath, reporter);
+                if (requestId != openRequestId)
+                    return;
+
+                ContentArea.Content = new JsonView { DataContext = vm };
                 RecentFileHistory.Add(normalizedPath);
                 ReloadRecentFiles();
                 StatusText.Text = normalizedPath;
                 break;
+            }
             case FileTypeDetector.FileKind.Ndjson:
             {
                 DetachNdJsonViewModel();
-                var vm = new NdJsonViewModel(normalizedPath);
+                StatusText.Text = $"Indexing {normalizedPath}… 0%";
+
+                var reporter = new StatusProgressReporter(this, normalizedPath, requestId);
+                var vm = new NdJsonViewModel();
+                await vm.LoadAsync(normalizedPath, reporter);
+                if (requestId != openRequestId)
+                    return;
+
                 currentNdJsonViewModel = vm;
                 currentNdJsonViewModel.PropertyChanged += OnNdJsonViewModelPropertyChanged;
                 ContentArea.Content = new NdJsonView { DataContext = vm };
@@ -120,6 +141,18 @@ public partial class MainWindow : Window
         currentNdJsonViewModel = null;
     }
 
+    private void UpdateIndexingStatus(string path, long bytesProcessed, long totalBytes)
+    {
+        if (totalBytes <= 0)
+        {
+            StatusText.Text = $"Indexing {path}…";
+            return;
+        }
+
+        var percent = (int)Math.Min(100, (bytesProcessed * 100L) / totalBytes);
+        StatusText.Text = $"Indexing {path}… {percent}%";
+    }
+
     private void ReloadRecentFiles()
     {
         var recentFiles = RecentFileHistory.Load();
@@ -153,10 +186,44 @@ public partial class MainWindow : Window
             button.Click += (_, _) =>
             {
                 PathBox.Text = path;
-                OpenPath(path);
+                _ = OpenPath(path);
             };
 
             RecentFilesPanel.Children.Add(button);
+        }
+    }
+
+    private sealed class StatusProgressReporter : IProgressReporter
+    {
+        private readonly MainWindow window;
+        private readonly string path;
+        private readonly int requestId;
+        private int lastPercent = -1;
+
+        public StatusProgressReporter(MainWindow window, string path, int requestId)
+        {
+            this.window = window;
+            this.path = path;
+            this.requestId = requestId;
+        }
+
+        public void Report(long bytesProcessed, long totalBytes)
+        {
+            if (requestId != window.openRequestId)
+                return;
+
+            if (totalBytes <= 0)
+            {
+                Dispatcher.UIThread.Post(() => window.UpdateIndexingStatus(path, bytesProcessed, totalBytes));
+                return;
+            }
+
+            int percent = (int)Math.Min(100, (bytesProcessed * 100L) / totalBytes);
+            if (percent == lastPercent)
+                return;
+
+            lastPercent = percent;
+            Dispatcher.UIThread.Post(() => window.UpdateIndexingStatus(path, bytesProcessed, totalBytes));
         }
     }
 }

@@ -32,7 +32,7 @@ public static class JsonIndexer
 {
     private const int ChunkSize = 64 * 1024;
 
-    public static List<JsonToken> Build(MMapFile file)
+    public static List<JsonToken> Build(MMapFile file, IProgressReporter? progressReporter = null)
     {
         long offset = 0;
         long length = file.Length;
@@ -51,9 +51,12 @@ public static class JsonIndexer
             int size = (int)Math.Min(ChunkSize, length - offset);
             var buffer = ArrayPool<byte>.Shared.Rent(size);
             JsonReaderState nextState = state;
+            int bytesRead = 0;
             try
             {
-                int bytesRead = file.Read(offset, buffer);
+                bytesRead = file.Read(offset, buffer);
+                if (bytesRead == 0)
+                    break;
 
                 var reader = new Utf8JsonReader(buffer.AsSpan(0, bytesRead), offset + bytesRead >= length, state);
 
@@ -96,8 +99,11 @@ public static class JsonIndexer
             }
 
             state = nextState;
-            offset += size;
+            offset += bytesRead;
+            progressReporter?.Report(offset, length);
         }
+
+        progressReporter?.Report(length, length);
 
         return tokens;
     }

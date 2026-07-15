@@ -1,4 +1,6 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Threading.Tasks;
 using JsonViewerCore.Infrastructure;
 
 namespace JsonViewerCore.Features.Json;
@@ -7,21 +9,35 @@ public sealed class JsonViewModel
 {
     public ObservableCollection<JsonNode> Nodes { get; } = new();
 
-    public JsonViewModel(string path)
+    public JsonViewModel()
     {
-        using var mmap = new MMapFile(path);
-        var tokens = JsonIndexer.Build(mmap);
+    }
 
-        foreach (var t in tokens)
+    public async Task LoadAsync(string path, IProgressReporter? progressReporter = null)
+    {
+        var nodes = await Task.Run(() =>
         {
-            if (t.Text is not null)
+            using var mmap = new MMapFile(path);
+            var tokens = JsonIndexer.Build(mmap, progressReporter);
+            var builtNodes = new List<JsonNode>(tokens.Count);
+
+            foreach (var t in tokens)
             {
-                Nodes.Add(new JsonNode
+                if (t.Text is null)
+                    continue;
+
+                builtNodes.Add(new JsonNode
                 {
                     Depth = t.Depth,
                     Text = t.Text
                 });
             }
-        }
+
+            return builtNodes;
+        });
+
+        Nodes.Clear();
+        foreach (var node in nodes)
+            Nodes.Add(node);
     }
 }

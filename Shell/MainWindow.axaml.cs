@@ -176,7 +176,6 @@ public partial class MainWindow : Window
 
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
-            vm.RefreshWindow();
             UpdateNdJsonStatus(vm);
         });
     }

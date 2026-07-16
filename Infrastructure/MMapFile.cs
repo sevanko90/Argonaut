@@ -20,6 +20,9 @@ public sealed class MMapFile : IDisposable
     public int Read(long offset, byte[] buffer)
         => _accessor.ReadArray(offset, buffer, 0, buffer.Length);
 
+    public int Read(long offset, byte[] buffer, int count)
+        => _accessor.ReadArray(offset, buffer, 0, count);
+
     public void Dispose()
     {
         _accessor.Dispose();

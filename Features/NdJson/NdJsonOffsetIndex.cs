@@ -2,26 +2,32 @@ using System;
 using System.Buffers;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using JsonViewerCore.Infrastructure;
 
 namespace JsonViewerCore.Features.NdJson;
 
+public readonly record struct NdJsonLineSpan(long Offset, int Length);
+
+/// <summary>
+/// A class that scans, calculates and holds line offset and length values
+/// for a large memory-mapped file to allow fast seeking and loading of arbitrary lines
+/// </summary>
 public sealed class NdJsonOffsetIndex
 {
     private const int BufferSize = 256 * 1024;
     private const int QueueCapacity = 4096;
 
-    private readonly object sync = new();
-    private readonly List<long> lineStarts = new();
-    private readonly BlockingCollection<long> pendingLineStarts = new(new ConcurrentQueue<long>(), QueueCapacity);
+    private readonly Lock sync = new();
+    private readonly List<NdJsonLineSpan> lineSpans = new();
+    private readonly BlockingCollection<NdJsonLineSpan> pendingLineSpans = new(new ConcurrentQueue<NdJsonLineSpan>(), QueueCapacity);
     private TaskCompletionSource<bool>? lineCountReady;
     private int lineCountReadyTarget;
     private bool complete;
 
     private NdJsonOffsetIndex()
     {
-        lineStarts.Add(0);
     }
 
     public Task IndexingTask { get; private set; } = Task.CompletedTask;
@@ -31,7 +37,7 @@ public sealed class NdJsonOffsetIndex
         get
         {
             lock (sync)
-                return lineStarts.Count;
+                return lineSpans.Count;
         }
     }
 
@@ -44,27 +50,17 @@ public sealed class NdJsonOffsetIndex
         }
     }
 
-    public long GetOffset(int lineIndex)
+    public NdJsonLineSpan GetLineSpan(int lineIndex)
     {
         lock (sync)
-            return lineStarts[lineIndex];
-    }
-
-    public long GetLength(int lineIndex, long fileLength)
-    {
-        lock (sync)
-        {
-            var start = lineStarts[lineIndex];
-            var end = lineIndex + 1 < lineStarts.Count ? lineStarts[lineIndex + 1] : fileLength;
-            return end - start;
-        }
+            return lineSpans[lineIndex];
     }
 
     public Task WaitForLineCountAsync(int targetCount)
     {
         lock (sync)
         {
-            if (lineStarts.Count >= targetCount || complete)
+            if (lineSpans.Count >= targetCount || complete)
                 return Task.CompletedTask;
 
             if (lineCountReady is null || lineCountReady.Task.IsCompleted || targetCount > lineCountReadyTarget)
@@ -77,7 +73,13 @@ public sealed class NdJsonOffsetIndex
         }
     }
 
-    public static NdJsonOffsetIndex Start(MMapFile file, IProgressReporter? progressReporter = null)
+    /// <summary>
+    /// Start the process of indexing the file and returns a container object containing the background indexer
+    /// </summary>
+    /// <param name="file">Memory mapped file to index</param>
+    /// <param name="progressReporter">Progress reporter</param>
+    /// <returns>The index class, initially running in the background</returns>
+    public static NdJsonOffsetIndex StartIndexing(MMapFile file, IProgressReporter? progressReporter = null)
     {
         var index = new NdJsonOffsetIndex();
         index.IndexingTask = Task.WhenAll(
@@ -91,7 +93,7 @@ public sealed class NdJsonOffsetIndex
         long length = file.Length;
         if (length == 0)
         {
-            pendingLineStarts.CompleteAdding();
+            pendingLineSpans.CompleteAdding();
             MarkComplete();
             progressReporter?.Report(0, 0);
             return;
@@ -99,6 +101,7 @@ public sealed class NdJsonOffsetIndex
 
         var buffer = ArrayPool<byte>.Shared.Rent(BufferSize);
         long offset = 0;
+        long currentLineStart = 0;
         try
         {
             while (offset < length)
@@ -112,9 +115,10 @@ public sealed class NdJsonOffsetIndex
                     if (buffer[i] != (byte)'\n')
                         continue;
 
-                    long nextLineStart = offset + i + 1;
-                    if (nextLineStart < length)
-                        pendingLineStarts.Add(nextLineStart);
+                    long lineEndExclusive = offset + i + 1;
+                    int lineLength = checked((int)(lineEndExclusive - currentLineStart));
+                    pendingLineSpans.Add(new NdJsonLineSpan(currentLineStart, lineLength));
+                    currentLineStart = lineEndExclusive;
                 }
 
                 offset += bytesRead;
@@ -128,20 +132,25 @@ public sealed class NdJsonOffsetIndex
         finally
         {
             ArrayPool<byte>.Shared.Return(buffer);
-            pendingLineStarts.CompleteAdding();
+            if (currentLineStart < length)
+            {
+                pendingLineSpans.Add(new NdJsonLineSpan(currentLineStart, checked((int)(length - currentLineStart))));
+            }
+
+            pendingLineSpans.CompleteAdding();
             progressReporter?.Report(length, length);
         }
     }
 
     private void ConsumeOffsets()
     {
-        foreach (var lineStart in pendingLineStarts.GetConsumingEnumerable())
+        foreach (var lineSpan in pendingLineSpans.GetConsumingEnumerable())
         {
             TaskCompletionSource<bool>? waiter = null;
             lock (sync)
             {
-                lineStarts.Add(lineStart);
-                if (lineCountReady is not null && !lineCountReady.Task.IsCompleted && lineCountReadyTarget > 0 && lineStarts.Count >= lineCountReadyTarget)
+                lineSpans.Add(lineSpan);
+                if (lineCountReady is not null && !lineCountReady.Task.IsCompleted && lineCountReadyTarget > 0 && lineSpans.Count >= lineCountReadyTarget)
                     waiter = lineCountReady;
             }
 

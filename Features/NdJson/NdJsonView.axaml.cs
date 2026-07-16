@@ -5,6 +5,8 @@ namespace JsonViewerCore.Features.NdJson;
 
 public partial class NdJsonView : UserControl
 {
+    private bool suppressSelectionEvents;
+
     public NdJsonView()
     {
         InitializeComponent();
@@ -16,7 +18,8 @@ public partial class NdJsonView : UserControl
 
     private void OnLoaded(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        UpdateWindow();
+        if (DataContext is NdJsonViewModel vm)
+            SyncVisualSelection(vm);
     }
 
     private void OnDetachedFromVisualTree(object? sender, Avalonia.VisualTreeAttachmentEventArgs e)
@@ -29,35 +32,38 @@ public partial class NdJsonView : UserControl
 
     private void OnSelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
+        if (suppressSelectionEvents)
+            return;
+
         if (DataContext is not NdJsonViewModel vm)
             return;
 
         var selectedIndex = JsonLinesListBox.SelectedIndex;
         if (selectedIndex < 0)
+            return;
+
+        vm.LoadSelectedLine(selectedIndex);
+    }
+
+    private void SyncVisualSelection(NdJsonViewModel vm)
+    {
+        if (vm.SelectedLineNumber is null)
         {
-            vm.SelectedLineNumber = null;
+            JsonLinesListBox.SelectedIndex = -1;
             return;
         }
 
-        vm.SelectedLineNumber = vm.CurrentWindowStart + selectedIndex + 1;
-    }
-
-    private void OnScrollChanged(object? sender, ScrollChangedEventArgs e)
-    {
-        UpdateWindow();
-    }
-
-    private void UpdateWindow()
-    {
-        if (DataContext is not NdJsonViewModel vm)
-            return;
-
-        const double lineHeight = 20;
-        var viewportLines = (int)Math.Ceiling(MainScrollViewer.Viewport.Height / lineHeight);
-        if (viewportLines <= 0)
-            viewportLines = 50;
-
-        var firstVisibleIndex = Math.Max(0, (int)Math.Floor(MainScrollViewer.Offset.Y / lineHeight));
-        vm.EnsureWindow(firstVisibleIndex, viewportLines);
+        suppressSelectionEvents = true;
+        try
+        {
+            var selectedIndex = vm.SelectedLineNumber.Value - 1;
+            JsonLinesListBox.SelectedIndex = selectedIndex >= 0 && selectedIndex < vm.LineCount
+                ? selectedIndex
+                : -1;
+        }
+        finally
+        {
+            suppressSelectionEvents = false;
+        }
     }
 }

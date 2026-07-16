@@ -9,9 +9,12 @@ using JsonViewerCore.Infrastructure;
 
 namespace JsonViewerCore.Features.NdJson;
 
-public sealed class NdJsonVisibleLine
+/// <summary>
+/// Model that represents a line of a text file
+/// </summary>
+public sealed class MemoryMappedFileVisibleLine
 {
-    public NdJsonVisibleLine(int lineNumber, string text)
+    public MemoryMappedFileVisibleLine(int lineNumber, string text)
     {
         LineNumber = lineNumber;
         Text = text;
@@ -27,20 +30,20 @@ public sealed class NdJsonVisibleLine
 // demand. Avalonia's ItemsSourceView only avoids copying/enumerating the whole source into a
 // List<object> when it implements non-generic IList (IReadOnlyList<T>/IList<T> alone do
 // not qualify), so VirtualizingStackPanel touches only realized rows via Count + this[int].
-public sealed class NdJsonLineCollection : IList, INotifyCollectionChanged, IDisposable
+public sealed class MemoryMappedFileLineCollection : IList, INotifyCollectionChanged, IDisposable
 {
     private const int CacheCapacity = 1000;
     private static readonly TimeSpan GrowthPollInterval = TimeSpan.FromMilliseconds(120);
 
-    private readonly NdJsonOffsetIndex index;
+    private readonly FileOffsetIndex index;
     private readonly MMapFile mmap;
-    private readonly Dictionary<int, LinkedListNode<(int Index, NdJsonVisibleLine Line)>> cache = new();
-    private readonly LinkedList<(int Index, NdJsonVisibleLine Line)> cacheOrder = new();
+    private readonly Dictionary<int, LinkedListNode<(int Index, MemoryMappedFileVisibleLine Line)>> cache = new();
+    private readonly LinkedList<(int Index, MemoryMappedFileVisibleLine Line)> cacheOrder = new();
 
     private DispatcherTimer? growthTimer;
     private int notifiedCount;
 
-    public NdJsonLineCollection(NdJsonOffsetIndex index, MMapFile mmap)
+    public MemoryMappedFileLineCollection(FileOffsetIndex index, MMapFile mmap)
     {
         this.index = index;
         this.mmap = mmap;
@@ -68,7 +71,7 @@ public sealed class NdJsonLineCollection : IList, INotifyCollectionChanged, IDis
         set => throw new NotSupportedException();
     }
 
-    private NdJsonVisibleLine GetLine(int i)
+    private MemoryMappedFileVisibleLine GetLine(int i)
     {
         if (cache.TryGetValue(i, out var node))
         {
@@ -79,12 +82,12 @@ public sealed class NdJsonLineCollection : IList, INotifyCollectionChanged, IDis
 
         int lineCount = index.LineCount;
         if (i < 0 || i >= lineCount)
-            return new NdJsonVisibleLine(i + 1, string.Empty);
+            return new MemoryMappedFileVisibleLine(i + 1, string.Empty);
 
         var lineSpan = index.GetLineSpan(i);
-        var line = new NdJsonVisibleLine(i + 1, ReadLine(lineSpan));
+        var line = new MemoryMappedFileVisibleLine(i + 1, ReadLine(lineSpan));
 
-        var newNode = new LinkedListNode<(int, NdJsonVisibleLine)>((i, line));
+        var newNode = new LinkedListNode<(int, MemoryMappedFileVisibleLine)>((i, line));
         cacheOrder.AddFirst(newNode);
         cache[i] = newNode;
 
@@ -98,11 +101,12 @@ public sealed class NdJsonLineCollection : IList, INotifyCollectionChanged, IDis
         return line;
     }
 
-    private string ReadLine(NdJsonLineSpan lineSpan)
+    private string ReadLine(FileLineSpan lineSpan)
     {
         long offset = lineSpan.Offset;
         long length = lineSpan.Length;
 
+        // Lease space from shared memory, avoids byte[] allocations and GC
         var buffer = ArrayPool<byte>.Shared.Rent((int)length);
         try
         {

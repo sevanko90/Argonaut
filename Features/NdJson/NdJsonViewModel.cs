@@ -16,8 +16,8 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
     private const int InitialIndexedLineTarget = 250;
 
     private MMapFile? mmap;
-    private NdJsonOffsetIndex? index;
-    private NdJsonLineCollection? lines;
+    private FileOffsetIndex? index;
+    private MemoryMappedFileLineCollection? lines;
     private NdJsonSelectedLine? selectedLine;
 
     public string FilePath { get; private set; } = string.Empty;
@@ -26,7 +26,7 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
 
     public Task IndexingTask { get; private set; } = Task.CompletedTask;
 
-    public NdJsonLineCollection Lines => lines ?? throw new InvalidOperationException("LoadAsync must complete before Lines is accessed.");
+    public MemoryMappedFileLineCollection Lines => lines ?? throw new InvalidOperationException("LoadAsync must complete before Lines is accessed.");
 
     public NdJsonSelectedLine? SelectedLine
     {
@@ -56,7 +56,7 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
         FilePath = path;
 
         var mmap = new MMapFile(path);
-        var index = NdJsonOffsetIndex.StartIndexing(mmap, progressReporter);
+        var index = FileOffsetIndex.StartIndexing(mmap, progressReporter);
         this.mmap = mmap;
         this.index = index;
         IndexingTask = index.IndexingTask;
@@ -66,7 +66,7 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
         await index.WaitForLineCountAsync(InitialIndexedLineTarget);
 
         SelectedLine = null;
-        lines = new NdJsonLineCollection(index, mmap);
+        lines = new MemoryMappedFileLineCollection(index, mmap);
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Lines)));
     }
 
@@ -81,7 +81,7 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
         SelectedLine = new NdJsonSelectedLine(lineIndex + 1, ReadLine(lineSpan));
     }
 
-    private string ReadLine(NdJsonLineSpan lineSpan)
+    private string ReadLine(FileLineSpan lineSpan)
     {
         var mmap = this.mmap!;
         long offset = lineSpan.Offset;

@@ -104,7 +104,6 @@ public partial class MainWindow : Window
                 ContentArea.Content = new NdJsonView { DataContext = vm };
                 RecentFileHistory.Add(normalizedPath);
                 ReloadRecentFiles();
-                _ = MonitorNdJsonCompletionAsync(vm, requestId);
                 break;
             }
             default:

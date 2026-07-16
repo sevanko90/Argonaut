@@ -85,7 +85,8 @@ public partial class MainWindow : Window
                 ContentArea.Content = new JsonView { DataContext = vm };
                 RecentFileHistory.Add(normalizedPath);
                 ReloadRecentFiles();
-                StatusText.Text = normalizedPath;
+                StatusText.Text = $"{normalizedPath} — {vm.TokenCount:N0} tokens indexed so far";
+                _ = MonitorJsonCompletionAsync(vm, requestId);
                 break;
             }
             case FileTypeDetector.FileKind.Ndjson:
@@ -176,6 +177,33 @@ public partial class MainWindow : Window
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
             UpdateNdJsonStatus(vm);
+        });
+    }
+
+    private async Task MonitorJsonCompletionAsync(JsonViewModel vm, int requestId)
+    {
+        try
+        {
+            await vm.IndexingTask;
+        }
+        catch
+        {
+            if (requestId != openRequestId)
+                return;
+
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                StatusText.Text = $"{vm.FilePath} — indexing failed";
+            });
+            return;
+        }
+
+        if (requestId != openRequestId)
+            return;
+
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            StatusText.Text = $"{vm.FilePath} — {vm.TokenCount:N0} tokens";
         });
     }
 

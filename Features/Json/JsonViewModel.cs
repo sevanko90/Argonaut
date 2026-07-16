@@ -1,13 +1,24 @@
-using System.Collections.Generic;
-using System.Collections.ObjectModel;
+using System;
 using System.Threading.Tasks;
 using JsonViewerCore.Infrastructure;
 
 namespace JsonViewerCore.Features.Json;
 
-public sealed class JsonViewModel
+public sealed class JsonViewModel : IDisposable
 {
-    public ObservableCollection<JsonNode> Nodes { get; } = new();
+    private const int InitialTokenTarget = 250;
+
+    private MMapFile? mmap;
+    private JsonStructureIndex? index;
+    private JsonVisibleRowCollection? rows;
+
+    public string FilePath { get; private set; } = string.Empty;
+
+    public int TokenCount => index?.TokenCount ?? 0;
+
+    public Task IndexingTask { get; private set; } = Task.CompletedTask;
+
+    public JsonVisibleRowCollection Rows => rows ?? throw new InvalidOperationException("LoadAsync must complete before Rows is accessed.");
 
     public JsonViewModel()
     {
@@ -15,29 +26,24 @@ public sealed class JsonViewModel
 
     public async Task LoadAsync(string path, IProgressReporter? progressReporter = null)
     {
-        var nodes = await Task.Run(() =>
-        {
-            using var mmap = new MMapFile(path);
-            var tokens = JsonIndexer.Build(mmap, progressReporter);
-            var builtNodes = new List<JsonNode>(tokens.Count);
+        FilePath = path;
 
-            foreach (var t in tokens)
-            {
-                if (t.Text is null)
-                    continue;
+        var mmap = new MMapFile(path);
+        var index = JsonStructureIndex.StartIndexing(mmap, progressReporter);
+        this.mmap = mmap;
+        this.index = index;
+        IndexingTask = index.IndexingTask;
 
-                builtNodes.Add(new JsonNode
-                {
-                    Depth = t.Depth,
-                    Text = t.Text
-                });
-            }
+        // Await a small initial batch so the first paint isn't empty; the row collection
+        // then tracks index.TokenCount live as indexing continues in the background.
+        await index.WaitForTokenCountAsync(InitialTokenTarget);
 
-            return builtNodes;
-        });
+        rows = new JsonVisibleRowCollection(index, mmap);
+    }
 
-        Nodes.Clear();
-        foreach (var node in nodes)
-            Nodes.Add(node);
+    public void Dispose()
+    {
+        rows?.Dispose();
+        mmap?.Dispose();
     }
 }

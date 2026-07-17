@@ -1,7 +1,10 @@
-﻿using System;
+using System;
 using System.ComponentModel;
 using System.IO;
+using System.Linq;
+using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
@@ -14,16 +17,46 @@ namespace JsonViewerCore.Shell;
 
 public partial class MainWindow : Window
 {
+    private readonly EmptyStateView emptyStateView = new();
     private NdJsonViewModel? currentNdJsonViewModel;
     private int openRequestId;
+    private string? currentFilePath;
 
     public MainWindow()
     {
         InitializeComponent();
+
+        emptyStateView.ChooseFileRequested += async (_, _) => await BrowseForFile();
+        ContentArea.Content = emptyStateView;
         ReloadRecentFiles();
+
+        DragDrop.SetAllowDrop(this, true);
+        AddHandler(DragDrop.DragOverEvent, OnDragOver);
+        AddHandler(DragDrop.DropEvent, OnDrop);
     }
 
-    private async void OnBrowse(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    private void OnDragOver(object? sender, DragEventArgs e)
+    {
+        e.DragEffects = e.DataTransfer.Items.Count > 0 ? DragDropEffects.Copy : DragDropEffects.None;
+    }
+
+    private async void OnDrop(object? sender, DragEventArgs e)
+    {
+        var path = GetDroppedFilePath(e);
+        if (path is null)
+            return;
+
+        await OpenPath(path);
+    }
+
+    private static string? GetDroppedFilePath(DragEventArgs e)
+    {
+        var files = e.DataTransfer.TryGetFiles();
+        var file = files?.FirstOrDefault();
+        return file?.TryGetLocalPath();
+    }
+
+    private async Task BrowseForFile()
     {
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
@@ -38,23 +71,27 @@ public partial class MainWindow : Window
         if (path is null)
             return;
 
-        PathBox.Text = path;
         await OpenPath(path);
-    }
-
-    private async void OnOpen(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
-    {
-        await OpenPath(PathBox.Text);
     }
 
     private async Task OpenPath(string? path)
     {
         if (string.IsNullOrWhiteSpace(path)) return;
 
-        var requestId = ++openRequestId;
         var normalizedPath = Path.GetFullPath(path);
         if (!File.Exists(normalizedPath))
             return;
+
+        if (currentFilePath is not null && !string.Equals(currentFilePath, normalizedPath, StringComparison.OrdinalIgnoreCase))
+        {
+            var confirmed = await ConfirmDialog.Show(
+                this,
+                $"Replace the currently loaded file with \"{Path.GetFileName(normalizedPath)}\"?");
+            if (!confirmed)
+                return;
+        }
+
+        var requestId = ++openRequestId;
 
         FileTypeDetector.FileKind fileType;
         try
@@ -83,6 +120,7 @@ public partial class MainWindow : Window
                     return;
 
                 ContentArea.Content = new JsonView { DataContext = vm };
+                currentFilePath = normalizedPath;
                 RecentFileHistory.Add(normalizedPath);
                 ReloadRecentFiles();
                 StatusText.Text = $"{normalizedPath} — {vm.TokenCount:N0} tokens indexed so far";
@@ -103,6 +141,7 @@ public partial class MainWindow : Window
                 currentNdJsonViewModel = vm;
                 currentNdJsonViewModel.PropertyChanged += OnNdJsonViewModelPropertyChanged;
                 ContentArea.Content = new NdJsonView { DataContext = vm };
+                currentFilePath = normalizedPath;
                 RecentFileHistory.Add(normalizedPath);
                 ReloadRecentFiles();
                 break;
@@ -199,11 +238,12 @@ public partial class MainWindow : Window
     private void ReloadRecentFiles()
     {
         var recentFiles = RecentFileHistory.Load();
-        RecentFilesPanel.Children.Clear();
+        var panel = emptyStateView.RecentFilesHost;
+        panel.Children.Clear();
 
         if (recentFiles.Count == 0)
         {
-            RecentFilesPanel.Children.Add(new TextBlock
+            panel.Children.Add(new TextBlock
             {
                 Text = "No recent files yet.",
                 Opacity = 0.7
@@ -216,23 +256,18 @@ public partial class MainWindow : Window
             var button = new Button
             {
                 Content = Path.GetFileName(path),
-                HorizontalAlignment = HorizontalAlignment.Left,
+                HorizontalAlignment = HorizontalAlignment.Center,
                 Background = null,
-                BorderThickness = new Avalonia.Thickness(0),
-                Padding = new Avalonia.Thickness(0),
-                Margin = new Avalonia.Thickness(0, 0, 12, 0),
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(0),
                 Foreground = Avalonia.Media.Brushes.DodgerBlue,
-                Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand)
+                Cursor = new Cursor(StandardCursorType.Hand)
             };
 
             button.Classes.Add("linklike");
-            button.Click += (_, _) =>
-            {
-                PathBox.Text = path;
-                _ = OpenPath(path);
-            };
+            button.Click += (_, _) => { _ = OpenPath(path); };
 
-            RecentFilesPanel.Children.Add(button);
+            panel.Children.Add(button);
         }
     }
 

@@ -1,4 +1,0 @@
-<Solution>
-  <Project Path="JsonViewerCore.Tests/JsonViewerCore.Tests.csproj" />
-  <Project Path="JsonViewerCore/JsonViewerCore.csproj" />
-</Solution>

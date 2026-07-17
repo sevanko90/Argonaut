@@ -1,0 +1,141 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:json="clr-namespace:Argonaut.Features.Json"
+             x:Class="Argonaut.Features.Json.JsonView"
+             x:DataType="json:JsonViewModel">
+    <UserControl.Resources>
+        <json:DepthToMarginConverter x:Key="DepthToMargin" />
+    </UserControl.Resources>
+
+    <UserControl.Styles>
+        <Style Selector="Button.pathiconbutton">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="4" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="Button.pathiconbutton:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource AppHoverBackgroundBrush}" />
+        </Style>
+        <Style Selector="Button.pathiconbutton:disabled">
+            <Setter Property="Opacity" Value="0.4" />
+        </Style>
+
+        <Style Selector="Button.pathlink">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Foreground" Value="{DynamicResource AppAccentBrush}" />
+            <Setter Property="TextBlock.TextDecorations" Value="Underline" />
+        </Style>
+        <Style Selector="Button.pathlink:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource AppAccentHoverBrush}" />
+        </Style>
+    </UserControl.Styles>
+
+    <Border BorderBrush="{DynamicResource AppBorderBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Background="{DynamicResource AppWindowBackgroundBrush}"
+            ClipToBounds="True">
+        <Grid RowDefinitions="*,Auto">
+            <ListBox Grid.Row="0"
+                     x:Name="RowsListBox"
+                     ItemsSource="{Binding Rows}"
+                     SelectionMode="Single"
+                     Padding="8,6">
+                <ListBox.Styles>
+                    <Style Selector="ListBoxItem">
+                        <Setter Property="Padding" Value="0" />
+                        <Setter Property="MinHeight" Value="22" />
+                        <Setter Property="Height" Value="22" />
+                    </Style>
+                </ListBox.Styles>
+
+                <ListBox.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <VirtualizingStackPanel />
+                    </ItemsPanelTemplate>
+                </ListBox.ItemsPanel>
+
+                <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="json:JsonRow">
+                        <StackPanel Orientation="Horizontal"
+                                    Margin="{Binding Depth, Converter={StaticResource DepthToMargin}}">
+                            <Button Content="{Binding IsExpanded, Converter={x:Static json:ExpandGlyphConverter.Instance}}"
+                                    Click="OnToggleExpandClick"
+                                    IsVisible="{Binding HasChildren}"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    Padding="0"
+                                    Width="16"
+                                    HorizontalContentAlignment="Center"
+                                    FontFamily="{StaticResource AppMonoFontFamily}" />
+                            <TextBlock IsVisible="{Binding !HasChildren}"
+                                       Width="16" />
+                            <TextBlock Text="{Binding Name, StringFormat='{}{0}: '}"
+                                       IsVisible="{Binding Name, Converter={x:Static json:IsNotNullConverter.Instance}}"
+                                       Foreground="{DynamicResource AppAccentBrush}"
+                                       FontFamily="{StaticResource AppMonoFontFamily}" />
+                            <TextBlock Text="{Binding Value}"
+                                       TextWrapping="NoWrap"
+                                       FontFamily="{StaticResource AppMonoFontFamily}" />
+                        </StackPanel>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+
+            <Border Grid.Row="1"
+                    BorderBrush="{DynamicResource AppBorderBrush}"
+                    BorderThickness="0,1,0,0"
+                    Background="{DynamicResource AppPanelBackgroundBrush}"
+                    Padding="10,4">
+                <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Grid.Column="0"
+                               Text="No selection"
+                               FontSize="11"
+                               VerticalAlignment="Center"
+                               IsVisible="{Binding SelectedPath, Converter={x:Static json:IsNullConverter.Instance}}"
+                               Foreground="{DynamicResource AppMutedTextBrush}"
+                               FontFamily="{StaticResource AppMonoFontFamily}" />
+                    <ItemsControl Grid.Column="0"
+                                  ItemsSource="{Binding SelectedPathSegments}"
+                                  IsVisible="{Binding SelectedPath, Converter={x:Static json:IsNotNullConverter.Instance}}"
+                                  VerticalAlignment="Center">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Orientation="Horizontal" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="json:JsonPathSegment">
+                                <Button Content="{Binding Label}"
+                                        Click="OnPathSegmentClick"
+                                        Classes="pathlink"
+                                        FontSize="11"
+                                        FontFamily="{StaticResource AppMonoFontFamily}" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <Button Grid.Column="1"
+                            x:Name="CopyPathButton"
+                            Classes="pathiconbutton"
+                            Click="OnCopyPathClick"
+                            IsEnabled="{Binding SelectedPath, Converter={x:Static json:IsNotNullConverter.Instance}}"
+                            ToolTip.Tip="Copy JSONPath"
+                            Margin="8,0,0,0">
+                        <Viewbox Width="12" Height="12">
+                            <Path Fill="{DynamicResource AppMutedTextBrush}"
+                                  Data="M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z" />
+                        </Viewbox>
+                    </Button>
+                </Grid>
+            </Border>
+        </Grid>
+    </Border>
+</UserControl>

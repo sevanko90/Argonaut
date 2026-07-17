@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Argonaut.Tests/Argonaut.Tests.csproj" />
+  <Project Path="Argonaut/Argonaut.csproj" />
+</Solution>

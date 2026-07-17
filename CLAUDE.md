@@ -2,7 +2,7 @@
 
 ## Memory-mapped files: always use explicit, OS-reported data length
 
-When working with `MemoryMappedFile`/`MemoryMappedViewAccessor` (see `JsonViewerCore/Infrastructure/MMapFile.cs`), never treat
+When working with `MemoryMappedFile`/`MemoryMappedViewAccessor` (see `Argonaut/Infrastructure/MMapFile.cs`), never treat
 `MemoryMappedViewAccessor.Capacity` as the file's data length. `Capacity` is rounded up to the platform's memory
 allocation granularity (this rounding differs between Windows and macOS), so it can be larger than the actual file
 size and expose trailing zero-padding bytes as if they were real content.

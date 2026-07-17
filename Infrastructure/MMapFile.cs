@@ -9,10 +9,11 @@ public sealed class MMapFile : IDisposable
     private readonly MemoryMappedFile _mmf;
     private readonly MemoryMappedViewAccessor _accessor;
 
-    public long Length => _accessor.Capacity;
+    public long Length { get; }
 
     public MMapFile(string path)
     {
+        Length = new FileInfo(path).Length;
         _mmf = MemoryMappedFile.CreateFromFile(path, FileMode.Open, null, 0, MemoryMappedFileAccess.Read);
         _accessor = _mmf.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
     }

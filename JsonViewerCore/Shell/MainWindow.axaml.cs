@@ -17,6 +17,8 @@ namespace JsonViewerCore.Shell;
 
 public partial class MainWindow : Window
 {
+    private const string DefaultTitle = "BigJsonViewer";
+
     private readonly EmptyStateView emptyStateView = new();
     private NdJsonViewModel? currentNdJsonViewModel;
     private int openRequestId;
@@ -26,6 +28,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
+        Title = DefaultTitle;
         emptyStateView.ChooseFileRequested += async (_, _) => await BrowseForFile();
         ContentArea.Content = emptyStateView;
         ReloadRecentFiles();
@@ -33,6 +36,23 @@ public partial class MainWindow : Window
         DragDrop.SetAllowDrop(this, true);
         AddHandler(DragDrop.DragOverEvent, OnDragOver);
         AddHandler(DragDrop.DropEvent, OnDrop);
+    }
+
+    private void OnCloseFile(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        CloseFile();
+    }
+
+    private void CloseFile()
+    {
+        ++openRequestId;
+        DetachNdJsonViewModel();
+        currentFilePath = null;
+        ContentArea.Content = emptyStateView;
+        FileHeaderBar.IsVisible = false;
+        StatusText.Text = "No file loaded";
+        Title = DefaultTitle;
+        ReloadRecentFiles();
     }
 
     private void OnDragOver(object? sender, DragEventArgs e)
@@ -121,6 +141,7 @@ public partial class MainWindow : Window
 
                 ContentArea.Content = new JsonView { DataContext = vm };
                 currentFilePath = normalizedPath;
+                ShowFileHeader(normalizedPath);
                 RecentFileHistory.Add(normalizedPath);
                 ReloadRecentFiles();
                 StatusText.Text = $"{normalizedPath} — {vm.TokenCount:N0} tokens indexed so far";
@@ -142,6 +163,7 @@ public partial class MainWindow : Window
                 currentNdJsonViewModel.PropertyChanged += OnNdJsonViewModelPropertyChanged;
                 ContentArea.Content = new NdJsonView { DataContext = vm };
                 currentFilePath = normalizedPath;
+                ShowFileHeader(normalizedPath);
                 RecentFileHistory.Add(normalizedPath);
                 ReloadRecentFiles();
                 break;
@@ -169,6 +191,15 @@ public partial class MainWindow : Window
         }
 
         StatusText.Text = $"{vm.FilePath} — {vm.LineCount:N0} lines — Selected line: {vm.SelectedLineNumber:N0}";
+    }
+
+    private void ShowFileHeader(string filePath)
+    {
+        var fileName = Path.GetFileName(filePath);
+        FileNameText.Text = fileName;
+        ToolTip.SetTip(FileNameText, filePath);
+        FileHeaderBar.IsVisible = true;
+        Title = $"{DefaultTitle} — {fileName}";
     }
 
     private void DetachNdJsonViewModel()

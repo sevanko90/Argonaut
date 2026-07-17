@@ -9,45 +9,51 @@
         <json:DepthToMarginConverter x:Key="DepthToMargin" />
     </UserControl.Resources>
 
-    <ListBox x:Name="RowsListBox" ItemsSource="{Binding Rows}">
-        <ListBox.Styles>
-            <Style Selector="ListBoxItem">
-                <Setter Property="Padding" Value="0" />
-                <Setter Property="MinHeight" Value="20" />
-                <Setter Property="Height" Value="20" />
-            </Style>
-        </ListBox.Styles>
+    <Border BorderBrush="{StaticResource AppBorderBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Background="White"
+            ClipToBounds="True">
+        <ListBox x:Name="RowsListBox" ItemsSource="{Binding Rows}" Padding="8,6">
+            <ListBox.Styles>
+                <Style Selector="ListBoxItem">
+                    <Setter Property="Padding" Value="0" />
+                    <Setter Property="MinHeight" Value="22" />
+                    <Setter Property="Height" Value="22" />
+                </Style>
+            </ListBox.Styles>
 
-        <ListBox.ItemsPanel>
-            <ItemsPanelTemplate>
-                <VirtualizingStackPanel />
-            </ItemsPanelTemplate>
-        </ListBox.ItemsPanel>
+            <ListBox.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <VirtualizingStackPanel />
+                </ItemsPanelTemplate>
+            </ListBox.ItemsPanel>
 
-        <ListBox.ItemTemplate>
-            <DataTemplate x:DataType="json:JsonRow">
-                <StackPanel Orientation="Horizontal"
-                            Margin="{Binding Depth, Converter={StaticResource DepthToMargin}}">
-                    <Button Content="{Binding IsExpanded, Converter={x:Static json:ExpandGlyphConverter.Instance}}"
-                            Click="OnToggleExpandClick"
-                            IsVisible="{Binding HasChildren}"
-                            Background="Transparent"
-                            BorderThickness="0"
-                            Padding="0"
-                            Width="16"
-                            HorizontalContentAlignment="Center"
-                            FontFamily="Consolas, Monaco, 'Courier New', monospace" />
-                    <TextBlock IsVisible="{Binding !HasChildren}"
-                               Width="16" />
-                    <TextBlock Text="{Binding Name, StringFormat='{}{0}: '}"
-                               IsVisible="{Binding Name, Converter={x:Static json:IsNotNullConverter.Instance}}"
-                               Foreground="#9CDCFE"
-                               FontFamily="Consolas, Monaco, 'Courier New', monospace" />
-                    <TextBlock Text="{Binding Value}"
-                               TextWrapping="NoWrap"
-                               FontFamily="Consolas, Monaco, 'Courier New', monospace" />
-                </StackPanel>
-            </DataTemplate>
-        </ListBox.ItemTemplate>
-    </ListBox>
+            <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="json:JsonRow">
+                    <StackPanel Orientation="Horizontal"
+                                Margin="{Binding Depth, Converter={StaticResource DepthToMargin}}">
+                        <Button Content="{Binding IsExpanded, Converter={x:Static json:ExpandGlyphConverter.Instance}}"
+                                Click="OnToggleExpandClick"
+                                IsVisible="{Binding HasChildren}"
+                                Background="Transparent"
+                                BorderThickness="0"
+                                Padding="0"
+                                Width="16"
+                                HorizontalContentAlignment="Center"
+                                FontFamily="{StaticResource AppMonoFontFamily}" />
+                        <TextBlock IsVisible="{Binding !HasChildren}"
+                                   Width="16" />
+                        <TextBlock Text="{Binding Name, StringFormat='{}{0}: '}"
+                                   IsVisible="{Binding Name, Converter={x:Static json:IsNotNullConverter.Instance}}"
+                                   Foreground="#2563EB"
+                                   FontFamily="{StaticResource AppMonoFontFamily}" />
+                        <TextBlock Text="{Binding Value}"
+                                   TextWrapping="NoWrap"
+                                   FontFamily="{StaticResource AppMonoFontFamily}" />
+                    </StackPanel>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+    </Border>
 </UserControl>

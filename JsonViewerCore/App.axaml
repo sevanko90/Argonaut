@@ -7,4 +7,11 @@
     <Application.Styles>
         <FluentTheme />
     </Application.Styles>
+
+    <Application.Resources>
+        <SolidColorBrush x:Key="AppMutedTextBrush" Color="#6B7280" />
+        <SolidColorBrush x:Key="AppBorderBrush" Color="#E5E7EB" />
+        <SolidColorBrush x:Key="AppLinkBrush" Color="DodgerBlue" />
+        <FontFamily x:Key="AppMonoFontFamily">Consolas, Monaco, 'Courier New', monospace</FontFamily>
+    </Application.Resources>
 </Application>

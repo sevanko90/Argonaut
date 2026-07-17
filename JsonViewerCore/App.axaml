@@ -1,22 +1,23 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="JsonViewerCore.App"
-             RequestedThemeVariant="Light">
-             <!-- Pinned to Light: every color in this app (backgrounds, borders, text) is a
-                  hardcoded light value with no dark-mode counterparts, so following the OS
-                  theme variant let FluentTheme's built-in dark-mode control states (e.g.
-                  Button :pointerover) render against that hardcoded-light chrome - producing
-                  bugs like a link's hover highlight turning white-on-white after the OS
-                  switches to dark mode. -->
+             RequestedThemeVariant="Default">
+             <!-- "Default" follows the OS light/dark setting. Every custom color the app uses
+                  is defined for both variants in Themes/AppColors.axaml (merged below) and
+                  referenced via DynamicResource, so this is safe - MainWindow's theme-toggle
+                  button can also override it explicitly at runtime (System/Light/Dark). -->
 
     <Application.Styles>
         <FluentTheme />
     </Application.Styles>
 
     <Application.Resources>
-        <SolidColorBrush x:Key="AppMutedTextBrush" Color="#6B7280" />
-        <SolidColorBrush x:Key="AppBorderBrush" Color="#E5E7EB" />
-        <SolidColorBrush x:Key="AppLinkBrush" Color="DodgerBlue" />
-        <FontFamily x:Key="AppMonoFontFamily">Consolas, Monaco, 'Courier New', monospace</FontFamily>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceInclude Source="avares://JsonViewerCore/Themes/AppColors.axaml" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <FontFamily x:Key="AppMonoFontFamily">Consolas, Monaco, 'Courier New', monospace</FontFamily>
+        </ResourceDictionary>
     </Application.Resources>
 </Application>

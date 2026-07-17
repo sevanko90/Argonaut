@@ -6,10 +6,10 @@
              xmlns:jsonview="clr-namespace:JsonViewerCore.Features.Json"
              x:Class="JsonViewerCore.Features.NdJson.NdJsonView"
              x:DataType="json:NdJsonViewModel">
-    <Border BorderBrush="{StaticResource AppBorderBrush}"
+    <Border BorderBrush="{DynamicResource AppBorderBrush}"
             BorderThickness="1"
             CornerRadius="8"
-            Background="White"
+            Background="{DynamicResource AppWindowBackgroundBrush}"
             ClipToBounds="True">
         <Grid ColumnDefinitions="*,1,*">
             <ListBox x:Name="JsonLinesListBox"
@@ -31,7 +31,7 @@
                                        Text="{Binding LineNumber}"
                                        HorizontalAlignment="Right"
                                        Margin="0,0,12,0"
-                                       Foreground="#8A8F98"
+                                       Foreground="{DynamicResource AppMutedTextBrush}"
                                        FontFamily="{StaticResource AppMonoFontFamily}" />
                             <TextBlock Grid.Column="1"
                                        Text="{Binding Text}"
@@ -51,15 +51,15 @@
                           Width="1"
                           HorizontalAlignment="Stretch"
                           VerticalAlignment="Stretch"
-                          Background="{StaticResource AppBorderBrush}" />
+                          Background="{DynamicResource AppBorderBrush}" />
 
-            <Border Grid.Column="2" Padding="0" Background="#FAFAFA">
+            <Border Grid.Column="2" Padding="0" Background="{DynamicResource AppPanelBackgroundBrush}">
                 <Grid>
                     <ContentControl IsVisible="{Binding SelectedLineJsonViewModel, Converter={x:Static jsonview:IsNotNullConverter.Instance}}">
                         <jsonview:JsonView DataContext="{Binding SelectedLineJsonViewModel}" />
                     </ContentControl>
                     <TextBlock Text="Select a line to view its JSON"
-                               Foreground="#8A8F98"
+                               Foreground="{DynamicResource AppMutedTextBrush}"
                                FontFamily="{StaticResource AppMonoFontFamily}"
                                IsVisible="{Binding SelectedLineJsonViewModel, Converter={x:Static jsonview:IsNullConverter.Instance}}" />
                 </Grid>

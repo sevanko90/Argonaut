@@ -14,8 +14,7 @@ public static class RecentFileHistory
         WriteIndented = true
     };
 
-    private static string HistoryFilePath
-        => Path.Combine(Path.GetTempPath(), "JsonViewerCore", "recent-files.json");
+    private static string HistoryFilePath => AppDataPaths.GetSettingsFilePath("recent-files.json");
 
     public static IReadOnlyList<string> Load()
     {

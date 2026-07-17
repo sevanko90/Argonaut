@@ -1,0 +1,33 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- The app's full color palette. Every custom (non-FluentTheme-default) color used
+         anywhere in the UI is a DynamicResource lookup against one of the keys below, so
+         switching theme (Light/Dark/System) re-colors every view live, with no restart. -->
+    <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Light">
+            <SolidColorBrush x:Key="AppWindowBackgroundBrush" Color="White" />
+            <SolidColorBrush x:Key="AppPanelBackgroundBrush" Color="#F8F9FA" />
+            <SolidColorBrush x:Key="AppBorderBrush" Color="#E5E7EB" />
+            <SolidColorBrush x:Key="AppMutedTextBrush" Color="#6B7280" />
+            <SolidColorBrush x:Key="AppSubtleIconBrush" Color="#C4C9D1" />
+            <SolidColorBrush x:Key="AppAccentBrush" Color="#2563EB" />
+            <SolidColorBrush x:Key="AppAccentHoverBrush" Color="#1D4ED8" />
+            <SolidColorBrush x:Key="AppHoverBackgroundBrush" Color="#EAEBEE" />
+            <SolidColorBrush x:Key="AppDangerHoverBrush" Color="#EF4444" />
+        </ResourceDictionary>
+
+        <ResourceDictionary x:Key="Dark">
+            <SolidColorBrush x:Key="AppWindowBackgroundBrush" Color="#1E1F22" />
+            <SolidColorBrush x:Key="AppPanelBackgroundBrush" Color="#2A2B2E" />
+            <SolidColorBrush x:Key="AppBorderBrush" Color="#3A3B3E" />
+            <SolidColorBrush x:Key="AppMutedTextBrush" Color="#9CA3AF" />
+            <SolidColorBrush x:Key="AppSubtleIconBrush" Color="#52545A" />
+            <SolidColorBrush x:Key="AppAccentBrush" Color="#60A5FA" />
+            <SolidColorBrush x:Key="AppAccentHoverBrush" Color="#93C5FD" />
+            <SolidColorBrush x:Key="AppHoverBackgroundBrush" Color="#3A3B3E" />
+            <SolidColorBrush x:Key="AppDangerHoverBrush" Color="#F87171" />
+        </ResourceDictionary>
+    </ResourceDictionary.ThemeDictionaries>
+
+</ResourceDictionary>

@@ -7,7 +7,7 @@
         Width="420" SizeToContent="Height"
         CanResize="False"
         WindowStartupLocation="CenterOwner"
-        Background="White">
+        Background="{DynamicResource AppWindowBackgroundBrush}">
     <StackPanel Margin="24" Spacing="20">
         <TextBlock x:Name="MessageText" TextWrapping="Wrap" FontSize="14" />
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">

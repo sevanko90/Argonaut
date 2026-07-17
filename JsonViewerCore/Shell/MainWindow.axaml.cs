@@ -6,7 +6,10 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Layout;
+using Avalonia.Markup.Xaml.MarkupExtensions;
+using Avalonia.Media;
 using Avalonia.Platform.Storage;
+using Avalonia.Styling;
 using Avalonia.Threading;
 using JsonViewerCore.Features.Json;
 using JsonViewerCore.Features.NdJson;
@@ -19,10 +22,20 @@ public partial class MainWindow : Window
 {
     private const string DefaultTitle = "BigJsonViewer";
 
+    // Material "desktop_windows" / "wb_sunny" / "brightness_2" glyphs (24x24 viewBox),
+    // cycled by the status bar's theme toggle button.
+    private const string SystemThemeIconData =
+        "M21 2H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h7l-2 3v1h8v-1l-2-3h7c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H3V4h18v12z";
+    private const string LightThemeIconData =
+        "M6.76 4.84l-1.8-1.79-1.41 1.41 1.79 1.79 1.42-1.41zM4 10.5H1v2h3v-2zm9-9.95h-2V3.5h2V.55zm7.45 3.91l-1.41-1.41-1.79 1.79 1.41 1.41 1.79-1.79zm-3.21 13.7l1.79 1.8 1.41-1.41-1.8-1.79-1.4 1.4zM20 10.5v2h3v-2h-3zm-8-5c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm-1 16.95h2V19.5h-2v2.95zm-7.45-3.91l1.41 1.41 1.79-1.8-1.41-1.41-1.79 1.8z";
+    private const string DarkThemeIconData =
+        "M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z";
+
     private readonly EmptyStateView emptyStateView = new();
     private NdJsonViewModel? currentNdJsonViewModel;
     private int openRequestId;
     private string? currentFilePath;
+    private ThemeMode currentThemeMode;
 
     public MainWindow()
     {
@@ -37,10 +50,50 @@ public partial class MainWindow : Window
         };
         ContentArea.Content = emptyStateView;
         ReloadRecentFiles();
+        ApplyThemeMode(ThemePreference.Load());
 
         DragDrop.SetAllowDrop(this, true);
         AddHandler(DragDrop.DragOverEvent, OnDragOver);
         AddHandler(DragDrop.DropEvent, OnDrop);
+    }
+
+    private void OnToggleTheme(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        var next = currentThemeMode switch
+        {
+            ThemeMode.System => ThemeMode.Light,
+            ThemeMode.Light => ThemeMode.Dark,
+            _ => ThemeMode.System
+        };
+
+        ApplyThemeMode(next);
+        ThemePreference.Save(next);
+    }
+
+    private void ApplyThemeMode(ThemeMode mode)
+    {
+        currentThemeMode = mode;
+
+        Application.Current!.RequestedThemeVariant = mode switch
+        {
+            ThemeMode.Light => ThemeVariant.Light,
+            ThemeMode.Dark => ThemeVariant.Dark,
+            _ => ThemeVariant.Default
+        };
+
+        ThemeToggleIcon.Data = Geometry.Parse(mode switch
+        {
+            ThemeMode.Light => LightThemeIconData,
+            ThemeMode.Dark => DarkThemeIconData,
+            _ => SystemThemeIconData
+        });
+
+        ToolTip.SetTip(ThemeToggleButton, mode switch
+        {
+            ThemeMode.Light => "Theme: Light (click for Dark)",
+            ThemeMode.Dark => "Theme: Dark (click to follow System)",
+            _ => "Theme: System (click for Light)"
+        });
     }
 
     private void OnCloseFile(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
@@ -297,9 +350,13 @@ public partial class MainWindow : Window
                 Background = null,
                 BorderThickness = new Thickness(0),
                 Padding = new Thickness(0),
-                Foreground = Avalonia.Media.Brushes.DodgerBlue,
                 Cursor = new Cursor(StandardCursorType.Hand)
             };
+
+            // DynamicResource, not a plain field assignment - a live theme switch must
+            // re-color this button, and a one-off Brushes.DodgerBlue field set (the previous
+            // approach) never reacts to that, unlike a StyledElement resource binding.
+            button[!Button.ForegroundProperty] = new DynamicResourceExtension("AppAccentBrush");
 
             button.Classes.Add("linklike");
             button.Click += (_, _) => { _ = OpenPath(path); };

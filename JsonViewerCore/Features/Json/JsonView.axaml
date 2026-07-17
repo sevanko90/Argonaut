@@ -18,7 +18,7 @@
             <Setter Property="Cursor" Value="Hand" />
         </Style>
         <Style Selector="Button.pathiconbutton:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="#EAEBEE" />
+            <Setter Property="Background" Value="{DynamicResource AppHoverBackgroundBrush}" />
         </Style>
         <Style Selector="Button.pathiconbutton:disabled">
             <Setter Property="Opacity" Value="0.4" />
@@ -29,19 +29,19 @@
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Foreground" Value="#2563EB" />
+            <Setter Property="Foreground" Value="{DynamicResource AppAccentBrush}" />
             <Setter Property="TextBlock.TextDecorations" Value="Underline" />
         </Style>
         <Style Selector="Button.pathlink:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="#1D4ED8" />
+            <Setter Property="Foreground" Value="{DynamicResource AppAccentHoverBrush}" />
         </Style>
     </UserControl.Styles>
 
-    <Border BorderBrush="{StaticResource AppBorderBrush}"
+    <Border BorderBrush="{DynamicResource AppBorderBrush}"
             BorderThickness="1"
             CornerRadius="8"
-            Background="White"
+            Background="{DynamicResource AppWindowBackgroundBrush}"
             ClipToBounds="True">
         <Grid RowDefinitions="*,Auto">
             <ListBox Grid.Row="0"
@@ -80,7 +80,7 @@
                                        Width="16" />
                             <TextBlock Text="{Binding Name, StringFormat='{}{0}: '}"
                                        IsVisible="{Binding Name, Converter={x:Static json:IsNotNullConverter.Instance}}"
-                                       Foreground="#2563EB"
+                                       Foreground="{DynamicResource AppAccentBrush}"
                                        FontFamily="{StaticResource AppMonoFontFamily}" />
                             <TextBlock Text="{Binding Value}"
                                        TextWrapping="NoWrap"
@@ -91,9 +91,9 @@
             </ListBox>
 
             <Border Grid.Row="1"
-                    BorderBrush="{StaticResource AppBorderBrush}"
+                    BorderBrush="{DynamicResource AppBorderBrush}"
                     BorderThickness="0,1,0,0"
-                    Background="#F8F9FA"
+                    Background="{DynamicResource AppPanelBackgroundBrush}"
                     Padding="10,4">
                 <Grid ColumnDefinitions="*,Auto">
                     <TextBlock Grid.Column="0"
@@ -101,7 +101,7 @@
                                FontSize="11"
                                VerticalAlignment="Center"
                                IsVisible="{Binding SelectedPath, Converter={x:Static json:IsNullConverter.Instance}}"
-                               Foreground="{StaticResource AppMutedTextBrush}"
+                               Foreground="{DynamicResource AppMutedTextBrush}"
                                FontFamily="{StaticResource AppMonoFontFamily}" />
                     <ItemsControl Grid.Column="0"
                                   ItemsSource="{Binding SelectedPathSegments}"
@@ -130,7 +130,7 @@
                             ToolTip.Tip="Copy JSONPath"
                             Margin="8,0,0,0">
                         <Viewbox Width="12" Height="12">
-                            <Path Fill="{StaticResource AppMutedTextBrush}"
+                            <Path Fill="{DynamicResource AppMutedTextBrush}"
                                   Data="M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z" />
                         </Viewbox>
                     </Button>

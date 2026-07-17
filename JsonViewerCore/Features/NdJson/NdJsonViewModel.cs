@@ -1,9 +1,7 @@
 using System;
-using System.Buffers;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
-using System.Text;
 using System.Threading.Tasks;
 using JsonViewerCore.Infrastructure;
 
@@ -72,32 +70,13 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
 
     public string GetLineText(int lineIndex)
     {
-        return ReadLine(this.index!.GetLineSpan(lineIndex));
+        return NdJsonLineReader.ReadLine(this.mmap!, this.index!.GetLineSpan(lineIndex));
     }
 
     public void LoadSelectedLine(int lineIndex)
     {
         var lineSpan = this.index!.GetLineSpan(lineIndex);
-        SelectedLine = new NdJsonSelectedLine(lineIndex + 1, ReadLine(lineSpan));
-    }
-
-    private string ReadLine(FileLineSpan lineSpan)
-    {
-        var mmap = this.mmap!;
-        long offset = lineSpan.Offset;
-        long length = lineSpan.Length;
-
-        var buffer = ArrayPool<byte>.Shared.Rent((int)length);
-        try
-        {
-            int bytesRead = mmap.Read(offset, buffer, (int)length);
-
-            return Encoding.UTF8.GetString(buffer, 0, bytesRead).TrimEnd('\r', '\n');
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(buffer);
-        }
+        SelectedLine = new NdJsonSelectedLine(lineIndex + 1, NdJsonLineReader.ReadLine(this.mmap!, lineSpan));
     }
 
     public void Dispose()

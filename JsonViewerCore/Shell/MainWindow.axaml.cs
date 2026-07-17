@@ -141,17 +141,6 @@ public partial class MainWindow : Window
         currentNdJsonViewModel = null;
     }
 
-    private void UpdateIndexingStatus(string path, long bytesProcessed, long totalBytes)
-    {
-        if (totalBytes <= 0)
-        {
-            StatusText.Text = $"Indexing {path}…";
-            return;
-        }
-
-        var percent = (int)Math.Min(100, (bytesProcessed * 100L) / totalBytes);
-        StatusText.Text = $"Indexing {path}… {percent}%";
-    }
 
     private async Task MonitorNdJsonCompletionAsync(NdJsonViewModel vm, int requestId)
     {
@@ -249,10 +238,12 @@ public partial class MainWindow : Window
 
     private sealed class StatusProgressReporter : IProgressReporter
     {
+        private const int BucketSize = 5;
+
         private readonly MainWindow window;
         private readonly string path;
         private readonly int requestId;
-        private int lastPercent = -1;
+        private int lastBucket = -1;
 
         public StatusProgressReporter(MainWindow window, string path, int requestId)
         {
@@ -261,23 +252,29 @@ public partial class MainWindow : Window
             this.requestId = requestId;
         }
 
-        public void Report(long bytesProcessed, long totalBytes)
+        public void Report(string message, long? current = null, long? max = null)
         {
             if (requestId != window.openRequestId)
                 return;
 
-            if (totalBytes <= 0)
+            string text = $"{message} {path}…";
+
+            if (current.HasValue && max.HasValue && max.Value > 0)
             {
-                Dispatcher.UIThread.Post(() => window.UpdateIndexingStatus(path, bytesProcessed, totalBytes));
-                return;
+                int percent = (int)Math.Min(100, (current.Value * 100L) / max.Value);
+
+                // Only act once per 5% step - a raw byte-offset stream would otherwise
+                // post to the UI thread far more often than the status text can usefully
+                // change.
+                int bucket = percent / BucketSize;
+                if (bucket == lastBucket)
+                    return;
+
+                lastBucket = bucket;
+                text += $" ({percent}%)";
             }
 
-            int percent = (int)Math.Min(100, (bytesProcessed * 100L) / totalBytes);
-            if (percent == lastPercent)
-                return;
-
-            lastPercent = percent;
-            Dispatcher.UIThread.Post(() => window.UpdateIndexingStatus(path, bytesProcessed, totalBytes));
+            Dispatcher.UIThread.Post(() => window.StatusText.Text = text);
         }
     }
 }

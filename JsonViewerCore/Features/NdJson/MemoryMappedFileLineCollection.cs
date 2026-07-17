@@ -1,9 +1,7 @@
 using System;
-using System.Buffers;
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.Specialized;
-using System.Text;
 using Avalonia.Threading;
 using JsonViewerCore.Infrastructure;
 
@@ -85,7 +83,7 @@ public sealed class MemoryMappedFileLineCollection : IList, INotifyCollectionCha
             return new MemoryMappedFileVisibleLine(i + 1, string.Empty);
 
         var lineSpan = index.GetLineSpan(i);
-        var line = new MemoryMappedFileVisibleLine(i + 1, ReadLine(lineSpan));
+        var line = new MemoryMappedFileVisibleLine(i + 1, NdJsonLineReader.ReadLine(mmap, lineSpan));
 
         var newNode = new LinkedListNode<(int, MemoryMappedFileVisibleLine)>((i, line));
         cacheOrder.AddFirst(newNode);
@@ -99,24 +97,6 @@ public sealed class MemoryMappedFileLineCollection : IList, INotifyCollectionCha
         }
         
         return line;
-    }
-
-    private string ReadLine(FileLineSpan lineSpan)
-    {
-        long offset = lineSpan.Offset;
-        long length = lineSpan.Length;
-
-        // Lease space from shared memory, avoids byte[] allocations and GC
-        var buffer = ArrayPool<byte>.Shared.Rent((int)length);
-        try
-        {
-            int bytesRead = mmap.Read(offset, buffer, (int)length);
-            return Encoding.UTF8.GetString(buffer, 0, bytesRead).TrimEnd('\r', '\n');
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(buffer);
-        }
     }
 
     private void StartGrowthMonitor()

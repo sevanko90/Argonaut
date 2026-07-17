@@ -1,5 +1,4 @@
 using System;
-using System.Buffers;
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.Specialized;
@@ -67,9 +66,21 @@ public sealed class JsonVisibleRowCollection : IList, INotifyCollectionChanged, 
     private readonly Dictionary<int, LinkedListNode<(int Position, JsonRow Row)>> rowCache = new();
     private readonly LinkedList<(int Position, JsonRow Row)> rowCacheOrder = new();
 
+    // A container's direct-child count is immutable once its EndIndex is known (and
+    // DescribeChildCount only runs then), so entries never need invalidating and the
+    // cache intentionally survives Rebuild - without it, every collapsed container in
+    // view recounts up to ChildCountCap tokens on every growth-poll rebuild.
+    private readonly Dictionary<int, int> childCountCache = new();
+
     private List<VisibleRow> visibleRows = new();
     private DispatcherTimer? growthTimer;
     private int lastRebuildTokenCount = -1;
+
+    // True when the last Rebuild saw every visible container fully indexed
+    // (EndIndex known). From that point, further token growth cannot change any
+    // visible row, so growth ticks skip the rebuild instead of forcing the viewport
+    // to re-realize all visible text every 250ms for the rest of indexing.
+    private bool visibleTreeSettled;
 
     public JsonVisibleRowCollection(JsonStructureIndex index, MMapFile mmap)
     {
@@ -212,15 +223,20 @@ public sealed class JsonVisibleRowCollection : IList, INotifyCollectionChanged, 
     private string DescribeChildCount(int containerTokenIndex, JsonTokenInfo container)
     {
         string label = container.Kind == JsonTokenKind.StartObject ? "member" : "item";
-        int count = 0;
-        int i = containerTokenIndex + 1;
-        int end = container.EndIndex;
 
-        while (i < end && count <= ChildCountCap)
+        if (!childCountCache.TryGetValue(containerTokenIndex, out int count))
         {
-            var t = index.GetToken(i);
-            count++;
-            i = IsContainer(t.Kind) ? t.EndIndex + 1 : i + 1;
+            int i = containerTokenIndex + 1;
+            int end = container.EndIndex;
+
+            while (i < end && count <= ChildCountCap)
+            {
+                var t = index.GetToken(i);
+                count++;
+                i = IsContainer(t.Kind) ? t.EndIndex + 1 : i + 1;
+            }
+
+            childCountCache[containerTokenIndex] = count;
         }
 
         return count > ChildCountCap ? $"{ChildCountCap}+ {label}s" : $"{count} {label}{(count == 1 ? "" : "s")}";
@@ -240,16 +256,7 @@ public sealed class JsonVisibleRowCollection : IList, INotifyCollectionChanged, 
         if (length <= 0)
             return string.Empty;
 
-        var buffer = ArrayPool<byte>.Shared.Rent(length);
-        try
-        {
-            int bytesRead = mmap.Read(offset, buffer, length);
-            return Encoding.UTF8.GetString(buffer, 0, bytesRead);
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(buffer);
-        }
+        return Encoding.UTF8.GetString(mmap.GetSpan(offset, length));
     }
 
     private static bool IsContainer(JsonTokenKind kind) => kind is JsonTokenKind.StartObject or JsonTokenKind.StartArray;
@@ -262,6 +269,7 @@ public sealed class JsonVisibleRowCollection : IList, INotifyCollectionChanged, 
     private void Rebuild()
     {
         var newVisible = new List<VisibleRow>();
+        visibleTreeSettled = index.TokenCount > 0; // AppendSubtree clears it on any incomplete container
         if (index.TokenCount > 0)
             AppendSubtree(0, newVisible);
 
@@ -279,7 +287,17 @@ public sealed class JsonVisibleRowCollection : IList, INotifyCollectionChanged, 
         into.Add(VisibleRow.ForToken(tokenIndex));
 
         var token = index.GetToken(tokenIndex);
-        if (!IsContainer(token.Kind) || !expandedTokenIndices.Contains(tokenIndex))
+        if (!IsContainer(token.Kind))
+            return;
+
+        // An unclosed visible container means later token growth can still change this
+        // row (its collapsed summary, hasChildren, or - if expanded - its child list).
+        // Every early return below for "not indexed yet" is under an EndIndex < 0
+        // container, so this single check captures all of them.
+        if (token.EndIndex < 0)
+            visibleTreeSettled = false;
+
+        if (!expandedTokenIndices.Contains(tokenIndex))
             return;
 
         int limit = expandedChildLimit.TryGetValue(tokenIndex, out var l) ? l : ChildCap;
@@ -329,7 +347,11 @@ public sealed class JsonVisibleRowCollection : IList, INotifyCollectionChanged, 
     {
         bool complete = index.IsComplete;
 
-        if (index.TokenCount != lastRebuildTokenCount)
+        // Once the visible tree is settled, token growth can't change any visible row,
+        // so skip the rebuild (and its Reset event, which forces the viewport to
+        // re-realize everything). ToggleExpand into an unindexed region re-clears the
+        // flag via its own Rebuild, so ticks resume rebuilding when it matters again.
+        if (!visibleTreeSettled && index.TokenCount != lastRebuildTokenCount)
             Rebuild();
 
         if (complete)

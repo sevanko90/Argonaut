@@ -76,4 +76,26 @@ public class MMapFileTests
             Assert.Throws<ArgumentOutOfRangeException>(() => file.GetSpan(0, 1));
         });
     }
+
+    [Fact]
+    public void RangedConstructor_ReturnsExactSubRangeBytes()
+    {
+        byte[] content = Encoding.UTF8.GetBytes("{\"a\":1}\n{\"b\":2}\n{\"c\":3}");
+        string path = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllBytes(path, content);
+
+            using var middle = new MMapFile(path, 8, 7);
+            Assert.Equal(7, middle.Length);
+            Assert.Equal("{\"b\":2}", Encoding.UTF8.GetString(middle.GetSpan(0, (int)middle.Length)));
+
+            using var last = new MMapFile(path, 16, 7);
+            Assert.Equal("{\"c\":3}", Encoding.UTF8.GetString(last.GetSpan(0, (int)last.Length)));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }

@@ -12,10 +12,21 @@ public static class NdJsonLineReader
 {
     public static string ReadLine(MMapFile file, FileLineSpan lineSpan)
     {
-        var span = file.GetSpan(lineSpan.Offset, lineSpan.Length);
-        while (span.Length > 0 && span[^1] is (byte)'\n' or (byte)'\r')
-            span = span[..^1];
+        var trimmed = TrimTrailingNewline(file, lineSpan);
+        return Encoding.UTF8.GetString(file.GetSpan(trimmed.Offset, trimmed.Length));
+    }
 
-        return Encoding.UTF8.GetString(span);
+    /// <summary>
+    /// Returns <paramref name="lineSpan"/> with any trailing '\n'/'\r' bytes excluded, so the
+    /// range can be handed to something (e.g. a JSON parser) that must not see them.
+    /// </summary>
+    public static FileLineSpan TrimTrailingNewline(MMapFile file, FileLineSpan lineSpan)
+    {
+        var span = file.GetSpan(lineSpan.Offset, lineSpan.Length);
+        int length = span.Length;
+        while (length > 0 && span[length - 1] is (byte)'\n' or (byte)'\r')
+            length--;
+
+        return new FileLineSpan(lineSpan.Offset, length);
     }
 }

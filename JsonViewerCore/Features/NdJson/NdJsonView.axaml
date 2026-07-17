@@ -3,6 +3,7 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:json="clr-namespace:JsonViewerCore.Features.NdJson"
+             xmlns:jsonview="clr-namespace:JsonViewerCore.Features.Json"
              x:Class="JsonViewerCore.Features.NdJson.NdJsonView"
              x:DataType="json:NdJsonViewModel">
     <Border BorderBrush="{StaticResource AppBorderBrush}"
@@ -53,15 +54,15 @@
                           Background="{StaticResource AppBorderBrush}" />
 
             <Border Grid.Column="2" Padding="12" Background="#FAFAFA">
-                <TextBox Text="{Binding SelectedLineText, Mode=OneWay}"
-                         AcceptsReturn="True"
-                         IsReadOnly="True"
-                         TextWrapping="NoWrap"
-                         FontFamily="{StaticResource AppMonoFontFamily}"
-                         ScrollViewer.HorizontalScrollBarVisibility="Auto"
-                         ScrollViewer.VerticalScrollBarVisibility="Auto"
-                         BorderThickness="0"
-                         Background="Transparent" />
+                <Grid>
+                    <ContentControl IsVisible="{Binding SelectedLineJsonViewModel, Converter={x:Static jsonview:IsNotNullConverter.Instance}}">
+                        <jsonview:JsonView DataContext="{Binding SelectedLineJsonViewModel}" />
+                    </ContentControl>
+                    <TextBlock Text="Select a line to view its JSON"
+                               Foreground="#8A8F98"
+                               FontFamily="{StaticResource AppMonoFontFamily}"
+                               IsVisible="{Binding SelectedLineJsonViewModel, Converter={x:Static jsonview:IsNullConverter.Instance}}" />
+                </Grid>
             </Border>
         </Grid>
     </Border>

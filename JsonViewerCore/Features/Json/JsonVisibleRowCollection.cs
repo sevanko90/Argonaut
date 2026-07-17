@@ -248,6 +248,8 @@ public sealed class JsonVisibleRowCollection : IList, INotifyCollectionChanged, 
         JsonTokenKind.True => "true",
         JsonTokenKind.False => "false",
         JsonTokenKind.Number => ReadText(token.Offset, token.Length),
+        JsonTokenKind.EndObject => "}",
+        JsonTokenKind.EndArray => "]",
         _ => "\"" + ReadText(token.Offset, token.Length) + "\""
     };
 
@@ -308,7 +310,13 @@ public sealed class JsonVisibleRowCollection : IList, INotifyCollectionChanged, 
         while (true)
         {
             if (containerEnd >= 0 && childIndex >= containerEnd)
-                return; // reached the container's own End token - all children shown
+            {
+                // Show the container's own closing bracket as its own row, at the same
+                // depth as the opening one, so an expanded container's extent is visible
+                // without collapsing it back down.
+                into.Add(VisibleRow.ForToken(containerEnd));
+                return;
+            }
 
             if (childIndex >= index.TokenCount)
                 return; // indexing hasn't reached here yet; a later growth-poll Rebuild will catch up

@@ -17,6 +17,7 @@ public sealed unsafe class MMapFile : IDisposable
     private readonly MemoryMappedFile? _mmf;
     private readonly MemoryMappedViewAccessor? _accessor;
     private readonly byte* _ptr;
+    private bool disposed;
 
     public long Length { get; }
 
@@ -28,6 +29,27 @@ public sealed unsafe class MMapFile : IDisposable
 
         _mmf = MemoryMappedFile.CreateFromFile(path, FileMode.Open, null, 0, MemoryMappedFileAccess.Read);
         _accessor = _mmf.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
+
+        byte* ptr = null;
+        _accessor.SafeMemoryMappedViewHandle.AcquirePointer(ref ptr);
+        _ptr = ptr + _accessor.PointerOffset;
+    }
+
+    /// <summary>
+    /// Maps just the byte range [offset, offset + length) of the file at <paramref name="path"/>,
+    /// as its own independent OS-level mapping - fully decoupled from any other <see cref="MMapFile"/>
+    /// open over the same path. Used to view a sub-document (e.g. one NDJSON line) through the
+    /// same zero-copy machinery as a whole file, without inheriting the parent file's absolute
+    /// offsets.
+    /// </summary>
+    public MMapFile(string path, long offset, long length)
+    {
+        Length = length;
+        if (Length == 0)
+            return; // an empty range can't be mapped; GetSpan can only ever yield an empty span
+
+        _mmf = MemoryMappedFile.CreateFromFile(path, FileMode.Open, null, 0, MemoryMappedFileAccess.Read);
+        _accessor = _mmf.CreateViewAccessor(offset, length, MemoryMappedFileAccess.Read);
 
         byte* ptr = null;
         _accessor.SafeMemoryMappedViewHandle.AcquirePointer(ref ptr);
@@ -51,6 +73,10 @@ public sealed unsafe class MMapFile : IDisposable
 
     public void Dispose()
     {
+        if (disposed)
+            return;
+        disposed = true;
+
         _accessor?.SafeMemoryMappedViewHandle.ReleasePointer();
         _accessor?.Dispose();
         _mmf?.Dispose();

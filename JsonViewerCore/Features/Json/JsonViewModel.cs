@@ -24,11 +24,21 @@ public sealed class JsonViewModel : IDisposable
     {
     }
 
-    public async Task LoadAsync(string path, IProgressReporter? progressReporter = null)
+    public Task LoadAsync(string path, IProgressReporter? progressReporter = null)
     {
         FilePath = path;
+        return LoadCore(new MMapFile(path), progressReporter);
+    }
 
-        var mmap = new MMapFile(path);
+    /// <summary>
+    /// Loads from an already-open <see cref="MMapFile"/> instead of a path - e.g. a sub-range
+    /// mapping over one line of a larger NDJSON file. This <see cref="JsonViewModel"/> takes
+    /// ownership of <paramref name="mmap"/> and disposes it along with itself.
+    /// </summary>
+    public Task LoadAsync(MMapFile mmap, IProgressReporter? progressReporter = null) => LoadCore(mmap, progressReporter);
+
+    private async Task LoadCore(MMapFile mmap, IProgressReporter? progressReporter)
+    {
         var index = JsonStructureIndex.StartIndexing(mmap, progressReporter);
         this.mmap = mmap;
         this.index = index;

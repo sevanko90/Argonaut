@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
+using JsonViewerCore.Features.Json;
 using JsonViewerCore.Infrastructure;
 
 namespace JsonViewerCore.Features.NdJson;
@@ -17,6 +18,8 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
     private FileOffsetIndex? index;
     private MemoryMappedFileLineCollection? lines;
     private NdJsonSelectedLine? selectedLine;
+    private JsonViewModel? selectedLineJsonViewModel;
+    private long selectionRequestId;
 
     public string FilePath { get; private set; } = string.Empty;
 
@@ -42,6 +45,12 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
     public int? SelectedLineNumber => SelectedLine?.LineNumber;
 
     public string? SelectedLineText => SelectedLine?.Text;
+
+    public JsonViewModel? SelectedLineJsonViewModel
+    {
+        get => selectedLineJsonViewModel;
+        private set => SetField(ref selectedLineJsonViewModel, value);
+    }
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -77,11 +86,42 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
     {
         var lineSpan = this.index!.GetLineSpan(lineIndex);
         SelectedLine = new NdJsonSelectedLine(lineIndex + 1, NdJsonLineReader.ReadLine(this.mmap!, lineSpan));
+
+        var requestId = ++selectionRequestId;
+        var previous = SelectedLineJsonViewModel;
+        SelectedLineJsonViewModel = null;
+        previous?.Dispose();
+
+        _ = LoadSelectedLineJsonAsync(requestId, lineSpan);
+    }
+
+    private async Task LoadSelectedLineJsonAsync(long requestId, FileLineSpan lineSpan)
+    {
+        var trimmed = NdJsonLineReader.TrimTrailingNewline(this.mmap!, lineSpan);
+        var jsonViewModel = new JsonViewModel();
+        try
+        {
+            await jsonViewModel.LoadAsync(new MMapFile(FilePath, trimmed.Offset, trimmed.Length));
+        }
+        catch
+        {
+            jsonViewModel.Dispose();
+            return;
+        }
+
+        if (requestId != selectionRequestId)
+        {
+            jsonViewModel.Dispose();
+            return;
+        }
+
+        SelectedLineJsonViewModel = jsonViewModel;
     }
 
     public void Dispose()
     {
         lines?.Dispose();
+        selectedLineJsonViewModel?.Dispose();
         this.mmap?.Dispose();
     }
 

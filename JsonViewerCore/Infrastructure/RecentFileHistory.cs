@@ -34,6 +34,18 @@ public static class RecentFileHistory
         }
     }
 
+    public static void Clear()
+    {
+        try
+        {
+            File.Delete(HistoryFilePath);
+        }
+        catch
+        {
+            // History should not block file opening.
+        }
+    }
+
     public static void Add(string path)
     {
         if (string.IsNullOrWhiteSpace(path))

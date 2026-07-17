@@ -13,6 +13,16 @@
             <Setter Property="Foreground" Value="DodgerBlue" />
             <Setter Property="Cursor" Value="Hand" />
         </Style>
+        <Style Selector="Button.clearlist">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="4,0" />
+            <Setter Property="Foreground" Value="#9CA3AF" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="Button.clearlist:pointerover /template/ ContentPresenter">
+            <Setter Property="Foreground" Value="#EF4444" />
+        </Style>
     </UserControl.Styles>
 
     <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
@@ -37,7 +47,13 @@
                     Padding="20,8" />
 
             <StackPanel Orientation="Vertical" Spacing="4" HorizontalAlignment="Center" Margin="0,16,0,0">
-                <TextBlock Text="Recent files" FontWeight="SemiBold" Opacity="0.7" HorizontalAlignment="Center" />
+                <Grid ColumnDefinitions="Auto,Auto" HorizontalAlignment="Center">
+                    <TextBlock Grid.Column="0" Text="Recent files" FontWeight="SemiBold" Opacity="0.7"
+                               VerticalAlignment="Center" />
+                    <Button x:Name="ClearRecentFilesButton" Grid.Column="1" Content="✕" FontSize="11"
+                            Classes="clearlist" Click="OnClearRecentFiles" Margin="6,0,0,0"
+                            VerticalAlignment="Center" ToolTip.Tip="Clear recent files" />
+                </Grid>
                 <StackPanel x:Name="RecentFilesPanel" Orientation="Vertical" Spacing="4" HorizontalAlignment="Center" />
             </StackPanel>
 

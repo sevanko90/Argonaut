@@ -30,6 +30,11 @@ public partial class MainWindow : Window
 
         Title = DefaultTitle;
         emptyStateView.ChooseFileRequested += async (_, _) => await BrowseForFile();
+        emptyStateView.ClearRecentFilesRequested += (_, _) =>
+        {
+            RecentFileHistory.Clear();
+            ReloadRecentFiles();
+        };
         ContentArea.Content = emptyStateView;
         ReloadRecentFiles();
 
@@ -271,6 +276,7 @@ public partial class MainWindow : Window
         var recentFiles = RecentFileHistory.Load();
         var panel = emptyStateView.RecentFilesHost;
         panel.Children.Clear();
+        emptyStateView.ClearRecentFilesButtonVisible = recentFiles.Count > 0;
 
         if (recentFiles.Count == 0)
         {

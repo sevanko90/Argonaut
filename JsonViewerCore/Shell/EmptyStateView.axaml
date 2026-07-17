@@ -13,6 +13,11 @@
             <Setter Property="Foreground" Value="DodgerBlue" />
             <Setter Property="Cursor" Value="Hand" />
         </Style>
+        <Style Selector="Button.linklike:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="#1D6FE0" />
+            <Setter Property="TextBlock.TextDecorations" Value="Underline" />
+        </Style>
         <Style Selector="Button.clearlist">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />

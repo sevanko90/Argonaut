@@ -178,6 +178,33 @@ public class JsonStructureIndexTests
     }
 
     [Fact]
+    public void EndToken_MatchesStartTokenDepthAndParent()
+    {
+        // The closing bracket must line up visually with its opening one, so it needs the
+        // exact same Depth/ParentIndex as its matching Start token - not one level deeper,
+        // which is what a naive stack-count-at-the-End-token read would give (the container
+        // being closed is still on the stack when the End token is processed).
+        var (index, json, path) = BuildIndex();
+        try
+        {
+            for (int i = 0; i < index.TokenCount; i++)
+            {
+                var token = index.GetToken(i);
+                if (token.Kind is not (JsonTokenKind.StartObject or JsonTokenKind.StartArray))
+                    continue;
+
+                var end = index.GetToken(token.EndIndex);
+                Assert.Equal(token.Depth, end.Depth);
+                Assert.Equal(token.ParentIndex, end.ParentIndex);
+            }
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void ScalarsWithoutName_ReportNoNameSentinel()
     {
         var (index, json, path) = BuildIndex();

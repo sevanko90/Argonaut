@@ -284,8 +284,28 @@ public sealed class JsonStructureIndex
                 }
 
                 var kind = Map(tokenType);
-                int parentIndex = openContainers.Count > 0 ? openContainers.Peek() : -1;
-                int depth = openContainers.Count;
+
+                int parentIndex;
+                int depth;
+                int startIndex = -1;
+
+                if (tokenType is JsonTokenType.EndObject or JsonTokenType.EndArray)
+                {
+                    // The container being closed is still on the stack here (it's popped
+                    // below), so peeking/counting the stack directly would attribute this
+                    // End token to its own container as parent, one depth too deep. Instead
+                    // it must mirror its Start token's own parent/depth exactly, so the
+                    // closing bracket lines up visually with the opening one.
+                    startIndex = openContainers.Pop();
+                    var startToken = GetToken(startIndex);
+                    parentIndex = startToken.ParentIndex;
+                    depth = startToken.Depth;
+                }
+                else
+                {
+                    parentIndex = openContainers.Count > 0 ? openContainers.Peek() : -1;
+                    depth = openContainers.Count;
+                }
 
                 // Single writer, so the pre-Add Count is exactly this token's index.
                 int tokenIndex = tokens.Count;
@@ -301,8 +321,6 @@ public sealed class JsonStructureIndex
                 }
                 else if (tokenType is JsonTokenType.EndObject or JsonTokenType.EndArray)
                 {
-                    int startIndex = openContainers.Pop();
-
                     // EndIndex is the one field mutated after its token was published to
                     // lock-free readers, so the write must be volatile (paired with the
                     // Volatile.Read in Unpack). A plain write could be observed torn or

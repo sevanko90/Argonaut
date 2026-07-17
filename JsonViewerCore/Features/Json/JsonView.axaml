@@ -9,51 +9,101 @@
         <json:DepthToMarginConverter x:Key="DepthToMargin" />
     </UserControl.Resources>
 
+    <UserControl.Styles>
+        <Style Selector="Button.pathiconbutton">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="4" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="Button.pathiconbutton:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#EAEBEE" />
+        </Style>
+        <Style Selector="Button.pathiconbutton:disabled">
+            <Setter Property="Opacity" Value="0.4" />
+        </Style>
+    </UserControl.Styles>
+
     <Border BorderBrush="{StaticResource AppBorderBrush}"
             BorderThickness="1"
             CornerRadius="8"
             Background="White"
             ClipToBounds="True">
-        <ListBox x:Name="RowsListBox" ItemsSource="{Binding Rows}" Padding="8,6">
-            <ListBox.Styles>
-                <Style Selector="ListBoxItem">
-                    <Setter Property="Padding" Value="0" />
-                    <Setter Property="MinHeight" Value="22" />
-                    <Setter Property="Height" Value="22" />
-                </Style>
-            </ListBox.Styles>
+        <Grid RowDefinitions="*,Auto">
+            <ListBox Grid.Row="0"
+                     x:Name="RowsListBox"
+                     ItemsSource="{Binding Rows}"
+                     SelectionMode="Single"
+                     Padding="8,6">
+                <ListBox.Styles>
+                    <Style Selector="ListBoxItem">
+                        <Setter Property="Padding" Value="0" />
+                        <Setter Property="MinHeight" Value="22" />
+                        <Setter Property="Height" Value="22" />
+                    </Style>
+                </ListBox.Styles>
 
-            <ListBox.ItemsPanel>
-                <ItemsPanelTemplate>
-                    <VirtualizingStackPanel />
-                </ItemsPanelTemplate>
-            </ListBox.ItemsPanel>
+                <ListBox.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <VirtualizingStackPanel />
+                    </ItemsPanelTemplate>
+                </ListBox.ItemsPanel>
 
-            <ListBox.ItemTemplate>
-                <DataTemplate x:DataType="json:JsonRow">
-                    <StackPanel Orientation="Horizontal"
-                                Margin="{Binding Depth, Converter={StaticResource DepthToMargin}}">
-                        <Button Content="{Binding IsExpanded, Converter={x:Static json:ExpandGlyphConverter.Instance}}"
-                                Click="OnToggleExpandClick"
-                                IsVisible="{Binding HasChildren}"
-                                Background="Transparent"
-                                BorderThickness="0"
-                                Padding="0"
-                                Width="16"
-                                HorizontalContentAlignment="Center"
-                                FontFamily="{StaticResource AppMonoFontFamily}" />
-                        <TextBlock IsVisible="{Binding !HasChildren}"
-                                   Width="16" />
-                        <TextBlock Text="{Binding Name, StringFormat='{}{0}: '}"
-                                   IsVisible="{Binding Name, Converter={x:Static json:IsNotNullConverter.Instance}}"
-                                   Foreground="#2563EB"
-                                   FontFamily="{StaticResource AppMonoFontFamily}" />
-                        <TextBlock Text="{Binding Value}"
-                                   TextWrapping="NoWrap"
-                                   FontFamily="{StaticResource AppMonoFontFamily}" />
-                    </StackPanel>
-                </DataTemplate>
-            </ListBox.ItemTemplate>
-        </ListBox>
+                <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="json:JsonRow">
+                        <StackPanel Orientation="Horizontal"
+                                    Margin="{Binding Depth, Converter={StaticResource DepthToMargin}}">
+                            <Button Content="{Binding IsExpanded, Converter={x:Static json:ExpandGlyphConverter.Instance}}"
+                                    Click="OnToggleExpandClick"
+                                    IsVisible="{Binding HasChildren}"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    Padding="0"
+                                    Width="16"
+                                    HorizontalContentAlignment="Center"
+                                    FontFamily="{StaticResource AppMonoFontFamily}" />
+                            <TextBlock IsVisible="{Binding !HasChildren}"
+                                       Width="16" />
+                            <TextBlock Text="{Binding Name, StringFormat='{}{0}: '}"
+                                       IsVisible="{Binding Name, Converter={x:Static json:IsNotNullConverter.Instance}}"
+                                       Foreground="#2563EB"
+                                       FontFamily="{StaticResource AppMonoFontFamily}" />
+                            <TextBlock Text="{Binding Value}"
+                                       TextWrapping="NoWrap"
+                                       FontFamily="{StaticResource AppMonoFontFamily}" />
+                        </StackPanel>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+
+            <Border Grid.Row="1"
+                    BorderBrush="{StaticResource AppBorderBrush}"
+                    BorderThickness="0,1,0,0"
+                    Background="#F8F9FA"
+                    Padding="10,4">
+                <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Grid.Column="0"
+                               Text="{Binding SelectedPath, TargetNullValue='No selection'}"
+                               FontSize="11"
+                               TextTrimming="CharacterEllipsis"
+                               VerticalAlignment="Center"
+                               Foreground="{StaticResource AppMutedTextBrush}"
+                               FontFamily="{StaticResource AppMonoFontFamily}" />
+                    <Button Grid.Column="1"
+                            x:Name="CopyPathButton"
+                            Classes="pathiconbutton"
+                            Click="OnCopyPathClick"
+                            IsEnabled="{Binding SelectedPath, Converter={x:Static json:IsNotNullConverter.Instance}}"
+                            ToolTip.Tip="Copy JSONPath"
+                            Margin="8,0,0,0">
+                        <Viewbox Width="12" Height="12">
+                            <Path Fill="{StaticResource AppMutedTextBrush}"
+                                  Data="M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z" />
+                        </Viewbox>
+                    </Button>
+                </Grid>
+            </Border>
+        </Grid>
     </Border>
 </UserControl>

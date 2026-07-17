@@ -54,7 +54,7 @@
             </Grid>
         </Border>
 
-        <ContentControl Grid.Row="1" x:Name="ContentArea" Margin="16" />
+        <ContentControl Grid.Row="1" x:Name="ContentArea" />
 
         <Border Grid.Row="2"
                 Background="#F8F9FA"

@@ -1,16 +1,21 @@
 using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using JsonViewerCore.Infrastructure;
 
 namespace JsonViewerCore.Features.Json;
 
-public sealed class JsonViewModel : IDisposable
+public sealed class JsonViewModel : IDisposable, INotifyPropertyChanged
 {
     private const int InitialTokenTarget = 250;
 
     private MMapFile? mmap;
     private JsonStructureIndex? index;
     private JsonVisibleRowCollection? rows;
+    private int? selectedTokenIndex;
+    private string? selectedPath;
 
     public string FilePath { get; private set; } = string.Empty;
 
@@ -20,8 +25,33 @@ public sealed class JsonViewModel : IDisposable
 
     public JsonVisibleRowCollection Rows => rows ?? throw new InvalidOperationException("LoadAsync must complete before Rows is accessed.");
 
+    public int? SelectedTokenIndex
+    {
+        get => selectedTokenIndex;
+        private set => SetField(ref selectedTokenIndex, value);
+    }
+
+    public string? SelectedPath
+    {
+        get => selectedPath;
+        private set => SetField(ref selectedPath, value);
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
     public JsonViewModel()
     {
+    }
+
+    /// <summary>
+    /// Selects a token by index and computes its JSONPath. Only walks that token's
+    /// ancestor chain (see <see cref="JsonPathBuilder"/>) - cheap regardless of how large
+    /// the document is, since it never touches unrelated parts of the index.
+    /// </summary>
+    public void SelectToken(int tokenIndex)
+    {
+        SelectedTokenIndex = tokenIndex;
+        SelectedPath = JsonPathBuilder.Build(index!, mmap!, tokenIndex);
     }
 
     public Task LoadAsync(string path, IProgressReporter? progressReporter = null)
@@ -55,5 +85,15 @@ public sealed class JsonViewModel : IDisposable
     {
         rows?.Dispose();
         mmap?.Dispose();
+    }
+
+    private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
+    {
+        if (EqualityComparer<T>.Default.Equals(field, value))
+            return false;
+
+        field = value;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+        return true;
     }
 }

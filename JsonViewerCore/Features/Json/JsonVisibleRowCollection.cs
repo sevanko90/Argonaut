@@ -119,6 +119,23 @@ public sealed class JsonVisibleRowCollection : IList, INotifyCollectionChanged, 
     }
 
     /// <summary>
+    /// Finds a token's current position in the visible list, or null if it isn't visible
+    /// right now (its container is collapsed, or it hasn't been paged/indexed in yet).
+    /// Linear scan bounded by how many rows are currently visible, never by document size -
+    /// used to restore the selection highlight after a Rebuild reshuffles positions.
+    /// </summary>
+    public int? FindVisiblePosition(int tokenIndex)
+    {
+        for (int i = 0; i < visibleRows.Count; i++)
+        {
+            if (visibleRows[i].TokenIndex == tokenIndex)
+                return i;
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Toggle expand/collapse of the container at the given row position, or - if the
     /// row is a "more items" placeholder - reveal the next batch of that container's
     /// children. No I/O or awaiting happens here: if the target region isn't indexed

@@ -53,7 +53,7 @@
                           VerticalAlignment="Stretch"
                           Background="{StaticResource AppBorderBrush}" />
 
-            <Border Grid.Column="2" Padding="12" Background="#FAFAFA">
+            <Border Grid.Column="2" Padding="0" Background="#FAFAFA">
                 <Grid>
                     <ContentControl IsVisible="{Binding SelectedLineJsonViewModel, Converter={x:Static jsonview:IsNotNullConverter.Instance}}">
                         <jsonview:JsonView DataContext="{Binding SelectedLineJsonViewModel}" />

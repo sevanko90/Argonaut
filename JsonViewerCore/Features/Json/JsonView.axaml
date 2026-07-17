@@ -23,6 +23,18 @@
         <Style Selector="Button.pathiconbutton:disabled">
             <Setter Property="Opacity" Value="0.4" />
         </Style>
+
+        <Style Selector="Button.pathlink">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Foreground" Value="#2563EB" />
+            <Setter Property="TextBlock.TextDecorations" Value="Underline" />
+        </Style>
+        <Style Selector="Button.pathlink:pointerover /template/ ContentPresenter">
+            <Setter Property="Foreground" Value="#1D4ED8" />
+        </Style>
     </UserControl.Styles>
 
     <Border BorderBrush="{StaticResource AppBorderBrush}"
@@ -84,12 +96,31 @@
                     Padding="10,4">
                 <Grid ColumnDefinitions="*,Auto">
                     <TextBlock Grid.Column="0"
-                               Text="{Binding SelectedPath, TargetNullValue='No selection'}"
+                               Text="No selection"
                                FontSize="11"
-                               TextTrimming="CharacterEllipsis"
                                VerticalAlignment="Center"
+                               IsVisible="{Binding SelectedPath, Converter={x:Static json:IsNullConverter.Instance}}"
                                Foreground="{StaticResource AppMutedTextBrush}"
                                FontFamily="{StaticResource AppMonoFontFamily}" />
+                    <ItemsControl Grid.Column="0"
+                                  ItemsSource="{Binding SelectedPathSegments}"
+                                  IsVisible="{Binding SelectedPath, Converter={x:Static json:IsNotNullConverter.Instance}}"
+                                  VerticalAlignment="Center">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Orientation="Horizontal" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="json:JsonPathSegment">
+                                <Button Content="{Binding Label}"
+                                        Click="OnPathSegmentClick"
+                                        Classes="pathlink"
+                                        FontSize="11"
+                                        FontFamily="{StaticResource AppMonoFontFamily}" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                     <Button Grid.Column="1"
                             x:Name="CopyPathButton"
                             Classes="pathiconbutton"

@@ -136,6 +136,80 @@ public sealed class JsonVisibleRowCollection : IList, INotifyCollectionChanged, 
     }
 
     /// <summary>
+    /// Ensures a token is reachable in the visible list by expanding every collapsed
+    /// ancestor container along its ParentIndex chain and, for array ancestors, paging the
+    /// child-display limit up far enough to include it (capped at
+    /// MaxDisplayedChildrenPerContainer, same ceiling repeated "show more" clicks respect).
+    /// Every ancestor on this chain is necessarily a container, since only containers have
+    /// children. Only touches ancestors of tokenIndex - O(depth) plus one O(preceding-
+    /// siblings) sibling-skip walk per array ancestor (the same technique
+    /// JsonPathBuilder.FindArrayIndex uses to label path segments) - and skips Rebuild
+    /// entirely if nothing actually needed to change, e.g. tokenIndex was already visible.
+    /// </summary>
+    public void EnsureVisible(int tokenIndex)
+    {
+        bool changed = false;
+        int current = tokenIndex;
+
+        while (true)
+        {
+            var token = index.GetToken(current);
+            int parentIndex = token.ParentIndex;
+            if (parentIndex == -1)
+                break;
+
+            var parent = index.GetToken(parentIndex);
+
+            if (expandedTokenIndices.Add(parentIndex))
+                changed = true;
+
+            if (parent.Kind == JsonTokenKind.StartArray)
+            {
+                int childPosition = FindChildPosition(parentIndex, current);
+                int currentLimit = expandedChildLimit.TryGetValue(parentIndex, out var l) ? l : ChildCap;
+
+                if (childPosition >= currentLimit)
+                {
+                    int neededLimit = Math.Min(
+                        MaxDisplayedChildrenPerContainer,
+                        ((childPosition / ChildCap) + 1) * ChildCap);
+
+                    if (neededLimit > currentLimit)
+                    {
+                        expandedChildLimit[parentIndex] = neededLimit;
+                        changed = true;
+                    }
+                }
+            }
+
+            current = parentIndex;
+        }
+
+        if (changed)
+            Rebuild();
+    }
+
+    /// <summary>
+    /// Finds the zero-based position of targetTokenIndex among its parent container's
+    /// direct children, skipping whole sibling subtrees in O(1) via each sibling's
+    /// EndIndex - the same pattern JsonPathBuilder.FindArrayIndex uses.
+    /// </summary>
+    private int FindChildPosition(int parentIndex, int targetTokenIndex)
+    {
+        int i = parentIndex + 1;
+        int position = 0;
+
+        while (i < targetTokenIndex)
+        {
+            var sibling = index.GetToken(i);
+            i = IsContainer(sibling.Kind) ? sibling.EndIndex + 1 : i + 1;
+            position++;
+        }
+
+        return position;
+    }
+
+    /// <summary>
     /// Toggle expand/collapse of the container at the given row position, or - if the
     /// row is a "more items" placeholder - reveal the next batch of that container's
     /// children. No I/O or awaiting happens here: if the target region isn't indexed

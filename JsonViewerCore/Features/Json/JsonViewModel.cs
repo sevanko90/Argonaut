@@ -16,6 +16,7 @@ public sealed class JsonViewModel : IDisposable, INotifyPropertyChanged
     private JsonVisibleRowCollection? rows;
     private int? selectedTokenIndex;
     private string? selectedPath;
+    private IReadOnlyList<JsonPathSegment> selectedPathSegments = Array.Empty<JsonPathSegment>();
 
     public string FilePath { get; private set; } = string.Empty;
 
@@ -37,6 +38,12 @@ public sealed class JsonViewModel : IDisposable, INotifyPropertyChanged
         private set => SetField(ref selectedPath, value);
     }
 
+    public IReadOnlyList<JsonPathSegment> SelectedPathSegments
+    {
+        get => selectedPathSegments;
+        private set => SetField(ref selectedPathSegments, value);
+    }
+
     public event PropertyChangedEventHandler? PropertyChanged;
 
     public JsonViewModel()
@@ -44,14 +51,20 @@ public sealed class JsonViewModel : IDisposable, INotifyPropertyChanged
     }
 
     /// <summary>
-    /// Selects a token by index and computes its JSONPath. Only walks that token's
-    /// ancestor chain (see <see cref="JsonPathBuilder"/>) - cheap regardless of how large
-    /// the document is, since it never touches unrelated parts of the index.
+    /// Selects a token by index, computes its JSONPath, and ensures it's reachable in the
+    /// tree (expanding any collapsed ancestor - see JsonVisibleRowCollection.EnsureVisible).
+    /// Model fields are set before EnsureVisible so that if it does trigger a row-list
+    /// rebuild, that rebuild observes the new SelectedTokenIndex already in place. Only
+    /// walks tokenIndex's ancestor chain (see <see cref="JsonPathBuilder"/>) - cheap
+    /// regardless of how large the document is, since it never touches unrelated parts of
+    /// the index.
     /// </summary>
     public void SelectToken(int tokenIndex)
     {
         SelectedTokenIndex = tokenIndex;
         SelectedPath = JsonPathBuilder.Build(index!, mmap!, tokenIndex);
+        SelectedPathSegments = JsonPathBuilder.BuildSegments(index!, mmap!, tokenIndex);
+        rows?.EnsureVisible(tokenIndex);
     }
 
     public Task LoadAsync(string path, IProgressReporter? progressReporter = null)

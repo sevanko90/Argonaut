@@ -91,6 +91,24 @@ public partial class JsonView : UserControl
         vm.Rows.ToggleExpand(row.Position);
     }
 
+    private void OnPathSegmentClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (sender is not Control { DataContext: JsonPathSegment segment })
+            return;
+
+        if (DataContext is not JsonViewModel vm)
+            return;
+
+        vm.SelectToken(segment.TokenIndex);
+
+        // Safety net for the common case where the target was already fully visible:
+        // EnsureVisible then makes no change and never raises CollectionChanged, so
+        // nothing else would re-derive the ListBox's highlight/autoscroll from the new
+        // SelectedTokenIndex. When EnsureVisible does rebuild, this call is idempotent -
+        // OnRowsCollectionChanged already invoked it with the same result.
+        SyncVisualSelection();
+    }
+
     private async void OnCopyPathClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         if (DataContext is not JsonViewModel { SelectedPath: { } path })

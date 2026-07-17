@@ -6,6 +6,14 @@ using JsonViewerCore.Infrastructure;
 namespace JsonViewerCore.Features.Json;
 
 /// <summary>
+/// One clickable piece of a JSONPath, e.g. <c>.nested</c> or <c>[2]</c> (the root segment's
+/// label is <c>$</c>). <see cref="TokenIndex"/> is always an ancestor of (or equal to) the
+/// token the path was built for, so navigating to it never touches more of the document
+/// than the ancestor chain itself.
+/// </summary>
+public readonly record struct JsonPathSegment(string Label, int TokenIndex);
+
+/// <summary>
 /// Builds a JSONPath string (e.g. <c>$.foo.bar[3]['weird key']</c>) for a token in a
 /// <see cref="JsonStructureIndex"/> by walking its ParentIndex chain to the root. Only
 /// touches ancestors of the selected token - never the whole document - so this stays
@@ -19,42 +27,48 @@ public static class JsonPathBuilder
 
     public static string Build(JsonStructureIndex index, MMapFile mmap, int tokenIndex)
     {
-        var segments = new List<string>();
+        var segments = BuildSegments(index, mmap, tokenIndex);
+        var sb = new StringBuilder();
+        foreach (var segment in segments)
+            sb.Append(segment.Label);
+
+        return sb.ToString();
+    }
+
+    public static IReadOnlyList<JsonPathSegment> BuildSegments(JsonStructureIndex index, MMapFile mmap, int tokenIndex)
+    {
+        var raw = new List<(string Text, int TokenIndex)>();
         int current = tokenIndex;
 
-        while (current != -1)
+        while (true)
         {
             var token = index.GetToken(current);
             int parentIndex = token.ParentIndex;
             if (parentIndex == -1)
-                break; // root - no segment for the document root itself
-
-            if (token.NameLength >= 0)
             {
-                string name = ReadText(mmap, token.NameOffset, token.NameLength);
-                segments.Add(FormatMemberSegment(name));
-            }
-            else
-            {
-                int arrayIndex = FindArrayIndex(index, parentIndex, current);
-                segments.Add($"[{arrayIndex}]");
+                raw.Add(("$", current));
+                break;
             }
 
+            string text = token.NameLength >= 0
+                ? FormatMemberSegment(ReadText(mmap, token.NameOffset, token.NameLength))
+                : $"[{FindArrayIndex(index, parentIndex, current)}]";
+
+            raw.Add((text, current));
             current = parentIndex;
         }
 
-        segments.Reverse();
+        raw.Reverse();
 
-        var sb = new StringBuilder("$");
-        foreach (var segment in segments)
+        var segments = new List<JsonPathSegment>(raw.Count);
+        for (int i = 0; i < raw.Count; i++)
         {
-            if (segment.Length > 0 && segment[0] == '[')
-                sb.Append(segment);
-            else
-                sb.Append('.').Append(segment);
+            string text = raw[i].Text;
+            string label = i == 0 || (text.Length > 0 && text[0] == '[') ? text : "." + text;
+            segments.Add(new JsonPathSegment(label, raw[i].TokenIndex));
         }
 
-        return sb.ToString();
+        return segments;
     }
 
     /// <summary>

@@ -1,3 +1,4 @@
+using System.Linq;
 using JsonViewerCore.Features.Json;
 using JsonViewerCore.Infrastructure;
 
@@ -123,6 +124,59 @@ public class JsonPathBuilderTests
             int tokenIndex = FindTokenIndex(index, t => t.Kind == JsonTokenKind.True);
             string result = JsonPathBuilder.Build(index, mmap, tokenIndex);
             Assert.Equal("$.nested['weird key']", result);
+        }
+        finally
+        {
+            mmap.Dispose();
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void BuildSegments_LabelsConcatenateToSameStringAsBuild()
+    {
+        var (index, mmap, path) = BuildIndex(SampleJson);
+        try
+        {
+            // "nested":{"x":[1,2,{"deep":"value"}], ...} - locate the "value" string.
+            int tokenIndex = FindTokenIndex(index, t => t.Kind == JsonTokenKind.String && t.NameLength == 4);
+
+            string expected = JsonPathBuilder.Build(index, mmap, tokenIndex);
+            var segments = JsonPathBuilder.BuildSegments(index, mmap, tokenIndex);
+
+            string joined = string.Concat(segments.Select(s => s.Label));
+            Assert.Equal(expected, joined);
+            Assert.Equal("$.nested.x[2].deep", joined);
+        }
+        finally
+        {
+            mmap.Dispose();
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void BuildSegments_EachTokenIndexIsAnAncestorOfTheTarget()
+    {
+        var (index, mmap, path) = BuildIndex(SampleJson);
+        try
+        {
+            int tokenIndex = FindTokenIndex(index, t => t.Kind == JsonTokenKind.String && t.NameLength == 4);
+            var segments = JsonPathBuilder.BuildSegments(index, mmap, tokenIndex);
+
+            // Root first, target itself last.
+            Assert.Equal("$", segments[0].Label);
+            Assert.Equal(0, segments[0].TokenIndex);
+            Assert.Equal(tokenIndex, segments[^1].TokenIndex);
+
+            // Walking the target's own ParentIndex chain should reproduce every earlier
+            // segment's TokenIndex, in reverse order.
+            int current = tokenIndex;
+            for (int i = segments.Count - 1; i >= 0; i--)
+            {
+                Assert.Equal(segments[i].TokenIndex, current);
+                current = index.GetToken(current).ParentIndex;
+            }
         }
         finally
         {

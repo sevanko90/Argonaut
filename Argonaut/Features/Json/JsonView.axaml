@@ -37,6 +37,19 @@
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{DynamicResource AppAccentHoverBrush}" />
         </Style>
+
+        <Style Selector="Button.hintlink">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Foreground" Value="{DynamicResource AppMutedTextBrush}" />
+            <Setter Property="FontFamily" Value="{StaticResource AppMonoFontFamily}" />
+        </Style>
+        <Style Selector="Button.hintlink:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource AppAccentBrush}" />
+        </Style>
     </UserControl.Styles>
 
     <Border BorderBrush="{DynamicResource AppBorderBrush}"
@@ -67,7 +80,8 @@
                 <ListBox.ItemTemplate>
                     <DataTemplate x:DataType="json:JsonRow">
                         <StackPanel Orientation="Horizontal"
-                                    Margin="{Binding Depth, Converter={StaticResource DepthToMargin}}">
+                                    Margin="{Binding Depth, Converter={StaticResource DepthToMargin}}"
+                                    PointerPressed="OnRowPointerPressed">
                             <Button Content="{Binding IsExpanded, Converter={x:Static json:ExpandGlyphConverter.Instance}}"
                                     Click="OnToggleExpandClick"
                                     IsVisible="{Binding HasChildren}"
@@ -89,6 +103,13 @@
                                        search:SearchHighlight.Term="{Binding $parent[json:JsonView].((json:JsonViewModel)DataContext).HighlightTerm}"
                                        TextWrapping="NoWrap"
                                        FontFamily="{StaticResource AppMonoFontFamily}" />
+                            <Button Classes="hintlink"
+                                    Content="{Binding Hint}"
+                                    IsVisible="{Binding Hint, Converter={x:Static json:IsNotNullConverter.Instance}}"
+                                    Click="OnHintClick"
+                                    Margin="8,0,0,0"
+                                    VerticalAlignment="Center"
+                                    ToolTip.Tip="Decoded date (local time) — click to change scheme" />
                         </StackPanel>
                     </DataTemplate>
                 </ListBox.ItemTemplate>
@@ -126,18 +147,30 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
-                    <Button Grid.Column="1"
-                            x:Name="CopyPathButton"
-                            Classes="pathiconbutton"
-                            Click="OnCopyPathClick"
-                            IsEnabled="{Binding SelectedPath, Converter={x:Static json:IsNotNullConverter.Instance}}"
-                            ToolTip.Tip="Copy JSONPath"
-                            Margin="8,0,0,0">
-                        <Viewbox Width="12" Height="12">
-                            <Path Fill="{DynamicResource AppMutedTextBrush}"
-                                  Data="M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z" />
-                        </Viewbox>
-                    </Button>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                        <Button x:Name="CopyValueButton"
+                                Classes="pathiconbutton"
+                                Click="OnCopyValueClick"
+                                IsEnabled="{Binding SelectedPath, Converter={x:Static json:IsNotNullConverter.Instance}}"
+                                ToolTip.Tip="Copy value"
+                                Margin="8,0,0,0">
+                            <Viewbox Width="12" Height="12">
+                                <Path Fill="{DynamicResource AppMutedTextBrush}"
+                                      Data="M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z" />
+                            </Viewbox>
+                        </Button>
+                        <Button x:Name="CopyPathButton"
+                                Classes="pathiconbutton"
+                                Click="OnCopyPathClick"
+                                IsEnabled="{Binding SelectedPath, Converter={x:Static json:IsNotNullConverter.Instance}}"
+                                ToolTip.Tip="Copy JSONPath"
+                                Margin="8,0,0,0">
+                            <Viewbox Width="12" Height="12">
+                                <Path Fill="{DynamicResource AppMutedTextBrush}"
+                                      Data="M18 2H9a2 2 0 0 0-2 2v2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-2h2a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2zM14 20H5V8h9v12zm4-4h-2V8a2 2 0 0 0-2-2H9V4h9v12z" />
+                            </Viewbox>
+                        </Button>
+                    </StackPanel>
                 </Grid>
             </Border>
         </Grid>

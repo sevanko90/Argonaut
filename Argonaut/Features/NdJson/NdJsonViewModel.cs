@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using Argonaut.Features.Json;
+using Argonaut.Features.Json.Hints;
 using Argonaut.Infrastructure;
 
 namespace Argonaut.Features.NdJson;
@@ -58,6 +59,14 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
     }
 
     /// <summary>
+    /// Master date-hint settings shared across every line's nested JsonViewModel: the header
+    /// dropdown attaches to this. Only the default scheme is shared - per-token overrides live
+    /// on each line's own (disposed-per-selection) JsonViewModel.HintSettings and are never
+    /// copied here.
+    /// </summary>
+    public DateHintSettings HintSettings { get; } = new();
+
+    /// <summary>
     /// The active find term, highlighted in the line list and propagated into every nested
     /// per-line JsonViewModel (current and future) so the right-hand tree highlights too.
     /// </summary>
@@ -78,6 +87,44 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
 
     public NdJsonViewModel()
     {
+        HintSettings.PropertyChanged += OnMasterHintSettingsPropertyChanged;
+    }
+
+    /// <summary>Pushes a master default-scheme or time-zone-mode change down into the currently
+    /// selected line's nested JsonViewModel.</summary>
+    private void OnMasterHintSettingsPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (selectedLineJsonViewModel is null)
+            return;
+
+        if (e.PropertyName is null or nameof(DateHintSettings.FileDefaultScheme))
+        {
+            if (HintSettings.IsUserSelected)
+                selectedLineJsonViewModel.HintSettings.SetUserDefault(HintSettings.FileDefaultScheme);
+            else if (HintSettings.FileDefaultScheme != DateDecodingScheme.Off)
+                selectedLineJsonViewModel.HintSettings.TrySetInferredDefault(HintSettings.FileDefaultScheme);
+        }
+
+        if (e.PropertyName is null or nameof(DateHintSettings.TimeZoneMode))
+            selectedLineJsonViewModel.HintSettings.SetTimeZoneMode(HintSettings.TimeZoneMode);
+    }
+
+    /// <summary>
+    /// Promotes the current line's own inference (or user pick) up to the master default,
+    /// so the first classified value on the first opened line sets the whole-file default.
+    /// TrySetInferredDefault's no-op rules (plus equal-value no-ops on both sides) prevent
+    /// ping-pong with OnMasterHintSettingsPropertyChanged.
+    /// </summary>
+    private void OnChildHintSettingsPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is not (null or nameof(DateHintSettings.FileDefaultScheme)))
+            return;
+
+        if (selectedLineJsonViewModel is null || !ReferenceEquals(sender, selectedLineJsonViewModel.HintSettings))
+            return;
+
+        if (!selectedLineJsonViewModel.HintSettings.IsUserSelected)
+            HintSettings.TrySetInferredDefault(selectedLineJsonViewModel.HintSettings.FileDefaultScheme);
     }
 
     public async Task LoadAsync(string path, IProgressReporter? progressReporter = null)
@@ -112,6 +159,8 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
         var requestId = ++selectionRequestId;
         var previous = SelectedLineJsonViewModel;
         SelectedLineJsonViewModel = null;
+        if (previous is not null)
+            previous.HintSettings.PropertyChanged -= OnChildHintSettingsPropertyChanged;
         previous?.Dispose();
 
         _ = LoadSelectedLineJsonAsync(requestId, lineSpan);
@@ -139,12 +188,25 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
 
         // Re-copy in case the term changed while this line's JSON was loading.
         jsonViewModel.HighlightTerm = HighlightTerm;
+
+        // Seed this line's date-hint default and time-zone mode from the shared master, then
+        // keep it linked so this line's own inference (if the master doesn't have one yet) can
+        // promote the whole-file default too.
+        if (HintSettings.IsUserSelected)
+            jsonViewModel.HintSettings.SetUserDefault(HintSettings.FileDefaultScheme);
+        else if (HintSettings.FileDefaultScheme != DateDecodingScheme.Off)
+            jsonViewModel.HintSettings.TrySetInferredDefault(HintSettings.FileDefaultScheme);
+        jsonViewModel.HintSettings.SetTimeZoneMode(HintSettings.TimeZoneMode);
+        jsonViewModel.HintSettings.PropertyChanged += OnChildHintSettingsPropertyChanged;
+
         SelectedLineJsonViewModel = jsonViewModel;
     }
 
     public void Dispose()
     {
         lines?.Dispose();
+        if (selectedLineJsonViewModel is not null)
+            selectedLineJsonViewModel.HintSettings.PropertyChanged -= OnChildHintSettingsPropertyChanged;
         selectedLineJsonViewModel?.Dispose();
         this.mmap?.Dispose();
     }

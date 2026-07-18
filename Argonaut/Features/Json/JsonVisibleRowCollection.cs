@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Text;
 using Avalonia.Threading;
+using Argonaut.Features.Json.Hints;
 using Argonaut.Infrastructure;
 
 namespace Argonaut.Features.Json;
@@ -15,7 +16,7 @@ namespace Argonaut.Features.Json;
 /// </summary>
 public sealed class JsonRow
 {
-    public JsonRow(int position, int tokenIndex, int depth, JsonTokenKind kind, string? name, string value, bool hasChildren, bool isExpanded, bool isPlaceholder)
+    public JsonRow(int position, int tokenIndex, int depth, JsonTokenKind kind, string? name, string value, bool hasChildren, bool isExpanded, bool isPlaceholder, string? hint = null)
     {
         Position = position;
         TokenIndex = tokenIndex;
@@ -26,6 +27,7 @@ public sealed class JsonRow
         HasChildren = hasChildren;
         IsExpanded = isExpanded;
         IsPlaceholder = isPlaceholder;
+        Hint = hint;
     }
 
     /// <summary>Index into the owning JsonVisibleRowCollection's current visible list.</summary>
@@ -38,6 +40,9 @@ public sealed class JsonRow
     public bool HasChildren { get; }
     public bool IsExpanded { get; }
     public bool IsPlaceholder { get; }
+
+    /// <summary>Muted decoded-value hint (e.g. a decoded date) to render after Value, or null.</summary>
+    public string? Hint { get; }
 }
 
 /// <summary>
@@ -60,6 +65,7 @@ public sealed class JsonVisibleRowCollection : IList, INotifyCollectionChanged, 
 
     private readonly JsonStructureIndex index;
     private readonly MMapFile mmap;
+    private readonly IReadOnlyList<IValueHintProvider>? hintProviders;
     private readonly HashSet<int> expandedTokenIndices = new();
     private readonly Dictionary<int, int> expandedChildLimit = new();
 
@@ -82,10 +88,17 @@ public sealed class JsonVisibleRowCollection : IList, INotifyCollectionChanged, 
     // to re-realize all visible text every 250ms for the rest of indexing.
     private bool visibleTreeSettled;
 
-    public JsonVisibleRowCollection(JsonStructureIndex index, MMapFile mmap)
+    public JsonVisibleRowCollection(JsonStructureIndex index, MMapFile mmap, IReadOnlyList<IValueHintProvider>? hintProviders = null)
     {
         this.index = index;
         this.mmap = mmap;
+        this.hintProviders = hintProviders;
+
+        if (hintProviders is not null)
+        {
+            foreach (var provider in hintProviders)
+                provider.HintsChanged += OnHintsChanged;
+        }
 
         if (index.TokenCount > 0)
         {
@@ -294,7 +307,30 @@ public sealed class JsonVisibleRowCollection : IList, INotifyCollectionChanged, 
 
         bool hasChildren = isContainer && (token.EndIndex < 0 || token.EndIndex > vrow.TokenIndex + 1);
 
-        return new JsonRow(position, vrow.TokenIndex, token.Depth, token.Kind, name, value, hasChildren, expanded, isPlaceholder: false);
+        string? hint = isContainer ? null : BuildHint(vrow.TokenIndex, token);
+
+        return new JsonRow(position, vrow.TokenIndex, token.Depth, token.Kind, name, value, hasChildren, expanded, isPlaceholder: false, hint: hint);
+    }
+
+    private string? BuildHint(int tokenIndex, JsonTokenInfo token)
+    {
+        if (hintProviders is null)
+            return null;
+
+        foreach (var provider in hintProviders)
+        {
+            if (!provider.IsActive)
+                continue;
+
+            if (provider.TryClassify(token.Kind, mmap.GetSpan(token.Offset, token.Length), out var candidate))
+            {
+                string? hint = provider.FormatHint(in candidate, tokenIndex);
+                if (hint is not null)
+                    return hint;
+            }
+        }
+
+        return null;
     }
 
     private string BuildContainerSummary(int tokenIndex, JsonTokenInfo token, bool expanded)
@@ -432,6 +468,21 @@ public sealed class JsonVisibleRowCollection : IList, INotifyCollectionChanged, 
         }
     }
 
+    /// <summary>
+    /// Invalidates only realized row text (hints), keeping the visible-row structure: scheme
+    /// changes can't add/remove rows, so clearing the LRU cache and firing Reset is sufficient
+    /// - the ListBox re-realizes the viewport and BuildRow re-formats hints under the new
+    /// settings.
+    /// </summary>
+    public void InvalidateRealizedRows()
+    {
+        rowCache.Clear();
+        rowCacheOrder.Clear();
+        CollectionChanged?.Invoke(this, new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
+    }
+
+    private void OnHintsChanged(object? sender, EventArgs e) => InvalidateRealizedRows();
+
     private void StartGrowthMonitor()
     {
         growthTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = GrowthPollInterval };
@@ -465,6 +516,12 @@ public sealed class JsonVisibleRowCollection : IList, INotifyCollectionChanged, 
             growthTimer.Stop();
             growthTimer.Tick -= OnGrowthTick;
             growthTimer = null;
+        }
+
+        if (hintProviders is not null)
+        {
+            foreach (var provider in hintProviders)
+                provider.HintsChanged -= OnHintsChanged;
         }
     }
 

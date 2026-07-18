@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.Threading.Tasks;
+using Argonaut.Features.Json.Hints;
+using Argonaut.Infrastructure;
 using Avalonia.Controls;
 using Avalonia.Input.Platform;
 
@@ -11,6 +14,8 @@ public partial class JsonView : UserControl
     private bool suppressSelectionEvents;
     private JsonVisibleRowCollection? subscribedRows;
     private JsonViewModel? subscribedViewModel;
+    private MenuFlyout? hintFlyout;
+    private int hintFlyoutTokenIndex = -1;
 
     public JsonView()
     {
@@ -129,6 +134,37 @@ public partial class JsonView : UserControl
         vm.SelectToken(segment.TokenIndex);
     }
 
+    private void OnHintClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (sender is not Control { DataContext: JsonRow { Hint: not null } row } control)
+            return;
+
+        hintFlyoutTokenIndex = row.TokenIndex;
+        (hintFlyout ??= BuildHintFlyout()).ShowAt(control);
+    }
+
+    private MenuFlyout BuildHintFlyout()
+    {
+        var flyout = new MenuFlyout();
+        AddHintSchemeItem(flyout, "File default", null);
+        AddHintSchemeItem(flyout, "Off", DateDecodingScheme.Off);
+        AddHintSchemeItem(flyout, "JS milliseconds", DateDecodingScheme.JsMilliseconds);
+        AddHintSchemeItem(flyout, "JS seconds", DateDecodingScheme.JsSeconds);
+        AddHintSchemeItem(flyout, "Keepa minutes", DateDecodingScheme.KeepaMinutes);
+        return flyout;
+    }
+
+    private void AddHintSchemeItem(MenuFlyout flyout, string header, DateDecodingScheme? scheme)
+    {
+        var item = new MenuItem { Header = header };
+        item.Click += (_, _) =>
+        {
+            if (DataContext is JsonViewModel vm && hintFlyoutTokenIndex >= 0)
+                vm.HintSettings.SetTokenOverride(hintFlyoutTokenIndex, scheme);
+        };
+        flyout.Items.Add(item);
+    }
+
     private async void OnCopyPathClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         if (DataContext is not JsonViewModel { SelectedPath: { } path })
@@ -137,6 +173,45 @@ public partial class JsonView : UserControl
         var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
         if (clipboard is not null)
             await clipboard.SetTextAsync(path);
+
+        ToastService.Show("JSONPath copied to clipboard");
+    }
+
+    private async void OnCopyValueClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (RowsListBox.SelectedItem is not JsonRow { IsPlaceholder: false } row)
+            return;
+
+        await CopyValueToClipboardAsync(row);
+        ToastService.Show("Value copied to clipboard");
+    }
+
+    private async void OnRowPointerPressed(object? sender, Avalonia.Input.PointerPressedEventArgs e)
+    {
+        if (sender is not Control { DataContext: JsonRow { IsPlaceholder: false } row })
+            return;
+
+        if (!e.GetCurrentPoint(null).Properties.IsRightButtonPressed)
+            return;
+
+        e.Handled = true;
+        await CopyValueToClipboardAsync(row);
+        ToastService.Show("Value copied to clipboard");
+    }
+
+    private async Task CopyValueToClipboardAsync(JsonRow row)
+    {
+        var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+        if (clipboard is null)
+            return;
+
+        // Value carries the display formatting (e.g. quoted strings); strip the quotes so
+        // the clipboard holds the raw value rather than a JSON-literal rendering of it.
+        string text = row.Kind == JsonTokenKind.String && row.Value.Length >= 2
+            ? row.Value[1..^1]
+            : row.Value;
+
+        await clipboard.SetTextAsync(text);
     }
 
     private void OnSelectionChanged(object? sender, SelectionChangedEventArgs e)

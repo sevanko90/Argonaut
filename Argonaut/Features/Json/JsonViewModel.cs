@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
+using Argonaut.Features.Json.Hints;
 using Argonaut.Infrastructure;
+using Avalonia.Threading;
 
 namespace Argonaut.Features.Json;
 
@@ -18,6 +20,7 @@ public sealed class JsonViewModel : IDisposable, INotifyPropertyChanged
     private string? selectedPath;
     private string? highlightTerm;
     private IReadOnlyList<JsonPathSegment> selectedPathSegments = Array.Empty<JsonPathSegment>();
+    private volatile bool disposed;
 
     public string FilePath { get; private set; } = string.Empty;
 
@@ -30,6 +33,11 @@ public sealed class JsonViewModel : IDisposable, INotifyPropertyChanged
     public Task IndexingTask { get; private set; } = Task.CompletedTask;
 
     public JsonVisibleRowCollection Rows => rows ?? throw new InvalidOperationException("LoadAsync must complete before Rows is accessed.");
+
+    /// <summary>Session state for date hints: the file-level default scheme (inferred or
+    /// user-picked) and any per-token overrides. Created eagerly so MainWindow/NdJson can
+    /// attach to it before or during load.</summary>
+    public DateHintSettings HintSettings { get; } = new();
 
     public int? SelectedTokenIndex
     {
@@ -106,11 +114,39 @@ public sealed class JsonViewModel : IDisposable, INotifyPropertyChanged
         // then tracks index.TokenCount live as indexing continues in the background.
         await index.WaitForTokenCountAsync(InitialTokenTarget);
 
-        rows = new JsonVisibleRowCollection(index, mmap);
+        rows = new JsonVisibleRowCollection(index, mmap,
+            new IValueHintProvider[] { new DateHintProvider(HintSettings) });
+
+        _ = InferDefaultDateSchemeAsync(index, mmap);
+    }
+
+    /// <summary>
+    /// Scans at most DateHintInference.MaxTokensToScan already-indexed tokens in the
+    /// background for the first classifiable date value, and sets it as the file default if
+    /// found. Never a full-file scan. No-ops if the user has already picked a scheme.
+    /// </summary>
+    private async Task InferDefaultDateSchemeAsync(JsonStructureIndex index, MMapFile mmap)
+    {
+        try
+        {
+            await index.WaitForTokenCountAsync(DateHintInference.MaxTokensToScan);
+            if (disposed)
+                return;
+
+            var scheme = await Task.Run(() => disposed ? null : DateHintInference.FindFirstScheme(index, mmap, DateHintInference.MaxTokensToScan));
+            if (scheme is { } s)
+                Dispatcher.UIThread.Post(() => { if (!disposed) HintSettings.TrySetInferredDefault(s); });
+        }
+        catch
+        {
+            // Indexing failures are surfaced elsewhere (MonitorJsonCompletionAsync); inference
+            // simply leaves the default scheme at Off.
+        }
     }
 
     public void Dispose()
     {
+        disposed = true;
         rows?.Dispose();
         mmap?.Dispose();
     }

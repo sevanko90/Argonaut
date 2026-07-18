@@ -35,7 +35,7 @@
                 BorderBrush="{DynamicResource AppBorderBrush}"
                 BorderThickness="0,0,0,1"
                 Padding="16,8">
-            <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto">
+            <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
                 <TextBlock Grid.Column="0"
                            x:Name="FileNameText"
                            FontWeight="SemiBold"
@@ -54,7 +54,32 @@
                         Width="1"
                         Margin="12,2,12,2"
                         Background="{DynamicResource AppBorderBrush}" />
-                <Button Grid.Column="4"
+                <ComboBox Grid.Column="4"
+                          x:Name="DateHintSchemeCombo"
+                          FontSize="12"
+                          MinWidth="150"
+                          VerticalAlignment="Center"
+                          ToolTip.Tip="Decode all-numeric values as dates">
+                    <ComboBoxItem Content="Date hints: off" />
+                    <ComboBoxItem Content="Dates: JS milliseconds" />
+                    <ComboBoxItem Content="Dates: JS seconds" />
+                    <ComboBoxItem Content="Dates: Keepa minutes" />
+                </ComboBox>
+                <ComboBox Grid.Column="5"
+                          x:Name="DateHintTimeZoneCombo"
+                          FontSize="12"
+                          MinWidth="90"
+                          Margin="6,0,0,0"
+                          VerticalAlignment="Center"
+                          ToolTip.Tip="Display decoded dates in local time or UTC">
+                    <ComboBoxItem Content="Local time" />
+                    <ComboBoxItem Content="UTC" />
+                </ComboBox>
+                <Border Grid.Column="6"
+                        Width="1"
+                        Margin="12,2,12,2"
+                        Background="{DynamicResource AppBorderBrush}" />
+                <Button Grid.Column="7"
                         x:Name="CloseFileButton"
                         Click="OnCloseFile"
                         Classes="iconbutton"
@@ -68,6 +93,21 @@
         </Border>
 
         <ContentControl Grid.Row="1" x:Name="ContentArea" />
+
+        <Border Grid.Row="1"
+                x:Name="ToastBorder"
+                IsVisible="False"
+                IsHitTestVisible="False"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Bottom"
+                Margin="0,0,0,16"
+                Padding="12,6"
+                CornerRadius="6"
+                Background="{DynamicResource AppAccentBrush}">
+            <TextBlock x:Name="ToastText"
+                       Foreground="White"
+                       FontSize="12" />
+        </Border>
 
         <Border Grid.Row="2"
                 Background="{DynamicResource AppPanelBackgroundBrush}"

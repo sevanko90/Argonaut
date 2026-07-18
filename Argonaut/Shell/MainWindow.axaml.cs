@@ -12,6 +12,7 @@ using Avalonia.Platform.Storage;
 using Avalonia.Styling;
 using Avalonia.Threading;
 using Argonaut.Features.Json;
+using Argonaut.Features.Json.Hints;
 using Argonaut.Features.NdJson;
 using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
@@ -38,12 +39,16 @@ public partial class MainWindow : Window
     private int openRequestId;
     private string? currentFilePath;
     private ThemeMode currentThemeMode;
+    private DateHintSettings? currentHintSettings;
+    private bool suppressHintComboEvents;
+    private DispatcherTimer? toastTimer;
 
     public MainWindow()
     {
         InitializeComponent();
 
         Title = DefaultTitle;
+        ToastService.Requested += ShowToast;
         emptyStateView.ChooseFileRequested += async (_, _) => await BrowseForFile();
         emptyStateView.ClearRecentFilesRequested += (_, _) =>
         {
@@ -59,6 +64,9 @@ public partial class MainWindow : Window
             () => currentFilePath is null ? null : new StatusProgressReporter(this, currentFilePath, openRequestId));
         FindBarControl.FindRequested += (term, direction) => _ = findController.FindAsync(term, direction);
         FindBarControl.ResetRequested += CloseFindBar;
+
+        DateHintSchemeCombo.SelectionChanged += OnSchemeComboChanged;
+        DateHintTimeZoneCombo.SelectionChanged += OnTimeZoneComboChanged;
 
         DragDrop.SetAllowDrop(this, true);
         AddHandler(DragDrop.DragOverEvent, OnDragOver);
@@ -160,6 +168,7 @@ public partial class MainWindow : Window
         FindBarControl.Reset();
 
         DetachNdJsonViewModel();
+        DetachHintSettings();
         currentFilePath = null;
         ContentArea.Content = emptyStateView;
         ToolbarBar.IsVisible = false;
@@ -248,6 +257,7 @@ public partial class MainWindow : Window
                 await findController.DetachAsync();
                 FindBarControl.Reset();
                 DetachNdJsonViewModel();
+                DetachHintSettings();
                 StatusText.Text = $"Indexing {normalizedPath}… 0%";
 
                 var reporter = new StatusProgressReporter(this, normalizedPath, requestId);
@@ -260,6 +270,7 @@ public partial class MainWindow : Window
                 findController.Attach(new JsonSearchNavigator(vm));
                 currentFilePath = normalizedPath;
                 ShowToolbar(normalizedPath);
+                AttachHintSettings(vm.HintSettings);
                 RecentFileHistory.Add(normalizedPath);
                 ReloadRecentFiles();
                 StatusText.Text = $"{normalizedPath} — {vm.TokenCount:N0} tokens indexed so far";
@@ -271,6 +282,7 @@ public partial class MainWindow : Window
                 await findController.DetachAsync();
                 FindBarControl.Reset();
                 DetachNdJsonViewModel();
+                DetachHintSettings();
                 StatusText.Text = $"Indexing {normalizedPath}… 0%";
 
                 var reporter = new StatusProgressReporter(this, normalizedPath, requestId);
@@ -285,6 +297,7 @@ public partial class MainWindow : Window
                 findController.Attach(new NdJsonSearchNavigator(vm));
                 currentFilePath = normalizedPath;
                 ShowToolbar(normalizedPath);
+                AttachHintSettings(vm.HintSettings);
                 RecentFileHistory.Add(normalizedPath);
                 ReloadRecentFiles();
                 break;
@@ -314,6 +327,24 @@ public partial class MainWindow : Window
         StatusText.Text = $"{vm.FilePath} — {vm.LineCount:N0} lines — Selected line: {vm.SelectedLineNumber:N0}";
     }
 
+    private void ShowToast(string message)
+    {
+        ToastText.Text = message;
+        ToastBorder.IsVisible = true;
+
+        toastTimer ??= new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.5) };
+        toastTimer.Stop();
+        toastTimer.Tick -= OnToastTimerTick;
+        toastTimer.Tick += OnToastTimerTick;
+        toastTimer.Start();
+    }
+
+    private void OnToastTimerTick(object? sender, EventArgs e)
+    {
+        toastTimer!.Stop();
+        ToastBorder.IsVisible = false;
+    }
+
     private void ShowToolbar(string filePath)
     {
         var fileName = Path.GetFileName(filePath);
@@ -330,6 +361,77 @@ public partial class MainWindow : Window
 
         currentNdJsonViewModel.PropertyChanged -= OnNdJsonViewModelPropertyChanged;
         currentNdJsonViewModel = null;
+    }
+
+    private void AttachHintSettings(DateHintSettings settings)
+    {
+        DetachHintSettings();
+        currentHintSettings = settings;
+        settings.PropertyChanged += OnHintSettingsPropertyChanged;
+        SyncSchemeCombo();
+        SyncTimeZoneCombo();
+    }
+
+    private void DetachHintSettings()
+    {
+        if (currentHintSettings is not null)
+            currentHintSettings.PropertyChanged -= OnHintSettingsPropertyChanged;
+
+        currentHintSettings = null;
+        SyncSchemeCombo();
+        SyncTimeZoneCombo();
+    }
+
+    private void OnHintSettingsPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        // Inference completing in the background updates FileDefaultScheme - reflect it live.
+        if (e.PropertyName is null or nameof(DateHintSettings.FileDefaultScheme))
+            SyncSchemeCombo();
+
+        if (e.PropertyName is null or nameof(DateHintSettings.TimeZoneMode))
+            SyncTimeZoneCombo();
+    }
+
+    private void SyncSchemeCombo()
+    {
+        suppressHintComboEvents = true;
+        try
+        {
+            DateHintSchemeCombo.SelectedIndex = (int)(currentHintSettings?.FileDefaultScheme ?? DateDecodingScheme.Off);
+        }
+        finally
+        {
+            suppressHintComboEvents = false;
+        }
+    }
+
+    private void OnSchemeComboChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (suppressHintComboEvents || currentHintSettings is null || DateHintSchemeCombo.SelectedIndex < 0)
+            return;
+
+        currentHintSettings.SetUserDefault((DateDecodingScheme)DateHintSchemeCombo.SelectedIndex);
+    }
+
+    private void SyncTimeZoneCombo()
+    {
+        suppressHintComboEvents = true;
+        try
+        {
+            DateHintTimeZoneCombo.SelectedIndex = (int)(currentHintSettings?.TimeZoneMode ?? DateHintTimeZoneMode.Local);
+        }
+        finally
+        {
+            suppressHintComboEvents = false;
+        }
+    }
+
+    private void OnTimeZoneComboChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (suppressHintComboEvents || currentHintSettings is null || DateHintTimeZoneCombo.SelectedIndex < 0)
+            return;
+
+        currentHintSettings.SetTimeZoneMode((DateHintTimeZoneMode)DateHintTimeZoneCombo.SelectedIndex);
     }
 
 

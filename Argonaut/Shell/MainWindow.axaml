@@ -24,26 +24,37 @@
 
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <Border Grid.Row="0"
-                x:Name="FileHeaderBar"
+                x:Name="ToolbarBar"
                 IsVisible="False"
                 Background="{DynamicResource AppPanelBackgroundBrush}"
                 BorderBrush="{DynamicResource AppBorderBrush}"
                 BorderThickness="0,0,0,1"
-                Padding="16,10">
-            <Grid ColumnDefinitions="*,Auto">
+                Padding="16,8">
+            <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto">
                 <TextBlock Grid.Column="0"
                            x:Name="FileNameText"
                            FontWeight="SemiBold"
                            FontSize="14"
                            TextTrimming="CharacterEllipsis"
-                           VerticalAlignment="Center" />
-                <Button Grid.Column="1"
+                           VerticalAlignment="Center"
+                           Margin="0,0,12,0" />
+                <Border Grid.Column="1"
+                        Width="1"
+                        Margin="0,2,12,2"
+                        Background="{DynamicResource AppBorderBrush}" />
+                <search:FindBar Grid.Column="2"
+                                x:Name="FindBarControl"
+                                VerticalAlignment="Center" />
+                <Border Grid.Column="3"
+                        Width="1"
+                        Margin="12,2,12,2"
+                        Background="{DynamicResource AppBorderBrush}" />
+                <Button Grid.Column="4"
                         x:Name="CloseFileButton"
                         Click="OnCloseFile"
                         Classes="iconbutton"
@@ -56,11 +67,9 @@
             </Grid>
         </Border>
 
-        <search:FindBar Grid.Row="1" x:Name="FindBarControl" />
+        <ContentControl Grid.Row="1" x:Name="ContentArea" />
 
-        <ContentControl Grid.Row="2" x:Name="ContentArea" />
-
-        <Border Grid.Row="3"
+        <Border Grid.Row="2"
                 Background="{DynamicResource AppPanelBackgroundBrush}"
                 BorderBrush="{DynamicResource AppBorderBrush}"
                 BorderThickness="0,1,0,0"

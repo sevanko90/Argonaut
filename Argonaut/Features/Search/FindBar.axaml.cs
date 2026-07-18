@@ -5,38 +5,39 @@ using Avalonia.Input;
 namespace Argonaut.Features.Search;
 
 /// <summary>
-/// The find bar hosted by MainWindow: term box, previous/next, "n of m" status, close.
-/// Purely a view - it raises <see cref="FindRequested"/>/<see cref="CloseRequested"/> and
-/// leaves all search behavior to <see cref="FindController"/>.
+/// The find controls hosted inline in MainWindow's toolbar: term box, previous/next,
+/// "n of m" status, clear. Purely a view - it raises <see cref="FindRequested"/>/
+/// <see cref="ResetRequested"/> and leaves all search behavior to <see cref="FindController"/>.
 /// </summary>
 public partial class FindBar : UserControl
 {
     /// <summary>Raised on Enter or the prev/next buttons; direction is +1 forward, -1 backward.</summary>
     public event Action<string, int>? FindRequested;
 
-    public event Action? CloseRequested;
+    /// <summary>Raised by the clear button; asks the owner to stop the active search and reset.</summary>
+    public event Action? ResetRequested;
 
     public FindBar()
     {
         InitializeComponent();
 
-        IsVisible = false;
         TermBox.KeyDown += OnTermBoxKeyDown;
         PreviousButton.Click += (_, _) => RequestFind(-1);
         NextButton.Click += (_, _) => RequestFind(1);
-        CloseButton.Click += (_, _) => CloseRequested?.Invoke();
+        CloseButton.Click += (_, _) => ResetRequested?.Invoke();
     }
 
-    public void Open()
+    /// <summary>Ctrl+F target: focuses the term box and selects its contents.</summary>
+    public void FocusTerm()
     {
-        IsVisible = true;
         TermBox.Focus();
         TermBox.SelectAll();
     }
 
-    public void Close()
+    /// <summary>Clears the term/status, e.g. after Escape, the clear button, or a file close/switch.</summary>
+    public void Reset()
     {
-        IsVisible = false;
+        TermBox.Text = string.Empty;
         SetStatus(null);
     }
 

@@ -1,5 +1,11 @@
 # CLAUDE.md
 
+## Concept: Be mindful of memory footprint and performance
+This application is designed to handle multi-gb files fast and with a low memory footprint. 
+Feature design should take this into account and consider algorithms and types that minimise .NET
+allocations and GC pressure. Operations that require heavy processing or full file scans should be
+done on the background to keep the UI responsive. 
+
 ## Memory-mapped files: always use explicit, OS-reported data length
 
 When working with `MemoryMappedFile`/`MemoryMappedViewAccessor` (see `Argonaut/Infrastructure/MMapFile.cs`), never treat

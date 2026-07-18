@@ -58,7 +58,7 @@ public partial class MainWindow : Window
             status => FindBarControl.SetStatus(status),
             () => currentFilePath is null ? null : new StatusProgressReporter(this, currentFilePath, openRequestId));
         FindBarControl.FindRequested += (term, direction) => _ = findController.FindAsync(term, direction);
-        FindBarControl.CloseRequested += CloseFindBar;
+        FindBarControl.ResetRequested += CloseFindBar;
 
         DragDrop.SetAllowDrop(this, true);
         AddHandler(DragDrop.DragOverEvent, OnDragOver);
@@ -78,21 +78,21 @@ public partial class MainWindow : Window
         {
             if (currentFilePath is not null)
             {
-                FindBarControl.Open();
+                FindBarControl.FocusTerm();
                 e.Handled = true;
             }
 
             return;
         }
 
-        if (e.Key == Key.Escape && FindBarControl.IsVisible)
+        if (e.Key == Key.Escape && currentFilePath is not null)
         {
             CloseFindBar();
             e.Handled = true;
             return;
         }
 
-        if ((e.Key == Key.F3 || (e.Key == Key.G && cmdOrCtrl)) && FindBarControl.IsVisible)
+        if ((e.Key == Key.F3 || (e.Key == Key.G && cmdOrCtrl)) && currentFilePath is not null)
         {
             FindBarControl.RequestFind((e.KeyModifiers & KeyModifiers.Shift) != 0 ? -1 : 1);
             e.Handled = true;
@@ -102,7 +102,7 @@ public partial class MainWindow : Window
     private void CloseFindBar()
     {
         _ = findController.StopAsync();
-        FindBarControl.Close();
+        FindBarControl.Reset();
         ContentArea.Focus();
     }
 
@@ -157,12 +157,12 @@ public partial class MainWindow : Window
         // The search scan holds spans over the current view's MMapFile - it must be fully
         // stopped before the content swap below detaches (and thereby disposes) that view.
         await findController.DetachAsync();
-        FindBarControl.Close();
+        FindBarControl.Reset();
 
         DetachNdJsonViewModel();
         currentFilePath = null;
         ContentArea.Content = emptyStateView;
-        FileHeaderBar.IsVisible = false;
+        ToolbarBar.IsVisible = false;
         StatusText.Text = "No file loaded";
         Title = DefaultTitle;
         ReloadRecentFiles();
@@ -246,7 +246,7 @@ public partial class MainWindow : Window
                 // Stop any search over the outgoing file before its view (and MMapFile) is
                 // replaced/disposed by the content swap below.
                 await findController.DetachAsync();
-                FindBarControl.Close();
+                FindBarControl.Reset();
                 DetachNdJsonViewModel();
                 StatusText.Text = $"Indexing {normalizedPath}… 0%";
 
@@ -259,7 +259,7 @@ public partial class MainWindow : Window
                 ContentArea.Content = new JsonView { DataContext = vm };
                 findController.Attach(new JsonSearchNavigator(vm));
                 currentFilePath = normalizedPath;
-                ShowFileHeader(normalizedPath);
+                ShowToolbar(normalizedPath);
                 RecentFileHistory.Add(normalizedPath);
                 ReloadRecentFiles();
                 StatusText.Text = $"{normalizedPath} — {vm.TokenCount:N0} tokens indexed so far";
@@ -269,7 +269,7 @@ public partial class MainWindow : Window
             case FileTypeDetector.FileKind.Ndjson:
             {
                 await findController.DetachAsync();
-                FindBarControl.Close();
+                FindBarControl.Reset();
                 DetachNdJsonViewModel();
                 StatusText.Text = $"Indexing {normalizedPath}… 0%";
 
@@ -284,7 +284,7 @@ public partial class MainWindow : Window
                 ContentArea.Content = new NdJsonView { DataContext = vm };
                 findController.Attach(new NdJsonSearchNavigator(vm));
                 currentFilePath = normalizedPath;
-                ShowFileHeader(normalizedPath);
+                ShowToolbar(normalizedPath);
                 RecentFileHistory.Add(normalizedPath);
                 ReloadRecentFiles();
                 break;
@@ -314,12 +314,12 @@ public partial class MainWindow : Window
         StatusText.Text = $"{vm.FilePath} — {vm.LineCount:N0} lines — Selected line: {vm.SelectedLineNumber:N0}";
     }
 
-    private void ShowFileHeader(string filePath)
+    private void ShowToolbar(string filePath)
     {
         var fileName = Path.GetFileName(filePath);
         FileNameText.Text = fileName;
         ToolTip.SetTip(FileNameText, filePath);
-        FileHeaderBar.IsVisible = true;
+        ToolbarBar.IsVisible = true;
         Title = $"{DefaultTitle} — {fileName}";
     }
 

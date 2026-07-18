@@ -125,4 +125,45 @@ public class JsonVisibleRowCollectionTests
             File.Delete(path);
         }
     }
+
+    [Fact]
+    public void EnsureVisible_PagesObjectLimitPastDefaultChildCap()
+    {
+        // Same as the array case but for an object parent: a member past ChildCap (e.g. a
+        // search hit deep in a wide object) must page the display limit up too.
+        var sb = new StringBuilder();
+        sb.Append("{\"obj\":{");
+        for (int i = 0; i < 2100; i++)
+        {
+            if (i > 0)
+                sb.Append(',');
+            sb.Append("\"k").Append(i).Append("\":").Append(i);
+        }
+
+        sb.Append("}}");
+
+        var (index, mmap, path) = BuildIndex(sb.ToString());
+        try
+        {
+            var rows = new JsonVisibleRowCollection(index, mmap);
+
+            int objTokenIndex = FindTokenIndex(index,
+                t => t.Kind == JsonTokenKind.StartObject && t.ParentIndex == 0);
+            var objToken = index.GetToken(objTokenIndex);
+
+            int lastMemberIndex = objToken.EndIndex - 1; // last Number member before the closing brace
+            Assert.Equal(JsonTokenKind.Number, index.GetToken(lastMemberIndex).Kind);
+
+            Assert.Null(rows.FindVisiblePosition(lastMemberIndex));
+
+            rows.EnsureVisible(lastMemberIndex);
+
+            Assert.NotNull(rows.FindVisiblePosition(lastMemberIndex));
+        }
+        finally
+        {
+            mmap.Dispose();
+            File.Delete(path);
+        }
+    }
 }

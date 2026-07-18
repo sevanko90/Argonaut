@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 using Avalonia.Controls;
 
 namespace Argonaut.Features.NdJson;
@@ -6,12 +7,14 @@ namespace Argonaut.Features.NdJson;
 public partial class NdJsonView : UserControl
 {
     private bool suppressSelectionEvents;
+    private NdJsonViewModel? subscribedViewModel;
 
     public NdJsonView()
     {
         InitializeComponent();
 
         Loaded += OnLoaded;
+        DataContextChanged += OnDataContextChanged;
         DetachedFromVisualTree += OnDetachedFromVisualTree;
         JsonLinesListBox.SelectionChanged += OnSelectionChanged;
     }
@@ -22,9 +25,45 @@ public partial class NdJsonView : UserControl
             SyncVisualSelection(vm);
     }
 
+    private void OnDataContextChanged(object? sender, EventArgs e)
+    {
+        if (subscribedViewModel is not null)
+        {
+            subscribedViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+            subscribedViewModel = null;
+        }
+
+        if (DataContext is NdJsonViewModel vm)
+        {
+            subscribedViewModel = vm;
+            vm.PropertyChanged += OnViewModelPropertyChanged;
+        }
+    }
+
+    /// <summary>
+    /// Mirrors programmatic selection (e.g. a search reveal calling LoadSelectedLine) into
+    /// the ListBox - user clicks already go the other way via OnSelectionChanged, and
+    /// SyncVisualSelection suppresses the echo so LoadSelectedLine isn't re-entered.
+    /// </summary>
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (sender is not NdJsonViewModel vm)
+            return;
+
+        if (e.PropertyName is null or nameof(NdJsonViewModel.SelectedLineNumber))
+            SyncVisualSelection(vm);
+    }
+
     private void OnDetachedFromVisualTree(object? sender, Avalonia.VisualTreeAttachmentEventArgs e)
     {
         JsonLinesListBox.SelectionChanged -= OnSelectionChanged;
+        DataContextChanged -= OnDataContextChanged;
+
+        if (subscribedViewModel is not null)
+        {
+            subscribedViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+            subscribedViewModel = null;
+        }
 
         if (DataContext is IDisposable d)
             d.Dispose();

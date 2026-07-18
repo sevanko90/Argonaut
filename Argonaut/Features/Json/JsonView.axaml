@@ -3,6 +3,7 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:json="clr-namespace:Argonaut.Features.Json"
+             xmlns:search="clr-namespace:Argonaut.Features.Search"
              x:Class="Argonaut.Features.Json.JsonView"
              x:DataType="json:JsonViewModel">
     <UserControl.Resources>
@@ -78,11 +79,14 @@
                                     FontFamily="{StaticResource AppMonoFontFamily}" />
                             <TextBlock IsVisible="{Binding !HasChildren}"
                                        Width="16" />
-                            <TextBlock Text="{Binding Name, StringFormat='{}{0}: '}"
+                            <TextBlock search:SearchHighlight.Text="{Binding Name}"
+                                       search:SearchHighlight.Suffix=": "
+                                       search:SearchHighlight.Term="{Binding $parent[json:JsonView].((json:JsonViewModel)DataContext).HighlightTerm}"
                                        IsVisible="{Binding Name, Converter={x:Static json:IsNotNullConverter.Instance}}"
                                        Foreground="{DynamicResource AppAccentBrush}"
                                        FontFamily="{StaticResource AppMonoFontFamily}" />
-                            <TextBlock Text="{Binding Value}"
+                            <TextBlock search:SearchHighlight.Text="{Binding Value}"
+                                       search:SearchHighlight.Term="{Binding $parent[json:JsonView].((json:JsonViewModel)DataContext).HighlightTerm}"
                                        TextWrapping="NoWrap"
                                        FontFamily="{StaticResource AppMonoFontFamily}" />
                         </StackPanel>

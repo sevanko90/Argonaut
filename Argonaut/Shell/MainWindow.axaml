@@ -4,6 +4,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
         x:Class="Argonaut.Shell.MainWindow"
+        xmlns:search="clr-namespace:Argonaut.Features.Search"
         Background="{DynamicResource AppWindowBackgroundBrush}"
         Width="1000" Height="700">
 
@@ -22,6 +23,7 @@
         </Grid.Styles>
 
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
@@ -54,9 +56,11 @@
             </Grid>
         </Border>
 
-        <ContentControl Grid.Row="1" x:Name="ContentArea" />
+        <search:FindBar Grid.Row="1" x:Name="FindBarControl" />
 
-        <Border Grid.Row="2"
+        <ContentControl Grid.Row="2" x:Name="ContentArea" />
+
+        <Border Grid.Row="3"
                 Background="{DynamicResource AppPanelBackgroundBrush}"
                 BorderBrush="{DynamicResource AppBorderBrush}"
                 BorderThickness="0,1,0,0"

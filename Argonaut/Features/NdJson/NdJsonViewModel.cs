@@ -19,9 +19,14 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
     private MemoryMappedFileLineCollection? lines;
     private NdJsonSelectedLine? selectedLine;
     private JsonViewModel? selectedLineJsonViewModel;
+    private string? highlightTerm;
     private long selectionRequestId;
 
     public string FilePath { get; private set; } = string.Empty;
+
+    internal MMapFile? Mmap => mmap;
+
+    internal FileOffsetIndex? Index => index;
 
     public int LineCount => this.index?.LineCount ?? 0;
 
@@ -50,6 +55,23 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
     {
         get => selectedLineJsonViewModel;
         private set => SetField(ref selectedLineJsonViewModel, value);
+    }
+
+    /// <summary>
+    /// The active find term, highlighted in the line list and propagated into every nested
+    /// per-line JsonViewModel (current and future) so the right-hand tree highlights too.
+    /// </summary>
+    public string? HighlightTerm
+    {
+        get => highlightTerm;
+        set
+        {
+            if (!SetField(ref highlightTerm, value))
+                return;
+
+            if (selectedLineJsonViewModel is not null)
+                selectedLineJsonViewModel.HighlightTerm = value;
+        }
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -115,6 +137,8 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
             return;
         }
 
+        // Re-copy in case the term changed while this line's JSON was loading.
+        jsonViewModel.HighlightTerm = HighlightTerm;
         SelectedLineJsonViewModel = jsonViewModel;
     }
 

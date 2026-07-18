@@ -137,12 +137,12 @@ public sealed class JsonVisibleRowCollection : IList, INotifyCollectionChanged, 
 
     /// <summary>
     /// Ensures a token is reachable in the visible list by expanding every collapsed
-    /// ancestor container along its ParentIndex chain and, for array ancestors, paging the
+    /// ancestor container along its ParentIndex chain and paging each ancestor's
     /// child-display limit up far enough to include it (capped at
     /// MaxDisplayedChildrenPerContainer, same ceiling repeated "show more" clicks respect).
     /// Every ancestor on this chain is necessarily a container, since only containers have
     /// children. Only touches ancestors of tokenIndex - O(depth) plus one O(preceding-
-    /// siblings) sibling-skip walk per array ancestor (the same technique
+    /// siblings) sibling-skip walk per ancestor (the same technique
     /// JsonPathBuilder.FindArrayIndex uses to label path segments) - and skips Rebuild
     /// entirely if nothing actually needed to change, e.g. tokenIndex was already visible.
     /// </summary>
@@ -158,27 +158,24 @@ public sealed class JsonVisibleRowCollection : IList, INotifyCollectionChanged, 
             if (parentIndex == -1)
                 break;
 
-            var parent = index.GetToken(parentIndex);
-
             if (expandedTokenIndices.Add(parentIndex))
                 changed = true;
 
-            if (parent.Kind == JsonTokenKind.StartArray)
+            // Applies to object parents as well as arrays: a target member past the child
+            // cap needs the same paging-up or the expanded ancestors still won't show it.
+            int childPosition = FindChildPosition(parentIndex, current);
+            int currentLimit = expandedChildLimit.TryGetValue(parentIndex, out var l) ? l : ChildCap;
+
+            if (childPosition >= currentLimit)
             {
-                int childPosition = FindChildPosition(parentIndex, current);
-                int currentLimit = expandedChildLimit.TryGetValue(parentIndex, out var l) ? l : ChildCap;
+                int neededLimit = Math.Min(
+                    MaxDisplayedChildrenPerContainer,
+                    ((childPosition / ChildCap) + 1) * ChildCap);
 
-                if (childPosition >= currentLimit)
+                if (neededLimit > currentLimit)
                 {
-                    int neededLimit = Math.Min(
-                        MaxDisplayedChildrenPerContainer,
-                        ((childPosition / ChildCap) + 1) * ChildCap);
-
-                    if (neededLimit > currentLimit)
-                    {
-                        expandedChildLimit[parentIndex] = neededLimit;
-                        changed = true;
-                    }
+                    expandedChildLimit[parentIndex] = neededLimit;
+                    changed = true;
                 }
             }
 

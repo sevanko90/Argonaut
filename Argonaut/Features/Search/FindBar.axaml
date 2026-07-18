@@ -1,0 +1,68 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d"
+             x:Class="Argonaut.Features.Search.FindBar">
+    <UserControl.Styles>
+        <Style Selector="Button.findicon">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="6" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="Button.findicon:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource AppHoverBackgroundBrush}" />
+        </Style>
+    </UserControl.Styles>
+
+    <Border Background="{DynamicResource AppPanelBackgroundBrush}"
+            BorderBrush="{DynamicResource AppBorderBrush}"
+            BorderThickness="0,0,0,1"
+            Padding="16,6">
+        <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto">
+            <TextBox Grid.Column="0"
+                     x:Name="TermBox"
+                     Width="280"
+                     FontSize="12"
+                     PlaceholderText="Find"
+                     FontFamily="{StaticResource AppMonoFontFamily}" />
+            <Button Grid.Column="1"
+                    x:Name="PreviousButton"
+                    Classes="findicon"
+                    Margin="6,0,0,0"
+                    ToolTip.Tip="Previous match (Shift+Enter)">
+                <Viewbox Width="12" Height="12">
+                    <Path Fill="{DynamicResource AppMutedTextBrush}"
+                          Data="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z" />
+                </Viewbox>
+            </Button>
+            <Button Grid.Column="2"
+                    x:Name="NextButton"
+                    Classes="findicon"
+                    ToolTip.Tip="Next match (Enter)">
+                <Viewbox Width="12" Height="12">
+                    <Path Fill="{DynamicResource AppMutedTextBrush}"
+                          Data="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z" />
+                </Viewbox>
+            </Button>
+            <TextBlock Grid.Column="3"
+                       x:Name="StatusLabel"
+                       FontSize="12"
+                       Margin="10,0,0,0"
+                       VerticalAlignment="Center"
+                       TextTrimming="CharacterEllipsis"
+                       Foreground="{DynamicResource AppMutedTextBrush}" />
+            <Button Grid.Column="4"
+                    x:Name="CloseButton"
+                    Classes="findicon"
+                    ToolTip.Tip="Close (Esc)">
+                <Viewbox Width="12" Height="12">
+                    <Path Fill="{DynamicResource AppMutedTextBrush}"
+                          Data="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
+                </Viewbox>
+            </Button>
+        </Grid>
+    </Border>
+</UserControl>

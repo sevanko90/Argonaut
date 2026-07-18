@@ -16,9 +16,14 @@ public sealed class JsonViewModel : IDisposable, INotifyPropertyChanged
     private JsonVisibleRowCollection? rows;
     private int? selectedTokenIndex;
     private string? selectedPath;
+    private string? highlightTerm;
     private IReadOnlyList<JsonPathSegment> selectedPathSegments = Array.Empty<JsonPathSegment>();
 
     public string FilePath { get; private set; } = string.Empty;
+
+    internal MMapFile? Mmap => mmap;
+
+    internal JsonStructureIndex? Index => index;
 
     public int TokenCount => index?.TokenCount ?? 0;
 
@@ -42,6 +47,16 @@ public sealed class JsonViewModel : IDisposable, INotifyPropertyChanged
     {
         get => selectedPathSegments;
         private set => SetField(ref selectedPathSegments, value);
+    }
+
+    /// <summary>
+    /// The active find term; rows re-find and highlight it in their displayed text (see
+    /// SearchHighlight). Null when no find is active.
+    /// </summary>
+    public string? HighlightTerm
+    {
+        get => highlightTerm;
+        set => SetField(ref highlightTerm, value);
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;

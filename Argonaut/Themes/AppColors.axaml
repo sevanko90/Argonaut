@@ -15,6 +15,7 @@
             <SolidColorBrush x:Key="AppAccentHoverBrush" Color="#1D4ED8" />
             <SolidColorBrush x:Key="AppHoverBackgroundBrush" Color="#EAEBEE" />
             <SolidColorBrush x:Key="AppDangerHoverBrush" Color="#EF4444" />
+            <SolidColorBrush x:Key="AppSearchHighlightBrush" Color="#FDE68A" />
         </ResourceDictionary>
 
         <ResourceDictionary x:Key="Dark">
@@ -27,6 +28,7 @@
             <SolidColorBrush x:Key="AppAccentHoverBrush" Color="#93C5FD" />
             <SolidColorBrush x:Key="AppHoverBackgroundBrush" Color="#3A3B3E" />
             <SolidColorBrush x:Key="AppDangerHoverBrush" Color="#F87171" />
+            <SolidColorBrush x:Key="AppSearchHighlightBrush" Color="#7A5B00" />
         </ResourceDictionary>
     </ResourceDictionary.ThemeDictionaries>
 

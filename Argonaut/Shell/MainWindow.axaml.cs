@@ -13,6 +13,7 @@ using Avalonia.Styling;
 using Avalonia.Threading;
 using Argonaut.Features.Json;
 using Argonaut.Features.NdJson;
+using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
 using System.Threading.Tasks;
 
@@ -32,6 +33,7 @@ public partial class MainWindow : Window
         "M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z";
 
     private readonly EmptyStateView emptyStateView = new();
+    private readonly FindController findController;
     private NdJsonViewModel? currentNdJsonViewModel;
     private int openRequestId;
     private string? currentFilePath;
@@ -52,9 +54,56 @@ public partial class MainWindow : Window
         ReloadRecentFiles();
         ApplyThemeMode(ThemePreference.Load());
 
+        findController = new FindController(
+            status => FindBarControl.SetStatus(status),
+            () => currentFilePath is null ? null : new StatusProgressReporter(this, currentFilePath, openRequestId));
+        FindBarControl.FindRequested += (term, direction) => _ = findController.FindAsync(term, direction);
+        FindBarControl.CloseRequested += CloseFindBar;
+
         DragDrop.SetAllowDrop(this, true);
         AddHandler(DragDrop.DragOverEvent, OnDragOver);
         AddHandler(DragDrop.DropEvent, OnDrop);
+        AddHandler(KeyDownEvent, OnGlobalKeyDown, Avalonia.Interactivity.RoutingStrategies.Tunnel);
+    }
+
+    /// <summary>
+    /// Window-wide find shortcuts. Tunneling so they fire regardless of which control has
+    /// focus (including the find bar's own TextBox, which never sees a handled event).
+    /// </summary>
+    private void OnGlobalKeyDown(object? sender, KeyEventArgs e)
+    {
+        bool cmdOrCtrl = (e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Meta)) != 0;
+
+        if (e.Key == Key.F && cmdOrCtrl)
+        {
+            if (currentFilePath is not null)
+            {
+                FindBarControl.Open();
+                e.Handled = true;
+            }
+
+            return;
+        }
+
+        if (e.Key == Key.Escape && FindBarControl.IsVisible)
+        {
+            CloseFindBar();
+            e.Handled = true;
+            return;
+        }
+
+        if ((e.Key == Key.F3 || (e.Key == Key.G && cmdOrCtrl)) && FindBarControl.IsVisible)
+        {
+            FindBarControl.RequestFind((e.KeyModifiers & KeyModifiers.Shift) != 0 ? -1 : 1);
+            e.Handled = true;
+        }
+    }
+
+    private void CloseFindBar()
+    {
+        _ = findController.StopAsync();
+        FindBarControl.Close();
+        ContentArea.Focus();
     }
 
     private void OnToggleTheme(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
@@ -96,14 +145,20 @@ public partial class MainWindow : Window
         });
     }
 
-    private void OnCloseFile(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    private async void OnCloseFile(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        CloseFile();
+        await CloseFile();
     }
 
-    private void CloseFile()
+    private async Task CloseFile()
     {
         ++openRequestId;
+
+        // The search scan holds spans over the current view's MMapFile - it must be fully
+        // stopped before the content swap below detaches (and thereby disposes) that view.
+        await findController.DetachAsync();
+        FindBarControl.Close();
+
         DetachNdJsonViewModel();
         currentFilePath = null;
         ContentArea.Content = emptyStateView;
@@ -188,6 +243,10 @@ public partial class MainWindow : Window
                 break;
             case FileTypeDetector.FileKind.Json:
             {
+                // Stop any search over the outgoing file before its view (and MMapFile) is
+                // replaced/disposed by the content swap below.
+                await findController.DetachAsync();
+                FindBarControl.Close();
                 DetachNdJsonViewModel();
                 StatusText.Text = $"Indexing {normalizedPath}… 0%";
 
@@ -198,6 +257,7 @@ public partial class MainWindow : Window
                     return;
 
                 ContentArea.Content = new JsonView { DataContext = vm };
+                findController.Attach(new JsonSearchNavigator(vm));
                 currentFilePath = normalizedPath;
                 ShowFileHeader(normalizedPath);
                 RecentFileHistory.Add(normalizedPath);
@@ -208,6 +268,8 @@ public partial class MainWindow : Window
             }
             case FileTypeDetector.FileKind.Ndjson:
             {
+                await findController.DetachAsync();
+                FindBarControl.Close();
                 DetachNdJsonViewModel();
                 StatusText.Text = $"Indexing {normalizedPath}… 0%";
 
@@ -220,6 +282,7 @@ public partial class MainWindow : Window
                 currentNdJsonViewModel = vm;
                 currentNdJsonViewModel.PropertyChanged += OnNdJsonViewModelPropertyChanged;
                 ContentArea.Content = new NdJsonView { DataContext = vm };
+                findController.Attach(new NdJsonSearchNavigator(vm));
                 currentFilePath = normalizedPath;
                 ShowFileHeader(normalizedPath);
                 RecentFileHistory.Add(normalizedPath);

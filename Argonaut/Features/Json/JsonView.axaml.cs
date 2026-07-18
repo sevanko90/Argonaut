@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Specialized;
+using System.ComponentModel;
 using Avalonia.Controls;
 using Avalonia.Input.Platform;
 
@@ -9,6 +10,7 @@ public partial class JsonView : UserControl
 {
     private bool suppressSelectionEvents;
     private JsonVisibleRowCollection? subscribedRows;
+    private JsonViewModel? subscribedViewModel;
 
     public JsonView()
     {
@@ -23,7 +25,7 @@ public partial class JsonView : UserControl
     {
         RowsListBox.SelectionChanged -= OnSelectionChanged;
         DataContextChanged -= OnDataContextChanged;
-        UnsubscribeRows();
+        UnsubscribeViewModel();
 
         if (DataContext is IDisposable d)
             d.Dispose();
@@ -31,24 +33,47 @@ public partial class JsonView : UserControl
 
     private void OnDataContextChanged(object? sender, EventArgs e)
     {
-        UnsubscribeRows();
+        UnsubscribeViewModel();
 
-        if (DataContext is JsonViewModel vm && TryGetRows(vm, out var rows))
+        if (DataContext is JsonViewModel vm)
         {
-            subscribedRows = rows;
-            rows.CollectionChanged += OnRowsCollectionChanged;
+            subscribedViewModel = vm;
+            vm.PropertyChanged += OnViewModelPropertyChanged;
+
+            if (TryGetRows(vm, out var rows))
+            {
+                subscribedRows = rows;
+                rows.CollectionChanged += OnRowsCollectionChanged;
+            }
         }
 
         SyncVisualSelection();
     }
 
-    private void UnsubscribeRows()
+    private void UnsubscribeViewModel()
     {
+        if (subscribedViewModel is not null)
+        {
+            subscribedViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+            subscribedViewModel = null;
+        }
+
         if (subscribedRows is null)
             return;
 
         subscribedRows.CollectionChanged -= OnRowsCollectionChanged;
         subscribedRows = null;
+    }
+
+    /// <summary>
+    /// Any SelectToken caller (breadcrumb click, search reveal, nested NDJSON reveal) syncs
+    /// the ListBox highlight/autoscroll through this, covering the case where EnsureVisible
+    /// changed nothing and so no CollectionChanged Reset ever fires.
+    /// </summary>
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is null or nameof(JsonViewModel.SelectedTokenIndex))
+            SyncVisualSelection();
     }
 
     private static bool TryGetRows(JsonViewModel vm, out JsonVisibleRowCollection rows)
@@ -99,14 +124,9 @@ public partial class JsonView : UserControl
         if (DataContext is not JsonViewModel vm)
             return;
 
+        // OnViewModelPropertyChanged re-derives the ListBox highlight/autoscroll from the
+        // SelectedTokenIndex change, whether or not EnsureVisible rebuilt the row list.
         vm.SelectToken(segment.TokenIndex);
-
-        // Safety net for the common case where the target was already fully visible:
-        // EnsureVisible then makes no change and never raises CollectionChanged, so
-        // nothing else would re-derive the ListBox's highlight/autoscroll from the new
-        // SelectedTokenIndex. When EnsureVisible does rebuild, this call is idempotent -
-        // OnRowsCollectionChanged already invoked it with the same result.
-        SyncVisualSelection();
     }
 
     private async void OnCopyPathClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)

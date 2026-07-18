@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Argonaut
+Comment=Fast viewer for large JSON and NDJSON files
+Exec=Argonaut %f
+Icon=argonaut
+Terminal=false
+Categories=Development;Utility;
+MimeType=application/json;

@@ -6,6 +6,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <RootNamespace>Argonaut</RootNamespace>
+    <ApplicationIcon>Assets\Icon\argonaut.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>

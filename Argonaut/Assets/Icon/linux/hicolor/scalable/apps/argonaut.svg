@@ -1,0 +1,55 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1c4d75"/>
+      <stop offset="1" stop-color="#0a2338"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f9dd8a"/>
+      <stop offset="1" stop-color="#c8952c"/>
+    </linearGradient>
+    <linearGradient id="sea" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#123650"/>
+      <stop offset="1" stop-color="#081b2a"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect x="0" y="0" width="512" height="512" rx="112" fill="url(#bg)"/>
+
+  <!-- Sea -->
+  <path d="M0 372
+           C 64 352 96 392 160 372
+           C 224 352 256 392 320 372
+           C 384 352 448 392 512 372
+           V 512 H 0 Z" fill="url(#sea)"/>
+  <path d="M0 400
+           C 64 384 96 416 160 400
+           C 224 384 256 416 320 400
+           C 384 384 448 416 512 400
+           V 512 H 0 Z" fill="#06141f"/>
+
+  <!-- Ship hull -->
+  <path d="M108 352 L404 352 L366 402 Q256 424 146 402 Z" fill="#4a2e16"/>
+  <path d="M108 352 L404 352 L392 368 L120 368 Z" fill="#6b431f"/>
+
+  <!-- Mast -->
+  <rect x="249" y="128" width="14" height="228" rx="4" fill="#4a2e16"/>
+  <rect x="150" y="352" width="212" height="10" rx="4" fill="#3a230f"/>
+
+  <!-- Fleece sail: scalloped golden shape hung from the mast -->
+  <path d="M256 146
+           C 216 146 198 168 202 190
+           C 174 196 158 218 172 240
+           C 150 250 146 278 170 292
+           C 194 306 228 302 256 282
+           C 284 302 318 306 342 292
+           C 366 278 362 250 340 240
+           C 354 218 338 196 310 190
+           C 314 168 296 146 256 146 Z"
+        fill="url(#gold)" stroke="#8a5a1e" stroke-width="5"/>
+
+  <!-- JSON braces motif on the sail -->
+  <text x="256" y="248" font-family="Georgia, 'Times New Roman', serif" font-size="92"
+        font-weight="700" text-anchor="middle" fill="#7a4f18" opacity="0.6">{ }</text>
+</svg>

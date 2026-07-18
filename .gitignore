@@ -4,6 +4,7 @@
 bin/
 obj/
 out/
+dist/
 *.user
 *.suo
 *.userprefs

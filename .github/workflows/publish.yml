@@ -29,6 +29,7 @@ jobs:
         run: dotnet workload restore
       - name: Publish
         if: matrix.os != 'macos-latest'
+        shell: bash
         run: |
           dotnet publish Argonaut/Argonaut.csproj \
             -c Release \

@@ -1,10 +1,12 @@
 name: Publish
 
 on:
-  push:
-    tags:
-      - 'v*'
+  release:
+    types: [published]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   publish:
@@ -40,6 +42,17 @@ jobs:
         with:
           name: argonaut-${{ matrix.rid }}
           path: Argonaut/bin/Release/net10.0/${{ matrix.rid }}/publish
+      - name: Zip publish output
+        if: github.event_name == 'release'
+        shell: bash
+        run: |
+          cd Argonaut/bin/Release/net10.0/${{ matrix.rid }}/publish
+          zip -r ${{ github.workspace }}/argonaut-${{ matrix.rid }}.zip .
+      - name: Attach to release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: argonaut-${{ matrix.rid }}.zip
       - name: Upload binlog
         if: failure()
         uses: actions/upload-artifact@v4

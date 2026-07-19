@@ -7,9 +7,11 @@ public static class FileTypeDetector
 {
     public enum FileKind
     {
-        NotJson,
+        Unidentified,
         Json,
-        Ndjson
+        Ndjson,
+        Csv,
+        Tsv
     }
 
     private const int ChunkSize = 64 * 1024;
@@ -28,16 +30,16 @@ public static class FileTypeDetector
 
         long length = mmap.Length;
         if (length == 0)
-            return FileKind.NotJson;
+            return FileKind.Unidentified;
 
         // 1. First non-whitespace byte must open a JSON container.
         long firstCharOffset = FindNonWhitespace(mmap, 0, length);
         if (firstCharOffset < 0)
-            return FileKind.NotJson;
+            return FileKind.Unidentified;
 
         byte firstChar = mmap.GetSpan(firstCharOffset, 1)[0];
         if (firstChar is not (byte)'{' and not (byte)'[')
-            return FileKind.NotJson;
+            return DetectDelimited(mmap, length);
 
         // 2. Find the end of the first line and its last non-whitespace character.
         long firstLineEnd = FindNewline(mmap, firstCharOffset, length);
@@ -57,6 +59,61 @@ public static class FileTypeDetector
         return lastCharFirstLine == (byte)'}' && secondFirstChar == (byte)'{'
             ? FileKind.Ndjson
             : FileKind.Json;
+    }
+
+    /// <summary>
+    /// CSV/TSV rule: not JSON/NDJSON, but the first two physical lines have an equal, non-zero
+    /// count of unquoted commas (or, failing that, unquoted tabs). Comma is checked first as
+    /// the tie-break for the rare file where both counts happen to match.
+    /// </summary>
+    private static FileKind DetectDelimited(MMapFile file, long length)
+    {
+        long firstLineEnd = FindNewline(file, 0, length);
+        if (firstLineEnd < 0)
+            return FileKind.Unidentified; // single-line file: nothing to compare against
+
+        long secondLineStart = firstLineEnd + 1;
+        if (secondLineStart >= length)
+            return FileKind.Unidentified;
+
+        long secondLineEnd = FindNewline(file, secondLineStart, length);
+        if (secondLineEnd < 0)
+            secondLineEnd = length;
+
+        var line1 = file.GetSpan(0, checked((int)firstLineEnd));
+        var line2 = file.GetSpan(secondLineStart, checked((int)(secondLineEnd - secondLineStart)));
+
+        int commas1 = CountUnquotedDelimiter(line1, (byte)',');
+        int commas2 = CountUnquotedDelimiter(line2, (byte)',');
+        if (commas1 > 0 && commas1 == commas2)
+            return FileKind.Csv;
+
+        int tabs1 = CountUnquotedDelimiter(line1, (byte)'\t');
+        int tabs2 = CountUnquotedDelimiter(line2, (byte)'\t');
+        if (tabs1 > 0 && tabs1 == tabs2)
+            return FileKind.Tsv;
+
+        return FileKind.Unidentified;
+    }
+
+    /// <summary>
+    /// Counts occurrences of <paramref name="delimiter"/> in <paramref name="line"/>, ignoring
+    /// any that fall inside a quoted span. Quote state resets at the start of every call (i.e.
+    /// per line) - an unterminated quote doesn't carry over to the next line.
+    /// </summary>
+    private static int CountUnquotedDelimiter(ReadOnlySpan<byte> line, byte delimiter)
+    {
+        int count = 0;
+        bool inQuotes = false;
+        foreach (byte b in line)
+        {
+            if (b == (byte)'"')
+                inQuotes = !inQuotes;
+            else if (!inQuotes && b == delimiter)
+                count++;
+        }
+
+        return count;
     }
 
     // The chunked-scan loops in these three helpers (and in FileOffsetIndex/FileSearchSession)

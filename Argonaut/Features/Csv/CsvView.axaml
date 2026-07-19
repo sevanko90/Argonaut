@@ -1,0 +1,106 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:csv="clr-namespace:Argonaut.Features.Csv"
+             x:Class="Argonaut.Features.Csv.CsvView"
+             x:DataType="csv:CsvViewModel">
+    <UserControl.Resources>
+        <DataTemplate x:Key="CsvDataCellTemplate" x:DataType="csv:CsvCell">
+            <Border Width="{Binding Width}"
+                    Padding="6,4"
+                    BorderBrush="{DynamicResource AppBorderBrush}"
+                    BorderThickness="0,0,1,0">
+                <TextBlock Text="{Binding Text}"
+                           TextTrimming="CharacterEllipsis"
+                           TextWrapping="NoWrap"
+                           ToolTip.Tip="{Binding Text}"
+                           FontFamily="{StaticResource AppMonoFontFamily}"
+                           FontSize="12" />
+            </Border>
+        </DataTemplate>
+        <DataTemplate x:Key="CsvHeaderCellTemplate" x:DataType="csv:CsvCell">
+            <Border Width="{Binding Width}"
+                    Padding="6,4"
+                    BorderBrush="{DynamicResource AppBorderBrush}"
+                    BorderThickness="0,0,1,0">
+                <TextBlock Text="{Binding Text}"
+                           TextTrimming="CharacterEllipsis"
+                           TextWrapping="NoWrap"
+                           ToolTip.Tip="{Binding Text}"
+                           FontFamily="{StaticResource AppMonoFontFamily}"
+                           FontSize="12"
+                           FontWeight="SemiBold" />
+            </Border>
+        </DataTemplate>
+    </UserControl.Resources>
+
+    <Border BorderBrush="{DynamicResource AppBorderBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Background="{DynamicResource AppWindowBackgroundBrush}"
+            ClipToBounds="True">
+        <Grid RowDefinitions="Auto,Auto,*">
+            <Border Grid.Row="0"
+                    Padding="8,6"
+                    BorderBrush="{DynamicResource AppBorderBrush}"
+                    BorderThickness="0,0,0,1"
+                    Background="{DynamicResource AppPanelBackgroundBrush}">
+                <CheckBox Content="First row is header"
+                          IsChecked="{Binding IsHeaderRow}"
+                          FontSize="12" />
+            </Border>
+
+            <!-- Sticky header: not user-scrollable directly (IsHitTestVisible=False) - its
+                 horizontal Offset is mirrored from the body's ScrollViewer in code-behind so it
+                 stays pinned vertically but tracks horizontal scroll, keeping columns aligned
+                 with the virtualized rows below via the shared CsvCell.Width values. -->
+            <ScrollViewer Grid.Row="1"
+                          x:Name="HeaderScrollViewer"
+                          HorizontalScrollBarVisibility="Hidden"
+                          VerticalScrollBarVisibility="Disabled"
+                          IsHitTestVisible="False"
+                          Background="{DynamicResource AppPanelBackgroundBrush}">
+                <ItemsControl ItemsSource="{Binding HeaderCells}"
+                              ItemTemplate="{StaticResource CsvHeaderCellTemplate}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Orientation="Horizontal" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                </ItemsControl>
+            </ScrollViewer>
+
+            <ListBox Grid.Row="2"
+                     x:Name="RowsListBox"
+                     ItemsSource="{Binding Rows}"
+                     ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                     Padding="0">
+                <ListBox.Styles>
+                    <Style Selector="ListBoxItem">
+                        <Setter Property="Padding" Value="0" />
+                        <Setter Property="HorizontalContentAlignment" Value="Left" />
+                        <Setter Property="MinHeight" Value="24" />
+                    </Style>
+                </ListBox.Styles>
+                <ListBox.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <VirtualizingStackPanel />
+                    </ItemsPanelTemplate>
+                </ListBox.ItemsPanel>
+                <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="csv:CsvVisibleRow">
+                        <ItemsControl ItemsSource="{Binding Cells}"
+                                      ItemTemplate="{StaticResource CsvDataCellTemplate}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel Orientation="Horizontal" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                        </ItemsControl>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </Grid>
+    </Border>
+</UserControl>

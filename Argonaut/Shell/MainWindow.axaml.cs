@@ -9,6 +9,7 @@ using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Styling;
 using Avalonia.Threading;
+using Argonaut.Features.Csv;
 using Argonaut.Features.Json;
 using Argonaut.Features.Json.Hints;
 using Argonaut.Features.NdJson;
@@ -215,7 +216,7 @@ public partial class MainWindow : Window
     {
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
-            Title = "Open JSON or NDJSON file",
+            Title = "Open JSON, NDJSON, CSV, or TSV file",
             AllowMultiple = false
         });
 
@@ -270,7 +271,7 @@ public partial class MainWindow : Window
 
         switch (fileType)
         {
-            case FileTypeDetector.FileKind.NotJson:
+            case FileTypeDetector.FileKind.Unidentified:
                 // can't do anything with it
                 break;
             case FileTypeDetector.FileKind.Json:
@@ -334,9 +335,47 @@ public partial class MainWindow : Window
                 _ = MonitorIndexingCompletionAsync(vm.Index!, normalizedPath, requestId, () => UpdateNdJsonStatus(vm));
                 break;
             }
+            case FileTypeDetector.FileKind.Csv:
+                await OpenCsvAsync(normalizedPath, (byte)',', requestId);
+                break;
+            case FileTypeDetector.FileKind.Tsv:
+                await OpenCsvAsync(normalizedPath, (byte)'\t', requestId);
+                break;
             default:
                 throw new ArgumentOutOfRangeException();
         }
+    }
+
+    /// <summary>
+    /// Shared by the Csv/Tsv switch cases above - identical apart from the delimiter byte.
+    /// No search navigator is attached: FindController already no-ops with none attached
+    /// (FindAsync guards on navigator is null), so Ctrl+F is silently inert here. No
+    /// DateHintSettings either - CSV/TSV has no date-hint concept.
+    /// </summary>
+    private async Task OpenCsvAsync(string path, byte delimiter, int requestId)
+    {
+        await findController.DetachAsync();
+        FindBarControl.Reset();
+        DetachNdJsonViewModel();
+        DetachHintSettings();
+        StatusText.Text = $"Indexing {path}… 0%";
+
+        var reporter = new StatusProgressReporter(this, path, requestId);
+        var vm = new CsvViewModel();
+        await vm.LoadAsync(path, delimiter, reporter);
+        if (requestId != openRequestId)
+        {
+            vm.Dispose();
+            return;
+        }
+
+        ContentArea.Content = new CsvView { DataContext = vm };
+        currentFilePath = path;
+        ShowToolbar(path);
+        RecentFileHistory.Add(path);
+        ReloadRecentFiles();
+        StatusText.Text = $"{path} — {vm.RowCount:N0} rows indexed so far";
+        _ = MonitorIndexingCompletionAsync(vm.Index!, path, requestId, () => StatusText.Text = $"{path} — {vm.RowCount:N0} rows");
     }
 
     private void OnNdJsonViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)

@@ -14,11 +14,8 @@ public sealed class JsonViewModel : IDisposable, INotifyPropertyChanged
 {
     private const int InitialTokenTarget = 250;
 
-    private readonly CancellationTokenSource cts = new();
-    private MMapFile? mmap;
-    private JsonStructureIndex? index;
+    private IndexedFileSession<JsonStructureIndex>? session;
     private JsonVisibleRowCollection? rows;
-    private Task? inferTask;
     private int? selectedTokenIndex;
     private string? selectedPath;
     private string? highlightTerm;
@@ -27,13 +24,13 @@ public sealed class JsonViewModel : IDisposable, INotifyPropertyChanged
 
     public string FilePath { get; private set; } = string.Empty;
 
-    internal MMapFile? Mmap => mmap;
+    internal MMapFile? Mmap => session?.File;
 
-    internal JsonStructureIndex? Index => index;
+    internal JsonStructureIndex? Index => session?.Index;
 
-    public int TokenCount => index?.TokenCount ?? 0;
+    public int TokenCount => session?.Index.TokenCount ?? 0;
 
-    public Task IndexingTask { get; private set; } = Task.CompletedTask;
+    public Task IndexingTask => session?.IndexingTask ?? Task.CompletedTask;
 
     public JsonVisibleRowCollection Rows => rows ?? throw new InvalidOperationException("LoadAsync must complete before Rows is accessed.");
 
@@ -88,8 +85,8 @@ public sealed class JsonViewModel : IDisposable, INotifyPropertyChanged
     public void SelectToken(int tokenIndex)
     {
         SelectedTokenIndex = tokenIndex;
-        SelectedPath = JsonPathBuilder.Build(index!, mmap!, tokenIndex);
-        SelectedPathSegments = JsonPathBuilder.BuildSegments(index!, mmap!, tokenIndex);
+        SelectedPath = JsonPathBuilder.Build(Index!, Mmap!, tokenIndex);
+        SelectedPathSegments = JsonPathBuilder.BuildSegments(Index!, Mmap!, tokenIndex);
         rows?.EnsureVisible(tokenIndex);
     }
 
@@ -108,19 +105,18 @@ public sealed class JsonViewModel : IDisposable, INotifyPropertyChanged
 
     private async Task LoadCore(MMapFile mmap, IProgressReporter? progressReporter)
     {
-        var index = JsonStructureIndex.StartIndexing(mmap, progressReporter, cts.Token);
-        this.mmap = mmap;
-        this.index = index;
-        IndexingTask = index.IndexingTask;
+        var session = IndexedFileSession<JsonStructureIndex>.Start(mmap, JsonStructureIndex.StartIndexing, progressReporter);
+        this.session = session;
 
         // Await a small initial batch so the first paint isn't empty; the row collection
         // then tracks index.TokenCount live as indexing continues in the background.
-        await index.WaitForTokenCountAsync(InitialTokenTarget);
+        await session.Index.WaitForTokenCountAsync(InitialTokenTarget);
 
-        rows = new JsonVisibleRowCollection(index, mmap,
+        rows = new JsonVisibleRowCollection(session.Index, session.File,
             new IValueHintProvider[] { new DateHintProvider(HintSettings) });
 
-        inferTask = InferDefaultDateSchemeAsync(index, mmap);
+        // Inference dereferences the mapping, so the session must join it before unmapping.
+        session.RegisterDependentTask(InferDefaultDateSchemeAsync(session.Index, session.File, session.Token));
     }
 
     /// <summary>
@@ -128,7 +124,7 @@ public sealed class JsonViewModel : IDisposable, INotifyPropertyChanged
     /// background for the first classifiable date value, and sets it as the file default if
     /// found. Never a full-file scan. No-ops if the user has already picked a scheme.
     /// </summary>
-    private async Task InferDefaultDateSchemeAsync(JsonStructureIndex index, MMapFile mmap)
+    private async Task InferDefaultDateSchemeAsync(JsonStructureIndex index, MMapFile mmap, CancellationToken cancellationToken)
     {
         try
         {
@@ -136,7 +132,7 @@ public sealed class JsonViewModel : IDisposable, INotifyPropertyChanged
             if (disposed)
                 return;
 
-            var scheme = await Task.Run(() => disposed ? null : DateHintInference.FindFirstScheme(index, mmap, DateHintInference.MaxTokensToScan), cts.Token);
+            var scheme = await Task.Run(() => disposed ? null : DateHintInference.FindFirstScheme(index, mmap, DateHintInference.MaxTokensToScan), cancellationToken);
             if (scheme is { } s)
                 Dispatcher.UIThread.Post(() => { if (!disposed) HintSettings.TrySetInferredDefault(s); });
         }
@@ -151,18 +147,12 @@ public sealed class JsonViewModel : IDisposable, INotifyPropertyChanged
     {
         disposed = true;
 
-        // Cancel and join the background indexer (and the date-hint inference task riding on
-        // it) before releasing mmap below - both dereference it via cached pointers, and
-        // disposing out from under a still-running scan is a native use-after-free, not a
-        // catchable .NET exception (see CLAUDE.md / MMapFile). Both tasks check cancellation
-        // every ~65536 tokens/4MB, so this wait resolves in low single-digit milliseconds.
-        cts.Cancel();
-        try { IndexingTask.Wait(); } catch { /* cancellation/failure observed here only to unblock disposal */ }
-        try { inferTask?.Wait(); } catch { /* same */ }
-
+        // Cancel first so the background scans stop promptly; rows must be disposed
+        // (stopping its growth timer, which polls the index and reads the mapping) before
+        // session.Dispose joins the indexing/inference tasks and releases the mapping.
+        session?.Cancel();
         rows?.Dispose();
-        mmap?.Dispose();
-        cts.Dispose();
+        session?.Dispose();
     }
 
     private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)

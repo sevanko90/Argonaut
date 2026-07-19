@@ -16,9 +16,7 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
 {
     private const int InitialIndexedLineTarget = 250;
 
-    private readonly CancellationTokenSource cts = new();
-    private MMapFile? mmap;
-    private FileOffsetIndex? index;
+    private IndexedFileSession<FileOffsetIndex>? session;
     private MemoryMappedFileLineCollection? lines;
     private NdJsonSelectedLine? selectedLine;
     private JsonViewModel? selectedLineJsonViewModel;
@@ -27,13 +25,13 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
 
     public string FilePath { get; private set; } = string.Empty;
 
-    internal MMapFile? Mmap => mmap;
+    internal MMapFile? Mmap => this.session?.File;
 
-    internal FileOffsetIndex? Index => index;
+    internal FileOffsetIndex? Index => this.session?.Index;
 
-    public int LineCount => this.index?.LineCount ?? 0;
+    public int LineCount => this.session?.Index.LineCount ?? 0;
 
-    public Task IndexingTask { get; private set; } = Task.CompletedTask;
+    public Task IndexingTask => this.session?.IndexingTask ?? Task.CompletedTask;
 
     public MemoryMappedFileLineCollection Lines => lines ?? throw new InvalidOperationException("LoadAsync must complete before Lines is accessed.");
 
@@ -133,30 +131,27 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
     {
         FilePath = path;
 
-        var mmap = new MMapFile(path);
-        var index = FileOffsetIndex.StartIndexing(mmap, progressReporter, cts.Token);
-        this.mmap = mmap;
-        this.index = index;
-        IndexingTask = index.IndexingTask;
+        var session = IndexedFileSession<FileOffsetIndex>.Start(new MMapFile(path), FileOffsetIndex.StartIndexing, progressReporter);
+        this.session = session;
 
         // Await a small initial batch so the first paint isn't a totally empty scrollbar;
         // Lines.Count then tracks index.LineCount live as indexing continues in the background.
-        await index.WaitForLineCountAsync(InitialIndexedLineTarget);
+        await session.Index.WaitForLineCountAsync(InitialIndexedLineTarget);
 
         SelectedLine = null;
-        lines = new MemoryMappedFileLineCollection(index, mmap);
+        lines = new MemoryMappedFileLineCollection(session.Index, session.File);
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Lines)));
     }
 
     public string GetLineText(int lineIndex)
     {
-        return NdJsonLineReader.ReadLine(this.mmap!, this.index!.GetLineSpan(lineIndex));
+        return NdJsonLineReader.ReadLine(this.Mmap!, this.Index!.GetLineSpan(lineIndex));
     }
 
     public void LoadSelectedLine(int lineIndex)
     {
-        var lineSpan = this.index!.GetLineSpan(lineIndex);
-        SelectedLine = new NdJsonSelectedLine(lineIndex + 1, NdJsonLineReader.ReadLine(this.mmap!, lineSpan));
+        var lineSpan = this.Index!.GetLineSpan(lineIndex);
+        SelectedLine = new NdJsonSelectedLine(lineIndex + 1, NdJsonLineReader.ReadLine(this.Mmap!, lineSpan));
 
         var requestId = ++selectionRequestId;
         var previous = SelectedLineJsonViewModel;
@@ -170,7 +165,7 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
 
     private async Task LoadSelectedLineJsonAsync(long requestId, FileLineSpan lineSpan)
     {
-        var trimmed = NdJsonLineReader.TrimTrailingNewline(this.mmap!, lineSpan);
+        var trimmed = NdJsonLineReader.TrimTrailingNewline(this.Mmap!, lineSpan);
         var jsonViewModel = new JsonViewModel();
         try
         {
@@ -206,20 +201,16 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
 
     public void Dispose()
     {
-        // Cancel and join the background line-offset scan before releasing mmap below - it
-        // dereferences mmap via a cached pointer, and disposing out from under a still-running
-        // scan is a native use-after-free, not a catchable .NET exception (see CLAUDE.md /
-        // MMapFile). Checked every 4MB chunk, so this wait resolves in low single-digit
-        // milliseconds even on a multi-GB file.
-        cts.Cancel();
-        try { IndexingTask.Wait(); } catch { /* cancellation/failure observed here only to unblock disposal */ }
+        // Cancel first so the background line-offset scan stops promptly; the collections
+        // and the nested per-line view model must be disposed before session.Dispose joins
+        // the scan and releases the mapping.
+        this.session?.Cancel();
 
         lines?.Dispose();
         if (selectedLineJsonViewModel is not null)
             selectedLineJsonViewModel.HintSettings.PropertyChanged -= OnChildHintSettingsPropertyChanged;
         selectedLineJsonViewModel?.Dispose();
-        this.mmap?.Dispose();
-        cts.Dispose();
+        this.session?.Dispose();
     }
 
     private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)

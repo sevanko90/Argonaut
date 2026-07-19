@@ -15,9 +15,9 @@ namespace Argonaut.Infrastructure;
 /// </summary>
 public sealed unsafe class MMapFile : IDisposable
 {
-    private readonly MemoryMappedFile? _mmf;
-    private readonly MemoryMappedViewAccessor? _accessor;
-    private readonly byte* _ptr;
+    private readonly MemoryMappedFile? mmf;
+    private readonly MemoryMappedViewAccessor? accessor;
+    private readonly byte* ptr;
     private bool disposed;
 
     public long Length { get; }
@@ -28,12 +28,12 @@ public sealed unsafe class MMapFile : IDisposable
         if (Length == 0)
             return; // an empty file can't be mapped; GetSpan can only ever yield an empty span
 
-        _mmf = MemoryMappedFile.CreateFromFile(path, FileMode.Open, null, 0, MemoryMappedFileAccess.Read);
-        _accessor = _mmf.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
+        this.mmf = MemoryMappedFile.CreateFromFile(path, FileMode.Open, null, 0, MemoryMappedFileAccess.Read);
+        this.accessor = this.mmf.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
 
         byte* ptr = null;
-        _accessor.SafeMemoryMappedViewHandle.AcquirePointer(ref ptr);
-        _ptr = ptr + _accessor.PointerOffset;
+        this.accessor.SafeMemoryMappedViewHandle.AcquirePointer(ref ptr);
+        this.ptr = ptr + this.accessor.PointerOffset;
     }
 
     /// <summary>
@@ -49,12 +49,12 @@ public sealed unsafe class MMapFile : IDisposable
         if (Length == 0)
             return; // an empty range can't be mapped; GetSpan can only ever yield an empty span
 
-        _mmf = MemoryMappedFile.CreateFromFile(path, FileMode.Open, null, 0, MemoryMappedFileAccess.Read);
-        _accessor = _mmf.CreateViewAccessor(offset, length, MemoryMappedFileAccess.Read);
+        this.mmf = MemoryMappedFile.CreateFromFile(path, FileMode.Open, null, 0, MemoryMappedFileAccess.Read);
+        this.accessor = this.mmf.CreateViewAccessor(offset, length, MemoryMappedFileAccess.Read);
 
         byte* ptr = null;
-        _accessor.SafeMemoryMappedViewHandle.AcquirePointer(ref ptr);
-        _ptr = ptr + _accessor.PointerOffset;
+        this.accessor.SafeMemoryMappedViewHandle.AcquirePointer(ref ptr);
+        this.ptr = ptr + this.accessor.PointerOffset;
     }
 
     /// <summary>
@@ -69,7 +69,7 @@ public sealed unsafe class MMapFile : IDisposable
             throw new ArgumentOutOfRangeException(nameof(length),
                 $"Requested range [{offset}, {offset + length}) extends past the end of the file ({Length} bytes).");
 
-        return new ReadOnlySpan<byte>(_ptr + offset, length);
+        return new ReadOnlySpan<byte>(this.ptr + offset, length);
     }
 
     /// <summary>
@@ -86,8 +86,8 @@ public sealed unsafe class MMapFile : IDisposable
             return;
         disposed = true;
 
-        _accessor?.SafeMemoryMappedViewHandle.ReleasePointer();
-        _accessor?.Dispose();
-        _mmf?.Dispose();
+        this.accessor?.SafeMemoryMappedViewHandle.ReleasePointer();
+        this.accessor?.Dispose();
+        this.mmf?.Dispose();
     }
 }

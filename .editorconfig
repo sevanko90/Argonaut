@@ -1,0 +1,27 @@
+root = true
+
+[*]
+charset = utf-8
+insert_final_newline = true
+indent_style = space
+indent_size = 4
+
+[*.{json,xml,axaml,csproj,slnx}]
+indent_size = 2
+
+[*.cs]
+# Member access is `this.`-qualified (project convention; see CLAUDE.md).
+dotnet_style_qualification_for_field = true:warning
+dotnet_style_qualification_for_property = true:warning
+dotnet_style_qualification_for_method = true:warning
+dotnet_style_qualification_for_event = true:warning
+dotnet_diagnostic.IDE0009.severity = warning
+
+# Private fields are camelCase with no underscore prefix.
+dotnet_naming_rule.private_fields_no_underscore.symbols = private_fields
+dotnet_naming_rule.private_fields_no_underscore.style = camel_case_no_prefix
+dotnet_naming_rule.private_fields_no_underscore.severity = warning
+dotnet_naming_symbols.private_fields.applicable_kinds = field
+dotnet_naming_symbols.private_fields.applicable_accessibilities = private
+dotnet_naming_style.camel_case_no_prefix.capitalization = camel_case
+dotnet_diagnostic.IDE1006.severity = warning

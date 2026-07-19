@@ -5,8 +5,6 @@ using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
-using Avalonia.Layout;
-using Avalonia.Markup.Xaml.MarkupExtensions;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Styling;
@@ -50,6 +48,7 @@ public partial class MainWindow : Window
         Title = DefaultTitle;
         ToastService.Requested += ShowToast;
         emptyStateView.ChooseFileRequested += async (_, _) => await BrowseForFile();
+        emptyStateView.OpenRecentFileRequested += (_, path) => _ = OpenPath(path);
         emptyStateView.ClearRecentFilesRequested += (_, _) =>
         {
             RecentFileHistory.Clear();
@@ -498,43 +497,11 @@ public partial class MainWindow : Window
 
     private void ReloadRecentFiles()
     {
-        var recentFiles = RecentFileHistory.Load();
-        var panel = emptyStateView.RecentFilesHost;
-        panel.Children.Clear();
-        emptyStateView.ClearRecentFilesButtonVisible = recentFiles.Count > 0;
-
-        if (recentFiles.Count == 0)
-        {
-            panel.Children.Add(new TextBlock
-            {
-                Text = "No recent files yet.",
-                Opacity = 0.7
-            });
-            return;
-        }
-
-        foreach (var path in recentFiles)
-        {
-            var button = new Button
-            {
-                Content = Path.GetFileName(path),
-                HorizontalAlignment = HorizontalAlignment.Center,
-                Background = null,
-                BorderThickness = new Thickness(0),
-                Padding = new Thickness(0),
-                Cursor = new Cursor(StandardCursorType.Hand)
-            };
-
-            // DynamicResource, not a plain field assignment - a live theme switch must
-            // re-color this button, and a one-off Brushes.DodgerBlue field set (the previous
-            // approach) never reacts to that, unlike a StyledElement resource binding.
-            button[!Button.ForegroundProperty] = new DynamicResourceExtension("AppAccentBrush");
-
-            button.Classes.Add("linklike");
-            button.Click += (_, _) => { _ = OpenPath(path); };
-
-            panel.Children.Add(button);
-        }
+        // Rendering (linklike buttons, theme-reactive foreground, empty-state text) lives in
+        // EmptyStateView's ItemsControl template; this only supplies the data.
+        emptyStateView.SetRecentFiles(RecentFileHistory.Load()
+            .Select(path => new RecentFileItem(path, Path.GetFileName(path)))
+            .ToList());
     }
 
     private sealed class StatusProgressReporter : IProgressReporter

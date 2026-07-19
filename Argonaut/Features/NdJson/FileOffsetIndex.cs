@@ -114,10 +114,10 @@ public sealed class FileOffsetIndex
     /// <param name="file">Memory mapped file to index</param>
     /// <param name="progressReporter">Progress reporter</param>
     /// <returns>The index class, initially running in the background</returns>
-    public static FileOffsetIndex StartIndexing(MMapFile file, IProgressReporter? progressReporter = null)
+    public static FileOffsetIndex StartIndexing(MMapFile file, IProgressReporter? progressReporter = null, CancellationToken cancellationToken = default)
     {
         var index = new FileOffsetIndex();
-        index.IndexingTask = Task.Run(() => index.ProduceOffsets(file, progressReporter));
+        index.IndexingTask = Task.Run(() => index.ProduceOffsets(file, progressReporter, cancellationToken), cancellationToken);
         return index;
     }
 
@@ -134,8 +134,14 @@ public sealed class FileOffsetIndex
     /// </summary>
     /// <param name="file">Memory-mapped file to index</param>
     /// <param name="progressReporter">Allows callers to be notified of progress</param>
+    /// <param name="cancellationToken">
+    /// Checked once per scan chunk so a caller tearing down the owning <see cref="MMapFile"/>
+    /// (e.g. window close mid-scan) can stop this loop before it dereferences memory the OS
+    /// has unmapped - see CLAUDE.md / MMapFile for why touching the mapping after disposal is
+    /// a native use-after-free, not a catchable .NET exception.
+    /// </param>
     /// <remarks>Invoked in the background via a task</remarks>
-    private void ProduceOffsets(MMapFile file, IProgressReporter? progressReporter)
+    private void ProduceOffsets(MMapFile file, IProgressReporter? progressReporter, CancellationToken cancellationToken)
     {
         long length = file.Length;
         if (length == 0)
@@ -151,6 +157,8 @@ public sealed class FileOffsetIndex
         {
             while (offset < length)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 // Scan the mapped bytes directly - no buffer, no copy. IndexOf over a byte
                 // span is SIMD-vectorized, which is what makes this loop fast on multi-GB files.
                 int size = (int)Math.Min(ScanChunkSize, length - offset);

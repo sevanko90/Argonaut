@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Features.Json;
 using Argonaut.Features.Json.Hints;
@@ -15,6 +16,7 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
 {
     private const int InitialIndexedLineTarget = 250;
 
+    private readonly CancellationTokenSource cts = new();
     private MMapFile? mmap;
     private FileOffsetIndex? index;
     private MemoryMappedFileLineCollection? lines;
@@ -132,7 +134,7 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
         FilePath = path;
 
         var mmap = new MMapFile(path);
-        var index = FileOffsetIndex.StartIndexing(mmap, progressReporter);
+        var index = FileOffsetIndex.StartIndexing(mmap, progressReporter, cts.Token);
         this.mmap = mmap;
         this.index = index;
         IndexingTask = index.IndexingTask;
@@ -204,11 +206,20 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
 
     public void Dispose()
     {
+        // Cancel and join the background line-offset scan before releasing mmap below - it
+        // dereferences mmap via a cached pointer, and disposing out from under a still-running
+        // scan is a native use-after-free, not a catchable .NET exception (see CLAUDE.md /
+        // MMapFile). Checked every 4MB chunk, so this wait resolves in low single-digit
+        // milliseconds even on a multi-GB file.
+        cts.Cancel();
+        try { IndexingTask.Wait(); } catch { /* cancellation/failure observed here only to unblock disposal */ }
+
         lines?.Dispose();
         if (selectedLineJsonViewModel is not null)
             selectedLineJsonViewModel.HintSettings.PropertyChanged -= OnChildHintSettingsPropertyChanged;
         selectedLineJsonViewModel?.Dispose();
         this.mmap?.Dispose();
+        cts.Dispose();
     }
 
     private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)

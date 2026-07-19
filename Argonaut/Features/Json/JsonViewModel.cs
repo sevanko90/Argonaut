@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Features.Json.Hints;
 using Argonaut.Infrastructure;
@@ -13,9 +14,11 @@ public sealed class JsonViewModel : IDisposable, INotifyPropertyChanged
 {
     private const int InitialTokenTarget = 250;
 
+    private readonly CancellationTokenSource cts = new();
     private MMapFile? mmap;
     private JsonStructureIndex? index;
     private JsonVisibleRowCollection? rows;
+    private Task? inferTask;
     private int? selectedTokenIndex;
     private string? selectedPath;
     private string? highlightTerm;
@@ -105,7 +108,7 @@ public sealed class JsonViewModel : IDisposable, INotifyPropertyChanged
 
     private async Task LoadCore(MMapFile mmap, IProgressReporter? progressReporter)
     {
-        var index = JsonStructureIndex.StartIndexing(mmap, progressReporter);
+        var index = JsonStructureIndex.StartIndexing(mmap, progressReporter, cts.Token);
         this.mmap = mmap;
         this.index = index;
         IndexingTask = index.IndexingTask;
@@ -117,7 +120,7 @@ public sealed class JsonViewModel : IDisposable, INotifyPropertyChanged
         rows = new JsonVisibleRowCollection(index, mmap,
             new IValueHintProvider[] { new DateHintProvider(HintSettings) });
 
-        _ = InferDefaultDateSchemeAsync(index, mmap);
+        inferTask = InferDefaultDateSchemeAsync(index, mmap);
     }
 
     /// <summary>
@@ -133,7 +136,7 @@ public sealed class JsonViewModel : IDisposable, INotifyPropertyChanged
             if (disposed)
                 return;
 
-            var scheme = await Task.Run(() => disposed ? null : DateHintInference.FindFirstScheme(index, mmap, DateHintInference.MaxTokensToScan));
+            var scheme = await Task.Run(() => disposed ? null : DateHintInference.FindFirstScheme(index, mmap, DateHintInference.MaxTokensToScan), cts.Token);
             if (scheme is { } s)
                 Dispatcher.UIThread.Post(() => { if (!disposed) HintSettings.TrySetInferredDefault(s); });
         }
@@ -147,8 +150,19 @@ public sealed class JsonViewModel : IDisposable, INotifyPropertyChanged
     public void Dispose()
     {
         disposed = true;
+
+        // Cancel and join the background indexer (and the date-hint inference task riding on
+        // it) before releasing mmap below - both dereference it via cached pointers, and
+        // disposing out from under a still-running scan is a native use-after-free, not a
+        // catchable .NET exception (see CLAUDE.md / MMapFile). Both tasks check cancellation
+        // every ~65536 tokens/4MB, so this wait resolves in low single-digit milliseconds.
+        cts.Cancel();
+        try { IndexingTask.Wait(); } catch { /* cancellation/failure observed here only to unblock disposal */ }
+        try { inferTask?.Wait(); } catch { /* same */ }
+
         rows?.Dispose();
         mmap?.Dispose();
+        cts.Dispose();
     }
 
     private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)

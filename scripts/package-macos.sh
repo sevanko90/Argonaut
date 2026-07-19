@@ -21,7 +21,7 @@ dotnet publish "$PROJECT" \
     -c "$CONFIGURATION" \
     -r "$RID" \
     --self-contained true \
-    -p:PublishSingleFile=false
+    -p:PublishSingleFile=true
 
 echo "Assembling $BUNDLE_DIR..."
 rm -rf "$BUNDLE_DIR"

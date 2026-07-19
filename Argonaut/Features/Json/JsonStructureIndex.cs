@@ -207,18 +207,24 @@ public sealed class JsonStructureIndex
     /// </summary>
     public Task WaitForTokenIndexedAsync(int tokenIndex) => WaitForTokenCountAsync(tokenIndex + 1);
 
-    public static JsonStructureIndex StartIndexing(MMapFile file, IProgressReporter? progressReporter = null)
+    // Checked every 65536 tokens inside the hot per-token loop - frequent enough that a
+    // caller cancelling (e.g. window close mid-index) stops this loop within a few
+    // milliseconds, rare enough that the check (one branch on a bitmask) costs nothing
+    // measurable against the per-token budget.
+    private const int CancellationCheckMask = 0xFFFF;
+
+    public static JsonStructureIndex StartIndexing(MMapFile file, IProgressReporter? progressReporter = null, CancellationToken cancellationToken = default)
     {
         var index = new JsonStructureIndex();
-        index.IndexingTask = Task.Run(() => index.Run(file, progressReporter));
+        index.IndexingTask = Task.Run(() => index.Run(file, progressReporter, cancellationToken), cancellationToken);
         return index;
     }
 
-    private void Run(MMapFile file, IProgressReporter? progressReporter)
+    private void Run(MMapFile file, IProgressReporter? progressReporter, CancellationToken cancellationToken)
     {
         try
         {
-            Build(file, progressReporter);
+            Build(file, progressReporter, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -232,7 +238,7 @@ public sealed class JsonStructureIndex
         }
     }
 
-    private void Build(MMapFile file, IProgressReporter? progressReporter)
+    private void Build(MMapFile file, IProgressReporter? progressReporter, CancellationToken cancellationToken)
     {
         long offset = 0;
         long length = file.Length;
@@ -336,6 +342,9 @@ public sealed class JsonStructureIndex
                 int waitTarget = pendingWaitTarget;
                 if (waitTarget != 0 && tokenIndex + 1 >= waitTarget)
                     NotifyCountReady();
+
+                if ((tokenIndex & CancellationCheckMask) == 0)
+                    cancellationToken.ThrowIfCancellationRequested();
 
                 long consumedSoFar = offset + reader.BytesConsumed;
                 if (consumedSoFar >= nextReport)

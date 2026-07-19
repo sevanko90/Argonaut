@@ -198,6 +198,20 @@ public partial class MainWindow : Window
         return file?.TryGetLocalPath();
     }
 
+    public async Task OpenInitialFileAsync(string path)
+    {
+        OpenDebugLog.Write($"OpenInitialFileAsync: {path}");
+        try
+        {
+            await OpenPath(path);
+            OpenDebugLog.Write($"OpenInitialFileAsync completed, currentFilePath={currentFilePath ?? "<null>"}");
+        }
+        catch (Exception ex)
+        {
+            OpenDebugLog.Write($"OpenInitialFileAsync threw: {ex}");
+        }
+    }
+
     private async Task BrowseForFile()
     {
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
@@ -218,11 +232,18 @@ public partial class MainWindow : Window
 
     private async Task OpenPath(string? path)
     {
-        if (string.IsNullOrWhiteSpace(path)) return;
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            OpenDebugLog.Write("OpenPath: path is null/whitespace, returning");
+            return;
+        }
 
         var normalizedPath = Path.GetFullPath(path);
         if (!File.Exists(normalizedPath))
+        {
+            OpenDebugLog.Write($"OpenPath: File.Exists false for '{normalizedPath}'");
             return;
+        }
 
         if (currentFilePath is not null && !string.Equals(currentFilePath, normalizedPath, StringComparison.OrdinalIgnoreCase))
         {
@@ -240,10 +261,13 @@ public partial class MainWindow : Window
         {
             fileType = FileTypeDetector.DetectFileType(normalizedPath);
         }
-        catch
+        catch (Exception ex)
         {
+            OpenDebugLog.Write($"OpenPath: DetectFileType threw: {ex}");
             return;
         }
+
+        OpenDebugLog.Write($"OpenPath: normalizedPath='{normalizedPath}', fileType={fileType}");
 
         switch (fileType)
         {

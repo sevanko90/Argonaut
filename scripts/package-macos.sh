@@ -8,6 +8,7 @@ set -euo pipefail
 # Usage: scripts/package-macos.sh [osx-arm64|osx-x64]
 
 RID="${1:-osx-arm64}"
+VERSION="${2:-}"
 CONFIGURATION="Release"
 APP_NAME="Argonaut"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -21,7 +22,8 @@ dotnet publish "$PROJECT" \
     -c "$CONFIGURATION" \
     -r "$RID" \
     --self-contained true \
-    -p:PublishSingleFile=true
+    -p:PublishSingleFile=true \
+    ${VERSION:+-p:InformationalVersion="$VERSION"}
 
 echo "Assembling $BUNDLE_DIR..."
 rm -rf "$BUNDLE_DIR"

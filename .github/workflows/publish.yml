@@ -28,6 +28,7 @@ jobs:
       - name: Restore workloads
         run: dotnet workload restore
       - name: Publish
+        if: matrix.os != 'macos-latest'
         run: |
           dotnet publish Argonaut/Argonaut.csproj \
             -c Release \
@@ -35,19 +36,33 @@ jobs:
             --self-contained true \
             /p:PublishSingleFile=true \
             /p:InformationalVersion=${{ github.ref_name }}
+      - name: Publish and package .app
+        if: matrix.os == 'macos-latest'
+        run: ./scripts/package-macos.sh ${{ matrix.rid }} ${{ github.ref_name }}
       - name: Collect binlog on failure
         if: failure()
         run: dotnet publish Argonaut/Argonaut.csproj -c Release -r ${{ matrix.rid }} /bl:publish-${{ matrix.rid }}.binlog
       - uses: actions/upload-artifact@v4
+        if: matrix.os != 'macos-latest'
         with:
           name: argonaut-${{ matrix.rid }}
           path: Argonaut/bin/Release/net10.0/${{ matrix.rid }}/publish
+      - uses: actions/upload-artifact@v4
+        if: matrix.os == 'macos-latest'
+        with:
+          name: argonaut-${{ matrix.rid }}
+          path: dist/Argonaut.app
       - name: Zip publish output
-        if: github.event_name == 'release'
+        if: matrix.os != 'macos-latest' && github.event_name == 'release'
         shell: bash
         run: |
           cd Argonaut/bin/Release/net10.0/${{ matrix.rid }}/publish
           zip -r ${{ github.workspace }}/argonaut-${{ matrix.rid }}.zip .
+      - name: Zip .app bundle
+        if: matrix.os == 'macos-latest' && github.event_name == 'release'
+        run: |
+          cd dist
+          zip -r -y ${{ github.workspace }}/argonaut-${{ matrix.rid }}.zip Argonaut.app
       - name: Attach to release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2

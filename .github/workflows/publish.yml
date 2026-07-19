@@ -1,0 +1,48 @@
+name: Publish
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+          - os: macos-latest
+            rid: osx-arm64
+          - os: ubuntu-latest
+            rid: linux-x64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Restore workloads
+        run: dotnet workload restore
+      - name: Publish
+        run: |
+          dotnet publish Argonaut/Argonaut.csproj \
+            -c Release \
+            -r ${{ matrix.rid }} \
+            --self-contained true \
+            /p:PublishSingleFile=true \
+            /p:InformationalVersion=${{ github.ref_name }}
+      - name: Collect binlog on failure
+        if: failure()
+        run: dotnet publish Argonaut/Argonaut.csproj -c Release -r ${{ matrix.rid }} /bl:publish-${{ matrix.rid }}.binlog
+      - uses: actions/upload-artifact@v4
+        with:
+          name: argonaut-${{ matrix.rid }}
+          path: Argonaut/bin/Release/net10.0/${{ matrix.rid }}/publish
+      - name: Upload binlog
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: publish-logs-${{ matrix.rid }}
+          path: publish-${{ matrix.rid }}.binlog

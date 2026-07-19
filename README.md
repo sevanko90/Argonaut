@@ -34,9 +34,8 @@ in the application folder.
 
 ## Running the MacOS release
 
-MacOS quarantines downloaded applictions that have not been signed and refuses to run them, with an "Application is damaged" message.
-I don't have an Apple developer account and until I do, any app I upload will fail to run.
+MacOS quarantines downloaded applictions that have not been signed and refuses to run them, with an "Application is damaged" message. 
 
-You have a couple of options. You could (quite rightly!) not trust some random app you download from the internet, and build it from source. Or you can remove the quarantine/security attributes with this command, which allows MacOS to run it.
-
-    xattr -cr /path/to/Argonaut.app
+You have a couple of options. You could (quite rightly!) not trust some random app you download from the internet, and build it from source.
+Or, you can move the downloaded app out of the downloads folder and into somewhere else like `~/Applications`. That seemed to work for me.
+Or, you can wait until I get an Apple developer account to properly sign things. That might take a while!

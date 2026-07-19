@@ -60,9 +60,9 @@ public record struct JsonTokenInfo(
 public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.PackedToken>, IFileIndexer
 {
     // Sentinel NameLength stored in the packed word when a token has no property name
-    // (array element or root value). One value out of the 24-bit range is reserved for
-    // this so real name lengths only ever use 0 .. 0xFFFFFE.
-    private const int NoNameLength = 0xFFFFFF;
+    // (array element or root value). One value out of the 16-bit range is reserved for
+    // this so real name lengths only ever use 0 .. 0xFFFE.
+    private const int NoNameLength = ushort.MaxValue;
 
     // Sentinel NameDelta meaning "the real back-offset didn't fit in 16 bits, look it up in
     // nameOffsetOverflow instead". A property name sits immediately before its value in
@@ -72,34 +72,32 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
 
     private const int KindBits = 4;
     private const int DepthBits = 12;
-    private const int LengthBits = 24;
-    private const int NameLengthBits = 24;
+    private const int OffsetBits = 48;
 
     private const int DepthShift = KindBits;
-    private const int LengthShift = DepthShift + DepthBits;
-    private const int NameLengthShift = LengthShift + LengthBits;
+    private const int OffsetShift = DepthShift + DepthBits;
 
     private const ulong KindMask = (1UL << KindBits) - 1;
     private const ulong DepthMask = (1UL << DepthBits) - 1;
-    private const ulong LengthMask = (1UL << LengthBits) - 1;
-    private const ulong NameLengthMask = (1UL << NameLengthBits) - 1;
+    private const ulong OffsetMask = (1UL << OffsetBits) - 1;
 
     private const int MaxDepth = (int)DepthMask;
-    private const int MaxLength = (int)LengthMask;
+    private const long MaxOffset = (long)OffsetMask;
     private const int MaxNameLength = NoNameLength - 1;
 
     /// <summary>
-    /// Compact in-memory representation of one <see cref="JsonTokenInfo"/>. Kind/Depth/Length/
-    /// NameLength are bit-packed into a single 64-bit word instead of four separate ints, and
-    /// Offset/NameDelta use narrower types than the decoded (Offset/NameOffset) longs, so this
-    /// struct is 24 bytes instead of the 40-48 bytes a naive field-per-property layout would take:
+    /// Compact in-memory representation of one <see cref="JsonTokenInfo"/>. Kind/Depth/Offset
+    /// are bit-packed into a single 64-bit word instead of three separate fields, and
+    /// NameDelta/NameLength use narrower types than the decoded (NameOffset/NameLength) longs,
+    /// so this struct is 24 bytes instead of the 40-48 bytes a naive field-per-property layout
+    /// would take:
     ///
-    ///   Packed word (64 bits, MSB..LSB): [NameLength:24][Length:24][Depth:12][Kind:4]
-    ///   Offset       : uint   (4 bytes) - absolute byte offset, caps indexable files at ~4 GiB
-    ///   NameDelta    : ushort (2 bytes) - Offset - NameOffset (property names sit right before
-    ///                                     their value), or NameDeltaOverflow if that distance
-    ///                                     didn't fit - the real NameOffset then lives in
-    ///                                     nameOffsetOverflow keyed by token index
+    ///   Packed word (64 bits, MSB..LSB): [Offset:48][Depth:12][Kind:4]
+    ///                                    Offset is the absolute byte offset; 48 bits caps
+    ///                                    indexable files at ~256 TiB, which costs nothing
+    ///                                    extra since Kind+Depth only need 16 of the word's
+    ///                                    64 bits regardless.
+    ///   Length       : int    (4 bytes) - unpacked, no cap beyond int.MaxValue
     ///   ParentIndex  : int    (4 bytes) - unpacked, no width/frequency assumption to lean on
     ///   EndIndex     : int    (4 bytes) - mutated in place once the matching End token is seen.
     ///                                     Because that mutation happens AFTER the token is
@@ -108,6 +106,11 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
     ///                                     sides (see SegmentedAppendLog remarks); every other
     ///                                     field is immutable once published and safe to read
     ///                                     plainly.
+    ///   NameDelta    : ushort (2 bytes) - Offset - NameOffset (property names sit right before
+    ///                                     their value), or NameDeltaOverflow if that distance
+    ///                                     didn't fit - the real NameOffset then lives in
+    ///                                     nameOffsetOverflow keyed by token index
+    ///   NameLength   : ushort (2 bytes) - or NoNameLength if this token has no property name
     ///
     /// Public only because it parameterizes this class's AppendLogIndexBase (a public class
     /// requires a public base-class type argument); it is an implementation detail and not
@@ -116,10 +119,11 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
     public struct PackedToken
     {
         public ulong Packed;
-        public uint Offset;
-        public ushort NameDelta;
+        public int Length;
         public int ParentIndex;
         public int EndIndex;
+        public ushort NameDelta;
+        public ushort NameLength;
     }
 
     // The token log itself (base.items) is single-writer/multi-reader and lock-free - see
@@ -336,12 +340,10 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
     private PackedToken Pack(JsonTokenKind kind, int depth, long rawTokenOffset, int rawTokenLength,
         int parentIndex, long pendingNameOffset, int pendingNameLength, int tokenIndex)
     {
-        if (rawTokenOffset < 0 || rawTokenOffset > uint.MaxValue)
-            throw new NotSupportedException("File offset exceeds the ~4 GiB indexable limit.");
+        if (rawTokenOffset < 0 || rawTokenOffset > MaxOffset)
+            throw new NotSupportedException($"File offset exceeds the supported limit of {MaxOffset} bytes (~256 TiB).");
         if (depth > MaxDepth)
             throw new NotSupportedException($"JSON nesting depth exceeds the supported limit of {MaxDepth}.");
-        if (rawTokenLength > MaxLength)
-            throw new NotSupportedException($"Token length exceeds the supported limit of {MaxLength} bytes.");
 
         int nameLengthField;
         ushort nameDelta;
@@ -375,16 +377,16 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
 
         ulong packed = (ulong)(byte)kind & KindMask;
         packed |= ((ulong)depth & DepthMask) << DepthShift;
-        packed |= ((ulong)(uint)rawTokenLength & LengthMask) << LengthShift;
-        packed |= ((ulong)(uint)nameLengthField & NameLengthMask) << NameLengthShift;
+        packed |= ((ulong)rawTokenOffset & OffsetMask) << OffsetShift;
 
         return new PackedToken
         {
             Packed = packed,
-            Offset = (uint)rawTokenOffset,
-            NameDelta = nameDelta,
+            Length = rawTokenLength,
             ParentIndex = parentIndex,
-            EndIndex = -1
+            EndIndex = -1,
+            NameDelta = nameDelta,
+            NameLength = (ushort)nameLengthField
         };
     }
 
@@ -397,8 +399,9 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
     {
         var kind = (JsonTokenKind)(packed.Packed & KindMask);
         int depth = (int)((packed.Packed >> DepthShift) & DepthMask);
-        int length = (int)((packed.Packed >> LengthShift) & LengthMask);
-        int nameLengthField = (int)((packed.Packed >> NameLengthShift) & NameLengthMask);
+        long offset = (long)((packed.Packed >> OffsetShift) & OffsetMask);
+        int length = packed.Length;
+        int nameLengthField = packed.NameLength;
 
         // EndIndex is the one field the writer mutates after publication (when the matching
         // End token is found), so it must be read volatile - paired with the Volatile.Write
@@ -407,7 +410,6 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
         // like DescribeChildCount multiply by tens of thousands per rendered row.
         int endIndex = Volatile.Read(ref packed.EndIndex);
 
-        long offset = packed.Offset;
         int nameLength;
         long nameOffset;
         if (nameLengthField == NoNameLength)

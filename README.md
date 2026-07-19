@@ -15,14 +15,9 @@ A cross-platform JSON viewer built for large files — multi-gigabyte JSON and N
   - Copy property value to clipboard
 - NDJSON support
   - Browse individual lines, view the JSON for the selected line in the dedicated JSON viewer
-  - Tested with 3GB+ NSJson files, the practical limit for NDJson is disk space.
+  - Tested with 3GB+ NDJson files, the practical limit is disk space.
 - Recent files list
 - Light/dark theming, following the OS by default with an in-app override
-
-## Limitations
-
-- Any individual JSON document is limited to about 4 GB, due to the internal structural index using 32-bit file offsets. In practice this shouldn't be a real issue - a single 4GB json file is impractical to consume with most standard DOM parsers anyway but it can be revisited if it becomes necessary.
-  - for NDJson files this means any single line is limited to 4GB. The total file can be TBs. 
 
 ## Tech stack
 
@@ -39,7 +34,7 @@ in the application folder.
 
 ## Running the MacOS release
 
-MacOS quarantines downloaded applictions that have not been signed and refuses to run them, with an "Application is damaged message.
+MacOS quarantines downloaded applictions that have not been signed and refuses to run them, with an "Application is damaged" message.
 I don't have an Apple developer account and until I do, any app I upload will fail to run.
 
 You have a couple of options. You could (quite rightly!) not trust some random app you download from the internet, and build it from source. Or you can remove the quarantine/security attributes with this command, which allows MacOS to run it.

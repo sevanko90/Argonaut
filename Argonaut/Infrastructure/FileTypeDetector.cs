@@ -59,6 +59,9 @@ public static class FileTypeDetector
             : FileKind.Json;
     }
 
+    // The chunked-scan loops in these three helpers (and in FileOffsetIndex/FileSearchSession)
+    // are deliberately duplicated, not abstracted: they're hot paths, and the indirection an
+    // abstraction would add costs more than the ~15 shared lines save.
     private static long FindNonWhitespace(MMapFile file, long start, long end)
     {
         for (long offset = start; offset < end;)

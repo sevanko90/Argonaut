@@ -113,6 +113,8 @@ public sealed class FileSearchSession : AppendLogIndexBase<SearchMatch>, IDispos
             // overlap bytes at a window boundary must not re-emit a match already recorded.
             long searchFrom = 0;
 
+            // Chunked-scan loop deliberately duplicated (see also FileOffsetIndex,
+            // FileTypeDetector): hot path, indirection would cost more than the shared lines.
             while (windowStart < length)
             {
                 if (ct.IsCancellationRequested)

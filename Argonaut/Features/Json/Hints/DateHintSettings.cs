@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
-using System.Runtime.CompilerServices;
+using Argonaut.Infrastructure;
 
 namespace Argonaut.Features.Json.Hints;
 
@@ -11,7 +10,7 @@ namespace Argonaut.Features.Json.Hints;
 /// owning JsonViewModel/NdJsonViewModel. UI-thread only; background code must marshal through
 /// Dispatcher.UIThread before touching this.
 /// </summary>
-public sealed class DateHintSettings : INotifyPropertyChanged
+public sealed class DateHintSettings : ObservableObject
 {
     private readonly Dictionary<int, DateDecodingScheme> tokenOverrides = new();
     private DateDecodingScheme fileDefaultScheme = DateDecodingScheme.Off;
@@ -39,8 +38,6 @@ public sealed class DateHintSettings : INotifyPropertyChanged
         get => timeZoneMode;
         private set => SetField(ref timeZoneMode, value);
     }
-
-    public event PropertyChangedEventHandler? PropertyChanged;
 
     /// <summary>Raised whenever a change could affect a previously rendered hint: a default
     /// scheme change or a per-token override change. Never raised for no-op changes.</summary>
@@ -95,15 +92,5 @@ public sealed class DateHintSettings : INotifyPropertyChanged
         TimeZoneMode = mode;
         if (changed)
             HintsChanged?.Invoke(this, EventArgs.Empty);
-    }
-
-    private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
-    {
-        if (EqualityComparer<T>.Default.Equals(field, value))
-            return false;
-
-        field = value;
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
-        return true;
     }
 }

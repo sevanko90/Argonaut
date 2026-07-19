@@ -106,7 +106,7 @@ public static class JsonPathBuilder
         if (length <= 0)
             return string.Empty;
 
-        return Encoding.UTF8.GetString(mmap.GetSpan(offset, length));
+        return mmap.GetUtf8String(offset, length);
     }
 
     private static bool IsContainer(JsonTokenKind kind) => kind is JsonTokenKind.StartObject or JsonTokenKind.StartArray;

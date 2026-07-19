@@ -8,6 +8,10 @@ namespace Argonaut.Features.NdJson;
 /// contains it. Line spans are contiguous from offset 0 and include their trailing newline,
 /// so containment is exact; binary search is valid mid-indexing because spans are appended
 /// in ascending file order.
+///
+/// Deliberately a structural twin of JsonOffsetTokenResolver, not a shared generic: the
+/// binary search is a hot path and the indirection a generic abstraction would add costs
+/// more than the duplicated lines save.
 /// </summary>
 public static class NdJsonOffsetLineResolver
 {

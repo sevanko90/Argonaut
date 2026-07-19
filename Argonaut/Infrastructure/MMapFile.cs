@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.IO.MemoryMappedFiles;
+using System.Text;
 
 namespace Argonaut.Infrastructure;
 
@@ -70,6 +71,14 @@ public sealed unsafe class MMapFile : IDisposable
 
         return new ReadOnlySpan<byte>(_ptr + offset, length);
     }
+
+    /// <summary>
+    /// Decodes the file bytes [offset, offset + length) as UTF-8. The one place the
+    /// "decode text on demand from an (offset, length) span" idiom lives, so every reader
+    /// goes through <see cref="GetSpan"/>'s real-length bounds check (see CLAUDE.md).
+    /// </summary>
+    public string GetUtf8String(long offset, int length)
+        => Encoding.UTF8.GetString(GetSpan(offset, length));
 
     public void Dispose()
     {

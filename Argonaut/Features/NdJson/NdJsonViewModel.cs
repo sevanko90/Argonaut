@@ -1,8 +1,5 @@
 using System;
-using System.Collections.Generic;
 using System.ComponentModel;
-using System.Runtime.CompilerServices;
-using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Features.Json;
 using Argonaut.Features.Json.Hints;
@@ -12,7 +9,7 @@ namespace Argonaut.Features.NdJson;
 
 public sealed record NdJsonSelectedLine(int LineNumber, string Text);
 
-public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
+public sealed class NdJsonViewModel : ObservableObject, IDisposable
 {
     private const int InitialIndexedLineTarget = 250;
 
@@ -43,8 +40,8 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
             if (!SetField(ref selectedLine, value))
                 return;
 
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedLineNumber)));
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SelectedLineText)));
+            OnPropertyChanged(nameof(SelectedLineNumber));
+            OnPropertyChanged(nameof(SelectedLineText));
         }
     }
 
@@ -82,8 +79,6 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
                 selectedLineJsonViewModel.HighlightTerm = value;
         }
     }
-
-    public event PropertyChangedEventHandler? PropertyChanged;
 
     public NdJsonViewModel()
     {
@@ -140,7 +135,7 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
 
         SelectedLine = null;
         lines = new MemoryMappedFileLineCollection(session.Index, session.File);
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Lines)));
+        OnPropertyChanged(nameof(Lines));
     }
 
     public string GetLineText(int lineIndex)
@@ -211,15 +206,5 @@ public sealed class NdJsonViewModel : IDisposable, INotifyPropertyChanged
             selectedLineJsonViewModel.HintSettings.PropertyChanged -= OnChildHintSettingsPropertyChanged;
         selectedLineJsonViewModel?.Dispose();
         this.session?.Dispose();
-    }
-
-    private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
-    {
-        if (EqualityComparer<T>.Default.Equals(field, value))
-            return false;
-
-        field = value;
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
-        return true;
     }
 }

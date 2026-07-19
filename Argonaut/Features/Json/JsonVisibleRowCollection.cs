@@ -2,7 +2,6 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.Specialized;
-using System.Text;
 using Avalonia.Threading;
 using Argonaut.Features.Json.Hints;
 using Argonaut.Infrastructure;
@@ -382,7 +381,7 @@ public sealed class JsonVisibleRowCollection : IList, INotifyCollectionChanged, 
         if (length <= 0)
             return string.Empty;
 
-        return Encoding.UTF8.GetString(mmap.GetSpan(offset, length));
+        return mmap.GetUtf8String(offset, length);
     }
 
     private static bool IsContainer(JsonTokenKind kind) => kind is JsonTokenKind.StartObject or JsonTokenKind.StartArray;

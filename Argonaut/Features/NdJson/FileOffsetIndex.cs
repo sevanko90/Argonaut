@@ -104,6 +104,8 @@ public sealed class FileOffsetIndex : AppendLogIndexBase<FileLineSpan>, IFileInd
         long currentLineStart = 0;
         try
         {
+            // Chunked-scan loop deliberately duplicated (see also FileSearchSession.Scan,
+            // FileTypeDetector): hot path, indirection would cost more than the shared lines.
             while (offset < length)
             {
                 cancellationToken.ThrowIfCancellationRequested();

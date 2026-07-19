@@ -9,41 +9,23 @@ namespace Argonaut.Infrastructure;
 public static class RecentFileHistory
 {
     private const int MaxEntries = 5;
+    private const string FileName = "recent-files.json";
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true
     };
 
-    private static string HistoryFilePath => AppDataPaths.GetSettingsFilePath("recent-files.json");
-
     public static IReadOnlyList<string> Load()
     {
-        try
-        {
-            if (!File.Exists(HistoryFilePath))
-                return Array.Empty<string>();
-
-            var json = File.ReadAllText(HistoryFilePath);
-            var items = JsonSerializer.Deserialize<List<string>>(json, JsonOptions) ?? new List<string>();
-            return items.Where(static path => !string.IsNullOrWhiteSpace(path)).Take(MaxEntries).ToList();
-        }
-        catch
-        {
+        var items = JsonSettingsStore.TryLoad<List<string>>(FileName, JsonOptions);
+        if (items is null)
             return Array.Empty<string>();
-        }
+
+        return items.Where(static path => !string.IsNullOrWhiteSpace(path)).Take(MaxEntries).ToList();
     }
 
-    public static void Clear()
-    {
-        try
-        {
-            File.Delete(HistoryFilePath);
-        }
-        catch
-        {
-            // History should not block file opening.
-        }
-    }
+    public static void Clear() => JsonSettingsStore.Delete(FileName);
 
     public static void Add(string path)
     {
@@ -52,8 +34,6 @@ public static class RecentFileHistory
 
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(HistoryFilePath)!);
-
             var normalizedPath = Path.GetFullPath(path);
             var items = Load()
                 .Where(existing => !string.Equals(existing, normalizedPath, StringComparison.OrdinalIgnoreCase))
@@ -64,7 +44,7 @@ public static class RecentFileHistory
             if (items.Count > MaxEntries)
                 items = items.Take(MaxEntries).ToList();
 
-            File.WriteAllText(HistoryFilePath, JsonSerializer.Serialize(items, JsonOptions));
+            JsonSettingsStore.Save(FileName, items, JsonOptions);
         }
         catch
         {

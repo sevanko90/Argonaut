@@ -1,6 +1,4 @@
 using System;
-using System.IO;
-using System.Text.Json;
 
 namespace Argonaut.Infrastructure;
 
@@ -13,37 +11,15 @@ public enum ThemeMode
 
 public static class ThemePreference
 {
-    private static string SettingsFilePath => AppDataPaths.GetSettingsFilePath("theme.json");
+    private const string FileName = "theme.json";
 
     public static ThemeMode Load()
     {
-        try
-        {
-            if (!File.Exists(SettingsFilePath))
-                return ThemeMode.System;
-
-            var json = File.ReadAllText(SettingsFilePath);
-            var saved = JsonSerializer.Deserialize<SavedTheme>(json);
-            return saved is not null && Enum.TryParse<ThemeMode>(saved.Mode, out var mode) ? mode : ThemeMode.System;
-        }
-        catch
-        {
-            return ThemeMode.System;
-        }
+        var saved = JsonSettingsStore.TryLoad<SavedTheme>(FileName);
+        return saved is not null && Enum.TryParse<ThemeMode>(saved.Mode, out var mode) ? mode : ThemeMode.System;
     }
 
-    public static void Save(ThemeMode mode)
-    {
-        try
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(SettingsFilePath)!);
-            File.WriteAllText(SettingsFilePath, JsonSerializer.Serialize(new SavedTheme(mode.ToString())));
-        }
-        catch
-        {
-            // Preference should not block theme switching.
-        }
-    }
+    public static void Save(ThemeMode mode) => JsonSettingsStore.Save(FileName, new SavedTheme(mode.ToString()));
 
     private sealed record SavedTheme(string Mode);
 }

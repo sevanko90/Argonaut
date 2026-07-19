@@ -1,7 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
-using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Features.Json.Hints;
@@ -10,7 +8,7 @@ using Avalonia.Threading;
 
 namespace Argonaut.Features.Json;
 
-public sealed class JsonViewModel : IDisposable, INotifyPropertyChanged
+public sealed class JsonViewModel : ObservableObject, IDisposable
 {
     private const int InitialTokenTarget = 250;
 
@@ -66,8 +64,6 @@ public sealed class JsonViewModel : IDisposable, INotifyPropertyChanged
         get => highlightTerm;
         set => SetField(ref highlightTerm, value);
     }
-
-    public event PropertyChangedEventHandler? PropertyChanged;
 
     public JsonViewModel()
     {
@@ -153,15 +149,5 @@ public sealed class JsonViewModel : IDisposable, INotifyPropertyChanged
         session?.Cancel();
         rows?.Dispose();
         session?.Dispose();
-    }
-
-    private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
-    {
-        if (EqualityComparer<T>.Default.Equals(field, value))
-            return false;
-
-        field = value;
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
-        return true;
     }
 }

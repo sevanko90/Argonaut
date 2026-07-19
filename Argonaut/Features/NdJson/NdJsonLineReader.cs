@@ -1,4 +1,3 @@
-using System.Text;
 using Argonaut.Infrastructure;
 
 namespace Argonaut.Features.NdJson;
@@ -13,7 +12,7 @@ public static class NdJsonLineReader
     public static string ReadLine(MMapFile file, FileLineSpan lineSpan)
     {
         var trimmed = TrimTrailingNewline(file, lineSpan);
-        return Encoding.UTF8.GetString(file.GetSpan(trimmed.Offset, trimmed.Length));
+        return file.GetUtf8String(trimmed.Offset, trimmed.Length);
     }
 
     /// <summary>

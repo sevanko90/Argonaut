@@ -288,7 +288,10 @@ public partial class MainWindow : Window
                 var vm = new JsonViewModel();
                 await vm.LoadAsync(normalizedPath, reporter);
                 if (requestId != openRequestId)
+                {
+                    vm.Dispose();
                     return;
+                }
 
                 ContentArea.Content = new JsonView { DataContext = vm };
                 findController.Attach(new JsonSearchNavigator(vm));
@@ -313,7 +316,10 @@ public partial class MainWindow : Window
                 var vm = new NdJsonViewModel();
                 await vm.LoadAsync(normalizedPath, reporter);
                 if (requestId != openRequestId)
+                {
+                    vm.Dispose();
                     return;
+                }
 
                 currentNdJsonViewModel = vm;
                 currentNdJsonViewModel.PropertyChanged += OnNdJsonViewModelPropertyChanged;

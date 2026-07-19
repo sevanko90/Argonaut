@@ -57,7 +57,7 @@ public record struct JsonTokenInfo(
 /// documents; <see cref="GetToken"/> unpacks back to the friendly <see cref="JsonTokenInfo"/>
 /// shape so callers never see the packed representation.
 /// </summary>
-public sealed class JsonStructureIndex
+public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.PackedToken>
 {
     // Sentinel NameLength stored in the packed word when a token has no property name
     // (array element or root value). One value out of the 24-bit range is reserved for
@@ -108,8 +108,12 @@ public sealed class JsonStructureIndex
     ///                                     sides (see SegmentedAppendLog remarks); every other
     ///                                     field is immutable once published and safe to read
     ///                                     plainly.
+    ///
+    /// Public only because it parameterizes this class's AppendLogIndexBase (a public class
+    /// requires a public base-class type argument); it is an implementation detail and not
+    /// intended for use outside JsonStructureIndex.
     /// </summary>
-    private struct PackedToken
+    public struct PackedToken
     {
         public ulong Packed;
         public uint Offset;
@@ -118,34 +122,22 @@ public sealed class JsonStructureIndex
         public int EndIndex;
     }
 
-    // Single-writer (the indexing task) / multi-reader (UI). The log's volatile Count
-    // publication is what lets TokenCount/GetToken run lock-free - see SegmentedAppendLog
-    // for the full reasoning. The one field mutated after publication (EndIndex) uses
-    // Volatile.Read/Volatile.Write on both sides; see the PackedToken layout doc.
-    private readonly SegmentedAppendLog<PackedToken> tokens = new();
+    // The token log itself (base.items) is single-writer/multi-reader and lock-free - see
+    // AppendLogIndexBase/SegmentedAppendLog. The one field mutated after publication
+    // (EndIndex) uses Volatile.Read/Volatile.Write on both sides; see the PackedToken
+    // layout doc.
 
-    // Guards ONLY cold paths: the waiter machinery, the nameOffsetOverflow dictionary, and
-    // failure. Nothing on the per-token hot path takes this lock - that is the point of the
-    // lock-free log (an uncontended lock pair is 10-20ns, times ~3 per token, times millions
-    // of tokens).
-    private readonly Lock sync = new();
+    // Guards ONLY the cold overflow/failure state below (the waiter machinery has its own
+    // lock in the base). Nothing on the per-token hot path takes this lock - that is the
+    // point of the lock-free log (an uncontended lock pair is 10-20ns, times ~3 per token,
+    // times millions of tokens).
+    private readonly Lock overflowSync = new();
 
     // Populated only in the rare case a property name's back-offset from its value doesn't
     // fit in PackedToken.NameDelta (see NameDeltaOverflow). Expected to stay empty/near-empty.
-    // Dictionary<K,V> is not safe for read-during-resize, so BOTH sides access it under sync;
-    // that's fine because the overflow path is pathological-whitespace-only cold.
+    // Dictionary<K,V> is not safe for read-during-resize, so BOTH sides access it under
+    // overflowSync; that's fine because the overflow path is pathological-whitespace-only cold.
     private readonly Dictionary<int, long> nameOffsetOverflow = new();
-
-    private TaskCompletionSource<bool>? countReady;
-    private int countReadyTarget;
-
-    // Hot-path mirror of countReadyTarget: 0 means "nobody is waiting", so the writer can
-    // skip the waiter lock entirely with one volatile read per token. Written only inside
-    // the sync lock.
-    private volatile int pendingWaitTarget;
-
-    // volatile: read lock-free by IsComplete/readers; written once by the writer thread.
-    private volatile bool complete;
 
     private Exception? failure;
 
@@ -156,50 +148,20 @@ public sealed class JsonStructureIndex
     public Task IndexingTask { get; private set; } = Task.CompletedTask;
 
     /// <summary>
-    /// Number of tokens indexed so far (may grow until <see cref="IsComplete"/> is true).
+    /// Number of tokens indexed so far (may grow until <see cref="AppendLogIndexBase{T}.IsComplete"/> is true).
     /// </summary>
-    public int TokenCount => tokens.Count;
-
-    public bool IsComplete => complete;
+    public int TokenCount => this.ItemCount;
 
     public JsonTokenInfo GetToken(int index)
     {
-        return Unpack(index, ref tokens.ItemRef(index));
+        return Unpack(index, ref this.items.ItemRef(index));
     }
 
     /// <summary>
     /// Waits (asynchronously) until at least <paramref name="targetCount"/> tokens are indexed,
     /// or indexing completes with fewer tokens than that.
     /// </summary>
-    public Task WaitForTokenCountAsync(int targetCount)
-    {
-        lock (sync)
-        {
-            if (tokens.Count >= targetCount || complete)
-                return Task.CompletedTask;
-
-            if (countReady is null || countReady.Task.IsCompleted || targetCount > countReadyTarget)
-            {
-                countReadyTarget = targetCount;
-                countReady = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            }
-
-            pendingWaitTarget = countReadyTarget;
-
-            // Re-check after publishing the flag: the writer may have crossed the target
-            // between the first check above and the flag becoming visible to it. The
-            // condition is monotone (count only grows), so any later append also notices
-            // the flag - this re-check only matters if no further token is ever appended.
-            if (tokens.Count >= countReadyTarget || complete)
-            {
-                var waiter = countReady;
-                pendingWaitTarget = 0;
-                waiter.TrySetResult(true);
-            }
-
-            return countReady.Task;
-        }
-    }
+    public Task WaitForTokenCountAsync(int targetCount) => this.WaitForCountAsync(targetCount);
 
     /// <summary>
     /// Waits until the token at <paramref name="tokenIndex"/> has been indexed (i.e. TokenCount &gt; tokenIndex),
@@ -228,13 +190,13 @@ public sealed class JsonStructureIndex
         }
         catch (Exception ex)
         {
-            lock (sync)
+            lock (overflowSync)
                 failure = ex;
             throw;
         }
         finally
         {
-            MarkComplete();
+            this.MarkComplete();
         }
     }
 
@@ -314,8 +276,8 @@ public sealed class JsonStructureIndex
                 }
 
                 // Single writer, so the pre-Add Count is exactly this token's index.
-                int tokenIndex = tokens.Count;
-                tokens.Add(Pack(kind, depth, rawTokenOffset, rawTokenLength,
+                int tokenIndex = this.items.Count;
+                this.items.Add(Pack(kind, depth, rawTokenOffset, rawTokenLength,
                     parentIndex, pendingNameOffset, pendingNameLength, tokenIndex));
 
                 pendingNameOffset = -1;
@@ -333,15 +295,10 @@ public sealed class JsonStructureIndex
                     // reordered by a concurrent GetToken; the alternative - locking here
                     // and in every reader - costs 10-20ns per acquisition at millions of
                     // tokens, which is what this design exists to avoid.
-                    Volatile.Write(ref tokens.ItemRef(startIndex).EndIndex, tokenIndex);
+                    Volatile.Write(ref this.items.ItemRef(startIndex).EndIndex, tokenIndex);
                 }
 
-                // One volatile read per token instead of a lock. A transiently missed flag
-                // is harmless: the condition is monotone, so the next append re-checks it,
-                // and MarkComplete signals unconditionally at the end of indexing.
-                int waitTarget = pendingWaitTarget;
-                if (waitTarget != 0 && tokenIndex + 1 >= waitTarget)
-                    NotifyCountReady();
+                this.OnItemsPublished(tokenIndex + 1);
 
                 if ((tokenIndex & CancellationCheckMask) == 0)
                     cancellationToken.ThrowIfCancellationRequested();
@@ -400,11 +357,11 @@ public sealed class JsonStructureIndex
             if (delta >= NameDeltaOverflow)
             {
                 nameDelta = NameDeltaOverflow;
-                // The entry lands in the dictionary before tokens.Add publishes this token,
-                // so any reader that can see the token can also see its entry; the lock is
-                // only for the dictionary's own internal consistency (readers may look up
-                // older entries while this insert resizes it).
-                lock (sync)
+                // The entry lands in the dictionary before the log's Add publishes this
+                // token, so any reader that can see the token can also see its entry; the
+                // lock is only for the dictionary's own internal consistency (readers may
+                // look up older entries while this insert resizes it).
+                lock (overflowSync)
                     nameOffsetOverflow[tokenIndex] = pendingNameOffset;
             }
             else
@@ -460,7 +417,7 @@ public sealed class JsonStructureIndex
             nameLength = nameLengthField;
             if (packed.NameDelta == NameDeltaOverflow)
             {
-                lock (sync)
+                lock (overflowSync)
                     nameOffset = nameOffsetOverflow[tokenIndex];
             }
             else
@@ -470,36 +427,6 @@ public sealed class JsonStructureIndex
         }
 
         return new JsonTokenInfo(kind, depth, offset, length, packed.ParentIndex, endIndex, nameOffset, nameLength);
-    }
-
-    private void NotifyCountReady()
-    {
-        TaskCompletionSource<bool>? waiter = null;
-        lock (sync)
-        {
-            if (countReady is not null && !countReady.Task.IsCompleted && countReadyTarget > 0 &&
-                tokens.Count >= countReadyTarget)
-            {
-                waiter = countReady;
-                pendingWaitTarget = 0;
-            }
-        }
-
-        waiter?.TrySetResult(true);
-    }
-
-    private void MarkComplete()
-    {
-        complete = true;
-
-        TaskCompletionSource<bool>? waiter;
-        lock (sync)
-        {
-            waiter = countReady;
-            pendingWaitTarget = 0;
-        }
-
-        waiter?.TrySetResult(true);
     }
 
     private static JsonTokenKind Map(JsonTokenType t) => t switch

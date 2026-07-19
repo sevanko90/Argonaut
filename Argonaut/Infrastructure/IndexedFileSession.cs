@@ -96,8 +96,19 @@ public sealed class IndexedFileSession<TIndex> : IDisposable where TIndex : clas
         this.dependentTasks.Add(task);
     }
 
-    /// <summary>Requests the scan stop early. Idempotent; <see cref="Dispose"/> also cancels.</summary>
-    public void Cancel() => this.cts.Cancel();
+    /// <summary>
+    /// Requests the scan stop early. Idempotent, including after <see cref="Dispose"/> - the
+    /// nested per-line JsonViewModel is disposed from two independent paths (its owning
+    /// NdJsonViewModel, and its JsonView's own detach handler when the visual tree tears
+    /// down), so a second Cancel/Dispose pair on the same session is expected, not a bug.
+    /// </summary>
+    public void Cancel()
+    {
+        if (this.disposed)
+            return;
+
+        this.cts.Cancel();
+    }
 
     public void Dispose()
     {

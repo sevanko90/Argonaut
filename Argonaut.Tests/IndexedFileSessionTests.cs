@@ -101,6 +101,29 @@ public class IndexedFileSessionTests
         }
     }
 
+    /// <summary>
+    /// Regression: the nested per-line JsonViewModel is disposed from two independent
+    /// paths (its owning NdJsonViewModel, and its JsonView's own detach handler when the
+    /// visual tree tears down) - a Cancel() arriving after Dispose() already released the
+    /// CancellationTokenSource must not throw ObjectDisposedException.
+    /// </summary>
+    [Fact]
+    public void CancelAfterDispose_DoesNotThrow()
+    {
+        string path = WriteTempFile("line\n");
+        try
+        {
+            var session = IndexedFileSession<FileOffsetIndex>.Start(
+                new MMapFile(path), FileOffsetIndex.StartIndexing);
+            session.Dispose();
+            session.Cancel();
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
     [Fact]
     public void Start_DisposesFileWhenFactoryThrows()
     {

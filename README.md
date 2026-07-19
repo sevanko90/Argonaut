@@ -29,3 +29,19 @@ A cross-platform JSON viewer built for large files — multi-gigabyte JSON and N
 Argonaut is a .NET application built on [Avalonia](https://avaloniaui.net/), a cross-platform XAML-based UI framework. This gives it a single C#/XAML codebase that runs natively on Windows, macOS, and Linux.
 
 ... And Claude! Let's not forget the agent that did the work. I'll take the credit for telling it what to do, and how to do it, and knowing what good looks like. But I'm not going to lie, I didn't type a single line of this app myself. We really are living in the future.
+
+### Running the code
+
+I use [JetBrains Rider](https://www.jetbrains.com/rider/) for compiling / running / tweaking, or you can just download the [.NET runtime](https://dotnet.microsoft.com/en-us/download) and call
+
+    dotnet publish
+in the application folder. 
+
+## Running the MacOS release
+
+MAcOS quarantines downloaded applictions that have not been signed and refuses to run them, with an "Application is damaged message.
+I don't have an Apple developer account and until I do, any app I upload will fail to run.
+
+You have a couple of options. You could (quite rightly!) not trust some random app you download from the internet, and build it from source. Or you can self-sign it to force MacOS to trust it with this command.
+
+    xattr -cr /path/to/Argonaut.app

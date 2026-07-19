@@ -17,10 +17,17 @@ public sealed class CsvViewModel : ObservableObject, IDisposable
     private byte delimiter;
     private bool isHeaderRow = true;
     private IReadOnlyList<CsvCell> headerCells = [];
+    private string? highlightTerm;
+    private int? selectedRowIndex;
+    private int? selectedColumnIndex;
 
     public string FilePath { get; private set; } = string.Empty;
 
     internal FileOffsetIndex? Index => this.session?.Index;
+
+    internal MMapFile? Mmap => this.session?.File;
+
+    internal byte Delimiter => this.delimiter;
 
     public Task IndexingTask => this.session?.IndexingTask ?? Task.CompletedTask;
 
@@ -55,6 +62,42 @@ public sealed class CsvViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(RowCount));
             UpdateHeaderCells();
         }
+    }
+
+    /// <summary>The active find term, highlighted in every visible cell (header and data) via
+    /// CsvView's SearchHighlight bindings. No nested view model to propagate into, unlike
+    /// NdJsonViewModel.HighlightTerm.</summary>
+    public string? HighlightTerm
+    {
+        get => this.highlightTerm;
+        set => SetField(ref this.highlightTerm, value);
+    }
+
+    /// <summary>Virtual row index within <see cref="Rows"/> that a search reveal wants
+    /// scrolled/selected into view; null if the current reveal target has no data row (e.g. a
+    /// match landed on the header line while <see cref="IsHeaderRow"/> is true).</summary>
+    public int? SelectedRowIndex
+    {
+        get => this.selectedRowIndex;
+        private set => SetField(ref this.selectedRowIndex, value);
+    }
+
+    /// <summary>Column index a search reveal wants scrolled into view horizontally - set even
+    /// when <see cref="SelectedRowIndex"/> is null, since the sticky header can still be
+    /// scrolled out of view sideways.</summary>
+    public int? SelectedColumnIndex
+    {
+        get => this.selectedColumnIndex;
+        private set => SetField(ref this.selectedColumnIndex, value);
+    }
+
+    /// <summary>Used by CsvSearchNavigator to reveal a search match - the view reacts to the
+    /// resulting property changes by selecting/scrolling, mirroring JsonViewModel.SelectToken's
+    /// verb-method shape for selection state.</summary>
+    public void SelectRow(int? rowIndex, int? columnIndex)
+    {
+        SelectedRowIndex = rowIndex;
+        SelectedColumnIndex = columnIndex;
     }
 
     public async Task LoadAsync(string path, byte delimiter, IProgressReporter? progressReporter = null)

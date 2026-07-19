@@ -347,10 +347,8 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Shared by the Csv/Tsv switch cases above - identical apart from the delimiter byte.
-    /// No search navigator is attached: FindController already no-ops with none attached
-    /// (FindAsync guards on navigator is null), so Ctrl+F is silently inert here. No
-    /// DateHintSettings either - CSV/TSV has no date-hint concept.
+    /// Shared by the Csv/Tsv switch cases above - identical apart from the delimiter byte. No
+    /// DateHintSettings attach - CSV/TSV has no date-hint concept.
     /// </summary>
     private async Task OpenCsvAsync(string path, byte delimiter, int requestId)
     {
@@ -370,6 +368,7 @@ public partial class MainWindow : Window
         }
 
         ContentArea.Content = new CsvView { DataContext = vm };
+        findController.Attach(new CsvSearchNavigator(vm));
         currentFilePath = path;
         ShowToolbar(path);
         RecentFileHistory.Add(path);

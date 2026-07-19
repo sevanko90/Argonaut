@@ -22,3 +22,18 @@ This has caused a real bug before: `JsonStructureIndex.Build` read past the real
 threw `JsonReaderException: '0x00' is invalid after a single JSON value`. It did not repro on macOS because the
 padding rounding happened to align differently there. Fixed by storing `Length` from `FileInfo(path).Length` in
 `MMapFile`'s constructor instead of deriving it from the accessor.
+
+## UI-threading convention: rely on the dispatcher's SynchronizationContext
+
+Avalonia installs a `SynchronizationContext` on the UI thread, so an `await` in a method that *started* on the
+UI thread resumes on the UI thread. The app leans on that guarantee as its one convention:
+
+- **UI-originated async flows never dispatch explicitly.** No `Dispatcher.UIThread.InvokeAsync` wrappers around
+  control access after an await — the await already resumed on the UI thread. Corollary: `ConfigureAwait(false)`
+  is banned in app code, since it silently breaks this guarantee.
+- **The one exception is code physically executing on a background thread** (e.g. `IProgressReporter.Report`
+  called from inside an indexing scan, or a `Task.Run` body). That code marshals with `Dispatcher.UIThread.Post`
+  — fire-and-forget, never `InvokeAsync`, because no worker should ever block on (or await) the UI thread.
+
+If a method can be entered from either kind of thread, split it or document which side it belongs to rather
+than sprinkling `CheckAccess`.

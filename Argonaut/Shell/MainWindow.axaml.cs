@@ -301,7 +301,7 @@ public partial class MainWindow : Window
                 RecentFileHistory.Add(normalizedPath);
                 ReloadRecentFiles();
                 StatusText.Text = $"{normalizedPath} — {vm.TokenCount:N0} tokens indexed so far";
-                _ = MonitorJsonCompletionAsync(vm, requestId);
+                _ = MonitorIndexingCompletionAsync(vm.Index!, normalizedPath, requestId);
                 break;
             }
             case FileTypeDetector.FileKind.Ndjson:
@@ -330,6 +330,9 @@ public partial class MainWindow : Window
                 AttachHintSettings(vm.HintSettings);
                 RecentFileHistory.Add(normalizedPath);
                 ReloadRecentFiles();
+                UpdateNdJsonStatus(vm);
+                // Keeps the "Selected line" suffix if a line is selected when indexing finishes.
+                _ = MonitorIndexingCompletionAsync(vm.Index!, normalizedPath, requestId, () => UpdateNdJsonStatus(vm));
                 break;
             }
             default:
@@ -465,58 +468,32 @@ public partial class MainWindow : Window
     }
 
 
-    private async Task MonitorNdJsonCompletionAsync(NdJsonViewModel vm, int requestId)
+    /// <summary>
+    /// Updates the status bar when a file's background indexing finishes or fails.
+    /// Fire-and-forget from the UI thread; per the app's threading convention (see
+    /// CLAUDE.md) the awaits resume on the UI thread, so controls are touched directly.
+    /// </summary>
+    private async Task MonitorIndexingCompletionAsync(IFileIndexer indexer, string filePath, int requestId,
+        Action? showCompleted = null)
     {
         try
         {
-            await vm.IndexingTask;
+            await indexer.IndexingTask;
         }
         catch
         {
-            if (requestId != openRequestId)
-                return;
-
-            await Dispatcher.UIThread.InvokeAsync(() =>
-            {
-                StatusText.Text = $"{vm.FilePath} — indexing failed";
-            });
+            if (requestId == openRequestId)
+                StatusText.Text = $"{filePath} — indexing failed";
             return;
         }
 
         if (requestId != openRequestId)
             return;
 
-        await Dispatcher.UIThread.InvokeAsync(() =>
-        {
-            UpdateNdJsonStatus(vm);
-        });
-    }
-
-    private async Task MonitorJsonCompletionAsync(JsonViewModel vm, int requestId)
-    {
-        try
-        {
-            await vm.IndexingTask;
-        }
-        catch
-        {
-            if (requestId != openRequestId)
-                return;
-
-            await Dispatcher.UIThread.InvokeAsync(() =>
-            {
-                StatusText.Text = $"{vm.FilePath} — indexing failed";
-            });
-            return;
-        }
-
-        if (requestId != openRequestId)
-            return;
-
-        await Dispatcher.UIThread.InvokeAsync(() =>
-        {
-            StatusText.Text = $"{vm.FilePath} — {vm.TokenCount:N0} tokens";
-        });
+        if (showCompleted is not null)
+            showCompleted();
+        else
+            StatusText.Text = $"{filePath} — {indexer.ItemCount:N0} {indexer.ItemNoun}";
     }
 
     private void ReloadRecentFiles()

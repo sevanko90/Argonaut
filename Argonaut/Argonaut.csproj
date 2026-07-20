@@ -21,6 +21,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Argonaut.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Compile Update="Features\Search\FindBar.axaml.cs">
       <DependentUpon>FindBar.axaml</DependentUpon>
     </Compile>

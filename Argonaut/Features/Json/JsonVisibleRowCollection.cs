@@ -1,5 +1,4 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Collections.Specialized;
 using Avalonia.Threading;
@@ -50,7 +49,7 @@ public sealed class JsonRow
 /// actually realized, and only currently-expanded subtrees (capped per container) are
 /// ever materialized into the visible list - the rest of a huge document is never touched.
 /// </summary>
-public sealed class JsonVisibleRowCollection : IList, INotifyCollectionChanged, IDisposable
+public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
 {
     private const int ChildCap = 2000;
     // Hard ceiling on how far repeated "show more" clicks can page a single container's
@@ -135,23 +134,9 @@ public sealed class JsonVisibleRowCollection : IList, INotifyCollectionChanged, 
     /// </summary>
     private bool IsExpanded(int tokenIndex, int depth) => (depth < defaultExpandDepth) ^ expandOverrides.Contains(tokenIndex);
 
-    public event NotifyCollectionChangedEventHandler? CollectionChanged;
+    protected override int GetCount() => visibleRows.Count;
 
-    public int Count => visibleRows.Count;
-
-    public bool IsFixedSize => true;
-
-    public bool IsReadOnly => true;
-
-    public bool IsSynchronized => false;
-
-    public object SyncRoot => this;
-
-    public object? this[int i]
-    {
-        get => GetRow(i);
-        set => throw new NotSupportedException();
-    }
+    protected override object GetItem(int index) => GetRow(index);
 
     /// <summary>
     /// Finds a token's current position in the visible list, or null if it isn't visible
@@ -434,7 +419,7 @@ public sealed class JsonVisibleRowCollection : IList, INotifyCollectionChanged, 
         rowCache.Clear();
         rowCacheOrder.Clear();
 
-        CollectionChanged?.Invoke(this, new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
+        RaiseCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
     }
 
     private void AppendSubtree(int tokenIndex, List<VisibleRow> into)
@@ -507,7 +492,7 @@ public sealed class JsonVisibleRowCollection : IList, INotifyCollectionChanged, 
     {
         rowCache.Clear();
         rowCacheOrder.Clear();
-        CollectionChanged?.Invoke(this, new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
+        RaiseCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
     }
 
     private void OnHintsChanged(object? sender, EventArgs e) => InvalidateRealizedRows();
@@ -538,7 +523,7 @@ public sealed class JsonVisibleRowCollection : IList, INotifyCollectionChanged, 
         }
     }
 
-    public void Dispose()
+    protected override void DisposeCore()
     {
         if (growthTimer is not null)
         {
@@ -552,29 +537,6 @@ public sealed class JsonVisibleRowCollection : IList, INotifyCollectionChanged, 
             foreach (var provider in hintProviders)
                 provider.HintsChanged -= OnHintsChanged;
         }
-    }
-
-    public int Add(object? value) => throw new NotSupportedException();
-
-    public void Clear() => throw new NotSupportedException();
-
-    public bool Contains(object? value) => false;
-
-    public int IndexOf(object? value) => -1;
-
-    public void Insert(int index, object? value) => throw new NotSupportedException();
-
-    public void Remove(object? value) => throw new NotSupportedException();
-
-    public void RemoveAt(int index) => throw new NotSupportedException();
-
-    public void CopyTo(Array array, int index) => throw new NotSupportedException();
-
-    public IEnumerator GetEnumerator()
-    {
-        int count = Count;
-        for (int i = 0; i < count; i++)
-            yield return this[i];
     }
 
     private readonly struct VisibleRow

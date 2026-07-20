@@ -3,13 +3,15 @@ using System.ComponentModel;
 using System.Threading.Tasks;
 using Argonaut.Features.Json;
 using Argonaut.Features.Json.Hints;
+using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
+using Argonaut.Shell;
 
 namespace Argonaut.Features.NdJson;
 
 public sealed record NdJsonSelectedLine(int LineNumber, string Text);
 
-public sealed class NdJsonViewModel : ObservableObject, IDisposable
+public sealed class NdJsonViewModel : ObservableObject, IDocumentViewModel
 {
     private const int InitialIndexedLineTarget = 250;
 
@@ -18,7 +20,9 @@ public sealed class NdJsonViewModel : ObservableObject, IDisposable
     private NdJsonSelectedLine? selectedLine;
     private JsonViewModel? selectedLineJsonViewModel;
     private string? highlightTerm;
+    private string statusText = string.Empty;
     private long selectionRequestId;
+    private bool disposed;
 
     public string FilePath { get; private set; } = string.Empty;
 
@@ -32,6 +36,15 @@ public sealed class NdJsonViewModel : ObservableObject, IDisposable
 
     public MemoryMappedFileLineCollection Lines => lines ?? throw new InvalidOperationException("LoadAsync must complete before Lines is accessed.");
 
+    /// <summary>Status-bar line for this document (see <see cref="IDocumentViewModel"/>):
+    /// line count plus the selected line, refreshed on selection changes and when
+    /// indexing finishes.</summary>
+    public string StatusText
+    {
+        get => statusText;
+        private set => SetField(ref statusText, value);
+    }
+
     public NdJsonSelectedLine? SelectedLine
     {
         get => selectedLine;
@@ -42,6 +55,7 @@ public sealed class NdJsonViewModel : ObservableObject, IDisposable
 
             OnPropertyChanged(nameof(SelectedLineNumber));
             OnPropertyChanged(nameof(SelectedLineText));
+            UpdateStatusText();
         }
     }
 
@@ -149,6 +163,42 @@ public sealed class NdJsonViewModel : ObservableObject, IDisposable
         SelectedLine = null;
         lines = new MemoryMappedFileLineCollection(session.Index, session.File);
         OnPropertyChanged(nameof(Lines));
+
+        UpdateStatusText();
+        _ = MonitorIndexingAsync(session);
+    }
+
+    public ISearchNavigator CreateSearchNavigator() => new NdJsonSearchNavigator(this);
+
+    private void UpdateStatusText()
+    {
+        StatusText = SelectedLineNumber is { } line
+            ? $"{FilePath} — {LineCount:N0} lines — Selected line: {line:N0}"
+            : $"{FilePath} — {LineCount:N0} lines";
+    }
+
+    /// <summary>
+    /// Refreshes <see cref="StatusText"/> when background indexing finishes (keeping the
+    /// "Selected line" suffix if one is selected by then) or fails. Fire-and-forget from
+    /// LoadAsync (UI thread); the await resumes there per the app's threading convention.
+    /// The disposed check covers cancellation-by-dispose: a superseded or closed document
+    /// must not repaint its status as a failure.
+    /// </summary>
+    private async Task MonitorIndexingAsync(IndexedFileSession<FileOffsetIndex> session)
+    {
+        try
+        {
+            await session.IndexingTask;
+        }
+        catch
+        {
+            if (!disposed)
+                StatusText = $"{FilePath} — indexing failed";
+            return;
+        }
+
+        if (!disposed)
+            UpdateStatusText();
     }
 
     public string GetLineText(int lineIndex)
@@ -177,7 +227,7 @@ public sealed class NdJsonViewModel : ObservableObject, IDisposable
         var jsonViewModel = new JsonViewModel { DefaultExpandDepth = DefaultExpandDepth };
         try
         {
-            await jsonViewModel.LoadAsync(new MMapFile(FilePath, trimmed.Offset, trimmed.Length));
+            await jsonViewModel.LoadAsync(FilePath, trimmed.Offset, trimmed.Length);
         }
         catch
         {
@@ -209,6 +259,11 @@ public sealed class NdJsonViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
+        // Idempotent - see IDocumentViewModel's lifetime contract.
+        if (disposed)
+            return;
+        disposed = true;
+
         // Cancel first so the background line-offset scan stops promptly; the collections
         // and the nested per-line view model must be disposed before session.Dispose joins
         // the scan and releases the mapping.

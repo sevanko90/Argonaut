@@ -2,11 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Argonaut.Features.NdJson;
+using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
+using Argonaut.Shell;
 
 namespace Argonaut.Features.Csv;
 
-public sealed class CsvViewModel : ObservableObject, IDisposable
+public sealed class CsvViewModel : ObservableObject, IDocumentViewModel
 {
     private const int InitialIndexedRowTarget = 250;
 
@@ -18,8 +20,10 @@ public sealed class CsvViewModel : ObservableObject, IDisposable
     private bool isHeaderRow = true;
     private IReadOnlyList<CsvCell> headerCells = [];
     private string? highlightTerm;
+    private string statusText = string.Empty;
     private int? selectedRowIndex;
     private int? selectedColumnIndex;
+    private bool disposed;
 
     public string FilePath { get; private set; } = string.Empty;
 
@@ -32,6 +36,13 @@ public sealed class CsvViewModel : ObservableObject, IDisposable
     public Task IndexingTask => this.session?.IndexingTask ?? Task.CompletedTask;
 
     public int RowCount => this.rows?.Count ?? 0;
+
+    /// <summary>Status-bar line for this document (see <see cref="IDocumentViewModel"/>).</summary>
+    public string StatusText
+    {
+        get => this.statusText;
+        private set => SetField(ref this.statusText, value);
+    }
 
     public CsvRowCollection Rows => this.rows ?? throw new InvalidOperationException("LoadAsync must complete before Rows is accessed.");
 
@@ -129,6 +140,34 @@ public sealed class CsvViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(Rows));
         OnPropertyChanged(nameof(ColumnLayout));
         OnPropertyChanged(nameof(RowCount));
+
+        StatusText = $"{path} — {RowCount:N0} rows indexed so far";
+        _ = MonitorIndexingAsync(session);
+    }
+
+    public ISearchNavigator CreateSearchNavigator() => new CsvSearchNavigator(this);
+
+    /// <summary>
+    /// Refreshes <see cref="StatusText"/> when background indexing finishes or fails.
+    /// Fire-and-forget from LoadAsync (UI thread); the await resumes there per the app's
+    /// threading convention. The disposed check covers cancellation-by-dispose: a
+    /// superseded or closed document must not repaint its status as a failure.
+    /// </summary>
+    private async Task MonitorIndexingAsync(IndexedFileSession<FileOffsetIndex> session)
+    {
+        try
+        {
+            await session.IndexingTask;
+        }
+        catch
+        {
+            if (!this.disposed)
+                StatusText = $"{FilePath} — indexing failed";
+            return;
+        }
+
+        if (!this.disposed)
+            StatusText = $"{FilePath} — {RowCount:N0} rows";
     }
 
     private void UpdateHeaderCells()
@@ -154,6 +193,11 @@ public sealed class CsvViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
+        // Idempotent - see IDocumentViewModel's lifetime contract.
+        if (this.disposed)
+            return;
+        this.disposed = true;
+
         // Cancel first so the background line-offset scan stops promptly; the row collection
         // must be disposed before session.Dispose joins the scan and releases the mapping.
         this.session?.Cancel();

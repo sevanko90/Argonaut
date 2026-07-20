@@ -1,5 +1,4 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Collections.Specialized;
 using Avalonia.Threading;
@@ -23,12 +22,12 @@ public sealed class MemoryMappedFileVisibleLine
     public string Text { get; }
 }
 
-// Backs the ListBox's ItemsSource directly against the whole file: Count is the true total
-// line count, and the indexer lazily reads a single line from the memory-mapped file on
-// demand. Avalonia's ItemsSourceView only avoids copying/enumerating the whole source into a
-// List<object> when it implements non-generic IList (IReadOnlyList<T>/IList<T> alone do
-// not qualify), so VirtualizingStackPanel touches only realized rows via Count + this[int].
-public sealed class MemoryMappedFileLineCollection : IList, INotifyCollectionChanged, IDisposable
+// Backs the ListBox's ItemsSource directly against the whole file: the count is the true total
+// line count, and the indexer lazily reads a single line from the memory-mapped file on demand.
+// The read-only IList + INotifyCollectionChanged surface and the empty-once-disposed safety live
+// in MemoryMappedCollectionBase; this only supplies the live count, item materialization, and the
+// background growth notifications.
+public sealed class MemoryMappedFileLineCollection : MemoryMappedCollectionBase
 {
     private const int CacheCapacity = 1000;
     private static readonly TimeSpan GrowthPollInterval = TimeSpan.FromMilliseconds(120);
@@ -51,23 +50,9 @@ public sealed class MemoryMappedFileLineCollection : IList, INotifyCollectionCha
             StartGrowthMonitor();
     }
 
-    public event NotifyCollectionChangedEventHandler? CollectionChanged;
+    protected override int GetCount() => index.LineCount;
 
-    public int Count => index.LineCount;
-
-    public bool IsFixedSize => true;
-
-    public bool IsReadOnly => true;
-
-    public bool IsSynchronized => false;
-
-    public object SyncRoot => this;
-
-    public object? this[int i]
-    {
-        get => GetLine(i);
-        set => throw new NotSupportedException();
-    }
+    protected override object GetItem(int index) => GetLine(index);
 
     private MemoryMappedFileVisibleLine GetLine(int i)
     {
@@ -120,7 +105,7 @@ public sealed class MemoryMappedFileLineCollection : IList, INotifyCollectionCha
             var newItems = new object?[delta];
             int startingIndex = notifiedCount;
             notifiedCount = current;
-            CollectionChanged?.Invoke(this, new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Add, newItems, startingIndex));
+            RaiseCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Add, newItems, startingIndex));
         }
 
         if (complete)
@@ -131,7 +116,7 @@ public sealed class MemoryMappedFileLineCollection : IList, INotifyCollectionCha
         }
     }
 
-    public void Dispose()
+    protected override void DisposeCore()
     {
         if (growthTimer is not null)
         {
@@ -139,28 +124,5 @@ public sealed class MemoryMappedFileLineCollection : IList, INotifyCollectionCha
             growthTimer.Tick -= OnGrowthTick;
             growthTimer = null;
         }
-    }
-
-    public int Add(object? value) => throw new NotSupportedException();
-
-    public void Clear() => throw new NotSupportedException();
-
-    public bool Contains(object? value) => false;
-
-    public int IndexOf(object? value) => -1;
-
-    public void Insert(int index, object? value) => throw new NotSupportedException();
-
-    public void Remove(object? value) => throw new NotSupportedException();
-
-    public void RemoveAt(int index) => throw new NotSupportedException();
-
-    public void CopyTo(Array array, int index) => throw new NotSupportedException();
-
-    public IEnumerator GetEnumerator()
-    {
-        int count = Count;
-        for (int i = 0; i < count; i++)
-            yield return this[i];
     }
 }

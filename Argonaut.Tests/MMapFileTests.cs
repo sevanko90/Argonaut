@@ -27,6 +27,28 @@ public class MMapFileTests
     }
 
     [Fact]
+    public void GetSpan_AfterDispose_ThrowsObjectDisposed_NotAccessViolation()
+    {
+        // A read after Dispose dereferences released memory. Without the guard this is an
+        // uncatchable AccessViolationException that crashes the process (the shell hit this
+        // when a virtualizing list enumerated an mmap-backed collection during the content
+        // swap that disposed it); the guard makes it a catchable managed failure instead.
+        string path = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllBytes(path, Encoding.UTF8.GetBytes("hello, mapped world"));
+            var file = new MMapFile(path);
+            file.Dispose();
+
+            Assert.Throws<ObjectDisposedException>(() => file.GetUtf8String(0, 5));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void Length_ComesFromFileNotMappingCapacity()
     {
         // 100 bytes is far below any platform's allocation granularity, so a capacity-derived

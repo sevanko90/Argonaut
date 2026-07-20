@@ -29,12 +29,7 @@ jobs:
         if: matrix.os != 'macos-latest'
         shell: bash
         run: |
-          dotnet publish Argonaut/Argonaut.csproj \
-            -c Release \
-            -r ${{ matrix.rid }} \
-            --self-contained true \
-            -p:PublishSingleFile=true \
-            -p:InformationalVersion=${{ github.ref_name }}
+          dotnet publish Argonaut/Argonaut.csproj -c Release -r ${{ matrix.rid }} --self-contained true -p:PublishSingleFile=true         -p:InformationalVersion=${{ github.ref_name }}
       - name: Publish and package .app
         if: matrix.os == 'macos-latest'
         run: ./scripts/package-macos.sh ${{ matrix.rid }} ${{ github.ref_name }}

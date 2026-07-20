@@ -37,6 +37,13 @@ public sealed class JsonViewModel : ObservableObject, IDisposable
     /// attach to it before or during load.</summary>
     public DateHintSettings HintSettings { get; } = new();
 
+    /// <summary>
+    /// How many container levels to auto-expand when the tree is first built. Must be set
+    /// before <see cref="LoadAsync(string,IProgressReporter?)"/>/<see cref="LoadAsync(MMapFile,IProgressReporter?)"/>
+    /// completes to affect the initial view - see MainWindow's header control.
+    /// </summary>
+    public int DefaultExpandDepth { get; set; } = 2;
+
     public int? SelectedTokenIndex
     {
         get => selectedTokenIndex;
@@ -86,6 +93,16 @@ public sealed class JsonViewModel : ObservableObject, IDisposable
         rows?.EnsureVisible(tokenIndex);
     }
 
+    /// <summary>
+    /// Changes the default-expand depth and applies it immediately if a file is already
+    /// loaded, in addition to affecting future loads.
+    /// </summary>
+    public void SetDefaultExpandDepth(int depth)
+    {
+        DefaultExpandDepth = depth;
+        rows?.SetDefaultExpandDepth(depth);
+    }
+
     public Task LoadAsync(string path, IProgressReporter? progressReporter = null)
     {
         FilePath = path;
@@ -109,7 +126,7 @@ public sealed class JsonViewModel : ObservableObject, IDisposable
         await session.Index.WaitForTokenCountAsync(InitialTokenTarget);
 
         rows = new JsonVisibleRowCollection(session.Index, session.File,
-            new IValueHintProvider[] { new DateHintProvider(HintSettings) });
+            new IValueHintProvider[] { new DateHintProvider(HintSettings) }, DefaultExpandDepth);
 
         // Inference dereferences the mapping, so the session must join it before unmapping.
         session.RegisterDependentTask(InferDefaultDateSchemeAsync(session.Index, session.File, session.Token));

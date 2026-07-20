@@ -29,7 +29,14 @@ public class JsonStructureIndexTests
         return sb.ToString();
     }
 
-    private static (JsonStructureIndex Index, string Json, string Path) BuildIndex()
+    /// <summary>
+    /// Builds a fresh temp file per call (never shared across tests) and indexes it.
+    /// Returns the owning <see cref="MMapFile"/> too - callers must dispose it before
+    /// deleting the temp file, since indexing (via <see cref="JsonStructureIndex.StartIndexing"/>)
+    /// runs on a background task that keeps the file mapped, and Windows won't delete a file
+    /// while it still has an open mapping handle.
+    /// </summary>
+    private static async Task<(JsonStructureIndex Index, MMapFile File, string Json, string Path)> BuildIndexAsync()
     {
         string json = BuildSampleJson();
         string path = Path.GetTempFileName();
@@ -37,8 +44,8 @@ public class JsonStructureIndexTests
 
         var file = new MMapFile(path);
         var index = JsonStructureIndex.StartIndexing(file);
-        index.IndexingTask.GetAwaiter().GetResult();
-        return (index, json, path);
+        await index.IndexingTask;
+        return (index, file, json, path);
     }
 
     private static List<(JsonTokenKind Kind, long Offset, int Length, long NameOffset, int NameLength)> ParseExpected(string json)
@@ -86,9 +93,9 @@ public class JsonStructureIndexTests
     }
 
     [Fact]
-    public void TokenCount_MatchesIndependentParse()
+    public async Task TokenCount_MatchesIndependentParse()
     {
-        var (index, json, path) = BuildIndex();
+        var (index, file, json, path) = await BuildIndexAsync();
         try
         {
             var expected = ParseExpected(json);
@@ -96,14 +103,15 @@ public class JsonStructureIndexTests
         }
         finally
         {
+            file.Dispose();
             File.Delete(path);
         }
     }
 
     [Fact]
-    public void DecodedTokens_MatchIndependentParse()
+    public async Task DecodedTokens_MatchIndependentParse()
     {
-        var (index, json, path) = BuildIndex();
+        var (index, file, json, path) = await BuildIndexAsync();
         try
         {
             var expected = ParseExpected(json);
@@ -122,14 +130,15 @@ public class JsonStructureIndexTests
         }
         finally
         {
+            file.Dispose();
             File.Delete(path);
         }
     }
 
     [Fact]
-    public void PropertyNames_DecodeToCorrectText()
+    public async Task PropertyNames_DecodeToCorrectText()
     {
-        var (index, json, path) = BuildIndex();
+        var (index, file, json, path) = await BuildIndexAsync();
         try
         {
             bool sawLongName = false;
@@ -151,14 +160,15 @@ public class JsonStructureIndexTests
         }
         finally
         {
+            file.Dispose();
             File.Delete(path);
         }
     }
 
     [Fact]
-    public void Containers_AllCloseWithValidEndIndex()
+    public async Task Containers_AllCloseWithValidEndIndex()
     {
-        var (index, json, path) = BuildIndex();
+        var (index, file, json, path) = await BuildIndexAsync();
         try
         {
             for (int i = 0; i < index.TokenCount; i++)
@@ -173,18 +183,19 @@ public class JsonStructureIndexTests
         }
         finally
         {
+            file.Dispose();
             File.Delete(path);
         }
     }
 
     [Fact]
-    public void EndToken_MatchesStartTokenDepthAndParent()
+    public async Task EndToken_MatchesStartTokenDepthAndParent()
     {
         // The closing bracket must line up visually with its opening one, so it needs the
         // exact same Depth/ParentIndex as its matching Start token - not one level deeper,
         // which is what a naive stack-count-at-the-End-token read would give (the container
         // being closed is still on the stack when the End token is processed).
-        var (index, json, path) = BuildIndex();
+        var (index, file, json, path) = await BuildIndexAsync();
         try
         {
             for (int i = 0; i < index.TokenCount; i++)
@@ -200,14 +211,15 @@ public class JsonStructureIndexTests
         }
         finally
         {
+            file.Dispose();
             File.Delete(path);
         }
     }
 
     [Fact]
-    public void ScalarsWithoutName_ReportNoNameSentinel()
+    public async Task ScalarsWithoutName_ReportNoNameSentinel()
     {
-        var (index, json, path) = BuildIndex();
+        var (index, file, json, path) = await BuildIndexAsync();
         try
         {
             // Array elements have no property name; find the "1,2,3" numbers inside "x".
@@ -231,6 +243,7 @@ public class JsonStructureIndexTests
         }
         finally
         {
+            file.Dispose();
             File.Delete(path);
         }
     }

@@ -40,6 +40,8 @@ public partial class MainWindow : Window
     private ThemeMode currentThemeMode;
     private DateHintSettings? currentHintSettings;
     private bool suppressHintComboEvents;
+    private int currentExpandDepth;
+    private bool suppressExpandDepthComboEvent;
     private DispatcherTimer? toastTimer;
 
     public MainWindow()
@@ -59,6 +61,9 @@ public partial class MainWindow : Window
         ReloadRecentFiles();
         ApplyThemeMode(ThemePreference.Load());
 
+        currentExpandDepth = ExpandDepthPreference.Load();
+        SyncExpandDepthCombo();
+
         findController = new FindController(
             status => FindBarControl.SetStatus(status),
             () => currentFilePath is null ? null : new StatusProgressReporter(this, currentFilePath, openRequestId));
@@ -67,6 +72,7 @@ public partial class MainWindow : Window
 
         DateHintSchemeCombo.SelectionChanged += OnSchemeComboChanged;
         DateHintTimeZoneCombo.SelectionChanged += OnTimeZoneComboChanged;
+        ExpandDepthCombo.SelectionChanged += OnExpandDepthComboChanged;
 
         DragDrop.SetAllowDrop(this, true);
         AddHandler(DragDrop.DragOverEvent, OnDragOver);
@@ -285,7 +291,7 @@ public partial class MainWindow : Window
                 StatusText.Text = $"Indexing {normalizedPath}… 0%";
 
                 var reporter = new StatusProgressReporter(this, normalizedPath, requestId);
-                var vm = new JsonViewModel();
+                var vm = new JsonViewModel { DefaultExpandDepth = currentExpandDepth };
                 await vm.LoadAsync(normalizedPath, reporter);
                 if (requestId != openRequestId)
                 {
@@ -313,7 +319,7 @@ public partial class MainWindow : Window
                 StatusText.Text = $"Indexing {normalizedPath}… 0%";
 
                 var reporter = new StatusProgressReporter(this, normalizedPath, requestId);
-                var vm = new NdJsonViewModel();
+                var vm = new NdJsonViewModel { DefaultExpandDepth = currentExpandDepth };
                 await vm.LoadAsync(normalizedPath, reporter);
                 if (requestId != openRequestId)
                 {
@@ -502,6 +508,39 @@ public partial class MainWindow : Window
             return;
 
         currentHintSettings.SetTimeZoneMode((DateHintTimeZoneMode)DateHintTimeZoneCombo.SelectedIndex);
+    }
+
+    private void SyncExpandDepthCombo()
+    {
+        suppressExpandDepthComboEvent = true;
+        try
+        {
+            ExpandDepthCombo.SelectedIndex = currentExpandDepth;
+        }
+        finally
+        {
+            suppressExpandDepthComboEvent = false;
+        }
+    }
+
+    /// <summary>
+    /// Persists the new default-expand depth for future file opens, and applies it live to
+    /// whichever JSON/NDJSON tree is currently on screen (see JsonVisibleRowCollection's
+    /// depth-vs-override expand model - this only touches containers the user hasn't
+    /// explicitly toggled themselves).
+    /// </summary>
+    private void OnExpandDepthComboChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (suppressExpandDepthComboEvent || ExpandDepthCombo.SelectedIndex < 0)
+            return;
+
+        currentExpandDepth = ExpandDepthCombo.SelectedIndex;
+        ExpandDepthPreference.Save(currentExpandDepth);
+
+        if (ContentArea.Content is JsonView { DataContext: JsonViewModel jsonVm })
+            jsonVm.SetDefaultExpandDepth(currentExpandDepth);
+        else if (ContentArea.Content is NdJsonView { DataContext: NdJsonViewModel ndJsonVm })
+            ndJsonVm.SetDefaultExpandDepth(currentExpandDepth);
     }
 
 

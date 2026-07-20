@@ -65,8 +65,16 @@ public sealed class JsonVisibleRowCollection : IList, INotifyCollectionChanged, 
     private readonly JsonStructureIndex index;
     private readonly MMapFile mmap;
     private readonly IReadOnlyList<IValueHintProvider>? hintProviders;
-    private readonly HashSet<int> expandedTokenIndices = new();
+
+    // A container is expanded by default when its depth is below defaultExpandDepth; this
+    // set holds only the containers where the user has explicitly toggled away from that
+    // default (so a container is expanded iff (depth < defaultExpandDepth) XOR membership
+    // here). Keeping expand state as a policy + override, rather than a plain "expanded"
+    // set, means raising/lowering the default (e.g. via the header control) doesn't need to
+    // touch every container - see SetDefaultExpandDepth.
+    private readonly HashSet<int> expandOverrides = new();
     private readonly Dictionary<int, int> expandedChildLimit = new();
+    private int defaultExpandDepth;
 
     private readonly Dictionary<int, LinkedListNode<(int Position, JsonRow Row)>> rowCache = new();
     private readonly LinkedList<(int Position, JsonRow Row)> rowCacheOrder = new();
@@ -87,10 +95,11 @@ public sealed class JsonVisibleRowCollection : IList, INotifyCollectionChanged, 
     // to re-realize all visible text every 250ms for the rest of indexing.
     private bool visibleTreeSettled;
 
-    public JsonVisibleRowCollection(JsonStructureIndex index, MMapFile mmap, IReadOnlyList<IValueHintProvider>? hintProviders = null)
+    public JsonVisibleRowCollection(JsonStructureIndex index, MMapFile mmap, IReadOnlyList<IValueHintProvider>? hintProviders = null, int defaultExpandDepth = 1)
     {
         this.index = index;
         this.mmap = mmap;
+        this.defaultExpandDepth = Math.Max(0, defaultExpandDepth);
         this.hintProviders = hintProviders;
 
         if (hintProviders is not null)
@@ -99,18 +108,32 @@ public sealed class JsonVisibleRowCollection : IList, INotifyCollectionChanged, 
                 provider.HintsChanged += OnHintsChanged;
         }
 
-        if (index.TokenCount > 0)
-        {
-            var root = index.GetToken(0);
-            if (IsContainer(root.Kind))
-                expandedTokenIndices.Add(0); // auto-expand root one level for a non-empty first view
-        }
-
         Rebuild();
 
         if (!index.IsComplete)
             StartGrowthMonitor();
     }
+
+    /// <summary>
+    /// Changes how many container levels are expanded by default (0 = start fully collapsed)
+    /// and rebuilds the visible list. Only affects containers the user hasn't explicitly
+    /// expanded/collapsed themselves - see <see cref="IsExpanded"/>.
+    /// </summary>
+    public void SetDefaultExpandDepth(int depth)
+    {
+        depth = Math.Max(0, depth);
+        if (depth == defaultExpandDepth)
+            return;
+
+        defaultExpandDepth = depth;
+        Rebuild();
+    }
+
+    /// <summary>
+    /// A container is expanded when its nesting depth is within the default-expand depth,
+    /// unless the user has explicitly toggled it the other way (see expandOverrides).
+    /// </summary>
+    private bool IsExpanded(int tokenIndex, int depth) => (depth < defaultExpandDepth) ^ expandOverrides.Contains(tokenIndex);
 
     public event NotifyCollectionChangedEventHandler? CollectionChanged;
 
@@ -170,8 +193,15 @@ public sealed class JsonVisibleRowCollection : IList, INotifyCollectionChanged, 
             if (parentIndex == -1)
                 break;
 
-            if (expandedTokenIndices.Add(parentIndex))
+            var parentToken = index.GetToken(parentIndex);
+            if (!IsExpanded(parentIndex, parentToken.Depth))
+            {
+                // Not currently expanded, so flipping the override always makes it expanded,
+                // regardless of whether that means adding or removing membership.
+                if (!expandOverrides.Remove(parentIndex))
+                    expandOverrides.Add(parentIndex);
                 changed = true;
+            }
 
             // Applies to object parents as well as arrays: a target member past the child
             // cap needs the same paging-up or the expanded ancestors still won't show it.
@@ -249,8 +279,8 @@ public sealed class JsonVisibleRowCollection : IList, INotifyCollectionChanged, 
         if (!IsContainer(token.Kind))
             return;
 
-        if (!expandedTokenIndices.Remove(vrow.TokenIndex))
-            expandedTokenIndices.Add(vrow.TokenIndex);
+        if (!expandOverrides.Remove(vrow.TokenIndex))
+            expandOverrides.Add(vrow.TokenIndex);
 
         Rebuild();
     }
@@ -298,7 +328,7 @@ public sealed class JsonVisibleRowCollection : IList, INotifyCollectionChanged, 
         var token = index.GetToken(vrow.TokenIndex);
         string? name = token.NameLength >= 0 ? ReadText(token.NameOffset, token.NameLength) : null;
         bool isContainer = IsContainer(token.Kind);
-        bool expanded = isContainer && expandedTokenIndices.Contains(vrow.TokenIndex);
+        bool expanded = isContainer && IsExpanded(vrow.TokenIndex, token.Depth);
 
         string value = isContainer
             ? BuildContainerSummary(vrow.TokenIndex, token, expanded)
@@ -422,7 +452,7 @@ public sealed class JsonVisibleRowCollection : IList, INotifyCollectionChanged, 
         if (token.EndIndex < 0)
             visibleTreeSettled = false;
 
-        if (!expandedTokenIndices.Contains(tokenIndex))
+        if (!IsExpanded(tokenIndex, token.Depth))
             return;
 
         int limit = expandedChildLimit.TryGetValue(tokenIndex, out var l) ? l : ChildCap;

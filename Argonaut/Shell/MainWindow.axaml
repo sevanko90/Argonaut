@@ -35,7 +35,7 @@
                 BorderBrush="{DynamicResource AppBorderBrush}"
                 BorderThickness="0,0,0,1"
                 Padding="16,8">
-            <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+            <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
                 <TextBlock Grid.Column="0"
                            x:Name="FileNameText"
                            FontWeight="SemiBold"
@@ -75,11 +75,25 @@
                     <ComboBoxItem Content="Local time" />
                     <ComboBoxItem Content="UTC" />
                 </ComboBox>
-                <Border Grid.Column="6"
+                <ComboBox Grid.Column="6"
+                          x:Name="ExpandDepthCombo"
+                          FontSize="12"
+                          MinWidth="130"
+                          Margin="6,0,0,0"
+                          VerticalAlignment="Center"
+                          ToolTip.Tip="How many levels to auto-expand when a file opens">
+                    <ComboBoxItem Content="Start collapsed" />
+                    <ComboBoxItem Content="Expand 1 level" />
+                    <ComboBoxItem Content="Expand 2 levels" />
+                    <ComboBoxItem Content="Expand 3 levels" />
+                    <ComboBoxItem Content="Expand 4 levels" />
+                    <ComboBoxItem Content="Expand 5 levels" />
+                </ComboBox>
+                <Border Grid.Column="7"
                         Width="1"
                         Margin="12,2,12,2"
                         Background="{DynamicResource AppBorderBrush}" />
-                <Button Grid.Column="7"
+                <Button Grid.Column="8"
                         x:Name="CloseFileButton"
                         Click="OnCloseFile"
                         Classes="iconbutton"

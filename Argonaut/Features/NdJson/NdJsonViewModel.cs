@@ -63,6 +63,9 @@ public sealed class NdJsonViewModel : ObservableObject, IDisposable
     /// </summary>
     public DateHintSettings HintSettings { get; } = new();
 
+    /// <summary>Default-expand depth applied to each selected line's nested JsonViewModel.</summary>
+    public int DefaultExpandDepth { get; set; } = 2;
+
     /// <summary>
     /// The active find term, highlighted in the line list and propagated into every nested
     /// per-line JsonViewModel (current and future) so the right-hand tree highlights too.
@@ -122,6 +125,16 @@ public sealed class NdJsonViewModel : ObservableObject, IDisposable
             HintSettings.TrySetInferredDefault(selectedLineJsonViewModel.HintSettings.FileDefaultScheme);
     }
 
+    /// <summary>
+    /// Changes the default-expand depth for future line selections, and applies it
+    /// immediately to the currently selected line's tree if one is open.
+    /// </summary>
+    public void SetDefaultExpandDepth(int depth)
+    {
+        DefaultExpandDepth = depth;
+        selectedLineJsonViewModel?.SetDefaultExpandDepth(depth);
+    }
+
     public async Task LoadAsync(string path, IProgressReporter? progressReporter = null)
     {
         FilePath = path;
@@ -161,7 +174,7 @@ public sealed class NdJsonViewModel : ObservableObject, IDisposable
     private async Task LoadSelectedLineJsonAsync(long requestId, FileLineSpan lineSpan)
     {
         var trimmed = NdJsonLineReader.TrimTrailingNewline(this.Mmap!, lineSpan);
-        var jsonViewModel = new JsonViewModel();
+        var jsonViewModel = new JsonViewModel { DefaultExpandDepth = DefaultExpandDepth };
         try
         {
             await jsonViewModel.LoadAsync(new MMapFile(FilePath, trimmed.Offset, trimmed.Length));

@@ -63,6 +63,12 @@ public sealed unsafe class MMapFile : IDisposable
     /// </summary>
     public ReadOnlySpan<byte> GetSpan(long offset, int length)
     {
+        // A read after Dispose dereferences released memory - a native use-after-free that
+        // surfaces as an uncatchable AccessViolationException. Fail as a catchable managed
+        // exception instead, so an ordering mistake (e.g. a view enumerating an mmap-backed
+        // collection after its mapping was disposed) is diagnosable rather than a hard crash.
+        ObjectDisposedException.ThrowIf(disposed, this);
+
         ArgumentOutOfRangeException.ThrowIfNegative(offset);
         ArgumentOutOfRangeException.ThrowIfNegative(length);
         if (offset + length > Length)

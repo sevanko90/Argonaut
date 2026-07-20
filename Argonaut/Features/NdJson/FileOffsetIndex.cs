@@ -135,7 +135,11 @@ public sealed class FileOffsetIndex : AppendLogIndexBase<FileLineSpan>, IFileInd
         }
         finally
         {
-            if (currentLineStart < length)
+            // Only on a genuine end-of-file is there a trailing (newline-less) line to record.
+            // On cancellation (close/teardown mid-scan) currentLineStart is wherever the scan
+            // stopped, so length - currentLineStart is the entire un-scanned remainder - which
+            // on a multi-GB file exceeds int.MaxValue and overflows the checked cast. Skip it.
+            if (!cancellationToken.IsCancellationRequested && currentLineStart < length)
             {
                 this.AddLineSpan(new FileLineSpan(currentLineStart, checked((int)(length - currentLineStart))));
             }

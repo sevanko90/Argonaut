@@ -1,0 +1,39 @@
+using System;
+using System.ComponentModel;
+using Argonaut.Features.Search;
+
+namespace Argonaut.Shell;
+
+/// <summary>
+/// The shell's contract for one open document (JSON, NDJSON, CSV/TSV). Each document view
+/// model owns its whole status-bar line (<see cref="StatusText"/>), including reacting to
+/// its own selection changes and its background indexing completing or failing - the shell
+/// only mirrors the current document's text.
+///
+/// Lifetime contract: instances are created and loaded by MainWindowViewModel, which owns
+/// disposal. It disposes any instance that never becomes CurrentDocument (a stale open
+/// superseded by a newer request, or a failed load), and it disposes the outgoing document
+/// when CurrentDocument changes - crucially, before the swap, not after (see
+/// MainWindowViewModel.SetCurrentDocument).
+///
+/// Disposing before the swap matters because setting CurrentDocument makes Avalonia tear down
+/// the outgoing view, and that teardown enumerates the old ListBox's whole-file, mmap-backed
+/// ItemsSource once. The collections report themselves empty once disposed (see
+/// MemoryMappedFileLineCollection / JsonVisibleRowCollection / CsvRowCollection), so an
+/// already-disposed document turns that walk into a no-op instead of a multi-second, whole-file
+/// materialization that also read freed memory and crashed. The hosting view's
+/// DetachedFromVisualTree handler also disposes its DataContext, as an idempotent safety net
+/// for teardown paths the shell doesn't drive (e.g. window close); <see cref="IDisposable.Dispose"/>
+/// is idempotent on every implementation, so the double-dispose is harmless.
+/// </summary>
+public interface IDocumentViewModel : INotifyPropertyChanged, IDisposable
+{
+    /// <summary>Full path of the loaded file.</summary>
+    string FilePath { get; }
+
+    /// <summary>The full status-bar line for this document; observable.</summary>
+    string StatusText { get; }
+
+    /// <summary>Creates the search navigator the shell attaches to its FindController.</summary>
+    ISearchNavigator CreateSearchNavigator();
+}

@@ -65,6 +65,58 @@ public class FileOffsetIndexTests
         });
     }
 
+    /// <summary>Cancels the scan after the first chunk's progress report fires.</summary>
+    private sealed class CancelAfterFirstReport : IProgressReporter
+    {
+        private readonly CancellationTokenSource cts;
+        private bool cancelled;
+
+        public CancelAfterFirstReport(CancellationTokenSource cts) => this.cts = cts;
+
+        public void Report(string message, long? current = null, long? max = null)
+        {
+            if (cancelled)
+                return;
+            cancelled = true;
+            cts.Cancel();
+        }
+    }
+
+    [Fact]
+    public void CancelledMidScan_DoesNotAppendBogusRemainderSpan()
+    {
+        // A multi-chunk file of short lines. Cancelling after the first 4MB chunk used to make
+        // the finally append one span covering the entire un-scanned remainder - which on a
+        // multi-GB file overflows the checked (int) length cast (OverflowException on close
+        // mid-index). Every real line here is well under 64 bytes, so a remainder span would
+        // stand out as enormous.
+        var sb = new StringBuilder();
+        for (int i = 0; sb.Length < 3 * ScanChunk; i++)
+            sb.Append(i).Append('\n');
+        byte[] content = Encoding.ASCII.GetBytes(sb.ToString());
+
+        string path = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllBytes(path, content);
+            using var file = new MMapFile(path);
+            var cts = new CancellationTokenSource();
+
+            var index = FileOffsetIndex.StartIndexing(file, new CancelAfterFirstReport(cts), cts.Token);
+            try { index.IndexingTask.GetAwaiter().GetResult(); }
+            catch (OperationCanceledException) { /* expected clean cancellation */ }
+
+            // No overflow, and no oversized "remainder" line was recorded.
+            for (int i = 0; i < index.LineCount; i++)
+                Assert.True(index.GetLineSpan(i).Length < 64,
+                    $"line {i} has span length {index.GetLineSpan(i).Length}; a bogus remainder span leaked in");
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
     [Fact]
     public void SimpleLines_MatchExpectedSpans()
     {

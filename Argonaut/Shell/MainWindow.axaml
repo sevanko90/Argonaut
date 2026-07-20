@@ -4,9 +4,27 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
         x:Class="Argonaut.Shell.MainWindow"
+        x:DataType="shell:MainWindowViewModel"
+        xmlns:shell="clr-namespace:Argonaut.Shell"
         xmlns:search="clr-namespace:Argonaut.Features.Search"
+        xmlns:json="clr-namespace:Argonaut.Features.Json"
+        xmlns:ndjson="clr-namespace:Argonaut.Features.NdJson"
+        xmlns:csv="clr-namespace:Argonaut.Features.Csv"
+        Title="{Binding Title}"
         Background="{DynamicResource AppWindowBackgroundBrush}"
         Width="1000" Height="700">
+
+    <Window.DataTemplates>
+        <DataTemplate DataType="json:JsonViewModel">
+            <json:JsonView />
+        </DataTemplate>
+        <DataTemplate DataType="ndjson:NdJsonViewModel">
+            <ndjson:NdJsonView />
+        </DataTemplate>
+        <DataTemplate DataType="csv:CsvViewModel">
+            <csv:CsvView />
+        </DataTemplate>
+    </Window.DataTemplates>
 
     <Grid>
         <Grid.Styles>
@@ -30,7 +48,7 @@
 
         <Border Grid.Row="0"
                 x:Name="ToolbarBar"
-                IsVisible="False"
+                IsVisible="{Binding IsFileOpen}"
                 Background="{DynamicResource AppPanelBackgroundBrush}"
                 BorderBrush="{DynamicResource AppBorderBrush}"
                 BorderThickness="0,0,0,1"
@@ -38,6 +56,8 @@
             <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
                 <TextBlock Grid.Column="0"
                            x:Name="FileNameText"
+                           Text="{Binding FileName}"
+                           ToolTip.Tip="{Binding FilePath}"
                            FontWeight="SemiBold"
                            FontSize="14"
                            TextTrimming="CharacterEllipsis"
@@ -56,6 +76,7 @@
                         Background="{DynamicResource AppBorderBrush}" />
                 <ComboBox Grid.Column="4"
                           x:Name="DateHintSchemeCombo"
+                          SelectedIndex="{Binding DateHintSchemeIndex, Mode=TwoWay}"
                           FontSize="12"
                           MinWidth="150"
                           VerticalAlignment="Center"
@@ -67,6 +88,7 @@
                 </ComboBox>
                 <ComboBox Grid.Column="5"
                           x:Name="DateHintTimeZoneCombo"
+                          SelectedIndex="{Binding TimeZoneModeIndex, Mode=TwoWay}"
                           FontSize="12"
                           MinWidth="90"
                           Margin="6,0,0,0"
@@ -77,6 +99,7 @@
                 </ComboBox>
                 <ComboBox Grid.Column="6"
                           x:Name="ExpandDepthCombo"
+                          SelectedIndex="{Binding ExpandDepthIndex, Mode=TwoWay}"
                           FontSize="12"
                           MinWidth="130"
                           Margin="6,0,0,0"
@@ -106,7 +129,13 @@
             </Grid>
         </Border>
 
-        <ContentControl Grid.Row="1" x:Name="ContentArea" />
+        <ContentControl Grid.Row="1"
+                        x:Name="ContentArea"
+                        Content="{Binding CurrentDocument}" />
+
+        <shell:EmptyStateView Grid.Row="1"
+                              x:Name="EmptyState"
+                              IsVisible="{Binding !IsFileOpen}" />
 
         <Border Grid.Row="1"
                 x:Name="ToastBorder"
@@ -131,7 +160,7 @@
             <Grid ColumnDefinitions="*,Auto">
                 <TextBlock Grid.Column="0"
                            x:Name="StatusText"
-                           Text="No file loaded"
+                           Text="{Binding StatusText}"
                            FontSize="12"
                            VerticalAlignment="Center"
                            Foreground="{DynamicResource AppMutedTextBrush}" />

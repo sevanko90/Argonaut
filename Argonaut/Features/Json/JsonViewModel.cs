@@ -3,12 +3,14 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Features.Json.Hints;
+using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
+using Argonaut.Shell;
 using Avalonia.Threading;
 
 namespace Argonaut.Features.Json;
 
-public sealed class JsonViewModel : ObservableObject, IDisposable
+public sealed class JsonViewModel : ObservableObject, IDocumentViewModel
 {
     private const int InitialTokenTarget = 250;
 
@@ -17,6 +19,7 @@ public sealed class JsonViewModel : ObservableObject, IDisposable
     private int? selectedTokenIndex;
     private string? selectedPath;
     private string? highlightTerm;
+    private string statusText = string.Empty;
     private IReadOnlyList<JsonPathSegment> selectedPathSegments = Array.Empty<JsonPathSegment>();
     private volatile bool disposed;
 
@@ -30,6 +33,15 @@ public sealed class JsonViewModel : ObservableObject, IDisposable
 
     public Task IndexingTask => session?.IndexingTask ?? Task.CompletedTask;
 
+    /// <summary>Status-bar line for this document (see <see cref="IDocumentViewModel"/>).
+    /// Meaningless (and unread) for the nested per-NDJSON-line instances, which load via
+    /// the <see cref="MMapFile"/> overload and are never a shell document.</summary>
+    public string StatusText
+    {
+        get => statusText;
+        private set => SetField(ref statusText, value);
+    }
+
     public JsonVisibleRowCollection Rows => rows ?? throw new InvalidOperationException("LoadAsync must complete before Rows is accessed.");
 
     /// <summary>Session state for date hints: the file-level default scheme (inferred or
@@ -39,8 +51,8 @@ public sealed class JsonViewModel : ObservableObject, IDisposable
 
     /// <summary>
     /// How many container levels to auto-expand when the tree is first built. Must be set
-    /// before <see cref="LoadAsync(string,IProgressReporter?)"/>/<see cref="LoadAsync(MMapFile,IProgressReporter?)"/>
-    /// completes to affect the initial view - see MainWindow's header control.
+    /// before <see cref="LoadAsync(string,IProgressReporter?)"/>/<see cref="LoadAsync(string,long,long,IProgressReporter?)"/>
+    /// completes to affect the initial view - see the shell's expand-depth control.
     /// </summary>
     public int DefaultExpandDepth { get; set; } = 2;
 
@@ -110,11 +122,16 @@ public sealed class JsonViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Loads from an already-open <see cref="MMapFile"/> instead of a path - e.g. a sub-range
-    /// mapping over one line of a larger NDJSON file. This <see cref="JsonViewModel"/> takes
-    /// ownership of <paramref name="mmap"/> and disposes it along with itself.
+    /// Loads the sub-document occupying the byte range [offset, offset + length) of the file
+    /// at <paramref name="path"/> - e.g. one line of a larger NDJSON file. Creates and owns
+    /// its own independent sub-range mapping (disposed with this view model), so a caller
+    /// never allocates a mapping this view model is then responsible for freeing.
     /// </summary>
-    public Task LoadAsync(MMapFile mmap, IProgressReporter? progressReporter = null) => LoadCore(mmap, progressReporter);
+    public Task LoadAsync(string path, long offset, long length, IProgressReporter? progressReporter = null)
+    {
+        FilePath = path;
+        return LoadCore(new MMapFile(path, offset, length), progressReporter);
+    }
 
     private async Task LoadCore(MMapFile mmap, IProgressReporter? progressReporter)
     {
@@ -130,6 +147,34 @@ public sealed class JsonViewModel : ObservableObject, IDisposable
 
         // Inference dereferences the mapping, so the session must join it before unmapping.
         session.RegisterDependentTask(InferDefaultDateSchemeAsync(session.Index, session.File, session.Token));
+
+        StatusText = $"{FilePath} — {TokenCount:N0} tokens indexed so far";
+        _ = MonitorIndexingAsync(session);
+    }
+
+    public ISearchNavigator CreateSearchNavigator() => new JsonSearchNavigator(this);
+
+    /// <summary>
+    /// Refreshes <see cref="StatusText"/> when background indexing finishes or fails.
+    /// Fire-and-forget from LoadCore (UI thread); per the app's threading convention the
+    /// await resumes on the UI thread. The disposed check covers cancellation-by-dispose:
+    /// a superseded or closed document must not repaint its status as a failure.
+    /// </summary>
+    private async Task MonitorIndexingAsync(IndexedFileSession<JsonStructureIndex> session)
+    {
+        try
+        {
+            await session.IndexingTask;
+        }
+        catch
+        {
+            if (!disposed)
+                StatusText = $"{FilePath} — indexing failed";
+            return;
+        }
+
+        if (!disposed)
+            StatusText = $"{FilePath} — {session.Index.ItemCount:N0} {session.Index.ItemNoun}";
     }
 
     /// <summary>
@@ -151,13 +196,18 @@ public sealed class JsonViewModel : ObservableObject, IDisposable
         }
         catch
         {
-            // Indexing failures are surfaced elsewhere (MonitorJsonCompletionAsync); inference
+            // Indexing failures are surfaced elsewhere (MonitorIndexingAsync); inference
             // simply leaves the default scheme at Off.
         }
     }
 
     public void Dispose()
     {
+        // Idempotent: a nested per-line instance is disposed both by its owning
+        // NdJsonViewModel and by its JsonView's detach handler, and shell documents may
+        // see both owners in teardown edge cases (see IDocumentViewModel).
+        if (disposed)
+            return;
         disposed = true;
 
         // Cancel first so the background scans stop promptly; rows must be disposed

@@ -32,6 +32,8 @@ public partial class JsonView : UserControl
         DataContextChanged -= OnDataContextChanged;
         UnsubscribeViewModel();
 
+        // Disposed synchronously here (before the content swap's trailing ItemsSource walk):
+        // JsonVisibleRowCollection reports empty once disposed, so that walk reads nothing.
         if (DataContext is IDisposable d)
             d.Dispose();
     }

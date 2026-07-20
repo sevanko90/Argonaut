@@ -1,5 +1,4 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Collections.Specialized;
 using Avalonia.Threading;
@@ -22,12 +21,13 @@ public sealed class CsvVisibleRow
     public IReadOnlyList<CsvCell> Cells { get; }
 }
 
-// Adapted from Argonaut.Features.NdJson.MemoryMappedFileLineCollection: same IList +
-// INotifyCollectionChanged + LRU-cache + growth-timer shape, so VirtualizingStackPanel only
-// touches realized rows while FileOffsetIndex keeps indexing in the background. The one
-// addition is dataStartIndex, which lets the "first row is header" tickbox shift which
-// absolute line each virtual row index maps to without re-indexing the file.
-public sealed class CsvRowCollection : IList, INotifyCollectionChanged, IDisposable
+// Adapted from Argonaut.Features.NdJson.MemoryMappedFileLineCollection: same
+// MemoryMappedCollectionBase (read-only IList + INotifyCollectionChanged + empty-once-disposed)
+// plus an LRU-cache + growth-timer, so VirtualizingStackPanel only touches realized rows while
+// FileOffsetIndex keeps indexing in the background. The one addition is dataStartIndex, which
+// lets the "first row is header" tickbox shift which absolute line each virtual row index maps
+// to without re-indexing the file.
+public sealed class CsvRowCollection : MemoryMappedCollectionBase
 {
     private const int CacheCapacity = 1000;
     private static readonly TimeSpan GrowthPollInterval = TimeSpan.FromMilliseconds(120);
@@ -50,29 +50,15 @@ public sealed class CsvRowCollection : IList, INotifyCollectionChanged, IDisposa
         this.delimiter = delimiter;
         this.layout = layout;
         this.dataStartIndex = dataStartIndex;
-        notifiedCount = Count;
+        notifiedCount = GetCount();
 
         if (!index.IsComplete)
             StartGrowthMonitor();
     }
 
-    public event NotifyCollectionChangedEventHandler? CollectionChanged;
+    protected override int GetCount() => Math.Max(0, index.LineCount - dataStartIndex);
 
-    public int Count => Math.Max(0, index.LineCount - dataStartIndex);
-
-    public bool IsFixedSize => true;
-
-    public bool IsReadOnly => true;
-
-    public bool IsSynchronized => false;
-
-    public object SyncRoot => this;
-
-    public object? this[int i]
-    {
-        get => GetRow(i);
-        set => throw new NotSupportedException();
-    }
+    protected override object GetItem(int index) => GetRow(index);
 
     private CsvVisibleRow GetRow(int i)
     {
@@ -122,8 +108,8 @@ public sealed class CsvRowCollection : IList, INotifyCollectionChanged, IDisposa
         dataStartIndex = newStart;
         cache.Clear();
         cacheOrder.Clear();
-        notifiedCount = Count;
-        CollectionChanged?.Invoke(this, new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
+        notifiedCount = GetCount();
+        RaiseCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
     }
 
     private void StartGrowthMonitor()
@@ -135,7 +121,7 @@ public sealed class CsvRowCollection : IList, INotifyCollectionChanged, IDisposa
 
     private void OnGrowthTick(object? sender, EventArgs e)
     {
-        int current = Count;
+        int current = GetCount();
         bool complete = index.IsComplete;
 
         if (current > notifiedCount)
@@ -147,7 +133,7 @@ public sealed class CsvRowCollection : IList, INotifyCollectionChanged, IDisposa
             var newItems = new object?[delta];
             int startingIndex = notifiedCount;
             notifiedCount = current;
-            CollectionChanged?.Invoke(this, new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Add, newItems, startingIndex));
+            RaiseCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Add, newItems, startingIndex));
         }
 
         if (complete)
@@ -158,7 +144,7 @@ public sealed class CsvRowCollection : IList, INotifyCollectionChanged, IDisposa
         }
     }
 
-    public void Dispose()
+    protected override void DisposeCore()
     {
         if (growthTimer is not null)
         {
@@ -166,28 +152,5 @@ public sealed class CsvRowCollection : IList, INotifyCollectionChanged, IDisposa
             growthTimer.Tick -= OnGrowthTick;
             growthTimer = null;
         }
-    }
-
-    public int Add(object? value) => throw new NotSupportedException();
-
-    public void Clear() => throw new NotSupportedException();
-
-    public bool Contains(object? value) => false;
-
-    public int IndexOf(object? value) => -1;
-
-    public void Insert(int index, object? value) => throw new NotSupportedException();
-
-    public void Remove(object? value) => throw new NotSupportedException();
-
-    public void RemoveAt(int index) => throw new NotSupportedException();
-
-    public void CopyTo(Array array, int index) => throw new NotSupportedException();
-
-    public IEnumerator GetEnumerator()
-    {
-        int count = Count;
-        for (int i = 0; i < count; i++)
-            yield return this[i];
     }
 }

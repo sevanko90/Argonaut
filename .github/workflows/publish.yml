@@ -33,8 +33,8 @@ jobs:
             -c Release \
             -r ${{ matrix.rid }} \
             --self-contained true \
-            /p:PublishSingleFile=true \
-            /p:InformationalVersion=${{ github.ref_name }}
+            -p:PublishSingleFile=true \
+            -p:InformationalVersion=${{ github.ref_name }}
       - name: Publish and package .app
         if: matrix.os == 'macos-latest'
         run: ./scripts/package-macos.sh ${{ matrix.rid }} ${{ github.ref_name }}

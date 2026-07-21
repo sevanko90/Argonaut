@@ -34,6 +34,15 @@ public interface IDocumentViewModel : INotifyPropertyChanged, IDisposable
     /// <summary>The full status-bar line for this document; observable.</summary>
     string StatusText { get; }
 
+    /// <summary>
+    /// This document's header toolbar view model, or null for a document with no toolbar
+    /// (e.g. CSV). The shell renders it via a DataTemplate keyed on the concrete type, in a
+    /// region that swaps alongside the document itself - so <c>object?</c> is the honest
+    /// contract here rather than a typed marker interface the shell never calls members on.
+    /// Shares this document's lifetime: created during load, torn down with the document.
+    /// </summary>
+    object? Toolbar { get; }
+
     /// <summary>Creates the search navigator the shell attaches to its FindController.</summary>
     ISearchNavigator CreateSearchNavigator();
 }

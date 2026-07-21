@@ -6,7 +6,6 @@ using System.Linq;
 using System.Threading.Tasks;
 using Argonaut.Features.Csv;
 using Argonaut.Features.Json;
-using Argonaut.Features.Json.Hints;
 using Argonaut.Features.NdJson;
 using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
@@ -17,8 +16,9 @@ namespace Argonaut.Shell;
 /// <summary>
 /// Shell-level application state and the open/close file lifecycle, factored out of
 /// <see cref="MainWindow"/>'s code-behind. Owns the current document view model, the status
-/// line, window title, recent-file list, the find controller, and the theme / expand-depth /
-/// date-hint preferences.
+/// line, window title, recent-file list, the find controller, and the theme preference. The
+/// header's document-specific toolbar (date hints, expand depth) is owned by each document
+/// view model instead - see <see cref="IDocumentViewModel.Toolbar"/>.
 ///
 /// All members run on the UI thread; awaits resume there per the app's threading convention
 /// (see CLAUDE.md), so the only explicit marshalling is <see cref="StatusProgressReporter"/>,
@@ -46,16 +46,12 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly FindController findController;
 
     private IDocumentViewModel? currentDocument;
-    private DateHintSettings? currentHintSettings;
     private string? currentFilePath;
     private string statusText = "No file loaded";
     private string title = DefaultTitle;
     private string fileName = string.Empty;
     private IReadOnlyList<RecentFileItem> recentFiles = Array.Empty<RecentFileItem>();
     private ThemeMode themeMode;
-    private int expandDepthIndex;
-    private int dateHintSchemeIndex;
-    private int timeZoneModeIndex;
     private int openRequestId;
 
     /// <summary>Raised when the find bar's status text should change (null clears it).</summary>
@@ -78,7 +74,6 @@ public sealed class MainWindowViewModel : ObservableObject
         this.documentLoader = documentLoader ?? LoadDocumentAsync;
 
         themeMode = ThemePreference.Load();
-        expandDepthIndex = ExpandDepthPreference.Load();
 
         findController = new FindController(
             status => FindStatusChanged?.Invoke(status),
@@ -128,57 +123,6 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         get => themeMode;
         private set => SetField(ref themeMode, value);
-    }
-
-    /// <summary>
-    /// Bound two-way to the expand-depth combo. Persists the choice and applies it live to the
-    /// current JSON/NDJSON tree. (Temporary shell ownership: the planned per-view injectable
-    /// toolbar will move this onto the document, at which point <see cref="IDocumentViewModel"/>
-    /// stays untouched.)
-    /// </summary>
-    public int ExpandDepthIndex
-    {
-        get => expandDepthIndex;
-        set
-        {
-            if (value < 0 || !SetField(ref expandDepthIndex, value))
-                return;
-
-            ExpandDepthPreference.Save(value);
-            switch (currentDocument)
-            {
-                case JsonViewModel json: json.SetDefaultExpandDepth(value); break;
-                case NdJsonViewModel ndjson: ndjson.SetDefaultExpandDepth(value); break;
-            }
-        }
-    }
-
-    /// <summary>Bound two-way to the date-hint scheme combo; forwards to the current document's
-    /// <see cref="DateHintSettings"/>. Temporary shell ownership - see <see cref="ExpandDepthIndex"/>.</summary>
-    public int DateHintSchemeIndex
-    {
-        get => dateHintSchemeIndex;
-        set
-        {
-            if (value < 0 || !SetField(ref dateHintSchemeIndex, value))
-                return;
-
-            currentHintSettings?.SetUserDefault((DateDecodingScheme)value);
-        }
-    }
-
-    /// <summary>Bound two-way to the time-zone combo; forwards to the current document's
-    /// <see cref="DateHintSettings"/>. Temporary shell ownership - see <see cref="ExpandDepthIndex"/>.</summary>
-    public int TimeZoneModeIndex
-    {
-        get => timeZoneModeIndex;
-        set
-        {
-            if (value < 0 || !SetField(ref timeZoneModeIndex, value))
-                return;
-
-            currentHintSettings?.SetTimeZoneMode((DateHintTimeZoneMode)value);
-        }
     }
 
     /// <summary>Cycles System → Light → Dark → System and persists the choice. The view reacts
@@ -255,11 +199,10 @@ public sealed class MainWindowViewModel : ObservableObject
         if (fileType == FileTypeDetector.FileKind.Unidentified)
             return; // can't do anything with it
 
-        // Stop any search over the outgoing file, and detach the current document's hint
-        // settings, before its view (and MMapFile) is torn down by the content swap below.
+        // Stop any search over the outgoing file before its view (and MMapFile) is torn down
+        // by the content swap below.
         await DetachFindAsync();
         FindBarResetRequested?.Invoke();
-        DetachHintSettings();
         StatusText = $"Indexing {normalizedPath}… 0%";
 
         var reporter = new StatusProgressReporter(this, normalizedPath, requestId);
@@ -323,14 +266,6 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private void PublishDocument(IDocumentViewModel document, string path)
     {
-        // Apply the current default-expand depth before this document goes on screen so the
-        // initial tree honours it (JSON/NDJSON only; CSV has no tree).
-        switch (document)
-        {
-            case JsonViewModel json: json.SetDefaultExpandDepth(expandDepthIndex); break;
-            case NdJsonViewModel ndjson: ndjson.SetDefaultExpandDepth(expandDepthIndex); break;
-        }
-
         SetCurrentDocument(document, path);
         findController.Attach(document.CreateSearchNavigator());
         RecentFileHistory.Add(path);
@@ -339,8 +274,10 @@ public sealed class MainWindowViewModel : ObservableObject
 
     /// <summary>
     /// Swaps in a new current document (or clears it when <paramref name="document"/> is null)
-    /// and refreshes all the derived shell state that tracks it: status mirroring, title,
-    /// toolbar visibility, and the date-hint settings binding.
+    /// and refreshes all the derived shell state that tracks it: status mirroring, title, and
+    /// toolbar-bar visibility. The document's own header toolbar (see
+    /// <see cref="IDocumentViewModel.Toolbar"/>) follows automatically via its binding to
+    /// <see cref="CurrentDocument"/>.
     ///
     /// Disposes the outgoing document here, before the swap: setting <see cref="CurrentDocument"/>
     /// makes Avalonia tear down the old view, and that teardown enumerates the old ListBox's
@@ -367,7 +304,6 @@ public sealed class MainWindowViewModel : ObservableObject
             StatusText = document.StatusText;
             FileName = Path.GetFileName(path!);
             Title = $"{DefaultTitle} — {FileName}";
-            AttachHintSettings(GetHintSettings(document));
         }
         else
         {
@@ -396,7 +332,6 @@ public sealed class MainWindowViewModel : ObservableObject
         await DetachFindAsync();
         FindBarResetRequested?.Invoke();
 
-        DetachHintSettings();
         SetCurrentDocument(null, null);
         ReloadRecentFiles();
     }
@@ -408,58 +343,6 @@ public sealed class MainWindowViewModel : ObservableObject
     public Task StopFindAsync() => findController.StopAsync();
 
     private Task DetachFindAsync() => findController.DetachAsync();
-
-    // ── Date-hint settings binding ────────────────────────────────────────────────────────
-    //
-    // Temporary shell ownership of the date-hint header controls; the planned per-view
-    // injectable toolbar will relocate this and let it drop out of the shell entirely. Kept
-    // out of IDocumentViewModel deliberately so that refactor deletes code rather than
-    // reworking the interface.
-
-    private static DateHintSettings? GetHintSettings(IDocumentViewModel? document) => document switch
-    {
-        JsonViewModel json => json.HintSettings,
-        NdJsonViewModel ndjson => ndjson.HintSettings,
-        _ => null
-    };
-
-    private void AttachHintSettings(DateHintSettings? settings)
-    {
-        DetachHintSettings();
-        currentHintSettings = settings;
-        if (settings is not null)
-            settings.PropertyChanged += OnHintSettingsPropertyChanged;
-        SyncHintCombos();
-    }
-
-    private void DetachHintSettings()
-    {
-        if (currentHintSettings is not null)
-            currentHintSettings.PropertyChanged -= OnHintSettingsPropertyChanged;
-
-        currentHintSettings = null;
-        SyncHintCombos();
-    }
-
-    private void OnHintSettingsPropertyChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        // Inference completing in the background updates FileDefaultScheme - reflect it live.
-        if (e.PropertyName is null or nameof(DateHintSettings.FileDefaultScheme) or nameof(DateHintSettings.TimeZoneMode))
-            SyncHintCombos();
-    }
-
-    /// <summary>
-    /// Pushes the current settings values into the bound combo indices. SetField's equality
-    /// check makes this a no-op when nothing changed, so the resulting property notification
-    /// doesn't loop back through the combo setters into <see cref="DateHintSettings"/>.
-    /// </summary>
-    private void SyncHintCombos()
-    {
-        SetField(ref dateHintSchemeIndex,
-            (int)(currentHintSettings?.FileDefaultScheme ?? DateDecodingScheme.Off), nameof(DateHintSchemeIndex));
-        SetField(ref timeZoneModeIndex,
-            (int)(currentHintSettings?.TimeZoneMode ?? DateHintTimeZoneMode.Local), nameof(TimeZoneModeIndex));
-    }
 
     /// <summary>
     /// Writes indexing/search scan progress into <see cref="StatusText"/>. Report is called

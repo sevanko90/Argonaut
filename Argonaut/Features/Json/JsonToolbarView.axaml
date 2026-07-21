@@ -1,0 +1,49 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:json="clr-namespace:Argonaut.Features.Json"
+             mc:Ignorable="d"
+             x:Class="Argonaut.Features.Json.JsonToolbarView"
+             x:DataType="json:JsonToolbarViewModel">
+    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+        <Border Width="1"
+                Margin="0,2,12,2"
+                Background="{DynamicResource AppBorderBrush}" />
+        <ComboBox x:Name="DateHintSchemeCombo"
+                  SelectedIndex="{Binding DateHintSchemeIndex, Mode=TwoWay}"
+                  FontSize="12"
+                  MinWidth="150"
+                  VerticalAlignment="Center"
+                  ToolTip.Tip="Decode all-numeric values as dates">
+            <ComboBoxItem Content="Date hints: off" />
+            <ComboBoxItem Content="Dates: JS milliseconds" />
+            <ComboBoxItem Content="Dates: JS seconds" />
+            <ComboBoxItem Content="Dates: Keepa minutes" />
+        </ComboBox>
+        <ComboBox x:Name="DateHintTimeZoneCombo"
+                  SelectedIndex="{Binding TimeZoneModeIndex, Mode=TwoWay}"
+                  FontSize="12"
+                  MinWidth="90"
+                  Margin="6,0,0,0"
+                  VerticalAlignment="Center"
+                  ToolTip.Tip="Display decoded dates in local time or UTC">
+            <ComboBoxItem Content="Local time" />
+            <ComboBoxItem Content="UTC" />
+        </ComboBox>
+        <ComboBox x:Name="ExpandDepthCombo"
+                  SelectedIndex="{Binding ExpandDepthIndex, Mode=TwoWay}"
+                  FontSize="12"
+                  MinWidth="130"
+                  Margin="6,0,0,0"
+                  VerticalAlignment="Center"
+                  ToolTip.Tip="How many levels to auto-expand when a file opens">
+            <ComboBoxItem Content="Start collapsed" />
+            <ComboBoxItem Content="Expand 1 level" />
+            <ComboBoxItem Content="Expand 2 levels" />
+            <ComboBoxItem Content="Expand 3 levels" />
+            <ComboBoxItem Content="Expand 4 levels" />
+            <ComboBoxItem Content="Expand 5 levels" />
+        </ComboBox>
+    </StackPanel>
+</UserControl>

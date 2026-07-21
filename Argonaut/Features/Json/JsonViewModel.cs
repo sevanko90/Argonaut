@@ -52,9 +52,18 @@ public sealed class JsonViewModel : ObservableObject, IDocumentViewModel
     /// <summary>
     /// How many container levels to auto-expand when the tree is first built. Must be set
     /// before <see cref="LoadAsync(string,IProgressReporter?)"/>/<see cref="LoadAsync(string,long,long,IProgressReporter?)"/>
-    /// completes to affect the initial view - see the shell's expand-depth control.
+    /// completes to affect the initial view - see <see cref="JsonToolbarViewModel"/>'s
+    /// expand-depth combo.
     /// </summary>
     public int DefaultExpandDepth { get; set; } = 2;
+
+    /// <summary>This document's header toolbar (see <see cref="IDocumentViewModel.Toolbar"/>).
+    /// Null until <see cref="LoadAsync(string,IProgressReporter?)"/> creates it; always null for
+    /// the nested per-NDJSON-line instances loaded via the offset/length overload, since those
+    /// are never a shell document.</summary>
+    public JsonToolbarViewModel? Toolbar { get; private set; }
+
+    object? IDocumentViewModel.Toolbar => Toolbar;
 
     public int? SelectedTokenIndex
     {
@@ -118,6 +127,8 @@ public sealed class JsonViewModel : ObservableObject, IDocumentViewModel
     public Task LoadAsync(string path, IProgressReporter? progressReporter = null)
     {
         FilePath = path;
+        DefaultExpandDepth = ExpandDepthPreference.Load();
+        Toolbar = new JsonToolbarViewModel(HintSettings, DefaultExpandDepth, SetDefaultExpandDepth);
         return LoadCore(new MMapFile(path), progressReporter);
     }
 

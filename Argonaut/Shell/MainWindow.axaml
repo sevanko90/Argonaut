@@ -24,6 +24,9 @@
         <DataTemplate DataType="csv:CsvViewModel">
             <csv:CsvView />
         </DataTemplate>
+        <DataTemplate DataType="json:JsonToolbarViewModel">
+            <json:JsonToolbarView />
+        </DataTemplate>
     </Window.DataTemplates>
 
     <Grid>
@@ -53,70 +56,19 @@
                 BorderBrush="{DynamicResource AppBorderBrush}"
                 BorderThickness="0,0,0,1"
                 Padding="16,8">
-            <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
-                <TextBlock Grid.Column="0"
-                           x:Name="FileNameText"
-                           Text="{Binding FileName}"
-                           ToolTip.Tip="{Binding FilePath}"
-                           FontWeight="SemiBold"
-                           FontSize="14"
-                           TextTrimming="CharacterEllipsis"
-                           VerticalAlignment="Center"
-                           Margin="0,0,12,0" />
-                <Border Grid.Column="1"
-                        Width="1"
-                        Margin="0,2,12,2"
-                        Background="{DynamicResource AppBorderBrush}" />
-                <search:FindBar Grid.Column="2"
+            <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto">
+                <search:FindBar Grid.Column="0"
                                 x:Name="FindBarControl"
+                                VerticalAlignment="Center" />
+                <ContentControl Grid.Column="1"
+                                x:Name="DocumentToolbarArea"
+                                Content="{Binding CurrentDocument.Toolbar, FallbackValue={x:Null}}"
                                 VerticalAlignment="Center" />
                 <Border Grid.Column="3"
                         Width="1"
                         Margin="12,2,12,2"
                         Background="{DynamicResource AppBorderBrush}" />
-                <ComboBox Grid.Column="4"
-                          x:Name="DateHintSchemeCombo"
-                          SelectedIndex="{Binding DateHintSchemeIndex, Mode=TwoWay}"
-                          FontSize="12"
-                          MinWidth="150"
-                          VerticalAlignment="Center"
-                          ToolTip.Tip="Decode all-numeric values as dates">
-                    <ComboBoxItem Content="Date hints: off" />
-                    <ComboBoxItem Content="Dates: JS milliseconds" />
-                    <ComboBoxItem Content="Dates: JS seconds" />
-                    <ComboBoxItem Content="Dates: Keepa minutes" />
-                </ComboBox>
-                <ComboBox Grid.Column="5"
-                          x:Name="DateHintTimeZoneCombo"
-                          SelectedIndex="{Binding TimeZoneModeIndex, Mode=TwoWay}"
-                          FontSize="12"
-                          MinWidth="90"
-                          Margin="6,0,0,0"
-                          VerticalAlignment="Center"
-                          ToolTip.Tip="Display decoded dates in local time or UTC">
-                    <ComboBoxItem Content="Local time" />
-                    <ComboBoxItem Content="UTC" />
-                </ComboBox>
-                <ComboBox Grid.Column="6"
-                          x:Name="ExpandDepthCombo"
-                          SelectedIndex="{Binding ExpandDepthIndex, Mode=TwoWay}"
-                          FontSize="12"
-                          MinWidth="130"
-                          Margin="6,0,0,0"
-                          VerticalAlignment="Center"
-                          ToolTip.Tip="How many levels to auto-expand when a file opens">
-                    <ComboBoxItem Content="Start collapsed" />
-                    <ComboBoxItem Content="Expand 1 level" />
-                    <ComboBoxItem Content="Expand 2 levels" />
-                    <ComboBoxItem Content="Expand 3 levels" />
-                    <ComboBoxItem Content="Expand 4 levels" />
-                    <ComboBoxItem Content="Expand 5 levels" />
-                </ComboBox>
-                <Border Grid.Column="7"
-                        Width="1"
-                        Margin="12,2,12,2"
-                        Background="{DynamicResource AppBorderBrush}" />
-                <Button Grid.Column="8"
+                <Button Grid.Column="4"
                         x:Name="CloseFileButton"
                         Click="OnCloseFile"
                         Classes="iconbutton"

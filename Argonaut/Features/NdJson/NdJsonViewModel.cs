@@ -80,6 +80,12 @@ public sealed class NdJsonViewModel : ObservableObject, IDocumentViewModel
     /// <summary>Default-expand depth applied to each selected line's nested JsonViewModel.</summary>
     public int DefaultExpandDepth { get; set; } = 2;
 
+    /// <summary>This document's header toolbar (see <see cref="IDocumentViewModel.Toolbar"/>).
+    /// Null until <see cref="LoadAsync"/> creates it.</summary>
+    public JsonToolbarViewModel? Toolbar { get; private set; }
+
+    object? IDocumentViewModel.Toolbar => Toolbar;
+
     /// <summary>
     /// The active find term, highlighted in the line list and propagated into every nested
     /// per-line JsonViewModel (current and future) so the right-hand tree highlights too.
@@ -152,6 +158,8 @@ public sealed class NdJsonViewModel : ObservableObject, IDocumentViewModel
     public async Task LoadAsync(string path, IProgressReporter? progressReporter = null)
     {
         FilePath = path;
+        DefaultExpandDepth = ExpandDepthPreference.Load();
+        Toolbar = new JsonToolbarViewModel(HintSettings, DefaultExpandDepth, SetDefaultExpandDepth);
 
         var session = IndexedFileSession<FileOffsetIndex>.Start(new MMapFile(path), FileOffsetIndex.StartIndexing, progressReporter);
         this.session = session;

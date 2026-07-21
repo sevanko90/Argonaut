@@ -45,7 +45,7 @@ public class CollectionDisposedEmptyTests
 
             vm.Dispose();
 
-            Assert.Equal(0, lines.Count);
+            Assert.Empty(lines);
             Assert.Equal(0, CountViaEnumerator(lines));
             Assert.Null(lines[0]); // no mmap read after the mapping is gone
         }
@@ -69,7 +69,7 @@ public class CollectionDisposedEmptyTests
 
             vm.Dispose();
 
-            Assert.Equal(0, rows.Count);
+            Assert.Empty(rows);
             Assert.Equal(0, CountViaEnumerator(rows));
             Assert.Null(rows[0]);
         }
@@ -93,7 +93,7 @@ public class CollectionDisposedEmptyTests
 
             vm.Dispose();
 
-            Assert.Equal(0, rows.Count);
+            Assert.Empty(rows);
             Assert.Equal(0, CountViaEnumerator(rows));
             Assert.Null(rows[0]);
         }

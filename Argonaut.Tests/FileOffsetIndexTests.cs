@@ -83,7 +83,7 @@ public class FileOffsetIndexTests
     }
 
     [Fact]
-    public void CancelledMidScan_DoesNotAppendBogusRemainderSpan()
+    public async Task CancelledMidScan_DoesNotAppendBogusRemainderSpan()
     {
         // A multi-chunk file of short lines. Cancelling after the first 4MB chunk used to make
         // the finally append one span covering the entire un-scanned remainder - which on a
@@ -103,7 +103,7 @@ public class FileOffsetIndexTests
             var cts = new CancellationTokenSource();
 
             var index = FileOffsetIndex.StartIndexing(file, new CancelAfterFirstReport(cts), cts.Token);
-            try { index.IndexingTask.GetAwaiter().GetResult(); }
+            try { await index.IndexingTask; }
             catch (OperationCanceledException) { /* expected clean cancellation */ }
 
             // No overflow, and no oversized "remainder" line was recorded.

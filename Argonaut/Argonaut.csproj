@@ -28,5 +28,8 @@
     <Compile Update="Features\Search\FindBar.axaml.cs">
       <DependentUpon>FindBar.axaml</DependentUpon>
     </Compile>
+    <Compile Update="Features\Json\JsonToolbarView.axaml.cs">
+      <DependentUpon>JsonToolbarView.axaml</DependentUpon>
+    </Compile>
   </ItemGroup>
 </Project>

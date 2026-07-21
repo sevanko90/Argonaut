@@ -62,7 +62,8 @@
                      x:Name="RowsListBox"
                      ItemsSource="{Binding Rows}"
                      SelectionMode="Single"
-                     Padding="8,6">
+                     Padding="8,6"
+                     ScrollViewer.HorizontalScrollBarVisibility="Auto">
                 <ListBox.Styles>
                     <Style Selector="ListBoxItem">
                         <Setter Property="Padding" Value="0" />

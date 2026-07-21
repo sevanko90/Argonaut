@@ -46,6 +46,9 @@ public sealed class CsvViewModel : ObservableObject, IDocumentViewModel
 
     public CsvRowCollection Rows => this.rows ?? throw new InvalidOperationException("LoadAsync must complete before Rows is accessed.");
 
+    /// <summary>CSV has no header-region toolbar (no date hints, no tree to expand).</summary>
+    public object? Toolbar => null;
+
     public CsvColumnLayout ColumnLayout => this.columnLayout ?? throw new InvalidOperationException("LoadAsync must complete before ColumnLayout is accessed.");
 
     /// <summary>

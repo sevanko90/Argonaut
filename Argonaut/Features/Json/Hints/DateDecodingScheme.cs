@@ -1,6 +1,6 @@
 namespace Argonaut.Features.Json.Hints;
 
-// Values are the MainWindow toolbar ComboBox item indices - keep in sync.
+// Values are JsonToolbarView's DateHintSchemeCombo item indices - keep in sync.
 public enum DateDecodingScheme
 {
     Off = 0,

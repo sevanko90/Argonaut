@@ -13,6 +13,7 @@ namespace Argonaut.Tests;
 /// indexing, or UI dispatcher is involved. AppDataPaths.RootOverride redirects the recent-file
 /// and preference stores to a temp dir so the developer's real settings are never touched.
 /// </summary>
+[Collection("AppDataPaths")]
 public sealed class MainWindowViewModelTests : IDisposable
 {
     private readonly string settingsRoot;
@@ -69,6 +70,8 @@ public sealed class MainWindowViewModelTests : IDisposable
         }
 
         public bool Disposed { get; private set; }
+
+        public object? Toolbar { get; init; }
 
         public ISearchNavigator CreateSearchNavigator() => new FakeNavigator();
 
@@ -226,6 +229,19 @@ public sealed class MainWindowViewModelTests : IDisposable
 
         Assert.Null(vm.CurrentDocument);
         Assert.False(vm.IsFileOpen);
+    }
+
+    [Fact]
+    public async Task OpenPath_PublishesDocumentToolbar()
+    {
+        string path = WriteJsonFile();
+        var toolbar = new object();
+        var document = new FakeDocument { FilePath = path, Toolbar = toolbar };
+        var vm = CreateViewModel((_, _, _) => Task.FromResult<IDocumentViewModel>(document));
+
+        await vm.OpenPathAsync(path);
+
+        Assert.Same(toolbar, vm.CurrentDocument?.Toolbar);
     }
 
     [Fact]

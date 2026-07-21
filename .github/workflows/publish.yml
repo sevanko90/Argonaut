@@ -46,12 +46,20 @@ jobs:
         with:
           name: argonaut-${{ matrix.rid }}
           path: dist/Argonaut.app
-      - name: Zip publish output
-        if: matrix.os != 'macos-latest' && github.event_name == 'release'
+      - name: Zip publish output (Linux)
+        if: matrix.os == 'ubuntu-latest' && github.event_name == 'release'
         shell: bash
         run: |
           cd Argonaut/bin/Release/net10.0/${{ matrix.rid }}/publish
-          zip -r ${{ github.workspace }}/argonaut-${{ matrix.rid }}.zip .
+          zip -r "${{ github.workspace }}/argonaut-${{ matrix.rid }}.zip" .
+      - name: Zip publish output (Windows)
+        if: matrix.os == 'windows-latest' && github.event_name == 'release'
+        shell: pwsh
+        run: |
+          $publishDir = Join-Path $Env:GITHUB_WORKSPACE "Argonaut\\bin\\Release\\net10.0\\${{ matrix.rid }}\\publish"
+          $zipPath = Join-Path $Env:GITHUB_WORKSPACE "argonaut-${{ matrix.rid }}.zip"
+          if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+          Compress-Archive -Path (Join-Path $publishDir '*') -DestinationPath $zipPath -Force
       - name: Zip .app bundle
         if: matrix.os == 'macos-latest' && github.event_name == 'release'
         run: |

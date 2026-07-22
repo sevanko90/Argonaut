@@ -25,7 +25,7 @@
                   SelectedIndex="{Binding TimeZoneModeIndex, Mode=TwoWay}"
                   FontSize="12"
                   MinWidth="90"
-                  Margin="6,0,0,0"
+                  Margin="8,0,0,0"
                   VerticalAlignment="Center"
                   ToolTip.Tip="Display decoded dates in local time or UTC">
             <ComboBoxItem Content="Local time" />
@@ -35,7 +35,7 @@
                   SelectedIndex="{Binding ExpandDepthIndex, Mode=TwoWay}"
                   FontSize="12"
                   MinWidth="130"
-                  Margin="6,0,0,0"
+                  Margin="8,0,0,0"
                   VerticalAlignment="Center"
                   ToolTip.Tip="How many levels to auto-expand when a file opens">
             <ComboBoxItem Content="Start collapsed" />

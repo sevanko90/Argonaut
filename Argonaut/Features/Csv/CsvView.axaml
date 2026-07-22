@@ -17,7 +17,7 @@
                            TextTrimming="CharacterEllipsis"
                            TextWrapping="NoWrap"
                            ToolTip.Tip="{Binding Text}"
-                           FontFamily="{StaticResource AppMonoFontFamily}"
+                           FontFamily="{DynamicResource AppContentFontFamily}"
                            FontSize="12" />
             </Border>
         </DataTemplate>
@@ -31,7 +31,7 @@
                            TextTrimming="CharacterEllipsis"
                            TextWrapping="NoWrap"
                            ToolTip.Tip="{Binding Text}"
-                           FontFamily="{StaticResource AppMonoFontFamily}"
+                           FontFamily="{DynamicResource AppContentFontFamily}"
                            FontSize="12"
                            FontWeight="SemiBold" />
             </Border>

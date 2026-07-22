@@ -33,12 +33,12 @@
                                        HorizontalAlignment="Right"
                                        Margin="0,0,12,0"
                                        Foreground="{DynamicResource AppMutedTextBrush}"
-                                       FontFamily="{StaticResource AppMonoFontFamily}" />
+                                       FontFamily="{DynamicResource AppContentFontFamily}" />
                             <TextBlock Grid.Column="1"
                                        search:SearchHighlight.Text="{Binding Text}"
                                        search:SearchHighlight.Term="{Binding $parent[json:NdJsonView].((json:NdJsonViewModel)DataContext).HighlightTerm}"
                                        TextWrapping="NoWrap"
-                                       FontFamily="{StaticResource AppMonoFontFamily}" />
+                                       FontFamily="{DynamicResource AppContentFontFamily}" />
                         </Grid>
                     </DataTemplate>
                 </ListBox.ItemTemplate>
@@ -62,7 +62,7 @@
                     </ContentControl>
                     <TextBlock Text="Select a line to view its JSON"
                                Foreground="{DynamicResource AppMutedTextBrush}"
-                               FontFamily="{StaticResource AppMonoFontFamily}"
+                               FontFamily="{DynamicResource AppContentFontFamily}"
                                IsVisible="{Binding SelectedLineJsonViewModel, Converter={x:Static jsonview:IsNullConverter.Instance}}" />
                 </Grid>
             </Border>

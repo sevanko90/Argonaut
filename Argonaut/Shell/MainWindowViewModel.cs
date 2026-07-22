@@ -52,6 +52,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private string fileName = string.Empty;
     private IReadOnlyList<RecentFileItem> recentFiles = Array.Empty<RecentFileItem>();
     private ThemeMode themeMode;
+    private ContentFontMode contentFontMode;
     private int openRequestId;
 
     /// <summary>Raised when the find bar's status text should change (null clears it).</summary>
@@ -74,6 +75,7 @@ public sealed class MainWindowViewModel : ObservableObject
         this.documentLoader = documentLoader ?? LoadDocumentAsync;
 
         themeMode = ThemePreference.Load();
+        contentFontMode = ContentFontPreference.Load();
 
         findController = new FindController(
             status => FindStatusChanged?.Invoke(status),
@@ -136,6 +138,22 @@ public sealed class MainWindowViewModel : ObservableObject
             _ => ThemeMode.System
         };
         ThemePreference.Save(ThemeMode);
+    }
+
+    public ContentFontMode ContentFontMode
+    {
+        get => contentFontMode;
+        private set => SetField(ref contentFontMode, value);
+    }
+
+    /// <summary>Toggles Monospace ↔ SansSerif and persists the choice. The view reacts to
+    /// <see cref="ContentFontMode"/> to swap the AppContentFontFamily resource and tooltip.</summary>
+    public void ToggleContentFont()
+    {
+        ContentFontMode = ContentFontMode == ContentFontMode.Monospace
+            ? ContentFontMode.SansSerif
+            : ContentFontMode.Monospace;
+        ContentFontPreference.Save(ContentFontMode);
     }
 
     public void OpenRecentFile(string path) => _ = OpenPathAsync(path);

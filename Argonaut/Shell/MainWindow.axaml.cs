@@ -53,6 +53,7 @@ public partial class MainWindow : Window
         EmptyState.SetRecentFiles(viewModel.RecentFiles);
 
         ApplyThemeMode(viewModel.ThemeMode);
+        ApplyContentFontMode(viewModel.ContentFontMode);
 
         FindBarControl.FindRequested += (term, direction) => _ = viewModel.FindAsync(term, direction);
         FindBarControl.ResetRequested += CloseFindBar;
@@ -67,6 +68,9 @@ public partial class MainWindow : Window
     {
         if (e.PropertyName is null or nameof(MainWindowViewModel.ThemeMode))
             ApplyThemeMode(viewModel.ThemeMode);
+
+        if (e.PropertyName is null or nameof(MainWindowViewModel.ContentFontMode))
+            ApplyContentFontMode(viewModel.ContentFontMode);
 
         if (e.PropertyName is null or nameof(MainWindowViewModel.RecentFiles))
             EmptyState.SetRecentFiles(viewModel.RecentFiles);
@@ -153,6 +157,27 @@ public partial class MainWindow : Window
             ThemeMode.Dark => "Theme: Dark (click to follow System)",
             _ => "Theme: System (click for Light)"
         });
+    }
+
+    private void OnToggleContentFont(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        viewModel.ToggleContentFont();
+    }
+
+    /// <summary>
+    /// Repoints the AppContentFontFamily application resource at the mono or sans family.
+    /// Content views consume it via DynamicResource, so replacing the entry re-fonts them
+    /// all live — the same mechanism the theme brushes use.
+    /// </summary>
+    private void ApplyContentFontMode(ContentFontMode mode)
+    {
+        var app = Application.Current!;
+        string sourceKey = mode == ContentFontMode.SansSerif ? "AppSansFontFamily" : "AppMonoFontFamily";
+        app.Resources["AppContentFontFamily"] = app.Resources[sourceKey];
+
+        ToolTip.SetTip(FontToggleButton, mode == ContentFontMode.SansSerif
+            ? "Content font: Sans-serif (click for Monospace)"
+            : "Content font: Monospace (click for Sans-serif)");
     }
 
     private async void OnCloseFile(object? sender, Avalonia.Interactivity.RoutedEventArgs e)

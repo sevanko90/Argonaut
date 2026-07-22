@@ -257,4 +257,20 @@ public sealed class MainWindowViewModelTests : IDisposable
         vm.ToggleTheme();
         Assert.Equal(ThemeMode.System, vm.ThemeMode);
     }
+
+    [Fact]
+    public void ToggleContentFont_TogglesAndPersists()
+    {
+        var vm = CreateViewModel((_, _, _) => Task.FromResult<IDocumentViewModel>(new FakeDocument()));
+
+        Assert.Equal(ContentFontMode.Monospace, vm.ContentFontMode);
+        vm.ToggleContentFont();
+        Assert.Equal(ContentFontMode.SansSerif, vm.ContentFontMode);
+        vm.ToggleContentFont();
+        Assert.Equal(ContentFontMode.Monospace, vm.ContentFontMode);
+
+        vm.ToggleContentFont();
+        var reloaded = CreateViewModel((_, _, _) => Task.FromResult<IDocumentViewModel>(new FakeDocument()));
+        Assert.Equal(ContentFontMode.SansSerif, reloaded.ContentFontMode);
+    }
 }

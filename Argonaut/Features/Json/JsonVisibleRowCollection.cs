@@ -46,6 +46,14 @@ public sealed class JsonRow
 
     /// <summary>Muted note that Name and/or Value was display-capped (with the full length), or null.</summary>
     public string? TruncationHint { get; }
+
+    // Scalar-kind flags consumed by JsonView.axaml Classes.* bindings for per-type value
+    // coloring. Container, placeholder and summary rows match none of them and keep the
+    // default foreground.
+    public bool IsStringValue => Kind == JsonTokenKind.String;
+    public bool IsNumberValue => Kind == JsonTokenKind.Number;
+    public bool IsBooleanValue => Kind is JsonTokenKind.True or JsonTokenKind.False;
+    public bool IsNullValue => Kind == JsonTokenKind.Null;
 }
 
 /// <summary>

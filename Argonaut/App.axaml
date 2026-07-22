@@ -10,6 +10,26 @@
 
     <Application.Styles>
         <FluentTheme />
+
+        <!-- Shared chromeless icon button (toolbar close, find bar arrows, theme toggle...).
+             Spacing follows the app's 4-based scale (4/8/12/16); "compact" is the tighter
+             variant for dense bars like the JSON path bar and status bar. -->
+        <Style Selector="Button.iconbutton">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="6" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="Button.iconbutton.compact">
+            <Setter Property="Padding" Value="4" />
+        </Style>
+        <Style Selector="Button.iconbutton:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource AppHoverBackgroundBrush}" />
+        </Style>
+        <Style Selector="Button.iconbutton:disabled">
+            <Setter Property="Opacity" Value="0.4" />
+        </Style>
     </Application.Styles>
 
     <Application.Resources>
@@ -18,7 +38,14 @@
                 <ResourceInclude Source="avares://Argonaut/Themes/AppColors.axaml" />
             </ResourceDictionary.MergedDictionaries>
 
-            <FontFamily x:Key="AppMonoFontFamily">Consolas, Monaco, 'Courier New', monospace</FontFamily>
+            <FontFamily x:Key="AppMonoFontFamily">Consolas, 'SF Mono', Menlo, Monaco, 'Cascadia Code', 'Courier New', monospace</FontFamily>
+            <FontFamily x:Key="AppSansFontFamily">fonts:Inter#Inter</FontFamily>
+
+            <!-- The font content views actually render with (JSON tree, NDJSON lines, CSV cells,
+                 find box). Consumed via DynamicResource; the status bar's font toggle swaps this
+                 entry at runtime between the mono and sans families above, re-fonting all views
+                 live (same mechanism as the theme brushes). -->
+            <FontFamily x:Key="AppContentFontFamily">Consolas, 'SF Mono', Menlo, Monaco, 'Cascadia Code', 'Courier New', monospace</FontFamily>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

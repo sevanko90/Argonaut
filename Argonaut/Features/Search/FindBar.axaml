@@ -4,30 +4,17 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              mc:Ignorable="d"
              x:Class="Argonaut.Features.Search.FindBar">
-    <UserControl.Styles>
-        <Style Selector="Button.findicon">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Padding" Value="6" />
-            <Setter Property="CornerRadius" Value="10" />
-            <Setter Property="Cursor" Value="Hand" />
-        </Style>
-        <Style Selector="Button.findicon:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="{DynamicResource AppHoverBackgroundBrush}" />
-        </Style>
-    </UserControl.Styles>
-
     <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto">
         <TextBox Grid.Column="0"
                  x:Name="TermBox"
                  Width="240"
                  FontSize="12"
                  PlaceholderText="Find"
-                 FontFamily="{StaticResource AppMonoFontFamily}" />
+                 FontFamily="{DynamicResource AppContentFontFamily}" />
         <Button Grid.Column="1"
                 x:Name="PreviousButton"
-                Classes="findicon"
-                Margin="6,0,0,0"
+                Classes="iconbutton"
+                Margin="8,0,0,0"
                 ToolTip.Tip="Previous match (Shift+Enter)">
             <Viewbox Width="12" Height="12">
                 <Path Fill="{DynamicResource AppMutedTextBrush}"
@@ -36,7 +23,7 @@
         </Button>
         <Button Grid.Column="2"
                 x:Name="NextButton"
-                Classes="findicon"
+                Classes="iconbutton"
                 ToolTip.Tip="Next match (Enter)">
             <Viewbox Width="12" Height="12">
                 <Path Fill="{DynamicResource AppMutedTextBrush}"
@@ -46,7 +33,7 @@
         <TextBlock Grid.Column="3"
                    x:Name="StatusLabel"
                    FontSize="12"
-                   Margin="10,0,0,0"
+                   Margin="8,0,0,0"
                    VerticalAlignment="Center"
                    MinWidth="70"
                    MaxWidth="140"
@@ -54,7 +41,7 @@
                    Foreground="{DynamicResource AppMutedTextBrush}" />
         <Button Grid.Column="4"
                 x:Name="CloseButton"
-                Classes="findicon"
+                Classes="iconbutton"
                 ToolTip.Tip="Clear search (Esc)">
             <Viewbox Width="12" Height="12">
                 <Path Fill="{DynamicResource AppMutedTextBrush}"

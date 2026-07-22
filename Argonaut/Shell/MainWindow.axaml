@@ -30,19 +30,6 @@
     </Window.DataTemplates>
 
     <Grid>
-        <Grid.Styles>
-            <Style Selector="Button.iconbutton">
-                <Setter Property="Background" Value="Transparent" />
-                <Setter Property="BorderThickness" Value="0" />
-                <Setter Property="Padding" Value="6" />
-                <Setter Property="CornerRadius" Value="14" />
-                <Setter Property="Cursor" Value="Hand" />
-            </Style>
-            <Style Selector="Button.iconbutton:pointerover /template/ ContentPresenter">
-                <Setter Property="Background" Value="{DynamicResource AppHoverBackgroundBrush}" />
-            </Style>
-        </Grid.Styles>
-
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
@@ -116,17 +103,27 @@
                            FontSize="12"
                            VerticalAlignment="Center"
                            Foreground="{DynamicResource AppMutedTextBrush}" />
-                <Button Grid.Column="1"
-                        x:Name="ThemeToggleButton"
-                        Click="OnToggleTheme"
-                        Classes="iconbutton"
-                        Padding="4"
-                        Margin="8,0,0,0">
-                    <Viewbox Width="14" Height="14">
-                        <Path x:Name="ThemeToggleIcon"
-                              Fill="{DynamicResource AppMutedTextBrush}" />
-                    </Viewbox>
-                </Button>
+                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <Button x:Name="FontToggleButton"
+                            Click="OnToggleContentFont"
+                            Classes="iconbutton compact"
+                            Margin="8,0,0,0">
+                        <Viewbox Width="14" Height="14">
+                            <!-- Material "text_fields" -->
+                            <Path Fill="{DynamicResource AppMutedTextBrush}"
+                                  Data="M2.5 4v3h5v12h3V7h5V4h-13zm19 5h-9v3h3v7h3v-7h3V9z" />
+                        </Viewbox>
+                    </Button>
+                    <Button x:Name="ThemeToggleButton"
+                            Click="OnToggleTheme"
+                            Classes="iconbutton compact"
+                            Margin="8,0,0,0">
+                        <Viewbox Width="14" Height="14">
+                            <Path x:Name="ThemeToggleIcon"
+                                  Fill="{DynamicResource AppMutedTextBrush}" />
+                        </Viewbox>
+                    </Button>
+                </StackPanel>
             </Grid>
         </Border>
     </Grid>

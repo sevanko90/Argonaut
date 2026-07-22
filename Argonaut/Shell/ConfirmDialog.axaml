@@ -9,7 +9,7 @@
         CanResize="False"
         WindowStartupLocation="CenterOwner"
         Background="{DynamicResource AppWindowBackgroundBrush}">
-    <StackPanel Margin="24" Spacing="20">
+    <StackPanel Margin="24" Spacing="16">
         <TextBlock x:Name="MessageText" TextWrapping="Wrap" FontSize="14" />
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
             <Button x:Name="NoButton" Content="Cancel" Click="OnNo" />

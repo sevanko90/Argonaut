@@ -16,6 +16,17 @@
             <SolidColorBrush x:Key="AppHoverBackgroundBrush" Color="#EAEBEE" />
             <SolidColorBrush x:Key="AppDangerHoverBrush" Color="#EF4444" />
             <SolidColorBrush x:Key="AppSearchHighlightBrush" Color="#FDE68A" />
+            <SolidColorBrush x:Key="AppJsonStringBrush" Color="#047857" />
+            <SolidColorBrush x:Key="AppJsonNumberBrush" Color="#7C3AED" />
+            <SolidColorBrush x:Key="AppJsonBoolBrush" Color="#C2410C" />
+            <SolidColorBrush x:Key="AppJsonNullBrush" Color="#6B7280" />
+
+            <!-- Fluent theme key overrides (names from Avalonia.Themes.Fluent 12.1).
+                 List selection: soft accent tint instead of Fluent's solid accent fill, so
+                 per-type value colors stay readable on selected rows. -->
+            <SolidColorBrush x:Key="SystemControlHighlightListAccentLowBrush" Color="#262563EB" />
+            <SolidColorBrush x:Key="SystemControlHighlightListAccentMediumBrush" Color="#382563EB" />
+            <SolidColorBrush x:Key="SystemControlHighlightListAccentHighBrush" Color="#4D2563EB" />
         </ResourceDictionary>
 
         <ResourceDictionary x:Key="Dark">
@@ -29,6 +40,15 @@
             <SolidColorBrush x:Key="AppHoverBackgroundBrush" Color="#3A3B3E" />
             <SolidColorBrush x:Key="AppDangerHoverBrush" Color="#F87171" />
             <SolidColorBrush x:Key="AppSearchHighlightBrush" Color="#7A5B00" />
+            <SolidColorBrush x:Key="AppJsonStringBrush" Color="#34D399" />
+            <SolidColorBrush x:Key="AppJsonNumberBrush" Color="#A78BFA" />
+            <SolidColorBrush x:Key="AppJsonBoolBrush" Color="#FB923C" />
+            <SolidColorBrush x:Key="AppJsonNullBrush" Color="#9CA3AF" />
+
+            <!-- Fluent theme key overrides — see the Light dictionary for what each group does. -->
+            <SolidColorBrush x:Key="SystemControlHighlightListAccentLowBrush" Color="#2E60A5FA" />
+            <SolidColorBrush x:Key="SystemControlHighlightListAccentMediumBrush" Color="#4260A5FA" />
+            <SolidColorBrush x:Key="SystemControlHighlightListAccentHighBrush" Color="#5960A5FA" />
         </ResourceDictionary>
     </ResourceDictionary.ThemeDictionaries>
 

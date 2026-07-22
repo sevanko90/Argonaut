@@ -1,4 +1,5 @@
 ﻿using Avalonia;
+using Avalonia.Media;
 using System;
 
 namespace Argonaut;
@@ -20,5 +21,8 @@ class Program
             .WithDeveloperTools()
 #endif
             .WithInterFont()
+            // Inter (embedded via WithInterFont) is the default UI chrome font; content
+            // surfaces override with AppContentFontFamily explicitly in XAML.
+            .With(new FontManagerOptions { DefaultFamilyName = "fonts:Inter#Inter" })
             .LogToTrace();
 }

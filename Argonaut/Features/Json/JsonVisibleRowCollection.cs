@@ -289,6 +289,149 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
         Rebuild();
     }
 
+    // Ceiling on how many visible rows one deep-expand may build. Rebuild and
+    // FindVisiblePosition are both O(visible rows) and run on every subsequent toggle, so an
+    // unbounded expand-all near the root of a huge file would tax every later click, not
+    // just this one. Approximate: containers on the walk's stack when the budget runs out
+    // are already flipped and still show up to their child cap, so the real row count can
+    // overshoot by a bounded slack - fine for a UI guard.
+    internal const int ExpandAllRowBudget = 100_000;
+
+    /// <summary>
+    /// Deep-toggles the container at the given row position (alt/option-click on its
+    /// expander). Collapsed: expands it and every descendant container, materialised into
+    /// expandOverrides by a walk that mirrors AppendSubtree's display caps (children behind
+    /// a "more items" placeholder are not touched) and stops at ExpandAllRowBudget.
+    /// Expanded: collapses it and forgets all descendant expand/paging state, so a later
+    /// re-expand starts from the clean default. Placeholder rows fall back to the normal
+    /// "show more" paging. Returns true when expansion stopped at the budget.
+    /// </summary>
+    public bool ToggleExpandAll(int position) => ToggleExpandAll(position, ExpandAllRowBudget);
+
+    internal bool ToggleExpandAll(int position, int rowBudget)
+    {
+        if (position < 0 || position >= visibleRows.Count)
+            return false;
+
+        var vrow = visibleRows[position];
+
+        if (vrow.IsPlaceholder)
+        {
+            ToggleExpand(position);
+            return false;
+        }
+
+        var token = index.GetToken(vrow.TokenIndex);
+        if (!IsContainer(token.Kind))
+            return false;
+
+        bool budgetHit = false;
+        if (IsExpanded(vrow.TokenIndex, token.Depth))
+        {
+            CollapseAllDescendants(vrow.TokenIndex, token.EndIndex);
+        }
+        else
+        {
+            int budget = rowBudget;
+            ExpandSubtree(vrow.TokenIndex, ref budget);
+            budgetHit = budget <= 0;
+        }
+
+        Rebuild();
+        return budgetHit;
+    }
+
+    /// <summary>
+    /// Collapses the (currently expanded) container and purges every descendant's expand
+    /// override and paging limit, so re-expanding shows the default-depth state again. For
+    /// an unclosed container (EndIndex &lt; 0) every later indexed token is inside it, so
+    /// the purge range is open-ended. O(override/paging entry count), never document size.
+    /// </summary>
+    private void CollapseAllDescendants(int tokenIndex, int endIndex)
+    {
+        if (!expandOverrides.Remove(tokenIndex))
+            expandOverrides.Add(tokenIndex);
+
+        expandOverrides.RemoveWhere(i => i > tokenIndex && (endIndex < 0 || i < endIndex));
+
+        List<int>? stale = null;
+        foreach (int key in expandedChildLimit.Keys)
+        {
+            if (key > tokenIndex && (endIndex < 0 || key < endIndex))
+                (stale ??= new List<int>()).Add(key);
+        }
+
+        if (stale is not null)
+        {
+            foreach (int key in stale)
+                expandedChildLimit.Remove(key);
+        }
+    }
+
+    /// <summary>
+    /// Flips every collapsed container in the subtree to expanded, walking exactly the
+    /// children AppendSubtree would display (same per-container limit, same early-outs for
+    /// unindexed regions) and decrementing <paramref name="budget"/> once per row the
+    /// expansion will make visible. Stops descending once the budget is exhausted.
+    /// </summary>
+    private void ExpandSubtree(int tokenIndex, ref int budget)
+    {
+        if (budget <= 0)
+            return;
+        budget--; // the row for this token itself
+
+        var token = index.GetToken(tokenIndex);
+        if (!IsContainer(token.Kind))
+            return;
+
+        if (!IsExpanded(tokenIndex, token.Depth))
+        {
+            if (!expandOverrides.Remove(tokenIndex))
+                expandOverrides.Add(tokenIndex);
+        }
+
+        int limit = expandedChildLimit.TryGetValue(tokenIndex, out var l) ? l : ChildCap;
+        int childIndex = tokenIndex + 1;
+        int containerEnd = token.EndIndex;
+        int shown = 0;
+
+        while (true)
+        {
+            if (containerEnd >= 0 && childIndex >= containerEnd)
+            {
+                budget--; // closing-bracket row
+                return;
+            }
+
+            if (childIndex >= index.TokenCount)
+                return; // indexing hasn't reached here yet
+
+            if (shown >= limit)
+            {
+                budget--; // "more items" placeholder row
+                return;
+            }
+
+            if (budget <= 0)
+                return;
+
+            var child = index.GetToken(childIndex);
+            ExpandSubtree(childIndex, ref budget);
+            shown++;
+
+            if (IsContainer(child.Kind))
+            {
+                if (child.EndIndex < 0)
+                    return; // child subtree not fully indexed - can't locate its sibling yet
+                childIndex = child.EndIndex + 1;
+            }
+            else
+            {
+                childIndex++;
+            }
+        }
+    }
+
     private JsonRow GetRow(int position)
     {
         if (rowCache.TryGetValue(position, out var node))

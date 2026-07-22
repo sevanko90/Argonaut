@@ -5,7 +5,9 @@ using System.Threading.Tasks;
 using Argonaut.Features.Json.Hints;
 using Argonaut.Infrastructure;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Input.Platform;
+using Avalonia.Interactivity;
 using Avalonia.Threading;
 
 namespace Argonaut.Features.Json;
@@ -17,6 +19,7 @@ public partial class JsonView : UserControl
     private JsonViewModel? subscribedViewModel;
     private MenuFlyout? hintFlyout;
     private int hintFlyoutTokenIndex = -1;
+    private KeyModifiers lastRowsPressModifiers;
 
     public JsonView()
     {
@@ -25,10 +28,16 @@ public partial class JsonView : UserControl
         DetachedFromVisualTree += OnDetachedFromVisualTree;
         DataContextChanged += OnDataContextChanged;
         RowsListBox.SelectionChanged += OnSelectionChanged;
+
+        // Tunnel-stage capture only, and never marks Handled: Button.Click carries no
+        // modifiers, so remember the press modifiers for OnToggleExpandClick (alt/option
+        // on the expander = deep toggle).
+        RowsListBox.AddHandler(PointerPressedEvent, OnRowsListPointerPressed, RoutingStrategies.Tunnel);
     }
 
     private void OnDetachedFromVisualTree(object? sender, Avalonia.VisualTreeAttachmentEventArgs e)
     {
+        RowsListBox.RemoveHandler(PointerPressedEvent, OnRowsListPointerPressed);
         RowsListBox.SelectionChanged -= OnSelectionChanged;
         DataContextChanged -= OnDataContextChanged;
         UnsubscribeViewModel();
@@ -130,7 +139,25 @@ public partial class JsonView : UserControl
         if (!row.IsPlaceholder)
             vm.SelectToken(row.TokenIndex);
 
-        vm.Rows.ToggleExpand(row.Position);
+        // Consume the captured press modifiers so a keyboard-activated Click (Space/Enter)
+        // can't reuse a stale alt from an earlier pointer press.
+        bool deepToggle = (lastRowsPressModifiers & KeyModifiers.Alt) != 0;
+        lastRowsPressModifiers = KeyModifiers.None;
+
+        if (deepToggle)
+        {
+            if (vm.Rows.ToggleExpandAll(row.Position))
+                ToastService.Show("Expanded to the display limit");
+        }
+        else
+        {
+            vm.Rows.ToggleExpand(row.Position);
+        }
+    }
+
+    private void OnRowsListPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        lastRowsPressModifiers = e.KeyModifiers;
     }
 
     private void OnPathSegmentClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)

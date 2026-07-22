@@ -104,6 +104,12 @@
                                        search:SearchHighlight.Term="{Binding $parent[json:JsonView].((json:JsonViewModel)DataContext).HighlightTerm}"
                                        TextWrapping="NoWrap"
                                        FontFamily="{StaticResource AppMonoFontFamily}" />
+                            <TextBlock Text="{Binding TruncationHint}"
+                                       IsVisible="{Binding TruncationHint, Converter={x:Static json:IsNotNullConverter.Instance}}"
+                                       Foreground="{DynamicResource AppMutedTextBrush}"
+                                       FontFamily="{StaticResource AppMonoFontFamily}"
+                                       Margin="8,0,0,0"
+                                       VerticalAlignment="Center" />
                             <Button Classes="hintlink"
                                     Content="{Binding Hint}"
                                     IsVisible="{Binding Hint, Converter={x:Static json:IsNotNullConverter.Instance}}"

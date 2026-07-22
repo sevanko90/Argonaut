@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Specialized;
+using System.Text;
 using Avalonia.Threading;
 using Argonaut.Features.Json.Hints;
 using Argonaut.Infrastructure;
@@ -14,7 +15,7 @@ namespace Argonaut.Features.Json;
 /// </summary>
 public sealed class JsonRow
 {
-    public JsonRow(int position, int tokenIndex, int depth, JsonTokenKind kind, string? name, string value, bool hasChildren, bool isExpanded, bool isPlaceholder, string? hint = null)
+    public JsonRow(int position, int tokenIndex, int depth, JsonTokenKind kind, string? name, string value, bool hasChildren, bool isExpanded, bool isPlaceholder, string? hint = null, string? truncationHint = null)
     {
         Position = position;
         TokenIndex = tokenIndex;
@@ -26,6 +27,7 @@ public sealed class JsonRow
         IsExpanded = isExpanded;
         IsPlaceholder = isPlaceholder;
         Hint = hint;
+        TruncationHint = truncationHint;
     }
 
     /// <summary>Index into the owning JsonVisibleRowCollection's current visible list.</summary>
@@ -41,6 +43,9 @@ public sealed class JsonRow
 
     /// <summary>Muted decoded-value hint (e.g. a decoded date) to render after Value, or null.</summary>
     public string? Hint { get; }
+
+    /// <summary>Muted note that Name and/or Value was display-capped (with the full length), or null.</summary>
+    public string? TruncationHint { get; }
 }
 
 /// <summary>
@@ -52,6 +57,12 @@ public sealed class JsonRow
 public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
 {
     private const int ChildCap = 2000;
+    // Display cap for any one decoded text (a scalar value or a property name). A single
+    // pathologically large token (e.g. a 100 MB string) must never reach the TextBlock:
+    // Avalonia lays out an unwrapped line in O(length), and the row would otherwise be
+    // re-decoded in full on every growth-poll rebuild. Rows past the cap render a
+    // truncation hint carrying the token's real length instead.
+    internal const int MaxDisplayTextLength = 1024;
     // Hard ceiling on how far repeated "show more" clicks can page a single container's
     // children into the visible list. Rebuild() re-walks the whole visible tree on every
     // toggle (see class remarks), so without this cap, paging through a container with
@@ -311,24 +322,37 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
         }
 
         var token = index.GetToken(vrow.TokenIndex);
-        string? name = token.NameLength >= 0 ? ReadText(token.NameOffset, token.NameLength) : null;
+        bool nameTruncated = false;
+        string? name = token.NameLength >= 0 ? ReadText(token.NameOffset, token.NameLength, out nameTruncated) : null;
         bool isContainer = IsContainer(token.Kind);
         bool expanded = isContainer && IsExpanded(vrow.TokenIndex, token.Depth);
 
+        bool valueTruncated = false;
         string value = isContainer
             ? BuildContainerSummary(vrow.TokenIndex, token, expanded)
-            : BuildScalarText(token);
+            : BuildScalarText(token, out valueTruncated);
 
         bool hasChildren = isContainer && (token.EndIndex < 0 || token.EndIndex > vrow.TokenIndex + 1);
 
         string? hint = isContainer ? null : BuildHint(vrow.TokenIndex, token);
 
-        return new JsonRow(position, vrow.TokenIndex, token.Depth, token.Kind, name, value, hasChildren, expanded, isPlaceholder: false, hint: hint);
+        string? truncationHint = valueTruncated
+            ? $"(truncated — full length {FormatByteLength(token.Length)})"
+            : nameTruncated
+                ? $"(name truncated — full length {FormatByteLength(token.NameLength)})"
+                : null;
+
+        return new JsonRow(position, vrow.TokenIndex, token.Depth, token.Kind, name, value, hasChildren, expanded, isPlaceholder: false, hint: hint, truncationHint: truncationHint);
     }
 
     private string? BuildHint(int tokenIndex, JsonTokenInfo token)
     {
         if (hintProviders is null)
+            return null;
+
+        // No classifiable value (a date in some encoding) is anywhere near this long; skip
+        // early rather than hand providers a span over a pathologically large token.
+        if (token.Length > MaxDisplayTextLength)
             return null;
 
         foreach (var provider in hintProviders)
@@ -380,24 +404,60 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
         return count > ChildCountCap ? $"{ChildCountCap}+ {label}s" : $"{count} {label}{(count == 1 ? "" : "s")}";
     }
 
-    private string BuildScalarText(JsonTokenInfo token) => token.Kind switch
+    private string BuildScalarText(JsonTokenInfo token, out bool truncated)
     {
-        JsonTokenKind.Null => "null",
-        JsonTokenKind.True => "true",
-        JsonTokenKind.False => "false",
-        JsonTokenKind.Number => ReadText(token.Offset, token.Length),
-        JsonTokenKind.EndObject => "}",
-        JsonTokenKind.EndArray => "]",
-        _ => "\"" + ReadText(token.Offset, token.Length) + "\""
-    };
+        switch (token.Kind)
+        {
+            case JsonTokenKind.Null: truncated = false; return "null";
+            case JsonTokenKind.True: truncated = false; return "true";
+            case JsonTokenKind.False: truncated = false; return "false";
+            case JsonTokenKind.EndObject: truncated = false; return "}";
+            case JsonTokenKind.EndArray: truncated = false; return "]";
+            case JsonTokenKind.Number: return ReadText(token.Offset, token.Length, out truncated);
+            default:
+                string text = ReadText(token.Offset, token.Length, out truncated);
+                // A truncated string keeps its opening quote but gets no closing one: the
+                // value visibly continues past the ellipsis. This also keeps copy-value's
+                // quote stripping (first + last char) correct - it removes the quote and
+                // the ellipsis, leaving exactly the truncated raw text.
+                return truncated ? "\"" + text : "\"" + text + "\"";
+        }
+    }
 
-    private string ReadText(long offset, int length)
+    private string ReadText(long offset, int length, out bool truncated)
     {
         if (length <= 0)
+        {
+            truncated = false;
             return string.Empty;
+        }
 
-        return mmap.GetUtf8String(offset, length);
+        if (length <= MaxDisplayTextLength)
+        {
+            truncated = false;
+            return mmap.GetUtf8String(offset, length);
+        }
+
+        truncated = true;
+
+        // Cut on a UTF-8 character boundary: read one byte past the cap and back the cut
+        // off while the first excluded byte is a continuation byte (0b10xxxxxx), so a
+        // multi-byte character is never split into a replacement glyph.
+        var span = mmap.GetSpan(offset, MaxDisplayTextLength + 1);
+        int cut = MaxDisplayTextLength;
+        while (cut > 0 && (span[cut] & 0xC0) == 0x80)
+            cut--;
+
+        return Encoding.UTF8.GetString(span[..cut]) + "…";
     }
+
+    private static string FormatByteLength(int bytes) => bytes switch
+    {
+        < 1024 => $"{bytes:N0} bytes",
+        < 1024 * 1024 => $"{bytes / 1024.0:0.#} KB",
+        < 1024 * 1024 * 1024 => $"{bytes / (1024.0 * 1024.0):0.#} MB",
+        _ => $"{bytes / (1024.0 * 1024.0 * 1024.0):0.#} GB"
+    };
 
     private static bool IsContainer(JsonTokenKind kind) => kind is JsonTokenKind.StartObject or JsonTokenKind.StartArray;
 

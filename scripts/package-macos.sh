@@ -18,6 +18,10 @@ DIST_DIR="$ROOT_DIR/dist"
 BUNDLE_DIR="$DIST_DIR/$APP_NAME.app"
 
 echo "Publishing $APP_NAME for $RID ($CONFIGURATION)..."
+# Force a clean publish dir: an incremental `dotnet publish` can skip re-emitting native
+# .dylib files (e.g. libSkiaSharp, libHarfBuzzSharp, libAvaloniaNative) alongside the
+# single-file executable, silently producing a bundle missing them.
+rm -rf "$PUBLISH_DIR"
 dotnet publish "$PROJECT" \
     -c "$CONFIGURATION" \
     -r "$RID" \

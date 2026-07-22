@@ -6,6 +6,7 @@ using Argonaut.Features.Json.Hints;
 using Argonaut.Infrastructure;
 using Avalonia.Controls;
 using Avalonia.Input.Platform;
+using Avalonia.Threading;
 
 namespace Argonaut.Features.Json;
 
@@ -101,7 +102,16 @@ public partial class JsonView : UserControl
 
     private void OnRowsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
-        SyncVisualSelection();
+        // Deliberately deferred (not the banned marshal-after-await pattern): never set
+        // RowsListBox.SelectedIndex from inside the rows collection's own CollectionChanged.
+        // Subscriber order vs the ListBox's ItemsSourceView is unspecified, and when this
+        // handler runs first the selection model still holds its pre-rebuild indexes; setting
+        // SelectedIndex makes it materialise those against the already-rebuilt (possibly
+        // shorter) list - ArgumentOutOfRangeException from GetRow, and the failed commit
+        // leaves the model stuck with the stale index so every later rebuild re-throws.
+        // Posting runs the sync after all subscribers have consumed the Reset, when the
+        // ListBox has already dropped the stale selection.
+        Dispatcher.UIThread.Post(SyncVisualSelection);
     }
 
     private void OnToggleExpandClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)

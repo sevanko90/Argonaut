@@ -62,7 +62,7 @@ public class FileIndexerInterfaceTests
     }
 
     [Fact]
-    public void RawSegmentIndex_InterfaceMirrorsSegmentCount()
+    public void RawSegmentIndex_InterfaceCountsAnchorsWhileRowCountCountsRows()
     {
         WithFile("one\ntwo\nthree\n", file =>
         {
@@ -71,9 +71,9 @@ public class FileIndexerInterfaceTests
             indexer.IndexingTask.GetAwaiter().GetResult();
 
             Assert.True(indexer.IsComplete);
-            Assert.Equal(index.SegmentCount, indexer.ItemCount);
-            Assert.Equal(3, indexer.ItemCount);
-            Assert.Equal("rows", indexer.ItemNoun);
+            Assert.Equal(3, index.RowCount);
+            Assert.Equal(1, indexer.ItemCount); // sparse: one anchor covers the first 64 rows
+            Assert.Equal("anchors", indexer.ItemNoun);
             Assert.Same(index.IndexingTask, indexer.IndexingTask);
         });
     }

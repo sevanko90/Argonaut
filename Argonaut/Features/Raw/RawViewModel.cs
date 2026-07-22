@@ -38,7 +38,7 @@ public sealed class RawViewModel : ObservableObject, IDocumentViewModel
 
     public Task IndexingTask => this.session?.IndexingTask ?? Task.CompletedTask;
 
-    public int RowCount => this.session?.Index.SegmentCount ?? 0;
+    public int RowCount => this.session?.Index.RowCount ?? 0;
 
     /// <summary>Byte cap per display row. Observable so the view can recompute its pan range.</summary>
     public int WrapWidth
@@ -93,8 +93,8 @@ public sealed class RawViewModel : ObservableObject, IDocumentViewModel
         this.session = session;
 
         // Await a small initial batch so the first paint isn't an empty list; RowCount then
-        // tracks the segment count live as indexing continues in the background.
-        await session.Index.WaitForSegmentCountAsync(InitialIndexedRowTarget);
+        // tracks the published row count live as indexing continues in the background.
+        await session.Index.WaitForRowCountAsync(InitialIndexedRowTarget);
 
         this.rows = new RawRowCollection(session.Index, session.File);
 
@@ -115,6 +115,10 @@ public sealed class RawViewModel : ObservableObject, IDocumentViewModel
         if (this.disposed || this.session is null || bytes == this.wrapWidth)
             return;
 
+        // Raised BEFORE the Rows swap below - the view reacts by resetting its scroll and
+        // re-laying-out against the old collection, so the virtualizer's remembered viewport
+        // is back at the top when the new ItemsSource arrives (see RawView's
+        // ResetScrollBeforeSourceSwap). Reordering this method breaks that contract.
         WrapWidth = bytes;
         IndexGeneration++;
 

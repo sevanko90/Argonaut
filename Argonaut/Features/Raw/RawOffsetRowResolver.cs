@@ -5,46 +5,24 @@ namespace Argonaut.Features.Raw;
 
 /// <summary>
 /// Maps an absolute byte offset in the file (e.g. a search hit) to the display row that
-/// contains it. Segments are contiguous from offset 0, so containment is exact and the row is
-/// the smallest segment index whose end offset exceeds the target; binary search is valid
-/// mid-indexing because segments are appended in ascending file order.
-///
-/// Deliberately a structural twin of NdJsonOffsetLineResolver, not a shared generic - same
-/// hot-path rationale as documented there.
+/// contains it. The lookup itself lives in <see cref="RawSegmentIndex.RowForOffset"/> (binary
+/// search over the sparse anchors, then one bucket walk); this adds the wait-for-coverage
+/// loop against a still-running indexer, mirroring NdJsonOffsetLineResolver's shape.
 /// </summary>
 public static class RawOffsetRowResolver
 {
-    private const int CoverageWaitBatch = 4096;
+    // Rows per coverage re-check while waiting out a scan. Generous on purpose: each
+    // iteration costs a waiter allocation plus a PublishedEndOffset bucket walk, and at
+    // ~64K rows (≈ a few MB of scan) the extra reveal latency is milliseconds.
+    private const int CoverageWaitBatch = 64 * 1024;
 
     /// <summary>
-    /// Resolves <paramref name="offset"/> against the segments indexed so far. Returns null
-    /// when the offset isn't covered yet (nothing indexed, or the offset lies beyond the last
-    /// indexed segment) - use <see cref="ResolveWhenCoveredAsync"/> to wait for coverage.
+    /// Resolves <paramref name="offset"/> against the rows published so far. Returns null
+    /// when the offset isn't covered yet (nothing published, or the offset lies beyond the
+    /// last published row) - use <see cref="ResolveWhenCoveredAsync"/> to wait for coverage.
     /// </summary>
     public static int? ResolveRowForOffset(RawSegmentIndex index, long offset)
-    {
-        int count = index.SegmentCount;
-        if (count == 0 || offset < 0 || offset >= index.GetSegmentEnd(count - 1))
-            return null;
-
-        // Smallest segment whose (exclusive) end lies beyond the offset.
-        int lo = 0, hi = count - 1, row = count - 1;
-        while (lo <= hi)
-        {
-            int mid = lo + (hi - lo) / 2;
-            if (index.GetSegmentEnd(mid) > offset)
-            {
-                row = mid;
-                hi = mid - 1;
-            }
-            else
-            {
-                lo = mid + 1;
-            }
-        }
-
-        return row;
-    }
+        => index.RowForOffset(offset);
 
     /// <summary>
     /// Like <see cref="ResolveRowForOffset"/>, but first waits until indexing has reached
@@ -56,16 +34,16 @@ public static class RawOffsetRowResolver
         {
             ct.ThrowIfCancellationRequested();
 
-            int count = index.SegmentCount;
+            int count = index.RowCount;
             if (index.IsComplete)
-                return ResolveRowForOffset(index, offset);
+                return index.RowForOffset(offset);
 
-            if (count > 0 && offset < index.GetSegmentEnd(count - 1))
-                return ResolveRowForOffset(index, offset);
+            if (count > 0 && offset < index.PublishedEndOffset)
+                return index.RowForOffset(offset);
 
             // Not cancellable directly, but resolves quickly while indexing is alive (and
             // immediately when it completes), so cancellation is honored between batches.
-            await index.WaitForSegmentCountAsync(count + CoverageWaitBatch);
+            await index.WaitForRowCountAsync(count + CoverageWaitBatch);
         }
     }
 }

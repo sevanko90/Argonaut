@@ -207,6 +207,50 @@ public sealed class RawViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task RepeatedWrapChangesWithReveals_DoNotGrowTheManagedHeap()
+    {
+        // ~6MB, 60k lines: big enough that a leaked index/collection generation (~1MB+ of
+        // anchors, caches and strings per cycle) is visible above the slack threshold.
+        var content = new byte[6 * 1024 * 1024];
+        Array.Fill(content, (byte)'x');
+        for (int i = 100; i < content.Length; i += 100)
+            content[i] = (byte)'\n';
+        string path = WriteFile(content);
+
+        var vm = new RawViewModel();
+        try
+        {
+            await vm.LoadAsync(path);
+            await vm.IndexingTask;
+
+            long baseline = 0;
+            for (int cycle = 0; cycle < 6; cycle++)
+            {
+                vm.SetWrapWidth(cycle % 2 == 0 ? 80 : 512);
+                // A reveal racing the re-index - the field scenario - must not pin anything.
+                var reveal = RawOffsetRowResolver.ResolveWhenCoveredAsync(vm.Index!, content.Length - 10, CancellationToken.None);
+                await vm.IndexingTask;
+                Assert.NotNull(await reveal);
+
+                // Realize some rows so caches/LRU churn like a live view.
+                for (int i = 0; i < 200; i++)
+                    _ = vm.Rows[i];
+
+                long heap = GC.GetTotalMemory(forceFullCollection: true);
+                if (cycle == 1)
+                    baseline = heap; // cycle 0 warms statics/pools
+                else if (cycle > 1)
+                    Assert.True(heap < baseline + 4_000_000,
+                        $"managed heap grew from {baseline:N0} to {heap:N0} by cycle {cycle} - a generation is being retained");
+            }
+        }
+        finally
+        {
+            vm.Dispose();
+        }
+    }
+
+    [Fact]
     public async Task RowContent_ExposesLineNumbersAndWrapMarkers()
     {
         // Line 1 wraps once at 160; line 2 fits.

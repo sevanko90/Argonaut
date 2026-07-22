@@ -5,16 +5,16 @@ using Argonaut.Infrastructure;
 namespace Argonaut.Tests;
 
 /// <summary>
-/// Verifies the raw viewer's segment indexer against an independent naive scan implementing
-/// the same rules (break at '\n' or at the wrap cap, newline peek at the cap, UTF-8 backoff):
-/// newline semantics match the NDJSON indexer, forced breaks land where they should with the
-/// soft-wrap flag set, segments stay contiguous and cap-bounded across scan-chunk seams, and
-/// line numbering marks only the first segment of each real line.
+/// Verifies the raw viewer's sparse segment indexer against an independent naive scan
+/// implementing the same rules (break at '\n' or at the wrap cap, newline peek at the cap,
+/// UTF-8 backoff): newline semantics match the NDJSON indexer, forced breaks land where they
+/// should with the soft-wrap flag set, rows stay contiguous and cap-bounded, line numbering
+/// marks only the first row of each real line - and, since only every 64th row is anchored,
+/// that rows re-derived from an anchor walk agree with the dense reference everywhere.
 /// </summary>
 public class RawSegmentIndexTests
 {
-    // Must exceed RawSegmentIndex.ScanChunkSize (4MB) so boundary tests actually cross it.
-    private const int BeyondScanChunk = 5 * 1024 * 1024;
+    private const int LinesBeyondOneAnchorBucket = 200; // > 3 anchor strides of 64
 
     private static void WithIndex(byte[] content, int wrapWidth, Action<RawSegmentIndex, MMapFile> assert)
     {
@@ -33,52 +33,70 @@ public class RawSegmentIndexTests
         }
     }
 
-    /// <summary>Independent implementation of the segmentation rules producing (end, softWrap) pairs.</summary>
-    private static List<(long End, bool SoftWrap)> NaiveScan(byte[] bytes, int wrapWidth)
+    private readonly record struct NaiveRow(long Start, long End, bool SoftWrap, int? LineNumber);
+
+    /// <summary>Independent dense implementation of the segmentation and numbering rules.</summary>
+    private static List<NaiveRow> NaiveScan(byte[] bytes, int wrapWidth)
     {
-        var segments = new List<(long, bool)>();
+        var rows = new List<NaiveRow>();
         long start = 0;
+        int line = 1;
+        bool atLineStart = true;
         while (start < bytes.Length)
         {
+            long end;
+            bool soft;
             long limit = Math.Min(start + wrapWidth, bytes.Length);
             int newline = Array.IndexOf(bytes, (byte)'\n', (int)start, (int)(limit - start));
             if (newline >= 0)
             {
-                segments.Add((newline + 1, false));
-                start = newline + 1;
-                continue;
+                end = newline + 1;
+                soft = false;
             }
-
-            if (start + wrapWidth >= bytes.Length)
+            else if (start + wrapWidth >= bytes.Length)
             {
                 // File ends before (or exactly at) the cap: a real end, no wrap marker.
-                segments.Add((bytes.Length, false));
-                break;
+                end = bytes.Length;
+                soft = false;
             }
-
-            long capEnd = start + wrapWidth;
-            if (bytes[capEnd] == (byte)'\n')
+            else
             {
-                segments.Add((capEnd + 1, false)); // newline peek-extension
-                start = capEnd + 1;
-                continue;
+                long capEnd = start + wrapWidth;
+                if (bytes[capEnd] == (byte)'\n')
+                {
+                    end = capEnd + 1; // newline peek-extension
+                    soft = false;
+                }
+                else
+                {
+                    end = capEnd;
+                    for (int back = 0; back < 3 && end - 1 > start; back++)
+                    {
+                        if ((bytes[end] & 0xC0) != 0x80)
+                            break;
+                        end--;
+                    }
+                    if ((bytes[end] & 0xC0) == 0x80)
+                        end = capEnd;
+                    soft = true;
+                }
             }
 
-            long end = capEnd;
-            for (int back = 0; back < 3 && end - 1 > start; back++)
+            rows.Add(new NaiveRow(start, end, soft, atLineStart ? line : null));
+            if (soft)
             {
-                if ((bytes[end] & 0xC0) != 0x80)
-                    break;
-                end--;
+                atLineStart = false;
             }
-            if ((bytes[end] & 0xC0) == 0x80)
-                end = capEnd;
+            else
+            {
+                line++;
+                atLineStart = true;
+            }
 
-            segments.Add((end, true));
             start = end;
         }
 
-        return segments;
+        return rows;
     }
 
     private static void AssertMatchesNaiveScan(byte[] content, int wrapWidth)
@@ -87,38 +105,17 @@ public class RawSegmentIndexTests
         {
             var expected = NaiveScan(content, wrapWidth);
             Assert.True(index.IsComplete);
-            Assert.Equal(expected.Count, index.SegmentCount);
+            Assert.Equal(expected.Count, index.RowCount);
             for (int i = 0; i < expected.Count; i++)
             {
-                Assert.Equal(expected[i].End, index.GetSegmentEnd(i));
-                Assert.Equal(expected[i].SoftWrap, index.IsSoftWrapped(i));
+                var info = index.GetRowInfo(i);
+                Assert.Equal(expected[i].Start, info.Start);
+                Assert.Equal(expected[i].End, info.End);
+                Assert.Equal(expected[i].SoftWrap, info.IsSoftWrapped);
+                Assert.Equal(expected[i].LineNumber, info.LineNumber);
+                Assert.InRange(info.End - info.Start, 1, wrapWidth + 1);
             }
-
-            AssertStructuralInvariants(index, content.Length, wrapWidth);
         });
-    }
-
-    /// <summary>Contiguity, full coverage, cap-bounded lengths, and line-number consistency.</summary>
-    private static void AssertStructuralInvariants(RawSegmentIndex index, long fileLength, int wrapWidth)
-    {
-        long expectedStart = 0;
-        int expectedLineNumber = 1;
-        bool atLineStart = true;
-        for (int i = 0; i < index.SegmentCount; i++)
-        {
-            Assert.Equal(expectedStart, index.GetSegmentStart(i));
-            long length = index.GetSegmentEnd(i) - index.GetSegmentStart(i);
-            Assert.InRange(length, 1, wrapWidth + 1);
-
-            Assert.Equal(atLineStart ? expectedLineNumber : null, index.GetLineNumber(i));
-            if (atLineStart)
-                expectedLineNumber++;
-            atLineStart = !index.IsSoftWrapped(i);
-
-            expectedStart = index.GetSegmentEnd(i);
-        }
-
-        Assert.Equal(fileLength, expectedStart);
     }
 
     [Fact]
@@ -126,16 +123,10 @@ public class RawSegmentIndexTests
     {
         WithIndex("one\ntwo\nthree\n"u8.ToArray(), 80, (index, _) =>
         {
-            Assert.Equal(3, index.SegmentCount);
-            Assert.Equal(4, index.GetSegmentEnd(0));
-            Assert.Equal(8, index.GetSegmentEnd(1));
-            Assert.Equal(14, index.GetSegmentEnd(2));
-            Assert.False(index.IsSoftWrapped(0));
-            Assert.False(index.IsSoftWrapped(1));
-            Assert.False(index.IsSoftWrapped(2));
-            Assert.Equal(1, index.GetLineNumber(0));
-            Assert.Equal(2, index.GetLineNumber(1));
-            Assert.Equal(3, index.GetLineNumber(2));
+            Assert.Equal(3, index.RowCount);
+            Assert.Equal(new RawRowInfo(0, 4, false, 1), index.GetRowInfo(0));
+            Assert.Equal(new RawRowInfo(4, 8, false, 2), index.GetRowInfo(1));
+            Assert.Equal(new RawRowInfo(8, 14, false, 3), index.GetRowInfo(2));
         });
     }
 
@@ -148,18 +139,11 @@ public class RawSegmentIndexTests
 
         WithIndex(content, 40, (index, _) =>
         {
-            Assert.Equal(3, index.SegmentCount);
-            Assert.Equal(40, index.GetSegmentEnd(0));
-            Assert.True(index.IsSoftWrapped(0));
-            Assert.Equal(80, index.GetSegmentEnd(1));
-            Assert.True(index.IsSoftWrapped(1));
-            Assert.Equal(101, index.GetSegmentEnd(2));
-            Assert.False(index.IsSoftWrapped(2));
-
-            // One real line: number on its first segment only, continuations blank.
-            Assert.Equal(1, index.GetLineNumber(0));
-            Assert.Null(index.GetLineNumber(1));
-            Assert.Null(index.GetLineNumber(2));
+            Assert.Equal(3, index.RowCount);
+            // One real line: number on its first row only, continuations blank.
+            Assert.Equal(new RawRowInfo(0, 40, true, 1), index.GetRowInfo(0));
+            Assert.Equal(new RawRowInfo(40, 80, true, null), index.GetRowInfo(1));
+            Assert.Equal(new RawRowInfo(80, 101, false, null), index.GetRowInfo(2));
         });
     }
 
@@ -171,25 +155,22 @@ public class RawSegmentIndexTests
 
         WithIndex(content, 40, (index, _) =>
         {
-            Assert.Equal(1, index.SegmentCount);
-            Assert.Equal(40, index.GetSegmentEnd(0));
-            Assert.False(index.IsSoftWrapped(0));
+            Assert.Equal(1, index.RowCount);
+            Assert.Equal(new RawRowInfo(0, 40, false, 1), index.GetRowInfo(0));
         });
     }
 
     [Fact]
-    public void OneByteOverCap_ProducesWrappedSegmentThenRemainder()
+    public void OneByteOverCap_ProducesWrappedRowThenRemainder()
     {
         var content = new byte[41];
         Array.Fill(content, (byte)'x');
 
         WithIndex(content, 40, (index, _) =>
         {
-            Assert.Equal(2, index.SegmentCount);
-            Assert.Equal(40, index.GetSegmentEnd(0));
-            Assert.True(index.IsSoftWrapped(0));
-            Assert.Equal(41, index.GetSegmentEnd(1));
-            Assert.False(index.IsSoftWrapped(1));
+            Assert.Equal(2, index.RowCount);
+            Assert.Equal(new RawRowInfo(0, 40, true, 1), index.GetRowInfo(0));
+            Assert.Equal(new RawRowInfo(40, 41, false, null), index.GetRowInfo(1));
         });
     }
 
@@ -201,10 +182,9 @@ public class RawSegmentIndexTests
 
         WithIndex(content, 40, (index, _) =>
         {
-            Assert.Equal(2, index.SegmentCount);
-            Assert.Equal(41, index.GetSegmentEnd(0));
-            Assert.False(index.IsSoftWrapped(0)); // real newline, no ⏎ marker
-            Assert.Equal(2, index.GetLineNumber(1));
+            Assert.Equal(2, index.RowCount);
+            Assert.Equal(new RawRowInfo(0, 41, false, 1), index.GetRowInfo(0)); // real newline, no ⏎ marker
+            Assert.Equal(2, index.GetRowInfo(1).LineNumber);
         });
     }
 
@@ -216,9 +196,8 @@ public class RawSegmentIndexTests
 
         WithIndex(content, 40, (index, file) =>
         {
-            Assert.Equal(2, index.SegmentCount);
-            Assert.Equal(41, index.GetSegmentEnd(0));
-            Assert.False(index.IsSoftWrapped(0));
+            Assert.Equal(2, index.RowCount);
+            Assert.Equal(new RawRowInfo(0, 41, false, 1), index.GetRowInfo(0));
             Assert.Equal(new string('x', 39), RawRowReader.ReadRow(file, 0, 41, false));
         });
     }
@@ -231,12 +210,14 @@ public class RawSegmentIndexTests
 
         WithIndex(content, 40, (index, file) =>
         {
-            Assert.Equal(38, index.GetSegmentEnd(0)); // backed off to before the lead byte
-            Assert.True(index.IsSoftWrapped(0));
-            // The next segment starts on the char boundary, so the text decodes cleanly.
-            var row1 = RawRowReader.ReadRow(file, index.GetSegmentStart(1), index.GetSegmentEnd(1), index.IsSoftWrapped(1));
-            Assert.StartsWith("日", row1);
-            Assert.DoesNotContain('�', row1);
+            var row0 = index.GetRowInfo(0);
+            Assert.Equal(38, row0.End); // backed off to before the lead byte
+            Assert.True(row0.IsSoftWrapped);
+            // The next row starts on the char boundary, so the text decodes cleanly.
+            var row1 = index.GetRowInfo(1);
+            string text1 = RawRowReader.ReadRow(file, row1.Start, row1.End, row1.IsSoftWrapped);
+            Assert.StartsWith("日", text1);
+            Assert.DoesNotContain('�', text1);
         });
 
         AssertMatchesNaiveScan(content, 40);
@@ -246,44 +227,67 @@ public class RawSegmentIndexTests
     public void PureContinuationBytes_BreakAtTheCapRegardless()
     {
         // Invalid UTF-8 (endless 0x80 continuation bytes): backoff finds no boundary and
-        // must give up at the cap, not walk backwards forever or emit short segments.
+        // must give up at the cap, not walk backwards forever or emit short rows.
         var content = new byte[100];
         Array.Fill(content, (byte)0x80);
 
         WithIndex(content, 40, (index, _) =>
         {
-            Assert.Equal(3, index.SegmentCount);
-            Assert.Equal(40, index.GetSegmentEnd(0));
-            Assert.True(index.IsSoftWrapped(0));
-            Assert.Equal(80, index.GetSegmentEnd(1));
-            Assert.Equal(100, index.GetSegmentEnd(2));
+            Assert.Equal(3, index.RowCount);
+            Assert.Equal(new RawRowInfo(0, 40, true, 1), index.GetRowInfo(0));
+            Assert.Equal(new RawRowInfo(40, 80, true, null), index.GetRowInfo(1));
+            Assert.Equal(new RawRowInfo(80, 100, false, null), index.GetRowInfo(2));
         });
     }
 
     [Fact]
-    public void NewlinelessFile_HasASingleLineStart()
+    public void NewlinelessFile_NumbersOnlyTheFirstRow()
     {
         var content = new byte[200];
         Array.Fill(content, (byte)'x');
 
         WithIndex(content, 80, (index, _) =>
         {
-            Assert.Equal(3, index.SegmentCount);
-            Assert.Equal(1, index.GetLineNumber(0));
-            Assert.Null(index.GetLineNumber(1));
-            Assert.Null(index.GetLineNumber(2));
+            Assert.Equal(3, index.RowCount);
+            Assert.Equal(1, index.GetRowInfo(0).LineNumber);
+            Assert.Null(index.GetRowInfo(1).LineNumber);
+            Assert.Null(index.GetRowInfo(2).LineNumber);
         });
     }
 
     [Fact]
-    public void GeneratedMixedFile_MatchesNaiveScanAcrossChunkSeams()
+    public void RowsAcrossAnchorBuckets_RederiveFromTheirOwnAnchor()
     {
-        // > 4MB of deterministic pseudo-random content: newline-terminated lines of varied
-        // length (many beyond the cap), occasional CRLF, and multibyte runs - so segments
-        // straddle the internal scan-chunk boundary and every break rule gets exercised.
+        // 200 one-row lines: rows past index 63 live in later anchor buckets, so their
+        // offsets and line numbers come from an anchor walk, not from row 0.
+        var sb = new StringBuilder();
+        for (int i = 0; i < LinesBeyondOneAnchorBucket; i++)
+            sb.Append($"row {i:D3}\n");
+        byte[] content = Encoding.ASCII.GetBytes(sb.ToString());
+
+        WithIndex(content, 80, (index, file) =>
+        {
+            Assert.Equal(LinesBeyondOneAnchorBucket, index.RowCount);
+            foreach (int r in new[] { 0, 63, 64, 65, 127, 128, 199 })
+            {
+                var info = index.GetRowInfo(r);
+                Assert.Equal(r + 1, info.LineNumber);
+                Assert.False(info.IsSoftWrapped);
+                Assert.Equal($"row {r:D3}", RawRowReader.ReadRow(file, info.Start, info.End, info.IsSoftWrapped));
+            }
+        });
+    }
+
+    [Fact]
+    public void GeneratedMixedFile_MatchesNaiveScanEverywhere()
+    {
+        // Several MB of deterministic pseudo-random content: newline-terminated lines of
+        // varied length (many beyond the cap), occasional CRLF, and multibyte runs - so
+        // thousands of anchor buckets exist and every break rule gets exercised, including
+        // rows re-derived mid-bucket.
         var rng = new Random(12345);
         var sb = new StringBuilder();
-        while (sb.Length < BeyondScanChunk)
+        while (sb.Length < 5 * 1024 * 1024)
         {
             int lineLength = rng.Next(0, 2000);
             sb.Append(rng.Next(4) == 0 ? new string('é', lineLength / 2) : new string('x', lineLength));
@@ -296,23 +300,23 @@ public class RawSegmentIndexTests
     }
 
     [Fact]
-    public void EmptyFile_CompletesWithZeroSegments()
+    public void EmptyFile_CompletesWithZeroRows()
     {
         WithIndex(Array.Empty<byte>(), 80, (index, _) =>
         {
             Assert.True(index.IsComplete);
-            Assert.Equal(0, index.SegmentCount);
+            Assert.Equal(0, index.RowCount);
         });
     }
 
     [Fact]
-    public void WaitForSegmentCountAsync_CompletesForReachableAndUnreachableTargets()
+    public void WaitForRowCountAsync_CompletesForReachableAndUnreachableTargets()
     {
         WithIndex("a\nb\nc\n"u8.ToArray(), 80, (index, _) =>
         {
-            Assert.True(index.WaitForSegmentCountAsync(2).Wait(TimeSpan.FromSeconds(5)));
-            Assert.True(index.WaitForSegmentCountAsync(1000).Wait(TimeSpan.FromSeconds(5)));
-            Assert.Equal(3, index.SegmentCount);
+            Assert.True(index.WaitForRowCountAsync(2).Wait(TimeSpan.FromSeconds(5)));
+            Assert.True(index.WaitForRowCountAsync(1000).Wait(TimeSpan.FromSeconds(5)));
+            Assert.Equal(3, index.RowCount);
         });
     }
 
@@ -332,7 +336,7 @@ public class RawSegmentIndexTests
         }
     }
 
-    /// <summary>Cancels the scan after the first chunk's progress report fires.</summary>
+    /// <summary>Cancels the scan after the first progress report fires.</summary>
     private sealed class CancelAfterFirstReport : IProgressReporter
     {
         private readonly CancellationTokenSource cts;
@@ -350,11 +354,11 @@ public class RawSegmentIndexTests
     }
 
     [Fact]
-    public async Task CancelledMidScan_DoesNotAppendBogusRemainderSegment()
+    public async Task CancelledMidScan_PublishesOnlyScannedCapBoundedRows()
     {
-        // Multi-chunk file; cancelling after the first 4MB chunk must not record the whole
-        // un-scanned remainder as one segment (see the same trap in FileOffsetIndexTests).
-        var content = new byte[3 * 4 * 1024 * 1024];
+        // Cancelling partway through must leave a consistent partial index: every published
+        // row cap-bounded and resolvable, none covering the un-scanned remainder.
+        var content = new byte[12 * 1024 * 1024];
         Array.Fill(content, (byte)'x');
 
         string path = Path.GetTempFileName();
@@ -369,10 +373,12 @@ public class RawSegmentIndexTests
             catch (OperationCanceledException) { /* expected clean cancellation */ }
 
             Assert.True(index.IsComplete);
-            for (int i = 0; i < index.SegmentCount; i++)
+            Assert.True(index.RowCount > 0);
+            Assert.True(index.RowCount < content.Length / 512, "cancellation should leave the tail un-indexed");
+            for (int i = 0; i < index.RowCount; i++)
             {
-                long length = index.GetSegmentEnd(i) - index.GetSegmentStart(i);
-                Assert.True(length <= 513, $"segment {i} has length {length}; a bogus remainder segment leaked in");
+                var info = index.GetRowInfo(i);
+                Assert.InRange(info.End - info.Start, 1, 513);
             }
         }
         finally

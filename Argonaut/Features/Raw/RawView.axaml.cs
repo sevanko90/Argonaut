@@ -92,7 +92,29 @@ public partial class RawView : UserControl
             SyncVisualSelection(vm);
 
         if (e.PropertyName is null or nameof(RawViewModel.WrapWidth))
+        {
+            ResetScrollBeforeSourceSwap();
             UpdatePanRange();
+        }
+    }
+
+    /// <summary>
+    /// A wrap-width change swaps the ItemsSource, and SetWrapWidth raises WrapWidth BEFORE
+    /// that swap - deliberately, so this can run first. Resetting the scroll and forcing one
+    /// synchronous layout against the OLD collection is cheap (top-of-file viewport, a
+    /// viewport's worth of rows) and refreshes the virtualizer's remembered viewport, which
+    /// otherwise still spans the old scroll position when the fresh source arrives. Measuring
+    /// a new source against that stale, potentially millions-of-pixels-deep viewport realizes
+    /// every row needed to bridge the gap in one pass - the wrap-change beachball/RAM runaway
+    /// (see RawViewVirtualizationTests).
+    /// </summary>
+    private void ResetScrollBeforeSourceSwap()
+    {
+        if (RowsListBox.Scroll is { } scroll && scroll.Offset != default)
+        {
+            scroll.Offset = default;
+            RowsListBox.UpdateLayout();
+        }
     }
 
     private void OnDetachedFromVisualTree(object? sender, Avalonia.VisualTreeAttachmentEventArgs e)

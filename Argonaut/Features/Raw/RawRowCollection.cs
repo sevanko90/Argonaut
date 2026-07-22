@@ -47,17 +47,24 @@ public sealed class RawRowCollection : MemoryMappedCollectionBase
     private DispatcherTimer? growthTimer;
     private int notifiedCount;
 
+    /// <summary>
+    /// Test seam: rows materialized (cache misses) since construction. Headless UI tests
+    /// assert this stays viewport-sized - a walk materializing every row of a multi-GB-backed
+    /// source is exactly the runaway-memory failure mode the virtualization must prevent.
+    /// </summary>
+    internal int MaterializedRowCount;
+
     public RawRowCollection(RawSegmentIndex index, MMapFile mmap)
     {
         this.index = index;
         this.mmap = mmap;
-        notifiedCount = index.SegmentCount;
+        notifiedCount = index.RowCount;
 
         if (!index.IsComplete)
             StartGrowthMonitor();
     }
 
-    protected override int GetCount() => index.SegmentCount;
+    protected override int GetCount() => index.RowCount;
 
     protected override object GetItem(int index) => GetRow(index);
 
@@ -70,15 +77,16 @@ public sealed class RawRowCollection : MemoryMappedCollectionBase
             return node.Value.Row;
         }
 
-        int segmentCount = index.SegmentCount;
-        if (i < 0 || i >= segmentCount)
+        int rowCount = index.RowCount;
+        if (i < 0 || i >= rowCount)
             return new RawVisibleRow(null, string.Empty, false);
 
-        bool softWrapped = index.IsSoftWrapped(i);
+        MaterializedRowCount++;
+        var info = index.GetRowInfo(i);
         var row = new RawVisibleRow(
-            index.GetLineNumber(i),
-            RawRowReader.ReadRow(mmap, index.GetSegmentStart(i), index.GetSegmentEnd(i), softWrapped),
-            softWrapped);
+            info.LineNumber,
+            RawRowReader.ReadRow(mmap, info.Start, info.End, info.IsSoftWrapped),
+            info.IsSoftWrapped);
 
         var newNode = new LinkedListNode<(int, RawVisibleRow)>((i, row));
         cacheOrder.AddFirst(newNode);
@@ -103,7 +111,7 @@ public sealed class RawRowCollection : MemoryMappedCollectionBase
 
     private void OnGrowthTick(object? sender, EventArgs e)
     {
-        int current = index.SegmentCount;
+        int current = index.RowCount;
         bool complete = index.IsComplete;
 
         if (current > notifiedCount)

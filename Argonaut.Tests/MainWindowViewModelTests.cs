@@ -99,6 +99,30 @@ public sealed class MainWindowViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task OpenPath_UnidentifiedFile_RoutesToTheLoaderAndPublishes()
+    {
+        // Plain prose: no JSON start token and no delimiters, so detection yields
+        // Unidentified - which must now reach the loader (raw viewer) instead of being
+        // silently abandoned.
+        string path = Path.Combine(tempDir, "notes.txt");
+        File.WriteAllText(path, "hello world\nno structure here\n");
+
+        FileTypeDetector.FileKind? seenKind = null;
+        var document = new FakeDocument { FilePath = path };
+        var vm = CreateViewModel((kind, _, _) =>
+        {
+            seenKind = kind;
+            return Task.FromResult<IDocumentViewModel>(document);
+        });
+
+        await vm.OpenPathAsync(path);
+
+        Assert.Equal(FileTypeDetector.FileKind.Unidentified, seenKind);
+        Assert.Same(document, vm.CurrentDocument);
+        Assert.True(vm.IsFileOpen);
+    }
+
+    [Fact]
     public async Task DocumentStatusChange_UpdatesShellStatus()
     {
         string path = WriteJsonFile();

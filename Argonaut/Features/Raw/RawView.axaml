@@ -1,0 +1,83 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:raw="clr-namespace:Argonaut.Features.Raw"
+             xmlns:search="clr-namespace:Argonaut.Features.Search"
+             x:Class="Argonaut.Features.Raw.RawView"
+             x:DataType="raw:RawViewModel">
+    <UserControl.Resources>
+        <!-- Shared by every row's text block; panning mutates its X so all rows shift
+             together while the line-number and wrap gutters stay pinned. -->
+        <TranslateTransform x:Key="PanTransform" />
+    </UserControl.Resources>
+    <Border BorderBrush="{DynamicResource AppBorderBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Background="{DynamicResource AppWindowBackgroundBrush}"
+            ClipToBounds="True">
+        <Grid RowDefinitions="*,Auto">
+            <!-- Horizontal scrolling is disabled on purpose: rows are always measured at
+                 viewport width, which is what keeps both gutters pinned. Sideways movement
+                 is the pan scrollbar below driving the shared render transform. -->
+            <ListBox x:Name="RowsListBox"
+                     Grid.Row="0"
+                     ItemsSource="{Binding Rows}"
+                     SelectionMode="Single"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                     Padding="8,6">
+                <ListBox.Styles>
+                    <Style Selector="ListBoxItem">
+                        <Setter Property="Padding" Value="0" />
+                        <Setter Property="MinHeight" Value="22" />
+                        <Setter Property="Height" Value="22" />
+                    </Style>
+                </ListBox.Styles>
+                <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="raw:RawVisibleRow">
+                        <Grid ColumnDefinitions="72,*,18">
+                            <TextBlock Grid.Column="0"
+                                       Text="{Binding LineNumber}"
+                                       HorizontalAlignment="Right"
+                                       Margin="0,0,12,0"
+                                       Foreground="{DynamicResource AppMutedTextBrush}"
+                                       FontFamily="{DynamicResource AppContentFontFamily}" />
+                            <Border Grid.Column="1" ClipToBounds="True">
+                                <!-- The horizontal StackPanel measures the TextBlock with
+                                     infinite width, so the whole row is laid out (a TextBlock
+                                     arranged at column width only renders the visible prefix,
+                                     leaving blank space when panned). The Border clips, the
+                                     shared transform pans. -->
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock RenderTransform="{StaticResource PanTransform}"
+                                               search:SearchHighlight.Text="{Binding Text}"
+                                               search:SearchHighlight.Term="{Binding $parent[raw:RawView].((raw:RawViewModel)DataContext).HighlightTerm}"
+                                               TextWrapping="NoWrap"
+                                               FontFamily="{DynamicResource AppContentFontFamily}" />
+                                </StackPanel>
+                            </Border>
+                            <TextBlock Grid.Column="2"
+                                       Text="&#x23CE;"
+                                       IsVisible="{Binding IsSoftWrapped}"
+                                       HorizontalAlignment="Center"
+                                       Foreground="{DynamicResource AppMutedTextBrush}"
+                                       FontFamily="{DynamicResource AppContentFontFamily}" />
+                        </Grid>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+                <ListBox.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <VirtualizingStackPanel />
+                    </ItemsPanelTemplate>
+                </ListBox.ItemsPanel>
+            </ListBox>
+
+            <ScrollBar x:Name="PanScrollBar"
+                       Grid.Row="1"
+                       Orientation="Horizontal"
+                       AllowAutoHide="False"
+                       IsVisible="False"
+                       Minimum="0" />
+        </Grid>
+    </Border>
+</UserControl>

@@ -1,0 +1,24 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:raw="clr-namespace:Argonaut.Features.Raw"
+             mc:Ignorable="d"
+             x:Class="Argonaut.Features.Raw.RawToolbarView"
+             x:DataType="raw:RawToolbarViewModel">
+    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+        <Border Width="1"
+                Margin="0,2,12,2"
+                Background="{DynamicResource AppBorderBrush}" />
+        <ComboBox x:Name="WrapWidthCombo"
+                  SelectedIndex="{Binding WrapWidthIndex, Mode=TwoWay}"
+                  FontSize="12"
+                  MinWidth="130"
+                  VerticalAlignment="Center"
+                  ToolTip.Tip="Force line breaks at this many bytes (re-indexes the file)">
+            <ComboBoxItem Content="Wrap: 80 bytes" />
+            <ComboBoxItem Content="Wrap: 160 bytes" />
+            <ComboBoxItem Content="Wrap: 512 bytes" />
+        </ComboBox>
+    </StackPanel>
+</UserControl>

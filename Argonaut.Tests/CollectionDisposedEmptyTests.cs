@@ -3,6 +3,7 @@ using System.Text;
 using Argonaut.Features.Csv;
 using Argonaut.Features.Json;
 using Argonaut.Features.NdJson;
+using Argonaut.Features.Raw;
 using Argonaut.Infrastructure;
 
 namespace Argonaut.Tests;
@@ -62,6 +63,30 @@ public class CollectionDisposedEmptyTests
         try
         {
             var vm = new JsonViewModel();
+            await vm.LoadAsync(path);
+            await vm.IndexingTask;
+            var rows = vm.Rows;
+            Assert.True(rows.Count > 0);
+
+            vm.Dispose();
+
+            Assert.Empty(rows);
+            Assert.Equal(0, CountViaEnumerator(rows));
+            Assert.Null(rows[0]);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task RawRowCollection_AfterDispose_IsEmpty()
+    {
+        string path = WriteTempFile(string.Join('\n', Enumerable.Range(0, 5000).Select(i => $"row {i}")));
+        try
+        {
+            var vm = new RawViewModel();
             await vm.LoadAsync(path);
             await vm.IndexingTask;
             var rows = vm.Rows;

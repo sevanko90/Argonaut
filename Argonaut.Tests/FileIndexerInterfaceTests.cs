@@ -1,6 +1,7 @@
 using System.Text;
 using Argonaut.Features.Json;
 using Argonaut.Features.NdJson;
+using Argonaut.Features.Raw;
 using Argonaut.Infrastructure;
 
 namespace Argonaut.Tests;
@@ -56,6 +57,23 @@ public class FileIndexerInterfaceTests
             Assert.True(indexer.IsComplete);
             Assert.Equal(index.TokenCount, indexer.ItemCount);
             Assert.Equal("tokens", indexer.ItemNoun);
+            Assert.Same(index.IndexingTask, indexer.IndexingTask);
+        });
+    }
+
+    [Fact]
+    public void RawSegmentIndex_InterfaceMirrorsSegmentCount()
+    {
+        WithFile("one\ntwo\nthree\n", file =>
+        {
+            var index = RawSegmentIndex.StartIndexing(file, 80);
+            IFileIndexer indexer = index;
+            indexer.IndexingTask.GetAwaiter().GetResult();
+
+            Assert.True(indexer.IsComplete);
+            Assert.Equal(index.SegmentCount, indexer.ItemCount);
+            Assert.Equal(3, indexer.ItemCount);
+            Assert.Equal("rows", indexer.ItemNoun);
             Assert.Same(index.IndexingTask, indexer.IndexingTask);
         });
     }

@@ -10,6 +10,7 @@
         xmlns:json="clr-namespace:Argonaut.Features.Json"
         xmlns:ndjson="clr-namespace:Argonaut.Features.NdJson"
         xmlns:csv="clr-namespace:Argonaut.Features.Csv"
+        xmlns:raw="clr-namespace:Argonaut.Features.Raw"
         Title="{Binding Title}"
         Background="{DynamicResource AppWindowBackgroundBrush}"
         Width="1000" Height="700">
@@ -24,8 +25,14 @@
         <DataTemplate DataType="csv:CsvViewModel">
             <csv:CsvView />
         </DataTemplate>
+        <DataTemplate DataType="raw:RawViewModel">
+            <raw:RawView />
+        </DataTemplate>
         <DataTemplate DataType="json:JsonToolbarViewModel">
             <json:JsonToolbarView />
+        </DataTemplate>
+        <DataTemplate DataType="raw:RawToolbarViewModel">
+            <raw:RawToolbarView />
         </DataTemplate>
     </Window.DataTemplates>
 

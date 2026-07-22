@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Argonaut.Features.Csv;
 using Argonaut.Features.Json;
 using Argonaut.Features.NdJson;
+using Argonaut.Features.Raw;
 using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
 using Avalonia.Threading;
@@ -214,9 +215,6 @@ public sealed class MainWindowViewModel : ObservableObject
 
         OpenDebugLog.Write($"OpenPath: normalizedPath='{normalizedPath}', fileType={fileType}");
 
-        if (fileType == FileTypeDetector.FileKind.Unidentified)
-            return; // can't do anything with it
-
         // Stop any search over the outgoing file before its view (and MMapFile) is torn down
         // by the content swap below.
         await DetachFindAsync();
@@ -275,6 +273,12 @@ public sealed class MainWindowViewModel : ObservableObject
             {
                 var vm = new CsvViewModel();
                 await vm.LoadAsync(path, (byte)'\t', reporter);
+                return vm;
+            }
+            case FileTypeDetector.FileKind.Unidentified:
+            {
+                var vm = new RawViewModel();
+                await vm.LoadAsync(path, reporter);
                 return vm;
             }
             default:

@@ -151,6 +151,16 @@ public sealed class CsvViewModel : ObservableObject, IDocumentViewModel
     public ISearchNavigator CreateSearchNavigator() => new CsvSearchNavigator(this);
 
     /// <summary>
+    /// Returns true if the VM can process the specified file type
+    /// </summary>
+    /// <param name="fileType">Type of file to query</param>
+    /// <returns>True if the view model can process the specified file type</returns>
+    public bool CanHandleFileType(FileTypeDetector.FileKind fileType)
+    {
+        return fileType == FileTypeDetector.FileKind.Csv || fileType == FileTypeDetector.FileKind.Tsv;
+    }
+
+    /// <summary>
     /// Refreshes <see cref="StatusText"/> when background indexing finishes or fails.
     /// Fire-and-forget from LoadAsync (UI thread); the await resumes there per the app's
     /// threading convention. The disposed check covers cancellation-by-dispose: a

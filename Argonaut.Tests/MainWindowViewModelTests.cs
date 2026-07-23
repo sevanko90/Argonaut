@@ -75,6 +75,16 @@ public sealed class MainWindowViewModelTests : IDisposable
 
         public ISearchNavigator CreateSearchNavigator() => new FakeNavigator();
 
+        /// <summary>
+        /// Returns true if the VM can process the specified file type
+        /// </summary>
+        /// <param name="fileType">Type of file to query</param>
+        /// <returns>True if the view model can process the specified file type</returns>
+        public bool CanHandleFileType(FileTypeDetector.FileKind fileType)
+        {
+            return true; // fake, can handle anything
+        }
+
         public void Dispose() => Disposed = true;
     }
 

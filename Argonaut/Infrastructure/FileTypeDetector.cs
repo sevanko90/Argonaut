@@ -7,11 +7,31 @@ public static class FileTypeDetector
 {
     public enum FileKind
     {
+        /// <summary>
+        /// Used to signify that we should auto-detect the file type.
+        /// </summary>
+        Unknown,
+
+        /// <summary>
+        /// File type cannot be identified after auto-detection.
+        /// </summary>
         Unidentified,
+        /// <summary>
+        /// JSON File.
+        /// </summary>
         Json,
+        /// <summary>
+        /// NDJson file.
+        /// </summary>
         Ndjson,
+        /// <summary>
+        /// CSV file.
+        /// </summary>
         Csv,
-        Tsv
+        /// <summary>
+        /// TSV file.
+        /// </summary>
+        Tsv,
     }
 
     private const int ChunkSize = 64 * 1024;
@@ -32,30 +52,32 @@ public static class FileTypeDetector
         if (length == 0)
             return FileKind.Unidentified;
 
-        // 1. First non-whitespace byte must open a JSON container.
+        // 1. Find first non-whitespace character for future detection.
         long firstCharOffset = FindNonWhitespace(mmap, 0, length);
         if (firstCharOffset < 0)
             return FileKind.Unidentified;
 
+        // 2. JSON Starts with { or [. If it's not that, check for CSV/TSV, or default to unidentified. 
+        // fast early-out, before bothering to read for the json/ndjson distinction.
         byte firstChar = mmap.GetSpan(firstCharOffset, 1)[0];
         if (firstChar is not (byte)'{' and not (byte)'[')
-            return DetectDelimited(mmap, length);
+            return DetectDelimitedOrUnknown(mmap, length);
 
-        // 2. Find the end of the first line and its last non-whitespace character.
+        // 3. Probably JSON, but could be NDJSON. Read second line to check
         long firstLineEnd = FindNewline(mmap, firstCharOffset, length);
         if (firstLineEnd < 0)
             return FileKind.Json; // single-line file
 
         byte lastCharFirstLine = LastNonWhitespaceBefore(mmap, firstCharOffset, firstLineEnd);
 
-        // 3. Find the first character of the next non-empty line.
+        // 4. Find the first character of the next non-empty line.
         long secondLineStart = FindNonWhitespace(mmap, firstLineEnd + 1, length);
         if (secondLineStart < 0)
             return FileKind.Json;
 
         byte secondFirstChar = mmap.GetSpan(secondLineStart, 1)[0];
 
-        // 4. NDJSON rule: first line ends with } and the second line starts with {.
+        // 5. NDJSON rule: first line ends with } and the second line starts with {.
         return lastCharFirstLine == (byte)'}' && secondFirstChar == (byte)'{'
             ? FileKind.Ndjson
             : FileKind.Json;
@@ -66,7 +88,7 @@ public static class FileTypeDetector
     /// count of unquoted commas (or, failing that, unquoted tabs). Comma is checked first as
     /// the tie-break for the rare file where both counts happen to match.
     /// </summary>
-    private static FileKind DetectDelimited(MMapFile file, long length)
+    private static FileKind DetectDelimitedOrUnknown(MMapFile file, long length)
     {
         long firstLineEnd = FindNewline(file, 0, length);
         if (firstLineEnd < 0)

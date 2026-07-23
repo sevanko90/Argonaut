@@ -141,6 +141,16 @@ public sealed class RawViewModel : ObservableObject, IDocumentViewModel
     public ISearchNavigator CreateSearchNavigator() => new RawSearchNavigator(this);
 
     /// <summary>
+    /// Returns true if the VM can process the specified file type
+    /// </summary>
+    /// <param name="fileType">Type of file to query</param>
+    /// <returns>True if the view model can process the specified file type</returns>
+    public bool CanHandleFileType(FileTypeDetector.FileKind fileType)
+    {
+        return fileType == FileTypeDetector.FileKind.Unidentified;
+    }
+
+    /// <summary>
     /// Refreshes <see cref="StatusText"/> when background indexing finishes or fails. The
     /// generation guard (index still current) covers both dispose-cancellation and a wrap
     /// change retiring this index mid-monitor - a retired scan's cancellation fault must not

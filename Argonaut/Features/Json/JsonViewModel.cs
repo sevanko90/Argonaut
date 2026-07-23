@@ -166,6 +166,16 @@ public sealed class JsonViewModel : ObservableObject, IDocumentViewModel
     public ISearchNavigator CreateSearchNavigator() => new JsonSearchNavigator(this);
 
     /// <summary>
+    /// Returns true if the VM can process the specified file type
+    /// </summary>
+    /// <param name="fileType">Type of file to query</param>
+    /// <returns>True if the view model can process the specified file type</returns>
+    public bool CanHandleFileType(FileTypeDetector.FileKind fileType)
+    {
+        return fileType == FileTypeDetector.FileKind.Json;
+    }
+
+    /// <summary>
     /// Refreshes <see cref="StatusText"/> when background indexing finishes or fails.
     /// Fire-and-forget from LoadCore (UI thread); per the app's threading convention the
     /// await resumes on the UI thread. The disposed check covers cancellation-by-dispose:

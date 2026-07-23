@@ -1,6 +1,7 @@
 using System;
 using System.ComponentModel;
 using Argonaut.Features.Search;
+using Argonaut.Infrastructure;
 
 namespace Argonaut.Shell;
 
@@ -45,4 +46,11 @@ public interface IDocumentViewModel : INotifyPropertyChanged, IDisposable
 
     /// <summary>Creates the search navigator the shell attaches to its FindController.</summary>
     ISearchNavigator CreateSearchNavigator();
+
+    /// <summary>
+    /// Returns true if the VM can process the specified file type
+    /// </summary>
+    /// <param name="fileType">Type of file to query</param>
+    /// <returns>True if the view model can process the specified file type</returns>
+    bool CanHandleFileType(FileTypeDetector.FileKind fileType);
 }

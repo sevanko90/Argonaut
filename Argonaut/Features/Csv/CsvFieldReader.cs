@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using System.Text;
 using Argonaut.Features.NdJson;
 using Argonaut.Infrastructure;
@@ -28,8 +27,10 @@ public static class CsvFieldReader
 
         var span = file.GetSpan(trimmed.Offset, trimmed.Length);
 
-        var spans = new List<CsvFieldSpan>();
-        int fieldStart = 0;
+        // Two passes over the (already mapped, no I/O) row bytes instead of a growing
+        // List<CsvFieldSpan> + ToArray(): counting first means the result array is
+        // allocated exactly once, at its final size, with no intermediate growth copies.
+        int fieldCount = 1;
         bool inQuotes = false;
         for (int i = 0; i < span.Length; i++)
         {
@@ -37,14 +38,27 @@ public static class CsvFieldReader
             if (b == (byte)'"')
                 inQuotes = !inQuotes;
             else if (!inQuotes && b == delimiter)
+                fieldCount++;
+        }
+
+        var spans = new CsvFieldSpan[fieldCount];
+        int fieldStart = 0;
+        int fieldIndex = 0;
+        inQuotes = false;
+        for (int i = 0; i < span.Length; i++)
+        {
+            byte b = span[i];
+            if (b == (byte)'"')
+                inQuotes = !inQuotes;
+            else if (!inQuotes && b == delimiter)
             {
-                spans.Add(new CsvFieldSpan(trimmed.Offset + fieldStart, i - fieldStart));
+                spans[fieldIndex++] = new CsvFieldSpan(trimmed.Offset + fieldStart, i - fieldStart);
                 fieldStart = i + 1;
             }
         }
 
-        spans.Add(new CsvFieldSpan(trimmed.Offset + fieldStart, span.Length - fieldStart));
-        return spans.ToArray();
+        spans[fieldIndex] = new CsvFieldSpan(trimmed.Offset + fieldStart, span.Length - fieldStart);
+        return spans;
     }
 
     /// <summary>

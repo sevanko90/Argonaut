@@ -619,7 +619,11 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
     /// </summary>
     private void Rebuild()
     {
-        var newVisible = new List<VisibleRow>();
+        // Seeded from the outgoing list's size: Rebuild fires on every expand/collapse and
+        // (while a huge file is still indexing) every growth-poll tick, so an unsized list
+        // would repeatedly re-grow-by-doubling from empty for what's usually a similarly
+        // sized visible set each time.
+        var newVisible = new List<VisibleRow>(visibleRows.Count);
         visibleTreeSettled = index.TokenCount > 0; // AppendSubtree clears it on any incomplete container
         if (index.TokenCount > 0)
             AppendSubtree(0, newVisible);

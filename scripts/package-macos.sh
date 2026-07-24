@@ -37,14 +37,16 @@ cp -R "$PUBLISH_DIR"/. "$BUNDLE_DIR/Contents/MacOS/"
 cp "$ROOT_DIR/Argonaut/Info.plist" "$BUNDLE_DIR/Contents/Info.plist"
 cp "$ROOT_DIR/Argonaut/Assets/Icon/argonaut.icns" "$BUNDLE_DIR/Contents/Resources/Argonaut.icns"
 
+#make macos recognise it as an executable
+chmod +x "$BUNDLE_DIR/Contents/MacOS/$APP_NAME"
+
 # get past "application is damaged" messge
 # remove quarantine attribute
 xattr -dr com.apple.quarantine $BUNDLE_DIR
-# ad-hoc sitgn
-codesign --force --deep --sign - $BUNDLE_DIR
 
-#make macos recognise it as an executable
-chmod +x "$BUNDLE_DIR/Contents/MacOS/$APP_NAME"
+# ad-hoc sitgn
+#codesign --force --deep --sign - $BUNDLE_DIR
+
 
 
 

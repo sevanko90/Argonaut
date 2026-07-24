@@ -39,4 +39,10 @@ cp "$ROOT_DIR/Argonaut/Assets/Icon/argonaut.icns" "$BUNDLE_DIR/Contents/Resource
 
 chmod +x "$BUNDLE_DIR/Contents/MacOS/$APP_NAME"
 
+# get past "application is damaged" messge
+# remove quarantine attribute
+xattr -dr com.apple.quarantine $BUNDLE_DIR
+# ad-hoc sitgn
+codesign --force --deep --sign - $BUNDLE_DIR
+
 echo "Done: $BUNDLE_DIR"

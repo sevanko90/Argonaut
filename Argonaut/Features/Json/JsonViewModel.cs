@@ -115,6 +115,47 @@ public sealed class JsonViewModel : ObservableObject, IDocumentViewModel
     }
 
     /// <summary>
+    /// Resolves a JSONPath string (see <see cref="JsonPathResolver"/>) and selects/reveals
+    /// the target token if found, or surfaces a toast on parse/lookup failure. Wired into
+    /// <see cref="JsonToolbarViewModel"/>'s "Go to path" action.
+    ///
+    /// Registers the resolve task with the session (RegisterDependentTask) because, on a
+    /// still-indexing file, it can await across several ticks while the document is closed -
+    /// without this, Dispose could free the mapping while ResolveAsync is still reading it.
+    /// </summary>
+    public async Task NavigateToPathAsync(string path)
+    {
+        if (session is null)
+        {
+            ToastService.Show("No file loaded yet.");
+            return;
+        }
+
+        var resolveTask = JsonPathResolver.ResolveAsync(session.Index, session.File, path, session.Token);
+        session.RegisterDependentTask(resolveTask);
+
+        JsonPathResolveResult result;
+        try
+        {
+            result = await resolveTask;
+        }
+        catch (Exception ex)
+        {
+            if (!disposed)
+                ToastService.Show($"Navigation failed: {ex.Message}");
+            return;
+        }
+
+        if (disposed)
+            return;
+
+        if (result.TokenIndex is { } tokenIndex)
+            SelectToken(tokenIndex);
+        else
+            ToastService.Show(result.Error ?? "Path not found.");
+    }
+
+    /// <summary>
     /// Changes the default-expand depth and applies it immediately if a file is already
     /// loaded, in addition to affecting future loads.
     /// </summary>
@@ -128,7 +169,7 @@ public sealed class JsonViewModel : ObservableObject, IDocumentViewModel
     {
         FilePath = path;
         DefaultExpandDepth = ExpandDepthPreference.Load();
-        Toolbar = new JsonToolbarViewModel(HintSettings, DefaultExpandDepth, SetDefaultExpandDepth);
+        Toolbar = new JsonToolbarViewModel(HintSettings, DefaultExpandDepth, SetDefaultExpandDepth, NavigateToPathAsync);
         return LoadCore(new MMapFile(path), progressReporter);
     }
 

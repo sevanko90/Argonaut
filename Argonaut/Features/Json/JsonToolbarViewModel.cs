@@ -1,16 +1,20 @@
 using System;
 using System.ComponentModel;
+using System.Threading.Tasks;
 using Argonaut.Features.Json.Hints;
 using Argonaut.Infrastructure;
 
 namespace Argonaut.Features.Json;
 
 /// <summary>
-/// Header toolbar for the JSON tree view: date-hint scheme/time-zone combos bound to a
-/// document's <see cref="DateHintSettings"/>, plus the default-expand-depth combo. Shared by
-/// JsonViewModel and NdJsonViewModel, which expose an identical surface (a DateHintSettings
-/// instance and a SetDefaultExpandDepth callback) and previously drove these same three combos
-/// through the shell via type-switches.
+/// Header toolbar for the JSON tree view: date-hint scheme/time-zone radio groups (behind a
+/// single "Date" dropdown button) bound to a document's <see cref="DateHintSettings"/>, the
+/// default-expand-depth combo, and (JSON documents only) a "jump to JSONPath" text entry.
+/// Shared by JsonViewModel and NdJsonViewModel, which expose an identical surface (a
+/// DateHintSettings instance and a SetDefaultExpandDepth callback) and previously drove these
+/// same combos through the shell via type-switches. NdJsonViewModel omits
+/// <paramref name="navigateToPath"/> (path navigation isn't a per-line NDJSON concept), which
+/// hides the path entry via <see cref="SupportsPathNavigation"/>.
 ///
 /// Owned by the document view model that creates it (see <see cref="JsonViewModel.Toolbar"/> /
 /// NdJsonViewModel's equivalent) and shares its lifetime - no unsubscription is needed since
@@ -20,20 +24,44 @@ public sealed class JsonToolbarViewModel : ObservableObject
 {
     private readonly DateHintSettings settings;
     private readonly Action<int> applyExpandDepth;
+    private readonly Func<string, Task>? navigateToPath;
     private int dateHintSchemeIndex;
     private int timeZoneModeIndex;
     private int expandDepthIndex;
+    private string jsonPathInput = string.Empty;
 
-    public JsonToolbarViewModel(DateHintSettings settings, int initialExpandDepthIndex, Action<int> applyExpandDepth)
+    public JsonToolbarViewModel(DateHintSettings settings, int initialExpandDepthIndex, Action<int> applyExpandDepth, Func<string, Task>? navigateToPath = null)
     {
         this.settings = settings;
         this.applyExpandDepth = applyExpandDepth;
+        this.navigateToPath = navigateToPath;
 
         dateHintSchemeIndex = (int)settings.FileDefaultScheme;
         timeZoneModeIndex = (int)settings.TimeZoneMode;
         expandDepthIndex = initialExpandDepthIndex;
 
         settings.PropertyChanged += OnSettingsPropertyChanged;
+    }
+
+    /// <summary>Whether the "jump to JSONPath" text entry should be shown - false for the
+    /// shared NDJSON toolbar, which has no single-document JSONPath concept.</summary>
+    public bool SupportsPathNavigation => navigateToPath is not null;
+
+    /// <summary>Bound two-way to the "jump to path" text entry.</summary>
+    public string JsonPathInput
+    {
+        get => jsonPathInput;
+        set => SetField(ref jsonPathInput, value);
+    }
+
+    /// <summary>Resolves <see cref="JsonPathInput"/> and navigates to it; no-op if path
+    /// navigation isn't supported or the box is blank.</summary>
+    public Task GoToPathAsync()
+    {
+        if (navigateToPath is null || string.IsNullOrWhiteSpace(jsonPathInput))
+            return Task.CompletedTask;
+
+        return navigateToPath(jsonPathInput);
     }
 
     /// <summary>Bound two-way to the date-hint scheme combo; forwards to <see cref="DateHintSettings"/>.</summary>

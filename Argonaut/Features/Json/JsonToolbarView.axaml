@@ -10,27 +10,57 @@
         <Border Width="1"
                 Margin="0,2,12,2"
                 Background="{DynamicResource AppBorderBrush}" />
-        <ComboBox x:Name="DateHintSchemeCombo"
-                  SelectedIndex="{Binding DateHintSchemeIndex, Mode=TwoWay}"
-                  FontSize="12"
-                  MinWidth="150"
-                  VerticalAlignment="Center"
-                  ToolTip.Tip="Decode all-numeric values as dates">
-            <ComboBoxItem Content="Date hints: off" />
-            <ComboBoxItem Content="Dates: JS milliseconds" />
-            <ComboBoxItem Content="Dates: JS seconds" />
-            <ComboBoxItem Content="Dates: Keepa minutes" />
-        </ComboBox>
-        <ComboBox x:Name="DateHintTimeZoneCombo"
-                  SelectedIndex="{Binding TimeZoneModeIndex, Mode=TwoWay}"
-                  FontSize="12"
-                  MinWidth="90"
-                  Margin="8,0,0,0"
-                  VerticalAlignment="Center"
-                  ToolTip.Tip="Display decoded dates in local time or UTC">
-            <ComboBoxItem Content="Local time" />
-            <ComboBoxItem Content="UTC" />
-        </ComboBox>
+        <Button x:Name="DateButton"
+                FontSize="12"
+                VerticalAlignment="Center"
+                ToolTip.Tip="Hint options: date interpretation and time format">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+                <TextBlock Text="Hint options" VerticalAlignment="Center" />
+                <Viewbox Width="8" Height="8" VerticalAlignment="Center">
+                    <Path Fill="{DynamicResource AppMutedTextBrush}" Data="M2 4 L10 4 L6 10 Z" />
+                </Viewbox>
+            </StackPanel>
+            <Button.Flyout>
+                <Flyout Placement="BottomEdgeAlignedLeft">
+                    <StackPanel Margin="10" Spacing="8" MinWidth="160">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Date interpretation"
+                                       FontSize="11"
+                                       Foreground="{DynamicResource AppMutedTextBrush}" />
+                            <RadioButton GroupName="dateHintScheme"
+                                         Content="Off"
+                                         FontSize="12"
+                                         IsChecked="{Binding DateHintSchemeIndex, Converter={x:Static json:IntEqualsConverter.Instance}, ConverterParameter=0}" />
+                            <RadioButton GroupName="dateHintScheme"
+                                         Content="JS milliseconds"
+                                         FontSize="12"
+                                         IsChecked="{Binding DateHintSchemeIndex, Converter={x:Static json:IntEqualsConverter.Instance}, ConverterParameter=1}" />
+                            <RadioButton GroupName="dateHintScheme"
+                                         Content="JS seconds"
+                                         FontSize="12"
+                                         IsChecked="{Binding DateHintSchemeIndex, Converter={x:Static json:IntEqualsConverter.Instance}, ConverterParameter=2}" />
+                            <RadioButton GroupName="dateHintScheme"
+                                         Content="Keepa minutes"
+                                         FontSize="12"
+                                         IsChecked="{Binding DateHintSchemeIndex, Converter={x:Static json:IntEqualsConverter.Instance}, ConverterParameter=3}" />
+                        </StackPanel>
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Time format"
+                                       FontSize="11"
+                                       Foreground="{DynamicResource AppMutedTextBrush}" />
+                            <RadioButton GroupName="dateHintTimeZone"
+                                         Content="Local time"
+                                         FontSize="12"
+                                         IsChecked="{Binding TimeZoneModeIndex, Converter={x:Static json:IntEqualsConverter.Instance}, ConverterParameter=0}" />
+                            <RadioButton GroupName="dateHintTimeZone"
+                                         Content="UTC"
+                                         FontSize="12"
+                                         IsChecked="{Binding TimeZoneModeIndex, Converter={x:Static json:IntEqualsConverter.Instance}, ConverterParameter=1}" />
+                        </StackPanel>
+                    </StackPanel>
+                </Flyout>
+            </Button.Flyout>
+        </Button>
         <ComboBox x:Name="ExpandDepthCombo"
                   SelectedIndex="{Binding ExpandDepthIndex, Mode=TwoWay}"
                   FontSize="12"
@@ -45,5 +75,25 @@
             <ComboBoxItem Content="Expand 4 levels" />
             <ComboBoxItem Content="Expand 5 levels" />
         </ComboBox>
+        <Border Width="1"
+                Margin="12,2,12,2"
+                Background="{DynamicResource AppBorderBrush}"
+                IsVisible="{Binding SupportsPathNavigation}" />
+        <TextBox x:Name="JsonPathTextBox"
+                 Text="{Binding JsonPathInput, Mode=TwoWay}"
+                 PlaceholderText="$.path.to[0]"
+                 FontSize="12"
+                 Width="180"
+                 VerticalAlignment="Center"
+                 IsVisible="{Binding SupportsPathNavigation}"
+                 KeyDown="OnJsonPathTextBoxKeyDown"
+                 ToolTip.Tip="Jump to a JSONPath, e.g. $.foo.bar[2]" />
+        <Button x:Name="GoToPathButton"
+                Content="Go"
+                FontSize="12"
+                Margin="8,0,0,0"
+                VerticalAlignment="Center"
+                IsVisible="{Binding SupportsPathNavigation}"
+                Click="OnGoToPathClick" />
     </StackPanel>
 </UserControl>

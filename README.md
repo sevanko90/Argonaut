@@ -34,8 +34,12 @@ in the application folder.
 
 ## Running the MacOS release
 
-MacOS quarantines downloaded applictions that have not been signed and refuses to run them, with an "Application is damaged" message. 
+MacOS quarantines downloaded applictions that have not been signed and refuses to run them.
 
 You have a couple of options. You could (quite rightly!) not trust some random app you download from the internet, and build it from source.
-Or, you can move the downloaded app out of the downloads folder and into somewhere else like `~/Applications`. That seemed to work for me.
+
+Or, extrscting the zip (to leave you with a .app), moving that .app to another folder (like ~/Applications) then running this in the console seemed to work for me.
+
+    xattr -cr ~/path/to/Argonaut.app
+
 Or, you can wait until I get an Apple developer account to properly sign things. That might take a while!

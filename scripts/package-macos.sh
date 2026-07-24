@@ -40,14 +40,15 @@ cp "$ROOT_DIR/Argonaut/Assets/Icon/argonaut.icns" "$BUNDLE_DIR/Contents/Resource
 #make macos recognise it as an executable
 chmod +x "$BUNDLE_DIR/Contents/MacOS/$APP_NAME"
 
-# get past "application is damaged" messge
-# remove quarantine attribute
-#xattr -dr com.apple.quarantine $BUNDLE_DIR
-
-# ad-hoc sitgn
-#codesign --force --deep --sign - $BUNDLE_DIR
-
-
-
+# Apple Silicon refuses to execute any binary with no code signature at all -
+# not a Gatekeeper "unidentified developer" prompt, but a hard "is damaged and
+# can't be opened" error. Ad-hoc signing (identity "-") satisfies that kernel
+# requirement without an Apple Developer account. It doesn't remove the
+# quarantine-flag warning on downloaded files; users still need to right-click
+# > Open (or `xattr -cr` the .app) once, but that's the milder prompt.
+if command -v codesign >/dev/null 2>&1; then
+    echo "Ad-hoc signing $BUNDLE_DIR..."
+    codesign --force --deep --sign - "$BUNDLE_DIR"
+fi
 
 echo "Done: $BUNDLE_DIR"

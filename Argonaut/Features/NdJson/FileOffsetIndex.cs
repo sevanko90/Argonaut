@@ -66,7 +66,7 @@ public sealed class FileOffsetIndex : AppendLogIndexBase<FileLineSpan>, IFileInd
     public static FileOffsetIndex StartIndexing(MMapFile file, IProgressReporter? progressReporter = null, CancellationToken cancellationToken = default)
     {
         var index = new FileOffsetIndex();
-        index.IndexingTask = Task.Run(() => index.ProduceOffsets(file, progressReporter, cancellationToken), cancellationToken);
+        index.IndexingTask = Task.Run(() => index.RunIndexing(() => index.ProduceOffsets(file, progressReporter, cancellationToken)), cancellationToken);
         return index;
     }
 
@@ -95,7 +95,6 @@ public sealed class FileOffsetIndex : AppendLogIndexBase<FileLineSpan>, IFileInd
         long length = file.Length;
         if (length == 0)
         {
-            this.MarkComplete();
             progressReporter?.Report("Indexing");
             return;
         }
@@ -144,7 +143,6 @@ public sealed class FileOffsetIndex : AppendLogIndexBase<FileLineSpan>, IFileInd
                 this.AddLineSpan(new FileLineSpan(currentLineStart, checked((int)(length - currentLineStart))));
             }
 
-            this.MarkComplete();
             progressReporter?.Report("Indexing", length, length);
         }
     }

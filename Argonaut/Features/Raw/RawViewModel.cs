@@ -28,6 +28,7 @@ public sealed class RawViewModel : ObservableObject, IDocumentViewModel
     private string statusText = string.Empty;
     private int? selectedRowIndex;
     private int wrapWidth = RawWrapWidthPreference.Default;
+    private IndexFailure? indexFailure;
     private bool disposed;
 
     public string FilePath { get; private set; } = string.Empty;
@@ -61,6 +62,13 @@ public sealed class RawViewModel : ObservableObject, IDocumentViewModel
     }
 
     public RawRowCollection Rows => this.rows ?? throw new InvalidOperationException("LoadAsync must complete before Rows is accessed.");
+
+    /// <summary>See <see cref="IDocumentViewModel.IndexFailure"/>.</summary>
+    public IndexFailure? IndexFailure
+    {
+        get => this.indexFailure;
+        private set => SetField(ref this.indexFailure, value);
+    }
 
     public object? Toolbar => this.toolbar;
 
@@ -96,6 +104,9 @@ public sealed class RawViewModel : ObservableObject, IDocumentViewModel
         // tracks the published row count live as indexing continues in the background.
         await session.Index.WaitForRowCountAsync(InitialIndexedRowTarget);
 
+        if (session.Index.Failure is { } failure)
+            IndexFailure = failure;
+
         this.rows = new RawRowCollection(session.Index, session.File);
 
         OnPropertyChanged(nameof(Rows));
@@ -124,6 +135,10 @@ public sealed class RawViewModel : ObservableObject, IDocumentViewModel
 
         // Clear selection before the swap - stale indexes must never be applied to the new list.
         SelectedRowIndex = null;
+
+        // Stale relative to the new scan about to start; MonitorIndexingAsync repopulates it
+        // if the new scan fails.
+        IndexFailure = null;
 
         this.session.RestartIndex(bytes);
 
@@ -165,7 +180,12 @@ public sealed class RawViewModel : ObservableObject, IDocumentViewModel
         catch
         {
             if (!this.disposed && ReferenceEquals(index, this.session?.Index))
-                StatusText = $"{FilePath} — indexing failed";
+            {
+                IndexFailure = index.Failure;
+                StatusText = index.Failure is { } failure
+                    ? $"{FilePath} — indexing stopped — {failure.ItemsIndexed:N0} rows shown"
+                    : $"{FilePath} — indexing failed";
+            }
             return;
         }
 

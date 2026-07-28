@@ -33,8 +33,11 @@ public sealed class FindController
         this.progressReporterFactory = progressReporterFactory;
     }
 
-    /// <summary>Attaches the navigator for a newly opened file. Call after <see cref="StopAsync"/>.</summary>
-    public void Attach(ISearchNavigator navigator)
+    /// <summary>
+    /// Attaches the navigator for a newly opened file, or null for a document with nothing
+    /// searchable. Call after <see cref="StopAsync"/>.
+    /// </summary>
+    public void Attach(ISearchNavigator? navigator)
     {
         this.navigator = navigator;
     }

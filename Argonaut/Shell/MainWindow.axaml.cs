@@ -185,6 +185,11 @@ public partial class MainWindow : Window
         await viewModel.CloseFileAsync();
     }
 
+    private void OnDismissFailureBanner(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        viewModel.DismissFailureBanner();
+    }
+
     private void OnDragOver(object? sender, DragEventArgs e)
     {
         e.DragEffects = e.DataTransfer.Items.Count > 0 ? DragDropEffects.Copy : DragDropEffects.None;

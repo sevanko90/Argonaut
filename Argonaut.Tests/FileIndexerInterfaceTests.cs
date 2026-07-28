@@ -86,6 +86,48 @@ public class FileIndexerInterfaceTests
             IFileIndexer indexer = JsonStructureIndex.StartIndexing(file);
             Assert.ThrowsAnyAsync<Exception>(() => indexer.IndexingTask).GetAwaiter().GetResult();
             Assert.True(indexer.IsComplete);
+
+            var failure = Assert.IsType<JsonStructureIndex>(indexer).Failure;
+            Assert.NotNull(failure);
+            Assert.NotNull(failure!.Line);
+            Assert.NotNull(failure.Column);
+            Assert.Equal(1, failure.ItemsIndexed); // the leading '{' already published as StartObject
+        });
+    }
+
+    [Fact]
+    public void JsonStructureIndex_Failure_IsNullOnSuccess()
+    {
+        WithFile("""{"a":1}""", file =>
+        {
+            var index = JsonStructureIndex.StartIndexing(file);
+            index.IndexingTask.GetAwaiter().GetResult();
+
+            Assert.Null(index.Failure);
+        });
+    }
+
+    [Fact]
+    public void FileOffsetIndex_Failure_IsNullOnSuccess()
+    {
+        WithFile("one\ntwo\nthree\n", file =>
+        {
+            var index = FileOffsetIndex.StartIndexing(file);
+            index.IndexingTask.GetAwaiter().GetResult();
+
+            Assert.Null(index.Failure);
+        });
+    }
+
+    [Fact]
+    public void RawSegmentIndex_Failure_IsNullOnSuccess()
+    {
+        WithFile("one\ntwo\nthree\n", file =>
+        {
+            var index = RawSegmentIndex.StartIndexing(file, 80);
+            index.IndexingTask.GetAwaiter().GetResult();
+
+            Assert.Null(index.Failure);
         });
     }
 }

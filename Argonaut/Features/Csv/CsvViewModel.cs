@@ -23,6 +23,7 @@ public sealed class CsvViewModel : ObservableObject, IDocumentViewModel
     private string statusText = string.Empty;
     private int? selectedRowIndex;
     private int? selectedColumnIndex;
+    private IndexFailure? indexFailure;
     private bool disposed;
 
     public string FilePath { get; private set; } = string.Empty;
@@ -45,6 +46,13 @@ public sealed class CsvViewModel : ObservableObject, IDocumentViewModel
     }
 
     public CsvRowCollection Rows => this.rows ?? throw new InvalidOperationException("LoadAsync must complete before Rows is accessed.");
+
+    /// <summary>See <see cref="IDocumentViewModel.IndexFailure"/>.</summary>
+    public IndexFailure? IndexFailure
+    {
+        get => this.indexFailure;
+        private set => SetField(ref this.indexFailure, value);
+    }
 
     /// <summary>CSV has no header-region toolbar (no date hints, no tree to expand).</summary>
     public object? Toolbar => null;
@@ -127,6 +135,9 @@ public sealed class CsvViewModel : ObservableObject, IDocumentViewModel
         // then tracks index.LineCount live as indexing continues in the background.
         await session.Index.WaitForLineCountAsync(InitialIndexedRowTarget);
 
+        if (session.Index.Failure is { } failure)
+            IndexFailure = failure;
+
         this.headerFields = session.Index.LineCount > 0
             ? CsvFieldReader.ReadFields(session.File, session.Index.GetLineSpan(0), delimiter)
             : [];
@@ -175,7 +186,12 @@ public sealed class CsvViewModel : ObservableObject, IDocumentViewModel
         catch
         {
             if (!this.disposed)
-                StatusText = $"{FilePath} — indexing failed";
+            {
+                IndexFailure = session.Index.Failure;
+                StatusText = session.Index.Failure is { } failure
+                    ? $"{FilePath} — indexing stopped — {failure.ItemsIndexed:N0} rows shown"
+                    : $"{FilePath} — indexing failed";
+            }
             return;
         }
 

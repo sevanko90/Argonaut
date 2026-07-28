@@ -84,6 +84,72 @@ public static class FileTypeDetector
     }
 
     /// <summary>
+    /// Cheap pre-flight check for whether <paramref name="path"/> is plausibly a
+    /// <paramref name="kind"/> file, without running a full background index. Used when the
+    /// user forces a view onto a file detection didn't pick, to reject obvious mismatches
+    /// (e.g. forcing JSON onto a CSV file) instantly instead of waiting for the indexer to
+    /// fail partway through.
+    /// </summary>
+    /// <param name="kind">The view the user is forcing.</param>
+    /// <param name="path">Path to the file.</param>
+    /// <param name="reason">Set to a human-readable explanation when this returns false.</param>
+    public static bool IsPlausibleFor(FileKind kind, string path, out string reason)
+    {
+        using var mmap = new MMapFile(path);
+        long length = mmap.Length;
+
+        switch (kind)
+        {
+            case FileKind.Unidentified:
+                // Raw is the guaranteed-safe fallback - always plausible.
+                reason = "";
+                return true;
+
+            case FileKind.Json:
+            case FileKind.Ndjson:
+            {
+                long firstCharOffset = FindNonWhitespace(mmap, 0, length);
+                if (firstCharOffset < 0)
+                {
+                    reason = "The file is empty or contains only whitespace.";
+                    return false;
+                }
+
+                byte firstChar = mmap.GetSpan(firstCharOffset, 1)[0];
+                if (firstChar is (byte)'{' or (byte)'[')
+                {
+                    reason = "";
+                    return true;
+                }
+
+                reason = $"Expected the first non-whitespace byte to be '{{' or '[', but found '{(char)firstChar}' at byte offset {firstCharOffset}.";
+                return false;
+            }
+
+            case FileKind.Csv:
+            case FileKind.Tsv:
+            {
+                long firstLineEnd = FindNewline(mmap, 0, length);
+                var firstLine = mmap.GetSpan(0, checked((int)(firstLineEnd < 0 ? length : firstLineEnd)));
+
+                byte delimiter = kind == FileKind.Csv ? (byte)',' : (byte)'\t';
+                if (CountUnquotedDelimiter(firstLine, delimiter) > 0)
+                {
+                    reason = "";
+                    return true;
+                }
+
+                reason = $"The first line contains no unquoted '{(char)delimiter}' delimiter.";
+                return false;
+            }
+
+            default:
+                reason = $"Unsupported file kind: {kind}.";
+                return false;
+        }
+    }
+
+    /// <summary>
     /// CSV/TSV rule: not JSON/NDJSON, but the first two physical lines have an equal, non-zero
     /// count of unquoted commas (or, failing that, unquoted tabs). Comma is checked first as
     /// the tie-break for the rare file where both counts happen to match.

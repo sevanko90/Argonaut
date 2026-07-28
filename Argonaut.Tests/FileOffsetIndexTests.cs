@@ -106,6 +106,8 @@ public class FileOffsetIndexTests
             try { await index.IndexingTask; }
             catch (OperationCanceledException) { /* expected clean cancellation */ }
 
+            Assert.Null(index.Failure); // cancellation is never reported as a failure
+
             // No overflow, and no oversized "remainder" line was recorded.
             for (int i = 0; i < index.LineCount; i++)
                 Assert.True(index.GetLineSpan(i).Length < 64,

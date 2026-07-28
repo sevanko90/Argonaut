@@ -143,8 +143,6 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
     // overflowSync; that's fine because the overflow path is pathological-whitespace-only cold.
     private readonly Dictionary<int, long> nameOffsetOverflow = new();
 
-    private Exception? failure;
-
     private JsonStructureIndex()
     {
     }
@@ -185,26 +183,29 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
     public static JsonStructureIndex StartIndexing(MMapFile file, IProgressReporter? progressReporter = null, CancellationToken cancellationToken = default)
     {
         var index = new JsonStructureIndex();
-        index.IndexingTask = Task.Run(() => index.Run(file, progressReporter, cancellationToken), cancellationToken);
+        index.IndexingTask = Task.Run(() => index.RunIndexing(() => index.Build(file, progressReporter, cancellationToken)), cancellationToken);
         return index;
     }
 
-    private void Run(MMapFile file, IProgressReporter? progressReporter, CancellationToken cancellationToken)
+    /// <summary>
+    /// Enriches a <see cref="JsonException"/> with best-effort line/column/byte-offset info.
+    /// <see cref="JsonException.LineNumber"/>/<see cref="JsonException.BytePositionInLine"/>
+    /// are relative to the current <see cref="Utf8JsonReader"/> window, which is the whole
+    /// file for the sub-2GiB common case - for larger files that resume across window
+    /// boundaries they may be relative to the window instead, hence "best-effort".
+    /// </summary>
+    protected override IndexFailure DescribeFailure(Exception ex)
     {
-        try
-        {
-            Build(file, progressReporter, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            lock (overflowSync)
-                failure = ex;
-            throw;
-        }
-        finally
-        {
-            this.MarkComplete();
-        }
+        if (ex is not JsonException jsonEx)
+            return base.DescribeFailure(ex);
+
+        long? byteOffset = this.ItemCount > 0 ? GetToken(this.ItemCount - 1).Offset + GetToken(this.ItemCount - 1).Length : 0;
+        return new IndexFailure(
+            jsonEx.Message,
+            byteOffset,
+            jsonEx.LineNumber.HasValue ? jsonEx.LineNumber.Value + 1 : null,
+            jsonEx.BytePositionInLine.HasValue ? jsonEx.BytePositionInLine.Value + 1 : null,
+            this.ItemCount);
     }
 
     private void Build(MMapFile file, IProgressReporter? progressReporter, CancellationToken cancellationToken)

@@ -24,6 +24,12 @@ public interface IFileIndexer
     /// <summary>True once the file has been fully indexed (lock-free read).</summary>
     bool IsComplete { get; }
 
+    /// <summary>
+    /// Non-null when the scan stopped because of an error; null on success *and* on
+    /// cancellation. Set before <see cref="IsComplete"/> becomes true.
+    /// </summary>
+    IndexFailure? Failure { get; }
+
     /// <summary>Records published so far (may grow until <see cref="IsComplete"/> is true).</summary>
     int ItemCount { get; }
 

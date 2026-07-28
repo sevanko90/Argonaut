@@ -114,4 +114,58 @@ public class FileTypeDetectorTests
     [Fact]
     public void JsonLikeFirstCharacter_NeverFallsThroughToDelimitedDetection()
         => Assert.Equal(FileTypeDetector.FileKind.Json, Detect("{\"a\":1,\"b\":2}\n"));
+
+    private static bool IsPlausible(FileTypeDetector.FileKind kind, string content, out string reason)
+    {
+        string path = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllBytes(path, Encoding.UTF8.GetBytes(content));
+            return FileTypeDetector.IsPlausibleFor(kind, path, out reason);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void IsPlausibleFor_CsvContent_RejectedForJson()
+    {
+        Assert.False(IsPlausible(FileTypeDetector.FileKind.Json, "a,b,c\n1,2,3\n", out var reason));
+        Assert.NotEmpty(reason);
+    }
+
+    [Fact]
+    public void IsPlausibleFor_JsonContent_RejectedForCsv()
+    {
+        Assert.False(IsPlausible(FileTypeDetector.FileKind.Csv, """{"a":1}""", out var reason));
+        Assert.NotEmpty(reason);
+    }
+
+    [Fact]
+    public void IsPlausibleFor_JsonContent_AcceptedForJsonAndNdjson()
+    {
+        Assert.True(IsPlausible(FileTypeDetector.FileKind.Json, """{"a":1}""", out _));
+        Assert.True(IsPlausible(FileTypeDetector.FileKind.Ndjson, """{"a":1}""", out _));
+    }
+
+    [Fact]
+    public void IsPlausibleFor_CsvContent_AcceptedForCsv()
+        => Assert.True(IsPlausible(FileTypeDetector.FileKind.Csv, "a,b,c\n1,2,3\n", out _));
+
+    [Fact]
+    public void IsPlausibleFor_TsvContent_RejectedForCsv_AcceptedForTsv()
+    {
+        Assert.False(IsPlausible(FileTypeDetector.FileKind.Csv, "a\tb\tc\n1\t2\t3\n", out _));
+        Assert.True(IsPlausible(FileTypeDetector.FileKind.Tsv, "a\tb\tc\n1\t2\t3\n", out _));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("hello world\n")]
+    [InlineData("""{"a":1}""")]
+    [InlineData("a,b,c\n1,2,3\n")]
+    public void IsPlausibleFor_Unidentified_AlwaysAccepted(string content)
+        => Assert.True(IsPlausible(FileTypeDetector.FileKind.Unidentified, content, out _));
 }

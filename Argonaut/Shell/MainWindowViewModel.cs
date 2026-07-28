@@ -4,10 +4,6 @@ using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
-using Argonaut.Features.Csv;
-using Argonaut.Features.Json;
-using Argonaut.Features.NdJson;
-using Argonaut.Features.Raw;
 using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
 using Avalonia.Threading;
@@ -48,12 +44,16 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private IDocumentViewModel? currentDocument;
     private string? currentFilePath;
+    private FileTypeDetector.FileKind currentKind;
     private string statusText = "No file loaded";
     private string title = DefaultTitle;
     private string fileName = string.Empty;
     private IReadOnlyList<RecentFileItem> recentFiles = Array.Empty<RecentFileItem>();
     private ThemeMode themeMode;
     private ContentFontMode contentFontMode;
+    private DocumentViewOption? selectedView;
+    private bool isFailureBannerVisible;
+    private bool isFindAvailable;
     private int openRequestId;
 
     /// <summary>Raised when the find bar's status text should change (null clears it).</summary>
@@ -73,7 +73,7 @@ public sealed class MainWindowViewModel : ObservableObject
     public MainWindowViewModel(Func<string, Task<bool>> confirmReplace, DocumentLoader? documentLoader = null)
     {
         this.confirmReplace = confirmReplace;
-        this.documentLoader = documentLoader ?? LoadDocumentAsync;
+        this.documentLoader = documentLoader ?? DocumentViewCatalog.LoadAsync;
 
         themeMode = ThemePreference.Load();
         contentFontMode = ContentFontPreference.Load();
@@ -115,6 +115,46 @@ public sealed class MainWindowViewModel : ObservableObject
 
     /// <summary>Full path of the current file, shown as the toolbar file-name tooltip.</summary>
     public string? FilePath => currentFilePath;
+
+    /// <summary>All views the user can force onto the current file, for the status-bar switcher.</summary>
+    public IReadOnlyList<DocumentViewOption> AvailableViews => DocumentViewCatalog.Options;
+
+    /// <summary>
+    /// The switcher's selection: reflects the current document's kind, and forces a view
+    /// switch when the user picks a different one. Programmatic updates that merely mirror
+    /// the already-current kind (on open, or after a switch completes) are inert - the guard
+    /// below only fires <see cref="SwitchViewAsync"/> when the kind actually changed.
+    /// </summary>
+    public DocumentViewOption? SelectedView
+    {
+        get => selectedView;
+        set
+        {
+            if (!SetField(ref selectedView, value))
+                return;
+
+            if (value is not null && currentFilePath is not null && value.Kind != currentKind)
+                _ = SwitchViewAsync(value.Kind);
+        }
+    }
+
+    /// <summary>True while the current document is a partial result (some items indexed before
+    /// a scan failure) whose dismissible warning banner is showing.</summary>
+    public bool IsFailureBannerVisible
+    {
+        get => isFailureBannerVisible;
+        private set => SetField(ref isFailureBannerVisible, value);
+    }
+
+    /// <summary>True when the current document has something searchable - false for the
+    /// incompatible-file placeholder, which hides the find bar entirely.</summary>
+    public bool IsFindAvailable
+    {
+        get => isFindAvailable;
+        private set => SetField(ref isFindAvailable, value);
+    }
+
+    public void DismissFailureBanner() => IsFailureBannerVisible = false;
 
     public IReadOnlyList<RecentFileItem> RecentFiles
     {
@@ -221,77 +261,126 @@ public sealed class MainWindowViewModel : ObservableObject
         FindBarResetRequested?.Invoke();
         StatusText = $"Indexing {normalizedPath}… 0%";
 
-        var reporter = new StatusProgressReporter(this, normalizedPath, requestId);
-        IDocumentViewModel document;
+        await LoadAndPublishAsync(fileType, normalizedPath, requestId, addToRecents: true);
+    }
+
+    /// <summary>
+    /// Forces <paramref name="kind"/> onto the currently open file, re-indexing it as that
+    /// kind - skipping the "replace file?" confirmation (same file, just a different view) and
+    /// the recent-files entry (unlike opening a new path, this isn't a new "recently opened"
+    /// event). No-ops if no file is open or <paramref name="kind"/> already matches.
+    /// </summary>
+    public async Task SwitchViewAsync(FileTypeDetector.FileKind kind)
+    {
+        if (currentFilePath is null || kind == currentKind)
+            return;
+
+        string path = currentFilePath;
+        var requestId = ++openRequestId;
+
+        // MUST precede the swap - a live find scan holds spans over the outgoing MMapFile.
+        await DetachFindAsync();
+        FindBarResetRequested?.Invoke();
+        StatusText = $"Indexing {path}… 0%";
+
+        await LoadAndPublishAsync(kind, path, requestId, addToRecents: false);
+    }
+
+    /// <summary>
+    /// Shared tail of <see cref="OpenPathAsync"/> and <see cref="SwitchViewAsync"/>: pre-flight
+    /// compatibility check, load, then publish - or reject into the incompatible-file
+    /// placeholder. See the class-level failure-classification diagram in the design doc:
+    /// a pre-flight rejection or a zero-progress indexing failure both become an
+    /// <see cref="IncompatibleViewModel"/>; a failure with some items indexed publishes the
+    /// partial document with the warning banner.
+    /// </summary>
+    private async Task LoadAndPublishAsync(FileTypeDetector.FileKind kind, string path, int requestId, bool addToRecents)
+    {
+        string attemptedViewName = DisplayNameFor(kind);
+
+        bool isPlausible;
+        string reason;
         try
         {
-            document = await documentLoader(fileType, normalizedPath, reporter);
+            isPlausible = FileTypeDetector.IsPlausibleFor(kind, path, out reason);
         }
         catch (Exception ex)
         {
-            OpenDebugLog.Write($"OpenPath: load threw: {ex}");
+            OpenDebugLog.Write($"LoadAndPublish: IsPlausibleFor threw: {ex}");
             if (requestId == openRequestId)
-                StatusText = $"{normalizedPath} — failed to open";
+                StatusText = $"{path} — failed to open";
             return;
         }
 
-        // A newer open won the race while we were loading: discard this document (it was
-        // never published, so nobody else will dispose it) and leave the newer one in place.
+        if (!isPlausible)
+        {
+            if (requestId == openRequestId)
+                ShowIncompatible(path, kind, attemptedViewName, new IndexFailure(reason, null, null, null, 0));
+            return;
+        }
+
+        var reporter = new StatusProgressReporter(this, path, requestId);
+        IDocumentViewModel document;
+        try
+        {
+            document = await documentLoader(kind, path, reporter);
+        }
+        catch (Exception ex)
+        {
+            OpenDebugLog.Write($"LoadAndPublish: load threw: {ex}");
+            if (requestId == openRequestId)
+                StatusText = $"{path} — failed to open";
+            return;
+        }
+
+        // A newer open/switch won the race while we were loading: discard this document (it
+        // was never published, so nobody else will dispose it) and leave the newer one in place.
         if (requestId != openRequestId)
         {
             document.Dispose();
             return;
         }
 
-        PublishDocument(document, normalizedPath);
-    }
-
-    private static async Task<IDocumentViewModel> LoadDocumentAsync(
-        FileTypeDetector.FileKind fileType, string path, IProgressReporter reporter)
-    {
-        switch (fileType)
+        if (document.IndexFailure is { ItemsIndexed: 0 } failure)
         {
-            case FileTypeDetector.FileKind.Json:
-            {
-                var vm = new JsonViewModel();
-                await vm.LoadAsync(path, reporter);
-                return vm;
-            }
-            case FileTypeDetector.FileKind.Ndjson:
-            {
-                var vm = new NdJsonViewModel();
-                await vm.LoadAsync(path, reporter);
-                return vm;
-            }
-            case FileTypeDetector.FileKind.Csv:
-            {
-                var vm = new CsvViewModel();
-                await vm.LoadAsync(path, (byte)',', reporter);
-                return vm;
-            }
-            case FileTypeDetector.FileKind.Tsv:
-            {
-                var vm = new CsvViewModel();
-                await vm.LoadAsync(path, (byte)'\t', reporter);
-                return vm;
-            }
-            case FileTypeDetector.FileKind.Unidentified:
-            {
-                var vm = new RawViewModel();
-                await vm.LoadAsync(path, reporter);
-                return vm;
-            }
-            default:
-                throw new ArgumentOutOfRangeException(nameof(fileType), fileType, null);
+            document.Dispose();
+            ShowIncompatible(path, kind, attemptedViewName, failure);
+            return;
         }
+
+        PublishDocument(document, path, kind, addToRecents);
+        IsFailureBannerVisible = document.IndexFailure is not null;
     }
 
-    private void PublishDocument(IDocumentViewModel document, string path)
+    private static string DisplayNameFor(FileTypeDetector.FileKind kind) =>
+        DocumentViewCatalog.Options.FirstOrDefault(o => o.Kind == kind)?.DisplayName ?? kind.ToString();
+
+    /// <summary>
+    /// Swaps in the incompatible-file placeholder, keeping <see cref="currentFilePath"/> (and
+    /// therefore <see cref="IsFileOpen"/>, the switcher, and the close button) so the user can
+    /// switch to a different view or close the file. Does not touch <see cref="findController"/>
+    /// - the caller already detached it before attempting the load, and the placeholder has
+    /// nothing searchable anyway.
+    /// </summary>
+    private void ShowIncompatible(string path, FileTypeDetector.FileKind kind, string attemptedViewName, IndexFailure failure)
     {
-        SetCurrentDocument(document, path);
-        findController.Attach(document.CreateSearchNavigator());
-        RecentFileHistory.Add(path);
-        ReloadRecentFiles();
+        var incompatible = new IncompatibleViewModel(path, attemptedViewName, failure,
+            openAsRawText: () => _ = SwitchViewAsync(FileTypeDetector.FileKind.Unidentified));
+        SetCurrentDocument(incompatible, path, kind);
+    }
+
+    private void PublishDocument(IDocumentViewModel document, string path, FileTypeDetector.FileKind kind, bool addToRecents)
+    {
+        var navigator = document.CreateSearchNavigator();
+        SetCurrentDocument(document, path, kind);
+        findController.Attach(navigator);
+        IsFindAvailable = navigator is not null;
+
+        if (addToRecents)
+        {
+            RecentFileHistory.Add(path);
+            ReloadRecentFiles();
+        }
     }
 
     /// <summary>
@@ -309,7 +398,7 @@ public sealed class MainWindowViewModel : ObservableObject
     /// is already stopped (callers await FindController.DetachAsync first), and the view's own
     /// DetachedFromVisualTree dispose stays as an idempotent safety net (e.g. window close).
     /// </summary>
-    private void SetCurrentDocument(IDocumentViewModel? document, string? path)
+    private void SetCurrentDocument(IDocumentViewModel? document, string? path, FileTypeDetector.FileKind kind = FileTypeDetector.FileKind.Unknown)
     {
         if (currentDocument is not null)
         {
@@ -318,7 +407,14 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         currentFilePath = path;
+        currentKind = kind;
         CurrentDocument = document;
+
+        // Reset here so every path (publish, incompatible, close) starts from the same clean
+        // slate; PublishDocument raises IsFindAvailable/IsFailureBannerVisible back up itself
+        // once it knows the new document's navigator/IndexFailure.
+        IsFailureBannerVisible = false;
+        IsFindAvailable = false;
 
         if (document is not null)
         {
@@ -326,23 +422,41 @@ public sealed class MainWindowViewModel : ObservableObject
             StatusText = document.StatusText;
             FileName = Path.GetFileName(path!);
             Title = $"{DefaultTitle} — {FileName}";
+            SelectedView = DocumentViewCatalog.Options.FirstOrDefault(o => o.Kind == kind);
         }
         else
         {
             StatusText = "No file loaded";
             FileName = string.Empty;
             Title = DefaultTitle;
+            SelectedView = null;
         }
 
         OnPropertyChanged(nameof(IsFileOpen));
         OnPropertyChanged(nameof(FilePath));
     }
 
-    /// <summary>Mirrors the current document's own status line into the shell status bar.</summary>
+    /// <summary>
+    /// Mirrors the current document's own status line into the shell status bar, and reacts to
+    /// its <see cref="IDocumentViewModel.IndexFailure"/> changing after publish: a late failure
+    /// with nothing indexed swaps to the incompatible placeholder, one with some items shows
+    /// the warning banner.
+    /// </summary>
     private void OnDocumentPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (sender == currentDocument && e.PropertyName is null or nameof(IDocumentViewModel.StatusText))
+        if (sender != currentDocument)
+            return;
+
+        if (e.PropertyName is null or nameof(IDocumentViewModel.StatusText))
             StatusText = currentDocument!.StatusText;
+
+        if (e.PropertyName is (null or nameof(IDocumentViewModel.IndexFailure)) && currentDocument!.IndexFailure is { } failure)
+        {
+            if (failure.ItemsIndexed == 0)
+                ShowIncompatible(currentFilePath!, currentKind, DisplayNameFor(currentKind), failure);
+            else
+                IsFailureBannerVisible = true;
+        }
     }
 
     public async Task CloseFileAsync()

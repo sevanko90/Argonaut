@@ -34,6 +34,9 @@
         <DataTemplate DataType="raw:RawToolbarViewModel">
             <raw:RawToolbarView />
         </DataTemplate>
+        <DataTemplate DataType="shell:IncompatibleViewModel">
+            <shell:IncompatibleView />
+        </DataTemplate>
     </Window.DataTemplates>
 
     <Grid>
@@ -53,6 +56,7 @@
             <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto">
                 <search:FindBar Grid.Column="0"
                                 x:Name="FindBarControl"
+                                IsVisible="{Binding IsFindAvailable}"
                                 VerticalAlignment="Center" />
                 <ContentControl Grid.Column="1"
                                 x:Name="DocumentToolbarArea"
@@ -75,9 +79,39 @@
             </Grid>
         </Border>
 
-        <ContentControl Grid.Row="1"
-                        x:Name="ContentArea"
-                        Content="{Binding CurrentDocument}" />
+        <Grid Grid.Row="1" RowDefinitions="Auto,*">
+            <Border Grid.Row="0"
+                    x:Name="FailureBanner"
+                    IsVisible="{Binding IsFailureBannerVisible}"
+                    Background="{DynamicResource AppPanelBackgroundBrush}"
+                    BorderBrush="{DynamicResource AppBorderBrush}"
+                    BorderThickness="0,0,0,1"
+                    Padding="16,8">
+                <Grid ColumnDefinitions="Auto,*,Auto">
+                    <Viewbox Grid.Column="0" Width="16" Height="16" Margin="0,0,8,0" VerticalAlignment="Center">
+                        <!-- Material "warning" -->
+                        <Path Fill="{DynamicResource AppDangerHoverBrush}"
+                              Data="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z" />
+                    </Viewbox>
+                    <TextBlock Grid.Column="1"
+                               Text="{Binding CurrentDocument.StatusText, FallbackValue={x:Null}}"
+                               VerticalAlignment="Center"
+                               TextWrapping="Wrap"
+                               Foreground="{DynamicResource AppMutedTextBrush}" />
+                    <Button Grid.Column="2"
+                            x:Name="DismissFailureBannerButton"
+                            Content="✕"
+                            FontSize="11"
+                            Click="OnDismissFailureBanner"
+                            Classes="iconbutton compact"
+                            ToolTip.Tip="Dismiss" />
+                </Grid>
+            </Border>
+
+            <ContentControl Grid.Row="1"
+                            x:Name="ContentArea"
+                            Content="{Binding CurrentDocument}" />
+        </Grid>
 
         <shell:EmptyStateView Grid.Row="1"
                               x:Name="EmptyState"
@@ -111,6 +145,16 @@
                            VerticalAlignment="Center"
                            Foreground="{DynamicResource AppMutedTextBrush}" />
                 <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <ComboBox x:Name="ViewSwitcherComboBox"
+                              IsVisible="{Binding IsFileOpen}"
+                              ItemsSource="{Binding AvailableViews}"
+                              SelectedItem="{Binding SelectedView, Mode=TwoWay}"
+                              DisplayMemberBinding="{Binding DisplayName}"
+                              FontSize="12"
+                              MinWidth="110"
+                              Padding="8,2"
+                              MinHeight="0"
+                              ToolTip.Tip="Change how this file is displayed" />
                     <Button x:Name="FontToggleButton"
                             Click="OnToggleContentFont"
                             Classes="iconbutton compact"

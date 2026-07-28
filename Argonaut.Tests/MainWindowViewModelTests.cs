@@ -60,6 +60,7 @@ public sealed class MainWindowViewModelTests : IDisposable
     private sealed class FakeDocument : ObservableObject, IDocumentViewModel
     {
         private string status = "loaded";
+        private IndexFailure? indexFailure;
 
         public string FilePath { get; init; } = string.Empty;
 
@@ -69,11 +70,19 @@ public sealed class MainWindowViewModelTests : IDisposable
             set => SetField(ref status, value);
         }
 
+        public IndexFailure? IndexFailure
+        {
+            get => indexFailure;
+            set => SetField(ref indexFailure, value);
+        }
+
+        public bool HasSearchNavigator { get; init; } = true;
+
         public bool Disposed { get; private set; }
 
         public object? Toolbar { get; init; }
 
-        public ISearchNavigator CreateSearchNavigator() => new FakeNavigator();
+        public ISearchNavigator? CreateSearchNavigator() => HasSearchNavigator ? new FakeNavigator() : null;
 
         /// <summary>
         /// Returns true if the VM can process the specified file type
@@ -306,5 +315,164 @@ public sealed class MainWindowViewModelTests : IDisposable
         vm.ToggleContentFont();
         var reloaded = CreateViewModel((_, _, _) => Task.FromResult<IDocumentViewModel>(new FakeDocument()));
         Assert.Equal(ContentFontMode.SansSerif, reloaded.ContentFontMode);
+    }
+
+    [Fact]
+    public async Task OpenPath_SelectedView_TracksDetectedKind()
+    {
+        string path = WriteJsonFile();
+        var document = new FakeDocument { FilePath = path };
+        var vm = CreateViewModel((_, _, _) => Task.FromResult<IDocumentViewModel>(document));
+
+        await vm.OpenPathAsync(path);
+
+        Assert.Equal(FileTypeDetector.FileKind.Json, vm.SelectedView?.Kind);
+    }
+
+    [Fact]
+    public async Task OpenPath_DocumentWithNavigator_MakesFindAvailable()
+    {
+        string path = WriteJsonFile();
+        var document = new FakeDocument { FilePath = path };
+        var vm = CreateViewModel((_, _, _) => Task.FromResult<IDocumentViewModel>(document));
+
+        await vm.OpenPathAsync(path);
+
+        Assert.True(vm.IsFindAvailable);
+    }
+
+    [Fact]
+    public async Task OpenPath_DocumentWithNoNavigator_LeavesFindUnavailable()
+    {
+        string path = WriteJsonFile();
+        var document = new FakeDocument { FilePath = path, HasSearchNavigator = false };
+        var vm = CreateViewModel((_, _, _) => Task.FromResult<IDocumentViewModel>(document));
+
+        await vm.OpenPathAsync(path);
+
+        Assert.False(vm.IsFindAvailable);
+    }
+
+    [Fact]
+    public async Task SwitchView_NeverCallsConfirmReplace()
+    {
+        string path = WriteJsonFile();
+        var initial = new FakeDocument { FilePath = path };
+        var switched = new FakeDocument { FilePath = path, StatusText = "switched" };
+        var vm = new MainWindowViewModel(
+            _ => throw new InvalidOperationException("confirmReplace must not be called for a view switch"),
+            (kind, _, _) => Task.FromResult<IDocumentViewModel>(kind == FileTypeDetector.FileKind.Json ? initial : switched));
+
+        await vm.OpenPathAsync(path);
+        await vm.SwitchViewAsync(FileTypeDetector.FileKind.Ndjson);
+
+        Assert.Same(switched, vm.CurrentDocument);
+    }
+
+    [Fact]
+    public async Task SwitchView_DisposesOutgoingDocument_AndDoesNotDuplicateRecentEntry()
+    {
+        string path = WriteJsonFile();
+        var initial = new FakeDocument { FilePath = path };
+        var switched = new FakeDocument { FilePath = path, StatusText = "switched" };
+        var vm = CreateViewModel((kind, _, _) =>
+            Task.FromResult<IDocumentViewModel>(kind == FileTypeDetector.FileKind.Json ? initial : switched));
+
+        await vm.OpenPathAsync(path);
+        int recentCountAfterOpen = vm.RecentFiles.Count;
+
+        await vm.SwitchViewAsync(FileTypeDetector.FileKind.Ndjson);
+
+        Assert.True(initial.Disposed, "the outgoing document must be disposed before the swap");
+        Assert.False(switched.Disposed);
+        Assert.Same(switched, vm.CurrentDocument);
+        Assert.Equal(recentCountAfterOpen, vm.RecentFiles.Count);
+    }
+
+    [Fact]
+    public async Task SwitchView_PreflightRejection_NeverInvokesLoader()
+    {
+        // Plain prose fails the Json pre-flight check (no leading '{'/'['), so switching to
+        // Json must reject before ever reaching the loader.
+        string path = Path.Combine(tempDir, "notes.txt");
+        File.WriteAllText(path, "hello world\nno structure here\n");
+
+        var document = new FakeDocument { FilePath = path };
+        bool loaderCalledForJson = false;
+        var vm = CreateViewModel((kind, _, _) =>
+        {
+            if (kind == FileTypeDetector.FileKind.Json)
+                loaderCalledForJson = true;
+            return Task.FromResult<IDocumentViewModel>(document);
+        });
+
+        await vm.OpenPathAsync(path); // detected Unidentified
+
+        await vm.SwitchViewAsync(FileTypeDetector.FileKind.Json);
+
+        Assert.False(loaderCalledForJson);
+        Assert.IsType<IncompatibleViewModel>(vm.CurrentDocument);
+        Assert.True(vm.IsFileOpen);
+    }
+
+    [Fact]
+    public async Task SwitchView_ZeroProgressFailure_ShowsIncompatible_AndDisposesFailedDocument()
+    {
+        string path = WriteJsonFile();
+        var initial = new FakeDocument { FilePath = path };
+        var failed = new FakeDocument { FilePath = path, IndexFailure = new IndexFailure("boom", null, 1, 1, 0) };
+        var vm = CreateViewModel((kind, _, _) =>
+            Task.FromResult<IDocumentViewModel>(kind == FileTypeDetector.FileKind.Json ? initial : failed));
+
+        await vm.OpenPathAsync(path);
+        await vm.SwitchViewAsync(FileTypeDetector.FileKind.Ndjson);
+
+        Assert.True(failed.Disposed, "a zero-progress failure must not be left as the published document");
+        Assert.IsType<IncompatibleViewModel>(vm.CurrentDocument);
+        Assert.True(vm.IsFileOpen);
+        Assert.False(vm.IsFailureBannerVisible);
+    }
+
+    [Fact]
+    public async Task SwitchView_FailureWithItems_PublishesDocument_AndShowsBanner()
+    {
+        string path = WriteJsonFile();
+        var initial = new FakeDocument { FilePath = path };
+        var partial = new FakeDocument { FilePath = path, IndexFailure = new IndexFailure("boom", 100, 5, 3, 42) };
+        var vm = CreateViewModel((kind, _, _) =>
+            Task.FromResult<IDocumentViewModel>(kind == FileTypeDetector.FileKind.Json ? initial : partial));
+
+        await vm.OpenPathAsync(path);
+        await vm.SwitchViewAsync(FileTypeDetector.FileKind.Ndjson);
+
+        Assert.Same(partial, vm.CurrentDocument);
+        Assert.False(partial.Disposed);
+        Assert.True(vm.IsFailureBannerVisible);
+
+        vm.DismissFailureBanner();
+        Assert.False(vm.IsFailureBannerVisible);
+    }
+
+    [Fact]
+    public async Task SwitchView_SameKind_IsNoOp()
+    {
+        string path = WriteJsonFile();
+        var document = new FakeDocument { FilePath = path };
+        bool loaderCalledTwice = false;
+        int loadCount = 0;
+        var vm = CreateViewModel((_, _, _) =>
+        {
+            loadCount++;
+            if (loadCount > 1)
+                loaderCalledTwice = true;
+            return Task.FromResult<IDocumentViewModel>(document);
+        });
+
+        await vm.OpenPathAsync(path);
+        await vm.SwitchViewAsync(FileTypeDetector.FileKind.Json);
+
+        Assert.False(loaderCalledTwice);
+        Assert.Same(document, vm.CurrentDocument);
+        Assert.False(document.Disposed);
     }
 }

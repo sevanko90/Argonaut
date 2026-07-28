@@ -21,6 +21,7 @@ public sealed class JsonViewModel : ObservableObject, IDocumentViewModel
     private string? highlightTerm;
     private string statusText = string.Empty;
     private IReadOnlyList<JsonPathSegment> selectedPathSegments = Array.Empty<JsonPathSegment>();
+    private IndexFailure? indexFailure;
     private volatile bool disposed;
 
     public string FilePath { get; private set; } = string.Empty;
@@ -43,6 +44,13 @@ public sealed class JsonViewModel : ObservableObject, IDocumentViewModel
     }
 
     public JsonVisibleRowCollection Rows => rows ?? throw new InvalidOperationException("LoadAsync must complete before Rows is accessed.");
+
+    /// <summary>See <see cref="IDocumentViewModel.IndexFailure"/>.</summary>
+    public IndexFailure? IndexFailure
+    {
+        get => indexFailure;
+        private set => SetField(ref indexFailure, value);
+    }
 
     /// <summary>Session state for date hints: the file-level default scheme (inferred or
     /// user-picked) and any per-token overrides. Created eagerly so MainWindow/NdJson can
@@ -194,6 +202,9 @@ public sealed class JsonViewModel : ObservableObject, IDocumentViewModel
         // then tracks index.TokenCount live as indexing continues in the background.
         await session.Index.WaitForTokenCountAsync(InitialTokenTarget);
 
+        if (session.Index.Failure is { } failure)
+            IndexFailure = failure;
+
         rows = new JsonVisibleRowCollection(session.Index, session.File,
             new IValueHintProvider[] { new DateHintProvider(HintSettings) }, DefaultExpandDepth);
 
@@ -231,7 +242,12 @@ public sealed class JsonViewModel : ObservableObject, IDocumentViewModel
         catch
         {
             if (!disposed)
-                StatusText = $"{FilePath} — indexing failed";
+            {
+                IndexFailure = session.Index.Failure;
+                StatusText = session.Index.Failure is { } failure
+                    ? $"{FilePath} — indexing stopped at line {failure.Line?.ToString("N0") ?? "?"}, column {failure.Column?.ToString("N0") ?? "?"} — {failure.ItemsIndexed:N0} tokens shown"
+                    : $"{FilePath} — indexing failed";
+            }
             return;
         }
 

@@ -373,6 +373,7 @@ public class RawSegmentIndexTests
             catch (OperationCanceledException) { /* expected clean cancellation */ }
 
             Assert.True(index.IsComplete);
+            Assert.Null(index.Failure); // cancellation is never reported as a failure
             Assert.True(index.RowCount > 0);
             Assert.True(index.RowCount < content.Length / 512, "cancellation should leave the tail un-indexed");
             for (int i = 0; i < index.RowCount; i++)

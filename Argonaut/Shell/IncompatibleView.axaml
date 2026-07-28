@@ -1,0 +1,53 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:shell="clr-namespace:Argonaut.Shell"
+             mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="500"
+             x:Class="Argonaut.Shell.IncompatibleView"
+             x:DataType="shell:IncompatibleViewModel">
+
+    <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
+        <StackPanel Orientation="Vertical" Spacing="16" HorizontalAlignment="Center">
+
+            <Viewbox Width="120" Height="120" Stretch="Uniform" HorizontalAlignment="Center">
+                <!-- Material "warning" -->
+                <Path Fill="{DynamicResource AppSubtleIconBrush}"
+                      Data="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z" />
+            </Viewbox>
+
+            <TextBlock Text="{Binding StatusText}"
+                       FontSize="16"
+                       Foreground="{DynamicResource AppMutedTextBrush}"
+                       TextAlignment="Center"
+                       TextWrapping="Wrap"
+                       HorizontalAlignment="Center"
+                       Width="420" />
+
+            <Border BorderBrush="{DynamicResource AppBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Background="{DynamicResource AppPanelBackgroundBrush}"
+                    Padding="16,12"
+                    MaxWidth="420"
+                    IsVisible="{Binding HasFailureDetail}">
+                <StackPanel Orientation="Vertical" Spacing="4">
+                    <TextBlock Text="{Binding IndexFailure.Message}"
+                               TextWrapping="Wrap"
+                               Foreground="{DynamicResource AppMutedTextBrush}" />
+                    <TextBlock Text="{Binding LocationText}"
+                               IsVisible="{Binding HasLocationText}"
+                               FontFamily="{DynamicResource AppContentFontFamily}"
+                               FontSize="12"
+                               Foreground="{DynamicResource AppMutedTextBrush}" />
+                </StackPanel>
+            </Border>
+
+            <Button Content="Open as raw text"
+                    Click="OnOpenAsRawText"
+                    HorizontalAlignment="Center"
+                    Padding="16,8" />
+
+        </StackPanel>
+    </Grid>
+</UserControl>

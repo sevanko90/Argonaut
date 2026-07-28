@@ -44,8 +44,12 @@ public interface IDocumentViewModel : INotifyPropertyChanged, IDisposable
     /// </summary>
     object? Toolbar { get; }
 
-    /// <summary>Creates the search navigator the shell attaches to its FindController.</summary>
-    ISearchNavigator CreateSearchNavigator();
+    /// <summary>
+    /// Creates the search navigator the shell attaches to its FindController, or null if this
+    /// document has nothing searchable (e.g. an incompatible-file placeholder with no backing
+    /// mapping).
+    /// </summary>
+    ISearchNavigator? CreateSearchNavigator();
 
     /// <summary>
     /// Returns true if the VM can process the specified file type
@@ -53,4 +57,11 @@ public interface IDocumentViewModel : INotifyPropertyChanged, IDisposable
     /// <param name="fileType">Type of file to query</param>
     /// <returns>True if the view model can process the specified file type</returns>
     bool CanHandleFileType(FileTypeDetector.FileKind fileType);
+
+    /// <summary>
+    /// Non-null when this document's background indexing stopped early because of an error;
+    /// null on success and on cancellation. Observable via <see cref="INotifyPropertyChanged"/>,
+    /// like <see cref="StatusText"/>.
+    /// </summary>
+    IndexFailure? IndexFailure { get; }
 }

@@ -1,3 +1,4 @@
+using System;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -36,12 +37,23 @@ public abstract class AppendLogIndexBase<T> where T : struct
     // volatile: read lock-free by IsComplete/readers; written once by the writer thread.
     private volatile bool complete;
 
+    // volatile: written once by the writer thread (inside RunIndexing's catch), read
+    // lock-free by IFileIndexer.Failure. Written before `complete` so a reader that
+    // observes IsComplete also observes the failure that caused it.
+    private volatile IndexFailure? failure;
+
     /// <summary>
     /// True once the scan has stopped publishing items. For the file indexers this means
     /// "fully indexed"; derived classes with other stop reasons (cancellation, caps)
     /// qualify it with their own flags.
     /// </summary>
     public bool IsComplete => this.complete;
+
+    /// <summary>
+    /// Non-null when the scan stopped because of an error; null on success and on
+    /// cancellation. See <see cref="RunIndexing"/>.
+    /// </summary>
+    public IndexFailure? Failure => this.failure;
 
     /// <summary>
     /// Number of items published so far (may grow until <see cref="IsComplete"/> is true).
@@ -132,4 +144,38 @@ public abstract class AppendLogIndexBase<T> where T : struct
 
         waiter?.TrySetResult(true);
     }
+
+    /// <summary>
+    /// Runs a scan body on the writer thread, recording any non-cancellation fault as
+    /// <see cref="Failure"/> before rethrowing (so <see cref="IFileIndexer.IndexingTask"/>
+    /// still faults the same way it always did), and marking the scan complete either way.
+    /// </summary>
+    protected void RunIndexing(Action body)
+    {
+        try
+        {
+            body();
+        }
+        catch (OperationCanceledException)
+        {
+            throw; // cancellation is not a failure
+        }
+        catch (Exception ex)
+        {
+            this.failure = DescribeFailure(ex);
+            throw;
+        }
+        finally
+        {
+            this.MarkComplete();
+        }
+    }
+
+    /// <summary>
+    /// Builds the <see cref="IndexFailure"/> recorded for an exception that stopped the
+    /// scan. The default reports just the message and how many items were published before
+    /// the fault; derived classes override to enrich it (e.g. line/column from a
+    /// <see cref="System.Text.Json.JsonException"/>).
+    /// </summary>
+    protected virtual IndexFailure DescribeFailure(Exception ex) => new(ex.Message, null, null, null, this.ItemCount);
 }

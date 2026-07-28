@@ -10,22 +10,71 @@ chain changes.
   drag/drop), file picker, replace-confirmation dialog, toast, and the theme-mode reaction
   (variant + toggle icon). No file-open/close or status logic.
 - `MainWindowViewModel` owns all shell state and the open/close lifecycle: `CurrentDocument`,
-  status line, title, toolbar visibility, recent files, find controller, and the theme /
-  expand-depth / date-hint preferences.
+  status line, title, toolbar visibility, recent files, find controller, the view switcher
+  (`AvailableViews`/`SelectedView`), the failure banner (`IsFailureBannerVisible`), and the
+  theme / expand-depth / date-hint preferences.
 - `MainWindow.axaml` binds `ContentControl.Content="{Binding CurrentDocument}"`; implicit
-  `DataTemplate`s map each document view model to its view (`JsonViewModel`→`JsonView`, etc.).
-  `EmptyStateView` shows when `!IsFileOpen`.
-- File loading is injectable via `MainWindowViewModel.DocumentLoader` (tests supply fakes).
+  `DataTemplate`s map each document view model to its view (`JsonViewModel`→`JsonView`, etc.),
+  including `IncompatibleViewModel`→`IncompatibleView`. `EmptyStateView` shows when `!IsFileOpen`.
+- File loading is injectable via `MainWindowViewModel.DocumentLoader` (tests supply fakes; the
+  real default is `DocumentViewCatalog.LoadAsync`).
 
 ## Documents
 
 - `IDocumentViewModel` (`Shell/IDocumentViewModel.cs`) is the shell's slim view of one open
-  document: `FilePath`, observable `StatusText`, `CreateSearchNavigator()`. Implemented by
-  `JsonViewModel`, `NdJsonViewModel`, `CsvViewModel`.
+  document: `FilePath`, observable `StatusText`, `CreateSearchNavigator()` (nullable — null for
+  a document with nothing searchable), `CanHandleFileType(FileKind)`, and observable
+  `IndexFailure`. Implemented by `JsonViewModel`, `NdJsonViewModel`, `CsvViewModel`,
+  `RawViewModel`, and the placeholder `IncompatibleViewModel`.
 - Each document view model owns its whole status line (initial, live indexing %, complete,
   failed, and — NDJSON — selected-line), which the shell mirrors into the status bar.
 - Deliberately NOT on the interface (kept until the planned per-view injectable toolbar):
   `HintSettings` and `SetDefaultExpandDepth`. The shell reaches these by concrete-type match.
+
+## View catalog & the view switcher
+
+- `DocumentViewCatalog` (`Shell/DocumentViewCatalog.cs`) is the single kind ↔ view model
+  mapping in the app: a static `(Create, Load)` registration table per view model, with the
+  `FileKind → registration` map *derived* once at startup by probing each registration's
+  throwaway instance with `CanHandleFileType` — not restated by hand. `Options` (JSON, NDJSON,
+  CSV, TSV, Raw text) drives the status-bar `ComboBox`; `LoadAsync` has the exact shape of
+  `MainWindowViewModel.DocumentLoader`, so it's both the production default and the same seam
+  tests fake.
+- The switcher's `SelectedView` setter fires `MainWindowViewModel.SwitchViewAsync(kind)` when
+  the user picks a different kind; it's naturally inert when code sets it to mirror the
+  already-current kind (on open, or after a switch completes), because the shell always updates
+  `currentKind` before reassigning `SelectedView`.
+- `SwitchViewAsync` re-indexes the *same* file as a different kind: unlike `OpenPathAsync`, it
+  skips the replace-confirmation and doesn't touch recent files, but otherwise shares the exact
+  publish path (`LoadAndPublishAsync`) — including the staleness guard and the pre-flight/failure
+  handling below.
+
+## Index failures & the incompatible-file placeholder
+
+- `IFileIndexer.Failure` (`Infrastructure/IndexFailure.cs`) is non-null when a background scan
+  stopped because of an error, null on success *and* on cancellation. `AppendLogIndexBase.RunIndexing`
+  is the one place that catches a scan's exception, records it (via the overridable
+  `DescribeFailure`, which `JsonStructureIndex` enriches with line/column/byte-offset from a
+  `JsonException`), and rethrows — so `IndexingTask` still faults exactly as before.
+- Forcing an incompatible kind onto a file (via the switcher) is classified in two stages:
+  1. **Pre-flight** — `FileTypeDetector.IsPlausibleFor(kind, path, out reason)` is a cheap header
+     check (no indexing) that rejects an obvious mismatch (e.g. CSV content forced to JSON)
+     instantly.
+  2. **Zero-progress rule** — if indexing still fails, `Failure.ItemsIndexed == 0` means nothing
+     ever rendered, so the shell treats it the same as a pre-flight rejection; `ItemsIndexed > 0`
+     means some of the file *is* valid, so the shell publishes the document with a dismissible
+     warning banner (`IsFailureBannerVisible`) instead of discarding it.
+- Both rejection paths swap in `IncompatibleViewModel` (`Shell/IncompatibleViewModel.cs`) via
+  `MainWindowViewModel.ShowIncompatible`, which keeps `currentFilePath` set (so `IsFileOpen`,
+  the switcher, and the close button all keep working) but never calls `FindController.Attach`
+  — the caller already detached find before attempting the load, and the placeholder's
+  `CreateSearchNavigator()` returns null (mirrored by `IsFindAvailable` hiding the find bar).
+  `IncompatibleViewModel.Dispose()` is a no-op: it has no backing `MMapFile`/session to release,
+  so it needs no special handling in the disposal ownership chain below beyond the normal
+  outgoing-document dispose.
+- A *late* failure (the initial batch loaded clean, but a background scan later throws) is
+  caught the same way, via `MainWindowViewModel.OnDocumentPropertyChanged` watching
+  `IndexFailure`: zero items swaps to the placeholder, some items just raises the banner.
 
 ## Views ↔ view models
 

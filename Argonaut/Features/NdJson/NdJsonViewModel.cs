@@ -21,6 +21,7 @@ public sealed class NdJsonViewModel : ObservableObject, IDocumentViewModel
     private JsonViewModel? selectedLineJsonViewModel;
     private string? highlightTerm;
     private string statusText = string.Empty;
+    private IndexFailure? indexFailure;
     private long selectionRequestId;
     private bool disposed;
 
@@ -35,6 +36,13 @@ public sealed class NdJsonViewModel : ObservableObject, IDocumentViewModel
     public Task IndexingTask => this.session?.IndexingTask ?? Task.CompletedTask;
 
     public MemoryMappedFileLineCollection Lines => lines ?? throw new InvalidOperationException("LoadAsync must complete before Lines is accessed.");
+
+    /// <summary>See <see cref="IDocumentViewModel.IndexFailure"/>.</summary>
+    public IndexFailure? IndexFailure
+    {
+        get => indexFailure;
+        private set => SetField(ref indexFailure, value);
+    }
 
     /// <summary>Status-bar line for this document (see <see cref="IDocumentViewModel"/>):
     /// line count plus the selected line, refreshed on selection changes and when
@@ -168,6 +176,9 @@ public sealed class NdJsonViewModel : ObservableObject, IDocumentViewModel
         // Lines.Count then tracks index.LineCount live as indexing continues in the background.
         await session.Index.WaitForLineCountAsync(InitialIndexedLineTarget);
 
+        if (session.Index.Failure is { } failure)
+            IndexFailure = failure;
+
         SelectedLine = null;
         lines = new MemoryMappedFileLineCollection(session.Index, session.File);
         OnPropertyChanged(nameof(Lines));
@@ -211,7 +222,12 @@ public sealed class NdJsonViewModel : ObservableObject, IDocumentViewModel
         catch
         {
             if (!disposed)
-                StatusText = $"{FilePath} — indexing failed";
+            {
+                IndexFailure = session.Index.Failure;
+                StatusText = session.Index.Failure is { } failure
+                    ? $"{FilePath} — indexing stopped — {failure.ItemsIndexed:N0} lines shown"
+                    : $"{FilePath} — indexing failed";
+            }
             return;
         }
 

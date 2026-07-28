@@ -22,6 +22,7 @@ public class IndexedFileSessionTests
         public bool IsComplete => IndexingTask.IsCompleted;
         public int ItemCount => 0;
         public string ItemNoun => "items";
+        public IndexFailure? Failure => null;
     }
 
     private static string WriteTempFile(string content)

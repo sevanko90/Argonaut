@@ -200,7 +200,7 @@ public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IFileInd
         ArgumentOutOfRangeException.ThrowIfLessThan(wrapWidth, MaxUtf8Backoff + 1);
 
         var index = new RawSegmentIndex(file, wrapWidth);
-        index.IndexingTask = Task.Run(() => index.ProduceRows(progressReporter, cancellationToken), cancellationToken);
+        index.IndexingTask = Task.Run(() => index.RunIndexing(() => index.ProduceRows(progressReporter, cancellationToken)), cancellationToken);
         return index;
     }
 
@@ -217,7 +217,6 @@ public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IFileInd
         long length = this.file.Length;
         if (length == 0)
         {
-            this.MarkComplete();
             progressReporter?.Report("Indexing");
             return;
         }
@@ -264,7 +263,6 @@ public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IFileInd
             // count is safe to publish even on cancellation - unlike the dense indexers,
             // there is no un-scanned remainder to mis-record.
             Volatile.Write(ref this.publishedRowCount, rows);
-            this.MarkComplete();
             progressReporter?.Report("Indexing", length, length);
         }
     }

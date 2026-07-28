@@ -193,6 +193,39 @@ public sealed class RawViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task JumpToByteOffsetAsync_SelectsTheRowContainingThatOffset()
+    {
+        var vm = new RawViewModel();
+        try
+        {
+            await vm.LoadAsync(WriteNewlinelessFile()); // wrap 160 by default -> rows at 0,160,320
+            await vm.IndexingTask;
+
+            await vm.JumpToByteOffsetAsync(165); // 5 bytes into the second row
+
+            Assert.Equal(1, vm.SelectedRowIndex);
+        }
+        finally
+        {
+            vm.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task JumpToByteOffsetAsync_AfterDispose_DoesNotThrow()
+    {
+        var vm = new RawViewModel();
+        await vm.LoadAsync(WriteNewlinelessFile());
+        await vm.IndexingTask;
+
+        vm.Dispose();
+
+        // The mapping is gone; resolving against it must be swallowed, not surfaced as an
+        // unhandled ObjectDisposedException from a fire-and-forget caller.
+        await vm.JumpToByteOffsetAsync(10);
+    }
+
+    [Fact]
     public async Task Dispose_IsIdempotent_AndMakesSetWrapWidthANoOp()
     {
         var vm = new RawViewModel();

@@ -35,7 +35,7 @@
                 </ListBox.Styles>
                 <ListBox.ItemTemplate>
                     <DataTemplate x:DataType="raw:RawVisibleRow">
-                        <Grid ColumnDefinitions="72,*,18">
+                        <Grid ColumnDefinitions="100,*,18">
                             <TextBlock Grid.Column="0"
                                        Text="{Binding LineNumber}"
                                        HorizontalAlignment="Right"

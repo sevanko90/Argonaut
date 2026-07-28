@@ -99,12 +99,14 @@
                                TextWrapping="Wrap"
                                Foreground="{DynamicResource AppMutedTextBrush}" />
                     <Button Grid.Column="2"
-                            x:Name="DismissFailureBannerButton"
-                            Content="✕"
-                            FontSize="11"
-                            Click="OnDismissFailureBanner"
-                            Classes="iconbutton compact"
-                            ToolTip.Tip="Dismiss" />
+                            x:Name="JumpToFailureLineButton"
+                            Content="Jump to line"
+                            IsVisible="{Binding CanJumpToFailureLocation}"
+                            Click="OnJumpToFailureLine"
+                            Classes="linklike"
+                            Margin="12,0,0,0"
+                            VerticalAlignment="Center"
+                            ToolTip.Tip="Jump to this location in the raw viewer" />
                 </Grid>
             </Border>
 

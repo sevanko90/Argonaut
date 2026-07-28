@@ -14,4 +14,9 @@ public partial class IncompatibleView : UserControl
     {
         (DataContext as IncompatibleViewModel)?.OpenAsRawText();
     }
+
+    private void OnJumpToFailureLocation(object? sender, RoutedEventArgs e)
+    {
+        (DataContext as IncompatibleViewModel)?.JumpToFailureLocation();
+    }
 }

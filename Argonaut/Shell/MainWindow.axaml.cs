@@ -185,9 +185,9 @@ public partial class MainWindow : Window
         await viewModel.CloseFileAsync();
     }
 
-    private void OnDismissFailureBanner(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    private void OnJumpToFailureLine(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        viewModel.DismissFailureBanner();
+        _ = viewModel.JumpToFailureLocationAsync(viewModel.CurrentDocument?.IndexFailure?.ByteOffset ?? 0);
     }
 
     private void OnDragOver(object? sender, DragEventArgs e)

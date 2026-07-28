@@ -62,8 +62,8 @@ chain changes.
      instantly.
   2. **Zero-progress rule** — if indexing still fails, `Failure.ItemsIndexed == 0` means nothing
      ever rendered, so the shell treats it the same as a pre-flight rejection; `ItemsIndexed > 0`
-     means some of the file *is* valid, so the shell publishes the document with a dismissible
-     warning banner (`IsFailureBannerVisible`) instead of discarding it.
+     means some of the file *is* valid, so the shell publishes the document with a warning
+     banner (`IsFailureBannerVisible`) instead of discarding it.
 - Both rejection paths swap in `IncompatibleViewModel` (`Shell/IncompatibleViewModel.cs`) via
   `MainWindowViewModel.ShowIncompatible`, which keeps `currentFilePath` set (so `IsFileOpen`,
   the switcher, and the close button all keep working) but never calls `FindController.Attach`
@@ -75,6 +75,26 @@ chain changes.
 - A *late* failure (the initial batch loaded clean, but a background scan later throws) is
   caught the same way, via `MainWindowViewModel.OnDocumentPropertyChanged` watching
   `IndexFailure`: zero items swaps to the placeholder, some items just raises the banner.
+- `IsFailureBannerVisible`, `FailureLocationText`, and `CanJumpToFailureLocation` are all
+  computed straight from `CurrentDocument?.IndexFailure` (no backing fields, no dismiss) - the
+  banner has **no dismiss affordance**: once a document is showing partial results, the warning
+  stays up for that document's whole lifetime, since it only goes away by fixing/switching away
+  from the actual problem. `SetCurrentDocument` and `OnDocumentPropertyChanged` both call
+  `NotifyFailurePropertiesChanged()` to raise change notification for the three whenever
+  `CurrentDocument` (or its `IndexFailure`) changes.
+- Where a failure carries a byte offset (`JsonStructureIndex`'s enriched `DescribeFailure` always
+  sets one; a pre-flight rejection never does, since it never got as far as reading a token),
+  its "Line N" location is a clickable link — in the banner (`MainWindow.axaml`'s
+  `JumpToFailureLineButton`) and in `IncompatibleView`'s location panel alike — that calls
+  `MainWindowViewModel.JumpToFailureLocationAsync(byteOffset)`: switches to the raw viewer (if
+  not already showing it) via `SwitchViewAsync`, then concrete-type-matches `CurrentDocument` to
+  `RawViewModel` (same precedent as HintSettings/SetDefaultExpandDepth above) and calls
+  `RawViewModel.JumpToByteOffsetAsync`, which resolves the offset to a display row via the
+  existing `RawOffsetRowResolver` (waiting out an in-progress scan if needed - the same machinery
+  `RawSearchNavigator` uses for a search reveal) and selects it. A resolve that outlives the
+  document (closed/switched away mid-wait) surfaces as a catchable `ObjectDisposedException`
+  from the now-unmapped file, not a crash - `JumpToByteOffsetAsync` swallows it, since there is
+  nothing left to reveal.
 
 ## Views ↔ view models
 

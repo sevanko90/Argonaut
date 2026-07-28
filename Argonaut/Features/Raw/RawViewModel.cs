@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
@@ -90,6 +91,45 @@ public sealed class RawViewModel : ObservableObject, IDocumentViewModel
 
     /// <summary>Used by RawSearchNavigator to reveal a search match.</summary>
     public void SelectRow(int rowIndex) => SelectedRowIndex = rowIndex;
+
+    /// <summary>
+    /// Resolves <paramref name="byteOffset"/> to a display row - waiting for indexing to reach
+    /// it (or finish) if necessary - and reveals it. Used by the "jump to failure location"
+    /// link on another document's incompatible/partial-failure display, which switches this
+    /// view in then calls here. Mirrors <see cref="Argonaut.Features.Search.RawSearchNavigator.RevealAsync"/>'s
+    /// generation re-check for a wrap-width change racing the resolve, and its own disposal:
+    /// if the document is closed/switched away while resolving, resuming touches an
+    /// already-unmapped file, which surfaces as a catchable <see cref="ObjectDisposedException"/>
+    /// (see CLAUDE.md/MMapFile) rather than corrupting anything - simply ignored here since
+    /// there is nothing left to reveal.
+    /// </summary>
+    public async Task JumpToByteOffsetAsync(long byteOffset)
+    {
+        if (this.session is null)
+            return;
+
+        try
+        {
+            int generation = IndexGeneration;
+            var row = await RawOffsetRowResolver.ResolveWhenCoveredAsync(this.session.Index, byteOffset, CancellationToken.None);
+            if (this.disposed)
+                return;
+
+            if (generation != IndexGeneration)
+            {
+                row = await RawOffsetRowResolver.ResolveWhenCoveredAsync(this.session!.Index, byteOffset, CancellationToken.None);
+                if (this.disposed)
+                    return;
+            }
+
+            if (row is int rowIndex)
+                SelectRow(rowIndex);
+        }
+        catch (ObjectDisposedException)
+        {
+            // Document closed/switched away mid-resolve; the mapping may already be gone.
+        }
+    }
 
     public async Task LoadAsync(string path, IProgressReporter? progressReporter = null)
     {

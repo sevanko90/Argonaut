@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
 
@@ -15,13 +14,16 @@ namespace Argonaut.Shell;
 public sealed class IncompatibleViewModel : ObservableObject, IDocumentViewModel
 {
     private readonly Action openAsRawText;
+    private readonly Action jumpToFailureLocation;
 
-    public IncompatibleViewModel(string filePath, string attemptedViewName, IndexFailure? failure, Action openAsRawText)
+    public IncompatibleViewModel(string filePath, string attemptedViewName, IndexFailure? failure,
+        Action openAsRawText, Action jumpToFailureLocation)
     {
         FilePath = filePath;
         AttemptedViewName = attemptedViewName;
         IndexFailure = failure;
         this.openAsRawText = openAsRawText;
+        this.jumpToFailureLocation = jumpToFailureLocation;
     }
 
     public string FilePath { get; }
@@ -36,29 +38,22 @@ public sealed class IncompatibleViewModel : ObservableObject, IDocumentViewModel
     /// <summary>Whether the failure-detail panel (message + location) should be shown at all.</summary>
     public bool HasFailureDetail => IndexFailure is not null;
 
-    /// <summary>
-    /// "Line N, column M (byte K)"-style summary of where the scan stopped, omitting any
-    /// parts the indexer couldn't supply; empty when there's no location info at all.
-    /// </summary>
-    public string LocationText
-    {
-        get
-        {
-            if (IndexFailure is not { } failure)
-                return string.Empty;
-
-            var parts = new List<string>();
-            if (failure.Line is { } line)
-                parts.Add(failure.Column is { } col ? $"Line {line:N0}, column {col:N0}" : $"Line {line:N0}");
-            if (failure.ByteOffset is { } offset)
-                parts.Add($"byte {offset:N0}");
-
-            return parts.Count == 0 ? string.Empty : string.Join(" (", parts) + (parts.Count > 1 ? ")" : "");
-        }
-    }
+    /// <summary>See <see cref="IndexFailureFormatting.DescribeLocation"/>.</summary>
+    public string LocationText => IndexFailure is { } failure ? IndexFailureFormatting.DescribeLocation(failure) : string.Empty;
 
     /// <summary>Whether <see cref="LocationText"/> has anything to show.</summary>
     public bool HasLocationText => LocationText.Length > 0;
+
+    /// <summary>
+    /// Whether the location can actually be jumped to in the raw viewer - requires a byte
+    /// offset, not just a line number (the raw viewer navigates by offset; see
+    /// <see cref="JumpToFailureLocation"/>).
+    /// </summary>
+    public bool CanJumpToFailureLocation => IndexFailure?.ByteOffset is not null;
+
+    /// <summary>Whether <see cref="LocationText"/> should render as plain (non-clickable) text -
+    /// has something to show, but nothing to jump to.</summary>
+    public bool ShowPlainLocationText => HasLocationText && !CanJumpToFailureLocation;
 
     public object? Toolbar => null;
 
@@ -68,6 +63,9 @@ public sealed class IncompatibleViewModel : ObservableObject, IDocumentViewModel
 
     /// <summary>Invoked by the "Open as raw text" button.</summary>
     public void OpenAsRawText() => openAsRawText();
+
+    /// <summary>Invoked by the location link - switches to raw text and jumps to the failure's byte offset.</summary>
+    public void JumpToFailureLocation() => jumpToFailureLocation();
 
     public void Dispose()
     {

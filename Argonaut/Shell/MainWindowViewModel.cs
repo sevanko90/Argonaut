@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Argonaut.Features.Raw;
 using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
 using Avalonia.Threading;
@@ -52,7 +53,6 @@ public sealed class MainWindowViewModel : ObservableObject
     private ThemeMode themeMode;
     private ContentFontMode contentFontMode;
     private DocumentViewOption? selectedView;
-    private bool isFailureBannerVisible;
     private bool isFindAvailable;
     private int openRequestId;
 
@@ -138,13 +138,23 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
-    /// <summary>True while the current document is a partial result (some items indexed before
-    /// a scan failure) whose dismissible warning banner is showing.</summary>
-    public bool IsFailureBannerVisible
-    {
-        get => isFailureBannerVisible;
-        private set => SetField(ref isFailureBannerVisible, value);
-    }
+    /// <summary>
+    /// True while the current document is a partial result (some items indexed before a scan
+    /// failure) - shows a permanent (non-dismissible - the user must fix or switch away from
+    /// the underlying problem) warning banner. False for <see cref="IncompatibleViewModel"/>,
+    /// which is itself the full failure display; never both at once since a zero-progress
+    /// failure always swaps to that placeholder instead of publishing (see
+    /// <see cref="LoadAndPublishAsync"/> / <see cref="OnDocumentPropertyChanged"/>).
+    /// </summary>
+    public bool IsFailureBannerVisible => currentDocument is not null and not IncompatibleViewModel && currentDocument.IndexFailure is not null;
+
+    /// <summary>See <see cref="IndexFailureFormatting.DescribeLocation"/> for the current
+    /// document's failure, or null when there is none (or nothing to show).</summary>
+    public string? FailureLocationText => currentDocument?.IndexFailure is { } f ? IndexFailureFormatting.DescribeLocation(f) : null;
+
+    /// <summary>Whether the failure banner's location can be jumped to in the raw viewer (needs
+    /// a byte offset - see <see cref="JumpToFailureLocationAsync"/>).</summary>
+    public bool CanJumpToFailureLocation => currentDocument?.IndexFailure?.ByteOffset is not null;
 
     /// <summary>True when the current document has something searchable - false for the
     /// incompatible-file placeholder, which hides the find bar entirely.</summary>
@@ -154,7 +164,22 @@ public sealed class MainWindowViewModel : ObservableObject
         private set => SetField(ref isFindAvailable, value);
     }
 
-    public void DismissFailureBanner() => IsFailureBannerVisible = false;
+    /// <summary>
+    /// Switches to the raw viewer (if not already showing it) and jumps to
+    /// <paramref name="byteOffset"/> - the shell-mediated action behind every failure
+    /// location's "Line N" link (the JSON banner's and the incompatible placeholder's alike).
+    /// Concrete-type match on <see cref="RawViewModel"/> because "jump to an offset" is a
+    /// raw-viewer-specific capability, not part of <see cref="IDocumentViewModel"/> - same
+    /// precedent as the shell reaching HintSettings/SetDefaultExpandDepth (see docs/architecture.md).
+    /// </summary>
+    public async Task JumpToFailureLocationAsync(long byteOffset)
+    {
+        if (currentKind != FileTypeDetector.FileKind.Unidentified)
+            await SwitchViewAsync(FileTypeDetector.FileKind.Unidentified);
+
+        if (CurrentDocument is RawViewModel raw)
+            await raw.JumpToByteOffsetAsync(byteOffset);
+    }
 
     public IReadOnlyList<RecentFileItem> RecentFiles
     {
@@ -349,7 +374,6 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         PublishDocument(document, path, kind, addToRecents);
-        IsFailureBannerVisible = document.IndexFailure is not null;
     }
 
     private static string DisplayNameFor(FileTypeDetector.FileKind kind) =>
@@ -365,7 +389,8 @@ public sealed class MainWindowViewModel : ObservableObject
     private void ShowIncompatible(string path, FileTypeDetector.FileKind kind, string attemptedViewName, IndexFailure failure)
     {
         var incompatible = new IncompatibleViewModel(path, attemptedViewName, failure,
-            openAsRawText: () => _ = SwitchViewAsync(FileTypeDetector.FileKind.Unidentified));
+            openAsRawText: () => _ = SwitchViewAsync(FileTypeDetector.FileKind.Unidentified),
+            jumpToFailureLocation: () => _ = JumpToFailureLocationAsync(failure.ByteOffset ?? 0));
         SetCurrentDocument(incompatible, path, kind);
     }
 
@@ -410,10 +435,11 @@ public sealed class MainWindowViewModel : ObservableObject
         currentKind = kind;
         CurrentDocument = document;
 
-        // Reset here so every path (publish, incompatible, close) starts from the same clean
-        // slate; PublishDocument raises IsFindAvailable/IsFailureBannerVisible back up itself
-        // once it knows the new document's navigator/IndexFailure.
-        IsFailureBannerVisible = false;
+        // IsFindAvailable is reset here so every path (publish, incompatible, close) starts
+        // from a clean slate; PublishDocument raises it back up once it knows the new
+        // document's navigator. The failure-derived properties need no reset - they're
+        // computed straight from currentDocument, so they just need their change notification
+        // raised (below) now that it points at a different document.
         IsFindAvailable = false;
 
         if (document is not null)
@@ -434,13 +460,21 @@ public sealed class MainWindowViewModel : ObservableObject
 
         OnPropertyChanged(nameof(IsFileOpen));
         OnPropertyChanged(nameof(FilePath));
+        NotifyFailurePropertiesChanged();
+    }
+
+    private void NotifyFailurePropertiesChanged()
+    {
+        OnPropertyChanged(nameof(IsFailureBannerVisible));
+        OnPropertyChanged(nameof(FailureLocationText));
+        OnPropertyChanged(nameof(CanJumpToFailureLocation));
     }
 
     /// <summary>
     /// Mirrors the current document's own status line into the shell status bar, and reacts to
     /// its <see cref="IDocumentViewModel.IndexFailure"/> changing after publish: a late failure
     /// with nothing indexed swaps to the incompatible placeholder, one with some items shows
-    /// the warning banner.
+    /// the (permanent, non-dismissible) warning banner.
     /// </summary>
     private void OnDocumentPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
@@ -455,7 +489,7 @@ public sealed class MainWindowViewModel : ObservableObject
             if (failure.ItemsIndexed == 0)
                 ShowIncompatible(currentFilePath!, currentKind, DisplayNameFor(currentKind), failure);
             else
-                IsFailureBannerVisible = true;
+                NotifyFailurePropertiesChanged();
         }
     }
 

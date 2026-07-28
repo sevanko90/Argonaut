@@ -448,9 +448,28 @@ public sealed class MainWindowViewModelTests : IDisposable
         Assert.Same(partial, vm.CurrentDocument);
         Assert.False(partial.Disposed);
         Assert.True(vm.IsFailureBannerVisible);
+        Assert.True(vm.CanJumpToFailureLocation);
+        Assert.Equal("Line 5, column 3 (byte 100)", vm.FailureLocationText);
 
-        vm.DismissFailureBanner();
-        Assert.False(vm.IsFailureBannerVisible);
+        // The banner has no dismiss affordance - it stays up for as long as the document does.
+        partial.StatusText = "still showing partial results";
+        Assert.True(vm.IsFailureBannerVisible);
+    }
+
+    [Fact]
+    public async Task JumpToFailureLocation_SwitchesToRawView()
+    {
+        string path = WriteJsonFile();
+        var initial = new FakeDocument { FilePath = path };
+        var raw = new FakeDocument { FilePath = path };
+        var vm = CreateViewModel((kind, _, _) =>
+            Task.FromResult<IDocumentViewModel>(kind == FileTypeDetector.FileKind.Json ? initial : raw));
+
+        await vm.OpenPathAsync(path);
+        await vm.JumpToFailureLocationAsync(12345);
+
+        Assert.Same(raw, vm.CurrentDocument);
+        Assert.Equal(FileTypeDetector.FileKind.Unidentified, vm.SelectedView?.Kind);
     }
 
     [Fact]

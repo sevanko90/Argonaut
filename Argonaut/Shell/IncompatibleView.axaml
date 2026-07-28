@@ -35,8 +35,19 @@
                     <TextBlock Text="{Binding IndexFailure.Message}"
                                TextWrapping="Wrap"
                                Foreground="{DynamicResource AppMutedTextBrush}" />
+                    <!-- Jumpable (has a byte offset to reveal): the whole location line is a
+                         link to the raw viewer, scrolled/selected to that spot. -->
+                    <Button Content="{Binding LocationText}"
+                            Click="OnJumpToFailureLocation"
+                            IsVisible="{Binding CanJumpToFailureLocation}"
+                            Classes="linklike"
+                            FontFamily="{DynamicResource AppContentFontFamily}"
+                            FontSize="12"
+                            ToolTip.Tip="Jump to this location in the raw viewer" />
+                    <!-- Not jumpable (message-only failure, e.g. a pre-flight rejection with
+                         no line/column at all): plain text, nothing to click. -->
                     <TextBlock Text="{Binding LocationText}"
-                               IsVisible="{Binding HasLocationText}"
+                               IsVisible="{Binding ShowPlainLocationText}"
                                FontFamily="{DynamicResource AppContentFontFamily}"
                                FontSize="12"
                                Foreground="{DynamicResource AppMutedTextBrush}" />

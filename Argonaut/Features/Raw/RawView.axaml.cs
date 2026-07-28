@@ -14,7 +14,14 @@ public partial class RawView : UserControl
     // Must mirror the row template's Grid ColumnDefinitions and the ListBox Padding - the pan
     // range is estimated, not measured from realized rows (a deterministic scrollbar beats an
     // exact one whose range jumps as rows realize).
-    private const double LineNumberColumnWidth = 72;
+    //
+    // 120px (with the row template's 12px margin, ~108px of text) comfortably fits a
+    // right-aligned line number up to ~12 monospace digits - multi-billion-line files, well
+    // beyond what a multi-GB source file can actually contain (a single-byte-line file would
+    // need well over 100GB to reach that many lines). A fixed width is deliberate here too:
+    // sizing it from realized rows would make the gutter (and the whole visible-text start
+    // position) jump as bigger line numbers scroll into view.
+    private const double LineNumberColumnWidth = 100;
     private const double WrapGutterColumnWidth = 18;
     private const double ListBoxHorizontalPadding = 16;
 

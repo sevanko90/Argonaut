@@ -111,6 +111,17 @@ public partial class JsonView : UserControl
 
     private void OnRowsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
+        // A pure tail-append (JsonVisibleRowCollection.Rebuild's isPureAppend path) can
+        // never move any row that was already visible, including the selected one - only
+        // new rows appear after it. There's nothing to resync, and forcing one anyway means
+        // reassigning RowsListBox.SelectedIndex to the *same* value on every growth-poll
+        // tick while a big file indexes (up to 4x/second) - avoidable selection/scroll work
+        // on a virtualizing panel that Avalonia doesn't handle cleanly under that much
+        // churn (e.g. https://github.com/AvaloniaUI/Avalonia/issues/11666,
+        // https://github.com/AvaloniaUI/Avalonia/issues/17635).
+        if (e.Action == NotifyCollectionChangedAction.Add)
+            return;
+
         // Deliberately deferred (not the banned marshal-after-await pattern): never set
         // RowsListBox.SelectedIndex from inside the rows collection's own CollectionChanged.
         // Subscriber order vs the ListBox's ItemsSourceView is unspecified, and when this
@@ -287,6 +298,13 @@ public partial class JsonView : UserControl
         int index = -1;
         if (DataContext is JsonViewModel { SelectedTokenIndex: { } tokenIndex } && subscribedRows is not null)
             index = subscribedRows.FindVisiblePosition(tokenIndex) ?? -1;
+
+        // Reassigning SelectedIndex to the value it already holds is not a no-op as far as
+        // the ListBox is concerned - it still redoes selection/scroll bookkeeping. Guard it
+        // so a caller that couldn't already tell nothing changed (e.g. a growth tick whose
+        // Reset fallback path re-derives the same position) doesn't pay for that anyway.
+        if (RowsListBox.SelectedIndex == index)
+            return;
 
         suppressSelectionEvents = true;
         try

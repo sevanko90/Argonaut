@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Text;
+using System.Threading.Tasks;
 using Avalonia.Threading;
 using Argonaut.Features.Json.Hints;
 using Argonaut.Infrastructure;
@@ -78,7 +79,17 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
     private const int MaxDisplayedChildrenPerContainer = 20_000;
     private const int ChildCountCap = 50_000;
     private const int RowCacheCapacity = 1000;
-    private static readonly TimeSpan GrowthPollInterval = TimeSpan.FromMilliseconds(250);
+    // Every tick that actually finds new tokens hands the visible ListBox a CollectionChanged
+    // notification, which forces Avalonia's VirtualizingStackPanel to redo virtualization/
+    // scroll-extent bookkeeping - and confirmed by testing, every single one of those
+    // notifications produces one visible selection/hover-highlight glitch (a known Avalonia
+    // panel bug around selection/hover state during virtualization; see e.g.
+    // https://github.com/AvaloniaUI/Avalonia/issues/11666 and
+    // https://github.com/AvaloniaUI/Avalonia/issues/17635). There's no interval that avoids it
+    // entirely without giving up live row streaming during indexing (a deliberate feature -
+    // the view must stay scrollable/readable while a multi-GB file is still indexing), so this
+    // only trades glitch frequency against how live the view feels.
+    private static readonly TimeSpan GrowthPollInterval = TimeSpan.FromMilliseconds(1500);
 
     private readonly JsonStructureIndex index;
     private readonly MMapFile mmap;
@@ -107,10 +118,21 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
     private DispatcherTimer? growthTimer;
     private int lastRebuildTokenCount = -1;
 
-    // True when the last Rebuild saw every visible container fully indexed
-    // (EndIndex known). From that point, further token growth cannot change any
-    // visible row, so growth ticks skip the rebuild instead of forcing the viewport
-    // to re-realize all visible text every 250ms for the rest of indexing.
+    // Token indices of currently-visible collapsed containers whose EndIndex isn't known
+    // yet, so their row still shows the "…" placeholder summary instead of a real child
+    // count. Rebuild diffs this against the previous rebuild's set to tell "nothing about
+    // the existing rows actually changed" apart from "a collapsed row's summary just
+    // became available and needs a real refresh" - see Rebuild's isPureAppend check.
+    private HashSet<int>? unsettledCollapsedContainerTokens;
+
+    // True when the last Rebuild found nothing that could still change what's currently
+    // visible: every visible container is either fully indexed (EndIndex known), or
+    // collapsed/at its display cap so further growth stays hidden behind a summary/
+    // placeholder that doesn't depend on how much more has been indexed (see
+    // AppendSubtree). A huge top-level array reaches this quickly once its cap is hit,
+    // even though it won't actually close until the whole file finishes - from that point,
+    // growth ticks skip the rebuild instead of forcing the viewport to re-realize
+    // everything on every poll for the rest of indexing.
     private bool visibleTreeSettled;
 
     public JsonVisibleRowCollection(JsonStructureIndex index, MMapFile mmap, IReadOnlyList<IValueHintProvider>? hintProviders = null, int defaultExpandDepth = 1)
@@ -628,13 +650,83 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
         if (index.TokenCount > 0)
             AppendSubtree(0, newVisible);
 
+        var oldVisible = visibleRows;
+        var oldUnsettledCollapsed = unsettledCollapsedContainerTokens;
+        var newUnsettledCollapsed = CollectUnsettledCollapsedContainers(newVisible);
+
+        // A growth-poll tick during indexing overwhelmingly just extends the visible list -
+        // AppendSubtree resumes exactly where the previous walk ran out of indexed tokens -
+        // without touching any row already shown. Detect that case and raise a targeted Add
+        // instead of a Reset: Avalonia's ListBox clears SelectedIndex on Reset (see
+        // JsonView.SyncVisualSelection's remarks), so firing one on every tick is what made
+        // the selection highlight flicker while auto-expand kept several containers open
+        // (and therefore still growing) for the whole indexing run. Any real structural
+        // change - or a previously-collapsed row in the unchanged prefix having just become
+        // fully indexed, so its "…" placeholder needs to turn into a real child count -
+        // falls back to the full Reset so the row actually gets refreshed.
+        bool isPureAppend = newVisible.Count > oldVisible.Count
+            && IsPrefixOf(oldVisible, newVisible)
+            && !AnyNowSettled(oldUnsettledCollapsed);
+
         visibleRows = newVisible;
+        unsettledCollapsedContainerTokens = newUnsettledCollapsed;
         lastRebuildTokenCount = index.TokenCount;
+
+        if (isPureAppend)
+        {
+            int startIndex = oldVisible.Count;
+            RaiseCollectionChanged(new NotifyCollectionChangedEventArgs(
+                NotifyCollectionChangedAction.Add, new object?[newVisible.Count - startIndex], startIndex));
+            return;
+        }
 
         rowCache.Clear();
         rowCacheOrder.Clear();
 
         RaiseCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
+    }
+
+    private static bool IsPrefixOf(List<VisibleRow> oldList, List<VisibleRow> newList)
+    {
+        for (int i = 0; i < oldList.Count; i++)
+        {
+            var a = oldList[i];
+            var b = newList[i];
+            if (a.TokenIndex != b.TokenIndex || a.PlaceholderContainerTokenIndex != b.PlaceholderContainerTokenIndex)
+                return false;
+        }
+
+        return true;
+    }
+
+    private bool AnyNowSettled(HashSet<int>? previouslyUnsettled)
+    {
+        if (previouslyUnsettled is null)
+            return false;
+
+        foreach (int tokenIndex in previouslyUnsettled)
+        {
+            if (index.GetToken(tokenIndex).EndIndex >= 0)
+                return true;
+        }
+
+        return false;
+    }
+
+    private HashSet<int>? CollectUnsettledCollapsedContainers(List<VisibleRow> rows)
+    {
+        HashSet<int>? set = null;
+        foreach (var row in rows)
+        {
+            if (row.IsPlaceholder)
+                continue;
+
+            var token = index.GetToken(row.TokenIndex);
+            if (token.EndIndex < 0 && IsContainer(token.Kind) && !IsExpanded(row.TokenIndex, token.Depth))
+                (set ??= new HashSet<int>()).Add(row.TokenIndex);
+        }
+
+        return set;
     }
 
     private void AppendSubtree(int tokenIndex, List<VisibleRow> into)
@@ -645,15 +737,15 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
         if (!IsContainer(token.Kind))
             return;
 
-        // An unclosed visible container means later token growth can still change this
-        // row (its collapsed summary, hasChildren, or - if expanded - its child list).
-        // Every early return below for "not indexed yet" is under an EndIndex < 0
-        // container, so this single check captures all of them.
-        if (token.EndIndex < 0)
-            visibleTreeSettled = false;
-
         if (!IsExpanded(tokenIndex, token.Depth))
+        {
+            // Collapsed: nothing below it is walked, so the only thing further indexing
+            // could still change is this row's own summary text ("…" becomes a real count
+            // once EndIndex is known - see BuildContainerSummary/DescribeChildCount).
+            if (token.EndIndex < 0)
+                visibleTreeSettled = false;
             return;
+        }
 
         int limit = expandedChildLimit.TryGetValue(tokenIndex, out var l) ? l : ChildCap;
         int childIndex = tokenIndex + 1;
@@ -666,16 +758,26 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
             {
                 // Show the container's own closing bracket as its own row, at the same
                 // depth as the opening one, so an expanded container's extent is visible
-                // without collapsing it back down.
+                // without collapsing it back down. Closed and fully displayed - settled.
                 into.Add(VisibleRow.ForToken(containerEnd));
                 return;
             }
 
             if (childIndex >= index.TokenCount)
-                return; // indexing hasn't reached here yet; a later growth-poll Rebuild will catch up
+            {
+                // Indexing hasn't reached here yet, so this container is still genuinely
+                // filling in - a later growth-poll Rebuild needs to catch up.
+                visibleTreeSettled = false;
+                return;
+            }
 
             if (shown >= limit)
             {
+                // At the display cap: BuildRow's "N more items"/"display limit reached"
+                // placeholder text depends only on the cap vs expandedChildLimit, never on
+                // how much more of the container has since been indexed, so nothing about
+                // what's currently visible changes until the user clicks "show more" (its
+                // own explicit Rebuild) - not a reason to keep polling this container.
                 into.Add(VisibleRow.ForMorePlaceholder(tokenIndex));
                 return;
             }
@@ -687,7 +789,17 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
             if (IsContainer(child.Kind))
             {
                 if (child.EndIndex < 0)
-                    return; // this child's own subtree isn't fully indexed - can't locate its sibling yet
+                {
+                    // This child is within our own display budget (shown < limit) and its
+                    // subtree isn't fully indexed, so we can't locate its sibling yet - but
+                    // once child closes, a sibling within our remaining budget (or our own
+                    // closing bracket) may still need to appear, so this container isn't
+                    // settled yet even if child's own recursive call didn't need to say so
+                    // (e.g. child is itself capped and therefore settled on its own terms).
+                    visibleTreeSettled = false;
+                    return;
+                }
+
                 childIndex = child.EndIndex + 1;
             }
             else
@@ -717,6 +829,43 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
         growthTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = GrowthPollInterval };
         growthTimer.Tick += OnGrowthTick;
         growthTimer.Start();
+
+        _ = AwaitIndexingCompletionAsync();
+    }
+
+    /// <summary>
+    /// The growth-poll timer trades live-update frequency against a known Avalonia panel
+    /// glitch (see GrowthPollInterval's remarks), which means a file that finishes indexing
+    /// well within one poll interval would otherwise keep showing only the construction-time
+    /// Rebuild until the next tick caught up - a multi-second wait on a file that's actually
+    /// already fully indexed. Awaiting the indexing task directly - regardless of success,
+    /// failure or cancellation, since MarkComplete runs in RunIndexing's finally either way -
+    /// guarantees one immediate final rebuild the moment indexing actually stops, independent
+    /// of the poll cadence. Called from StartGrowthMonitor, which only ever runs on the UI
+    /// thread (JsonVisibleRowCollection is always constructed there), so this await resumes
+    /// there too - no explicit dispatch needed.
+    /// </summary>
+    private async Task AwaitIndexingCompletionAsync()
+    {
+        try
+        {
+            await index.IndexingTask;
+        }
+        catch
+        {
+            // Failure/cancellation is already recorded via index.Failure; only IsComplete
+            // (set unconditionally in RunIndexing's finally) matters here.
+        }
+
+        if (IsDisposed || growthTimer is null)
+            return; // disposed, or a regular tick already ran the final rebuild and stopped this
+
+        if (!visibleTreeSettled && index.TokenCount != lastRebuildTokenCount)
+            Rebuild();
+
+        growthTimer.Stop();
+        growthTimer.Tick -= OnGrowthTick;
+        growthTimer = null;
     }
 
     private void OnGrowthTick(object? sender, EventArgs e)

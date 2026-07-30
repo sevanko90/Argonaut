@@ -1,0 +1,31 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        mc:Ignorable="d"
+        x:Class="Argonaut.Shell.AboutDialog"
+        Title="About Argonaut"
+        Width="360" SizeToContent="Height"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource AppWindowBackgroundBrush}">
+    <StackPanel Margin="24" Spacing="16">
+        <StackPanel Spacing="4">
+            <TextBlock x:Name="NameText" FontSize="18" FontWeight="Bold" />
+            <TextBlock x:Name="VersionText" FontSize="13" Foreground="{DynamicResource AppMutedTextBrush}" />
+            <Button x:Name="RepoLinkButton"
+                    Click="OnRepoLinkClicked"
+                    Classes="linklike"
+                    HorizontalAlignment="Left"
+                    Margin="0,4,0,0" />
+        </StackPanel>
+        <CheckBox x:Name="AutoUpdateCheckBox"
+                  Content="Automatically check for updates"
+                  Click="OnAutoUpdateToggled" />
+        <Button x:Name="CloseButton"
+                Content="Close"
+                Click="OnClose"
+                Classes="accent"
+                HorizontalAlignment="Right" />
+    </StackPanel>
+</Window>

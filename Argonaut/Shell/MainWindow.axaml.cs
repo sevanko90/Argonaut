@@ -189,6 +189,11 @@ public partial class MainWindow : Window
         await viewModel.CloseFileAsync();
     }
 
+    private async void OnShowAbout(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        await AboutDialog.ShowAbout(this);
+    }
+
     /// <summary>
     /// Silent, throttled startup check: no toast/dialog when there's nothing new, so a normal
     /// launch is undisturbed. Errors (offline, rate-limited, etc.) are swallowed here since

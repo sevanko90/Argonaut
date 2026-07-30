@@ -16,7 +16,6 @@ namespace Argonaut.Infrastructure;
 /// </summary>
 public sealed class UpdateService
 {
-    private const string RepoUrl = "https://github.com/sevanko90/Argonaut";
     private const string MarkerFileName = "update-check.json";
     private static readonly TimeSpan CheckInterval = TimeSpan.FromHours(24);
 
@@ -24,7 +23,7 @@ public sealed class UpdateService
 
     public UpdateService()
     {
-        manager = new UpdateManager(new GithubSource(RepoUrl, accessToken: null, prerelease: false));
+        manager = new UpdateManager(new GithubSource(AppInfo.RepoUrl, accessToken: null, prerelease: false));
     }
 
     /// <summary>
@@ -36,12 +35,17 @@ public sealed class UpdateService
     public Task<UpdateInfo?> CheckForUpdatesAsync() => manager.CheckForUpdatesAsync();
 
     /// <summary>
-    /// Throttles the silent background startup check to once per <see cref="CheckInterval"/>,
-    /// tracked via a marker file alongside the app's other settings files. Best-effort: any
-    /// read failure just allows the check to proceed.
+    /// Gates the silent background startup check: off entirely when the user has disabled
+    /// auto-update (see the About dialog), otherwise throttled to once per
+    /// <see cref="CheckInterval"/> via a marker file alongside the app's other settings files.
+    /// Does not affect the manual "Check for Updates" toolbar action - disabling auto-update
+    /// only stops the automatic check, not the user's ability to check on demand.
     /// </summary>
     public bool ShouldCheckOnStartup()
     {
+        if (!AutoUpdatePreference.Load())
+            return false;
+
         var marker = JsonSettingsStore.TryLoad<UpdateCheckMarker>(MarkerFileName);
         return marker is null || DateTimeOffset.UtcNow - marker.LastCheckUtc >= CheckInterval;
     }

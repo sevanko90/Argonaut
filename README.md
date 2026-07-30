@@ -4,7 +4,8 @@ A cross-platform file viewer built for large files — multi-gigabyte JSON and N
 
 ## Features
 
-- Fast load and view
+- Instantly view any file contents - if the type can't be auto-detected the file is shown in a basic text view.
+- Specialised views for different file types
 - Files of any size are navigable almost instantly, no "loading..." spinner here! Argonaut never loads the whole file before starting to display it.
 - Fast search and highlighting across multi-gb files
 - Searches run in the background and results are shown as soon as they become available
@@ -12,7 +13,7 @@ A cross-platform file viewer built for large files — multi-gigabyte JSON and N
 - Light/dark theming, following the OS by default with an in-app override
 
 
-### File type support
+### Specialised file type support
 
 #### JSON 
 
@@ -46,19 +47,17 @@ This works well for line based files like raw text and CSV - the index is a rela
 
 For JSON though, things get a bit more interesting.The index needs to hold a lot more than just line start, it needs to hold the position of every token (array, property, etc) so the index size is related to the depth and complexity of the JSON.
 
-It is possible (even likely) that the index for a complex JSON file could be bigger than the file itself! So Argonaut may take more RAM to load a lsrge file than other, slower viewers. This is the tradeoff for fast viewing and large file handling ability. I think it's worth it, but YMMV. 
+It is possible (even likely) that the index for a complex JSON file could be bigger than the file itself! So Argonaut may take more RAM to load a large file than other, slower viewers. This is the tradeoff for fast viewing of large files. I think it's worth it, but YMMV.
 
 
-
-
-### Running the code
+## Running the code
 
 I use [JetBrains Rider](https://www.jetbrains.com/rider/) for compiling / running / tweaking, or you can just download the [.NET runtime](https://dotnet.microsoft.com/en-us/download) and call
 
     dotnet publish
 in the application folder. 
 
-## Running the MacOS release
+### Running the MacOS release
 
 MacOS quarantines downloaded applictions that have not been signed and refuses to run them.
 

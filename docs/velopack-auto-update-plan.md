@@ -236,6 +236,17 @@ this plan as originally written:
   Silicon's "must have *a* signature" requirement without a Developer ID. This matches the
   chosen option (b) in that same wrinkles section (accept manual Gatekeeper approval after an
   update rather than pursuing notarization for this pass).
+- **`vpk pack`'s output directory has more in it than the release needs.** Alongside the
+  installer and `.nupkg`, it always writes `RELEASES`/`RELEASES-{channel}` (a legacy
+  Squirrel-format file, kept only for backward compat with pre-Velopack clients - confirmed
+  via Velopack's own source, `GitBase.cs`/`CoreUtil.cs`) and `assets.{channel}.json` (`vpk`'s
+  own local bookkeeping for delta generation across repeated packs into the same output
+  dir), plus a portable `.zip` that duplicates the plain zip this workflow already attaches.
+  `GitBase.GetReleaseFeed` - the code `GithubSource` actually runs on `CheckForUpdatesAsync`
+  - only ever fetches `releases.{channel}.json` from the release, then the `.nupkg` it
+  references. `publish.yml`'s "Attach Velopack assets to release" step therefore only
+  uploads `*.exe`, `*.pkg`, `*.nupkg`, and `releases.*.json`, leaving the rest out of the
+  release entirely.
 
 Decisions made for this implementation pass (the plan's open questions, resolved):
 release tags must be clean SemVer (`vX.Y.Z`) going forward - both packaging scripts fail fast

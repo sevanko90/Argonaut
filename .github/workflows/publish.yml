@@ -77,7 +77,17 @@ jobs:
         if: github.event_name == 'release' && matrix.os != 'ubuntu-latest'
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/velopack/*
+          # Only the installer, the update payload (.nupkg), and the feed manifest
+          # (releases.{channel}.json) that UpdateManager actually reads are attached.
+          # vpk also writes RELEASES*/assets.*.json (legacy Squirrel compat / vpk's own
+          # local pack bookkeeping - neither read by GithubSource) and a portable .zip
+          # (redundant with the plain zip already attached above) - none of those are
+          # needed on the release itself.
+          files: |
+            dist/velopack/*.exe
+            dist/velopack/*.pkg
+            dist/velopack/*.nupkg
+            dist/velopack/releases.*.json
       - name: Upload binlog
         if: failure()
         uses: actions/upload-artifact@v4

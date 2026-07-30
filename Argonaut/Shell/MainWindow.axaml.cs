@@ -10,6 +10,7 @@ using Avalonia.Styling;
 using Avalonia.Threading;
 using Argonaut.Infrastructure;
 using System.Threading.Tasks;
+using Velopack;
 
 namespace Argonaut.Shell;
 
@@ -32,6 +33,7 @@ public partial class MainWindow : Window
         "M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z";
 
     private readonly MainWindowViewModel viewModel;
+    private readonly UpdateService updateService = new();
     private DispatcherTimer? toastTimer;
 
     public MainWindow()
@@ -62,6 +64,8 @@ public partial class MainWindow : Window
         AddHandler(DragDrop.DragOverEvent, OnDragOver);
         AddHandler(DragDrop.DropEvent, OnDrop);
         AddHandler(KeyDownEvent, OnGlobalKeyDown, Avalonia.Interactivity.RoutingStrategies.Tunnel);
+
+        _ = CheckForUpdatesOnStartupAsync();
     }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -183,6 +187,91 @@ public partial class MainWindow : Window
     private async void OnCloseFile(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         await viewModel.CloseFileAsync();
+    }
+
+    /// <summary>
+    /// Silent, throttled startup check: no toast/dialog when there's nothing new, so a normal
+    /// launch is undisturbed. Errors (offline, rate-limited, etc.) are swallowed here since
+    /// there's no user action driving this check to report failure against.
+    /// </summary>
+    private async Task CheckForUpdatesOnStartupAsync()
+    {
+        if (!updateService.IsInstalled || !updateService.ShouldCheckOnStartup())
+            return;
+
+        updateService.RecordStartupCheck();
+
+        UpdateInfo? info;
+        try
+        {
+            info = await updateService.CheckForUpdatesAsync();
+        }
+        catch
+        {
+            return;
+        }
+
+        if (info is not null)
+            await OfferUpdateAsync(info);
+    }
+
+    private async void OnCheckForUpdates(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (!updateService.IsInstalled)
+        {
+            ToastService.Show("Auto-update isn't available for this build");
+            return;
+        }
+
+        UpdateInfo? info;
+        try
+        {
+            info = await updateService.CheckForUpdatesAsync();
+        }
+        catch (Exception ex)
+        {
+            ToastService.Show($"Update check failed: {ex.Message}");
+            return;
+        }
+
+        if (info is null)
+        {
+            ToastService.Show("You're up to date");
+            return;
+        }
+
+        await OfferUpdateAsync(info);
+    }
+
+    /// <summary>
+    /// Shared confirm-download-restart flow, driven either by the silent startup check or the
+    /// manual toolbar button. Declining either prompt just leaves the update for next time
+    /// (re-offered on the next check) rather than tracking a separate "staged" state.
+    /// </summary>
+    private async Task OfferUpdateAsync(UpdateInfo info)
+    {
+        string version = info.TargetFullRelease.Version.ToString();
+
+        bool download = await ConfirmDialog.Show(
+            this, $"Update available (v{version}). Download and install now?", "Download");
+        if (!download)
+            return;
+
+        try
+        {
+            await updateService.DownloadUpdatesAsync(
+                info, progress => ToastService.Show($"Downloading update... {progress}%"));
+        }
+        catch (Exception ex)
+        {
+            ToastService.Show($"Update download failed: {ex.Message}");
+            return;
+        }
+
+        bool restart = await ConfirmDialog.Show(
+            this, $"Update downloaded (v{version}). Restart Argonaut now to apply it?", "Restart");
+        if (restart)
+            updateService.ApplyUpdatesAndRestart(info);
     }
 
     private void OnJumpToFailureLine(object? sender, Avalonia.Interactivity.RoutedEventArgs e)

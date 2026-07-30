@@ -221,6 +221,27 @@ generation on as a follow-up once the basic update loop is proven.
    background update; delta package generation for smaller Windows updates; Linux
    AppImage + Velopack packaging.
 
+## Corrections from implementation
+
+A local macOS spike (`vpk pack` against a real publish output) surfaced two inaccuracies in
+this plan as originally written:
+
+- **`--bundleId` and `--plist` are mutually exclusive**, not combinable as suggested above in
+  [macOS wrinkles](#macos-wrinkles) point 1. Since the existing `Info.plist` already carries
+  `CFBundleIdentifier` and `CFBundleDocumentTypes`, the implementation passes `--plist` alone.
+- **Ad-hoc signing is automatic**, not something `vpk pack` needs an explicit flag for. Packing
+  without `--signAppIdentity`/`--notaryProfile` logs "Package will not be signed or notarized"
+  but `codesign -dv` on the resulting bundle shows `flags=0x2(adhoc)` regardless - Velopack
+  applies the same ad-hoc signature the old `codesign --sign -` step did, satisfying Apple
+  Silicon's "must have *a* signature" requirement without a Developer ID. This matches the
+  chosen option (b) in that same wrinkles section (accept manual Gatekeeper approval after an
+  update rather than pursuing notarization for this pass).
+
+Decisions made for this implementation pass (the plan's open questions, resolved):
+release tags must be clean SemVer (`vX.Y.Z`) going forward - both packaging scripts fail fast
+on anything else; the plain zip stays alongside Velopack assets for this transition; delta
+packages are off (`--delta None`) for both platforms' first cut.
+
 ## Open questions
 
 - Apple Developer ID / notarization budget and ownership — needed for the smoothest

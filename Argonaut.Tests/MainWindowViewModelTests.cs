@@ -80,6 +80,14 @@ public sealed class MainWindowViewModelTests : IDisposable
 
         public bool Disposed { get; private set; }
 
+        /// <summary>Lets a test hold indexing "running" and finish it on demand, to drive the
+        /// shell's hand-back of the status line (see IDocumentViewModel.IndexingTask). No
+        /// RunContinuationsAsynchronously, so SetResult runs the shell's continuation inline and
+        /// the test needs no polling to observe the hand-back.</summary>
+        public TaskCompletionSource Indexing { get; } = new();
+
+        public Task IndexingTask => Indexing.Task;
+
         public object? Toolbar { get; init; }
 
         public ISearchNavigator? CreateSearchNavigator() => HasSearchNavigator ? new FakeNavigator() : null;

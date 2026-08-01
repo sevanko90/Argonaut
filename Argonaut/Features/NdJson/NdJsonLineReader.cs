@@ -16,6 +16,18 @@ public static class NdJsonLineReader
     }
 
     /// <summary>
+    /// Decodes a line for display, capped per <see cref="DisplayText"/>. A file with no
+    /// newlines at all (a minified JSON document forced into this view) indexes as one line
+    /// spanning the whole file, so the uncapped <see cref="ReadLine"/> must never back a
+    /// realized row.
+    /// </summary>
+    public static string ReadDisplayLine(MMapFile file, FileLineSpan lineSpan)
+    {
+        var trimmed = TrimTrailingNewline(file, lineSpan);
+        return DisplayText.Read(file, trimmed.Offset, trimmed.Length, out _);
+    }
+
+    /// <summary>
     /// Returns <paramref name="lineSpan"/> with any trailing '\n'/'\r' bytes excluded, so the
     /// range can be handed to something (e.g. a JSON parser) that must not see them.
     /// </summary>

@@ -68,7 +68,7 @@ public sealed class MemoryMappedFileLineCollection : MemoryMappedCollectionBase
             return new MemoryMappedFileVisibleLine(i + 1, string.Empty);
 
         var lineSpan = index.GetLineSpan(i);
-        var line = new MemoryMappedFileVisibleLine(i + 1, NdJsonLineReader.ReadLine(mmap, lineSpan));
+        var line = new MemoryMappedFileVisibleLine(i + 1, NdJsonLineReader.ReadDisplayLine(mmap, lineSpan));
 
         var newNode = new LinkedListNode<(int, MemoryMappedFileVisibleLine)>((i, line));
         cacheOrder.AddFirst(newNode);

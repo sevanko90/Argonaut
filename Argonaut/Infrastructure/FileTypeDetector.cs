@@ -36,6 +36,9 @@ public static class FileTypeDetector
 
     private const int ChunkSize = 64 * 1024;
 
+    // How far IsPlausibleFor will scan a first line that never ends. See the CSV/TSV case.
+    private const int PreflightScanLimit = 1024 * 1024;
+
     private static readonly SearchValues<byte> Whitespace = SearchValues.Create(" \t\r\n"u8);
 
     /// <summary>
@@ -129,8 +132,15 @@ public static class FileTypeDetector
             case FileKind.Csv:
             case FileKind.Tsv:
             {
-                long firstLineEnd = FindNewline(mmap, 0, length);
-                var firstLine = mmap.GetSpan(0, checked((int)(firstLineEnd < 0 ? length : firstLineEnd)));
+                // Inspect at most a prefix of the first line. This runs on the UI thread before
+                // any background indexing starts, and CountUnquotedDelimiter is a byte-at-a-time
+                // scan - on a file with no newline at all (a minified JSON document forced into
+                // this view) the "first line" is the entire file, so an uncapped scan would
+                // freeze the UI for the whole pre-flight. A prefix is enough either way: one
+                // delimiter is all this check looks for.
+                long firstLineEnd = FindNewline(mmap, 0, Math.Min(length, PreflightScanLimit));
+                long firstLineLength = firstLineEnd < 0 ? Math.Min(length, PreflightScanLimit) : firstLineEnd;
+                var firstLine = mmap.GetSpan(0, checked((int)firstLineLength));
 
                 byte delimiter = kind == FileKind.Csv ? (byte)',' : (byte)'\t';
                 if (CountUnquotedDelimiter(firstLine, delimiter) > 0)
@@ -139,7 +149,9 @@ public static class FileTypeDetector
                     return true;
                 }
 
-                reason = $"The first line contains no unquoted '{(char)delimiter}' delimiter.";
+                reason = firstLineEnd < 0 && length > PreflightScanLimit
+                    ? $"The first {PreflightScanLimit / 1024:N0} KB contain no line break and no unquoted '{(char)delimiter}' delimiter."
+                    : $"The first line contains no unquoted '{(char)delimiter}' delimiter.";
                 return false;
             }
 

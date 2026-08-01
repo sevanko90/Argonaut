@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel;
+using System.Threading.Tasks;
 using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
 
@@ -64,4 +65,14 @@ public interface IDocumentViewModel : INotifyPropertyChanged, IDisposable
     /// like <see cref="StatusText"/>.
     /// </summary>
     IndexFailure? IndexFailure { get; }
+
+    /// <summary>
+    /// Completes when this document's background indexing stops (finished, failed, or
+    /// cancelled); already-completed for a document that never indexes anything. The shell
+    /// needs this to know when to stop writing scan progress over the status line, since past
+    /// that point <see cref="StatusText"/> holds the document's own final total. Faults are
+    /// this document's to report via <see cref="IndexFailure"/>/<see cref="StatusText"/> - the
+    /// shell only ever awaits completion, never the result.
+    /// </summary>
+    Task IndexingTask { get; }
 }

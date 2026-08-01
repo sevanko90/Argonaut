@@ -11,6 +11,48 @@
     <Application.Styles>
         <FluentTheme />
 
+        <!-- Rounded form controls everywhere (toolbars, dialogs) instead of Fluent's square-ish
+             defaults - matches the app's other rounded surfaces (panels, iconbuttons, rows).
+             More specific selectors (Button.iconbutton, Button.linklike, ...) still win. -->
+        <Style Selector="TextBox">
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style Selector="ComboBox">
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Button">
+            <Setter Property="CornerRadius" Value="8" />
+        </Style>
+
+        <!-- Popover surfaces (Hint options flyout, ...): card look consistent with the rest of
+             the app (bordered, rounded, panel background) instead of Fluent's flat default. -->
+        <Style Selector="FlyoutPresenter">
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="Background" Value="{DynamicResource AppWindowBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
+        <Style Selector="RadioButton">
+            <Setter Property="Padding" Value="8,5" />
+            <Setter Property="CornerRadius" Value="6" />
+        </Style>
+        <Style Selector="RadioButton:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource AppHoverBackgroundBrush}" />
+        </Style>
+        <!-- Fluent's RadioButton indicator is fixed at 20px with no exposed size resource;
+             shrink the named template parts directly so it reads at the app's compact scale. -->
+        <Style Selector="RadioButton /template/ Ellipse#OuterEllipse, RadioButton /template/ Ellipse#CheckOuterEllipse">
+            <Setter Property="Width" Value="14" />
+            <Setter Property="Height" Value="14" />
+        </Style>
+        <Style Selector="RadioButton /template/ Ellipse#CheckGlyph">
+            <Setter Property="Width" Value="6" />
+            <Setter Property="Height" Value="6" />
+        </Style>
+
         <!-- Shared chromeless icon button (toolbar close, find bar arrows, theme toggle...).
              Spacing follows the app's 4-based scale (4/8/12/16); "compact" is the tighter
              variant for dense bars like the JSON path bar and status bar. -->

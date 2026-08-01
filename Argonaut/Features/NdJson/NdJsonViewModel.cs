@@ -243,7 +243,8 @@ public sealed class NdJsonViewModel : ObservableObject, IDocumentViewModel
     public void LoadSelectedLine(int lineIndex)
     {
         var lineSpan = this.Index!.GetLineSpan(lineIndex);
-        SelectedLine = new NdJsonSelectedLine(lineIndex + 1, NdJsonLineReader.ReadLine(this.Mmap!, lineSpan));
+        // Display text only - the JSON tree below is parsed from lineSpan itself, uncapped.
+        SelectedLine = new NdJsonSelectedLine(lineIndex + 1, NdJsonLineReader.ReadDisplayLine(this.Mmap!, lineSpan));
 
         var requestId = ++selectionRequestId;
         var previous = SelectedLineJsonViewModel;

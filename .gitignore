@@ -101,3 +101,4 @@ Desktop.ini
 ############################
 *.mmap
 *.index
+.token-savior-cache.json

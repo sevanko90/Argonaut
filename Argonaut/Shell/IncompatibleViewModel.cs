@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
 
@@ -32,6 +33,9 @@ public sealed class IncompatibleViewModel : ObservableObject, IDocumentViewModel
     public string AttemptedViewName { get; }
 
     public IndexFailure? IndexFailure { get; }
+
+    /// <summary>Nothing is indexed for a placeholder - see <see cref="IDocumentViewModel.IndexingTask"/>.</summary>
+    public Task IndexingTask => Task.CompletedTask;
 
     public string StatusText => $"{FilePath} — not compatible with the {AttemptedViewName} view";
 

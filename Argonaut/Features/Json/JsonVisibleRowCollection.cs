@@ -78,12 +78,10 @@ public sealed class JsonRow
 public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
 {
     private const int ChildCap = 2000;
-    // Display cap for any one decoded text (a scalar value or a property name). A single
-    // pathologically large token (e.g. a 100 MB string) must never reach the TextBlock:
-    // Avalonia lays out an unwrapped line in O(length), and the row would otherwise be
-    // re-decoded in full on every growth-poll rebuild. Rows past the cap render a
+    // Display cap for any one decoded text (a scalar value or a property name) - see
+    // DisplayText for why every display path is capped. Rows past the cap render a
     // truncation hint carrying the token's real length instead.
-    internal const int MaxDisplayTextLength = 1024;
+    internal const int MaxDisplayTextLength = DisplayText.MaxLength;
     // Hard ceiling on how far repeated "show more" clicks can page a single container's
     // children into the visible list. Rebuild() re-walks the whole visible tree on every
     // toggle (see class remarks), so without this cap, paging through a container with
@@ -612,31 +610,7 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
     }
 
     private string ReadText(long offset, int length, out bool truncated)
-    {
-        if (length <= 0)
-        {
-            truncated = false;
-            return string.Empty;
-        }
-
-        if (length <= MaxDisplayTextLength)
-        {
-            truncated = false;
-            return mmap.GetUtf8String(offset, length);
-        }
-
-        truncated = true;
-
-        // Cut on a UTF-8 character boundary: read one byte past the cap and back the cut
-        // off while the first excluded byte is a continuation byte (0b10xxxxxx), so a
-        // multi-byte character is never split into a replacement glyph.
-        var span = mmap.GetSpan(offset, MaxDisplayTextLength + 1);
-        int cut = MaxDisplayTextLength;
-        while (cut > 0 && (span[cut] & 0xC0) == 0x80)
-            cut--;
-
-        return Encoding.UTF8.GetString(span[..cut]) + "…";
-    }
+        => DisplayText.Read(mmap, offset, length, out truncated, MaxDisplayTextLength);
 
     private static string FormatByteLength(int bytes) => bytes switch
     {

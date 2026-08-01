@@ -8,7 +8,11 @@ set -euo pipefail
 #
 # Usage: scripts/package-macos.sh [osx-arm64|osx-x64] [version]
 #   version must be a clean SemVer (e.g. 1.4.0, no leading 'v') when packing for release;
-#   omitted (or during local/dev runs) it defaults to 0.0.0.
+#   omitted (or during local/dev runs) it defaults to 0.0.1 (vpk rejects 0.0.0). Velopack's
+#   AutoApplyOnStartup (silently swapping in the highest-versioned .nupkg from its local
+#   package cache on launch) is disabled in Program.cs, so a low, stable local version here is
+#   safe - it won't get clobbered by a higher-versioned package left in that cache by an
+#   earlier local run.
 
 RID="${1:-osx-arm64}"
 RAW_VERSION="${2:-}"
@@ -21,7 +25,7 @@ DIST_DIR="$ROOT_DIR/dist"
 VELOPACK_OUT_DIR="$DIST_DIR/velopack"
 
 if [ -z "$RAW_VERSION" ]; then
-    PACK_VERSION="0.0.0"
+    PACK_VERSION="0.0.1"
 else
     PACK_VERSION="${RAW_VERSION#v}"
     if ! [[ "$PACK_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -37,7 +41,8 @@ if ! command -v vpk >/dev/null 2>&1; then
     dotnet tool install --global vpk --version 1.2.0
 fi
 
-echo "Publishing $APP_NAME for $RID ($CONFIGURATION)..."
+echo "Publishing $APP_NAME for $RID ($CONFIGURATION)..." 
+echo "Publish to: $PUBLISH_DIR"
 # Force a clean publish dir: an incremental `dotnet publish` can skip re-emitting native
 # .dylib files (e.g. libSkiaSharp, libHarfBuzzSharp, libAvaloniaNative) alongside the
 # single-file executable, silently producing a bundle missing them.

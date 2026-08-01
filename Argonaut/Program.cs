@@ -16,7 +16,15 @@ class Program
         // Must run before anything else touches Avalonia: handles a pending install/update
         // completion (e.g. Windows relaunching post-update) and then returns normally on a
         // regular launch.
-        VelopackApp.Build().Run();
+        // AutoApplyOnStartup is ON by default, meaning every launch silently swaps in
+        // whatever's the highest-versioned .nupkg sitting in Velopack's local package cache
+        // (~/Library/Caches/velopack/<app>/packages on macOS) - not just updates staged by
+        // our own UpdateService. That cache accumulates across every local packaging run, so
+        // a local dev build with a lower version than a previously packed one gets silently
+        // replaced on launch with no dialog. UpdateService.ApplyUpdatesAndRestart still applies
+        // updates explicitly (after user confirmation) regardless of this setting - only the
+        // implicit on-startup swap is disabled.
+        VelopackApp.Build().SetAutoApplyOnStartup(false).Run();
 
         BuildAvaloniaApp()
             .StartWithClassicDesktopLifetime(args);

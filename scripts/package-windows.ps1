@@ -4,7 +4,10 @@
 #
 # Usage: scripts/package-windows.ps1 [-Rid win-x64] [-Version 1.4.0]
 #   Version must be a clean SemVer (e.g. 1.4.0, no leading 'v') when packing for release;
-#   omitted (or during local/dev runs) it defaults to 0.0.0.
+#   omitted (or during local/dev runs) it defaults to 0.0.1. Velopack's AutoApplyOnStartup
+#   (silently swapping in the highest-versioned .nupkg from its local package cache on launch)
+#   is disabled in Program.cs, so a low, stable local version here is safe - it won't get
+#   clobbered by a higher-versioned package left in that cache by an earlier local run.
 
 param(
     [string]$Rid = "win-x64",
@@ -22,7 +25,7 @@ $DistDir = Join-Path $RootDir "dist"
 $VelopackOutDir = Join-Path $DistDir "velopack"
 
 if ([string]::IsNullOrEmpty($RawVersion)) {
-    $PackVersion = "0.0.0"
+    $PackVersion = "0.0.1"
 } else {
     $PackVersion = $RawVersion -replace '^v', ''
     if ($PackVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') {

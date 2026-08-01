@@ -56,6 +56,11 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool isFindAvailable;
     private int openRequestId;
 
+    // The reporter feeding scan progress into the status line for the current load. Held so
+    // every path that puts final text on that line can silence it first - see
+    // StatusProgressReporter.Stop. Null before the first load.
+    private StatusProgressReporter? indexProgressReporter;
+
     /// <summary>Raised when the find bar's status text should change (null clears it).</summary>
     public event Action<string?>? FindStatusChanged;
 
@@ -346,7 +351,12 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
+        // Silence the outgoing load's reporter before starting a new one, so a scan being torn
+        // down can't write over the incoming file's progress.
+        indexProgressReporter?.Stop();
         var reporter = new StatusProgressReporter(this, path, requestId);
+        indexProgressReporter = reporter;
+
         IDocumentViewModel document;
         try
         {
@@ -376,6 +386,32 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         PublishDocument(document, path, kind, addToRecents);
+        _ = StopProgressWhenIndexedAsync(document, reporter);
+    }
+
+    /// <summary>
+    /// Hands the status line back to <paramref name="document"/> once its indexing stops, so the
+    /// document's final total is the last thing written (see <see cref="StatusProgressReporter.Stop"/>).
+    ///
+    /// Ordering matters and is load-bearing: the document registered its own continuation on this
+    /// same task during load, before this one, so its final <see cref="IDocumentViewModel.StatusText"/>
+    /// is written - and mirrored here by <see cref="OnDocumentPropertyChanged"/> - before the
+    /// reporter goes quiet. Fire-and-forget from the UI thread; the await resumes there per the
+    /// app's threading convention.
+    /// </summary>
+    private static async Task StopProgressWhenIndexedAsync(IDocumentViewModel document, StatusProgressReporter reporter)
+    {
+        try
+        {
+            await document.IndexingTask;
+        }
+        catch
+        {
+            // A failed or cancelled scan is the document's to report (IndexFailure/StatusText);
+            // either way progress has stopped being meaningful, so the reporter still goes quiet.
+        }
+
+        reporter.Stop();
     }
 
     private static string DisplayNameFor(FileTypeDetector.FileKind kind) =>
@@ -390,6 +426,9 @@ public sealed class MainWindowViewModel : ObservableObject
     /// </summary>
     private void ShowIncompatible(string path, FileTypeDetector.FileKind kind, string attemptedViewName, IndexFailure failure)
     {
+        // The placeholder's text is final - no scan is still running that could add to it.
+        indexProgressReporter?.Stop();
+
         var incompatible = new IncompatibleViewModel(path, attemptedViewName, failure,
             openAsRawText: () => _ = SwitchViewAsync(FileTypeDetector.FileKind.Unidentified),
             jumpToFailureLocation: () => _ = JumpToRawOffsetAsync(failure.ByteOffset ?? 0));
@@ -498,6 +537,7 @@ public sealed class MainWindowViewModel : ObservableObject
     public async Task CloseFileAsync()
     {
         ++openRequestId;
+        indexProgressReporter?.Stop();
 
         // The search scan holds spans over the current view's MMapFile - it must be fully
         // stopped before the content swap detaches (and thereby disposes) that view.
@@ -521,6 +561,12 @@ public sealed class MainWindowViewModel : ObservableObject
     /// from a background scan thread, so it marshals with Dispatcher.UIThread.Post (never a
     /// blocking InvokeAsync) per the app's threading convention. A monotonic request id drops
     /// updates from a superseded open.
+    ///
+    /// Progress is the shell's only claim on the status line, and it is a temporary one: while
+    /// a scan runs, the document's own text is a stale partial count ("250 rows indexed so
+    /// far"), so live progress is the more useful thing to show. Once the scan stops, the
+    /// document's text becomes the real total and the shell must get out of the way - see
+    /// <see cref="Stop"/>.
     /// </summary>
     private sealed class StatusProgressReporter : IProgressReporter
     {
@@ -531,6 +577,10 @@ public sealed class MainWindowViewModel : ObservableObject
         private readonly int requestId;
         private int lastBucket = -1;
 
+        // Set on the UI thread once indexing stops; read on the UI thread inside the posted
+        // update. Volatile because Report itself runs on the scan thread.
+        private volatile bool stopped;
+
         public StatusProgressReporter(MainWindowViewModel owner, string path, int requestId)
         {
             this.owner = owner;
@@ -538,9 +588,20 @@ public sealed class MainWindowViewModel : ObservableObject
             this.requestId = requestId;
         }
 
+        /// <summary>
+        /// Permanently stops this reporter writing to the status line. Called on the UI thread
+        /// when the document's indexing task completes, which is what keeps the final "N tokens"
+        /// from being overwritten by a trailing "Indexing… (100%)": the last progress reports are
+        /// posted from the scan thread just before the scan completes, so they can still be
+        /// sitting in the dispatcher queue at that point. Re-checking the flag inside the posted
+        /// action (rather than only before posting) is what drops those already-queued updates -
+        /// both sides of that check run on the UI thread, so there is no race left.
+        /// </summary>
+        public void Stop() => stopped = true;
+
         public void Report(string message, long? current = null, long? max = null)
         {
-            if (requestId != owner.openRequestId)
+            if (stopped || requestId != owner.openRequestId)
                 return;
 
             string text = $"{message} {path}…";
@@ -561,7 +622,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
             Dispatcher.UIThread.Post(() =>
             {
-                if (requestId == owner.openRequestId)
+                if (!stopped && requestId == owner.openRequestId)
                     owner.StatusText = text;
             });
         }

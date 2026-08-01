@@ -23,7 +23,11 @@
 
             <!-- Fluent theme key overrides (names from Avalonia.Themes.Fluent 12.1).
                  List selection: soft accent tint instead of Fluent's solid accent fill, so
-                 per-type value colors stay readable on selected rows. -->
+                 per-type value colors stay readable on selected rows. Low/Medium (no "Accent")
+                 are the unselected hover/pressed tints - matches AppHoverBackgroundBrush so a
+                 row lights up the same way an iconbutton does on hover. -->
+            <SolidColorBrush x:Key="SystemControlHighlightListLowBrush" Color="#EAEBEE" />
+            <SolidColorBrush x:Key="SystemControlHighlightListMediumBrush" Color="#DEE0E4" />
             <SolidColorBrush x:Key="SystemControlHighlightListAccentLowBrush" Color="#262563EB" />
             <SolidColorBrush x:Key="SystemControlHighlightListAccentMediumBrush" Color="#382563EB" />
             <SolidColorBrush x:Key="SystemControlHighlightListAccentHighBrush" Color="#4D2563EB" />
@@ -46,6 +50,8 @@
             <SolidColorBrush x:Key="AppJsonNullBrush" Color="#9CA3AF" />
 
             <!-- Fluent theme key overrides — see the Light dictionary for what each group does. -->
+            <SolidColorBrush x:Key="SystemControlHighlightListLowBrush" Color="#3A3B3E" />
+            <SolidColorBrush x:Key="SystemControlHighlightListMediumBrush" Color="#46484C" />
             <SolidColorBrush x:Key="SystemControlHighlightListAccentLowBrush" Color="#2E60A5FA" />
             <SolidColorBrush x:Key="SystemControlHighlightListAccentMediumBrush" Color="#4260A5FA" />
             <SolidColorBrush x:Key="SystemControlHighlightListAccentHighBrush" Color="#5960A5FA" />

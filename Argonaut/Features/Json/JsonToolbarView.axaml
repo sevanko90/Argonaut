@@ -22,10 +22,12 @@
             </StackPanel>
             <Button.Flyout>
                 <Flyout Placement="BottomEdgeAlignedLeft">
-                    <StackPanel Margin="10" Spacing="8" MinWidth="160">
-                        <StackPanel Spacing="4">
+                    <StackPanel Margin="12" Spacing="12" MinWidth="170">
+                        <StackPanel Spacing="2">
                             <TextBlock Text="Date interpretation"
                                        FontSize="11"
+                                       FontWeight="SemiBold"
+                                       Margin="8,0,0,4"
                                        Foreground="{DynamicResource AppMutedTextBrush}" />
                             <RadioButton GroupName="dateHintScheme"
                                          Content="Off"
@@ -44,9 +46,12 @@
                                          FontSize="12"
                                          IsChecked="{Binding DateHintSchemeIndex, Converter={x:Static json:IntEqualsConverter.Instance}, ConverterParameter=3}" />
                         </StackPanel>
-                        <StackPanel Spacing="4">
+                        <Border Height="1" Background="{DynamicResource AppBorderBrush}" />
+                        <StackPanel Spacing="2">
                             <TextBlock Text="Time format"
                                        FontSize="11"
+                                       FontWeight="SemiBold"
+                                       Margin="8,0,0,4"
                                        Foreground="{DynamicResource AppMutedTextBrush}" />
                             <RadioButton GroupName="dateHintTimeZone"
                                          Content="Local time"
@@ -90,6 +95,7 @@
                  ToolTip.Tip="Jump to a JSONPath, e.g. $.foo.bar[2]" />
         <Button x:Name="GoToPathButton"
                 Content="Go"
+                Classes="accent"
                 FontSize="12"
                 Margin="8,0,0,0"
                 VerticalAlignment="Center"

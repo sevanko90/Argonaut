@@ -61,13 +61,17 @@
                      x:Name="RowsListBox"
                      ItemsSource="{Binding Rows}"
                      SelectionMode="Single"
-                     Padding="8,6"
+                     Padding="8,8"
                      ScrollViewer.HorizontalScrollBarVisibility="Auto">
                 <ListBox.Styles>
+                    <!-- Rounded, inset highlight instead of Fluent's flat full-bleed selection
+                         rectangle - matches the rounded hover treatment on toolbar iconbuttons. -->
                     <Style Selector="ListBoxItem">
                         <Setter Property="Padding" Value="0" />
                         <Setter Property="MinHeight" Value="22" />
                         <Setter Property="Height" Value="22" />
+                        <Setter Property="Margin" Value="0,1" />
+                        <Setter Property="CornerRadius" Value="6" />
                     </Style>
                 </ListBox.Styles>
 

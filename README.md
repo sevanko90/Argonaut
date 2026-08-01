@@ -4,7 +4,7 @@ A cross-platform file viewer built for large files — multi-gigabyte JSON and N
 
 ## Features
 
-- Instantly view any file contents - if the type can't be auto-detected the file is shown in a basic text view.
+- Instantly view any file contents - if the file type can't be auto-detected, the file is shown in a basic text view.
 - Specialised views for different file types
 - Files of any size are navigable almost instantly, no "loading..." spinner here! Argonaut never loads the whole file before starting to display it.
 - Fast search and highlighting across multi-gb files
@@ -12,14 +12,13 @@ A cross-platform file viewer built for large files — multi-gigabyte JSON and N
 - Recent files list
 - Light/dark theming, following the OS by default with an in-app override
 
-
 ### Specialised file type support
 
 #### JSON 
 
-Argonaut was originally concieved as a viewer for large JSON files and it has first class JSON support:
+Argonaut was originally conceived as a viewer for large JSON files and it has first-class JSON support:
 
-- Collapsable nodes
+- Collapsible nodes
 - JSONPath display of selected node and go to JSONPath node option
 - Inline decoding of JS dates to readable form
 - Copy property value or JSONPath to clipboard
@@ -32,6 +31,17 @@ Argonaut was originally concieved as a viewer for large JSON files and it has fi
 
 - Comma and tab delimited files are shown in a column viewer
 
+### Searching
+Argonaut searches files in the background and highlights matches as it finds them (or as you scroll them into view) - searches never block the UI.
+
+#### JSON searching
+Searches run against the underlying file, not the rendered display. This means that if you want to search for a specific `property:value` instance you need to search for it as it would appear in the file, quoting the property:
+
+
+❌: `property:value`  
+✅: `"property":value`
+
+
 ## Tech stack
 
 Argonaut is a .NET application built on [Avalonia](https://avaloniaui.net/), a cross-platform XAML-based UI framework. This gives it a single C#/XAML codebase that runs natively on Windows, macOS, and Linux.
@@ -43,9 +53,9 @@ Argonaut doesn't "load" a file in the traditional sense - that's how it gets it 
 
 To power this view, Argonaut first needs to index the file so it can navigate it (it needs to know where lines start, so it knows where to go when the view wants to display line 5000). The indexing process runs in the background and the file displays as soon as there is enough index to drive the view.
 
-This works well for line based files like raw text and CSV - the index is a relatively small size compared to the file. 
+This works well for line-based files like raw text and CSV - the index is a relatively small size compared to the file.
 
-For JSON though, things get a bit more interesting.The index needs to hold a lot more than just line start, it needs to hold the position of every token (array, property, etc) so the index size is related to the depth and complexity of the JSON.
+For JSON though, things get a bit more interesting. The index needs to hold a lot more than just line start, it needs to hold the position of every token (array, property, etc) so the index size is related to the depth and complexity of the JSON.
 
 It is possible (even likely) that the index for a complex JSON file could be bigger than the file itself! So Argonaut may take more RAM to load a large file than other, slower viewers. This is the tradeoff for fast viewing of large files. I think it's worth it, but YMMV.
 
@@ -57,13 +67,13 @@ I use [JetBrains Rider](https://www.jetbrains.com/rider/) for compiling / runnin
     dotnet publish
 in the application folder. 
 
-### Running the MacOS release
+### Running the macOS release
 
-MacOS quarantines downloaded applictions that have not been signed and refuses to run them.
+macOS quarantines downloaded applications that have not been signed and refuses to run them.
 
 You have a couple of options. You could (quite rightly!) not trust some random app you download from the internet, and build it from source.
 
-Or, extrscting the zip (to leave you with a .app), moving that .app to another folder (like ~/Applications) then running this in the console seemed to work for me.
+Or, extracting the zip (to leave you with a .app), moving that .app to another folder (like ~/Applications) then running this in the console seemed to work for me.
 
     xattr -cr ~/path/to/Argonaut.app
 

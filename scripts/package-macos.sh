@@ -61,7 +61,7 @@ vpk pack \
     --packVersion "$PACK_VERSION" \
     --packDir "$PUBLISH_DIR" \
     --mainExe "$APP_NAME" \
-    --icon "$ROOT_DIR/Argonaut/Assets/Icon/argonaut.icns" \
+    --icon "$ROOT_DIR/Argonaut/Assets/Icon/Argonaut.icns" \
     --plist "$ROOT_DIR/Argonaut/Info.plist" \
     --delta None \
     --outputDir "$VELOPACK_OUT_DIR" \

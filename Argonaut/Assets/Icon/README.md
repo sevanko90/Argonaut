@@ -7,8 +7,11 @@ rendered from it and shouldn't be hand-edited; regenerate them from the SVG inst
 - **`argonaut.ico`** — Windows icon (16–256px, multi-resolution). Wired in via
   `<ApplicationIcon>` in `Argonaut.csproj`, which also makes Avalonia use it as the
   default window icon on every platform at runtime.
-- **`argonaut.icns`** — macOS icon. Copied into `Argonaut.app/Contents/Resources` by
+- **`Argonaut.icns`** — macOS icon. Copied into `Argonaut.app/Contents/Resources` by
   `scripts/package-macos.sh` and referenced by `CFBundleIconFile` in `Argonaut/Info.plist`.
+  Filename case must match `CFBundleIconFile` (`Argonaut`) exactly — LaunchServices'
+  icon-asset resolver does a case-sensitive match even on case-insensitive APFS, so
+  `argonaut.icns` silently fails to resolve and Finder/Dock show the generic icon.
 - **`linux/hicolor/...`** — the standard [Freedesktop icon theme](https://specifications.freedesktop.org/icon-theme-spec/icon-theme-spec-latest.html)
   layout (`hicolor/<size>x<size>/apps/argonaut.png`, plus a `scalable/apps/argonaut.svg`).
   Install by copying `linux/hicolor` into `~/.local/share/icons/hicolor` (per-user) or

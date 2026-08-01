@@ -167,12 +167,14 @@ public sealed class MainWindowViewModel : ObservableObject
     /// <summary>
     /// Switches to the raw viewer (if not already showing it) and jumps to
     /// <paramref name="byteOffset"/> - the shell-mediated action behind every failure
-    /// location's "Line N" link (the JSON banner's and the incompatible placeholder's alike).
-    /// Concrete-type match on <see cref="RawViewModel"/> because "jump to an offset" is a
-    /// raw-viewer-specific capability, not part of <see cref="IDocumentViewModel"/> - same
-    /// precedent as the shell reaching HintSettings/SetDefaultExpandDepth (see docs/architecture.md).
+    /// location's "Line N" link (the JSON banner's and the incompatible placeholder's alike)
+    /// and behind <see cref="RawJumpService"/> requests (e.g. JsonView's "view in raw" link
+    /// on a truncated value). Concrete-type match on <see cref="RawViewModel"/> because "jump
+    /// to an offset" is a raw-viewer-specific capability, not part of
+    /// <see cref="IDocumentViewModel"/> - same precedent as the shell reaching
+    /// HintSettings/SetDefaultExpandDepth (see docs/architecture.md).
     /// </summary>
-    public async Task JumpToFailureLocationAsync(long byteOffset)
+    public async Task JumpToRawOffsetAsync(long byteOffset)
     {
         if (currentKind != FileTypeDetector.FileKind.Unidentified)
             await SwitchViewAsync(FileTypeDetector.FileKind.Unidentified);
@@ -390,7 +392,7 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         var incompatible = new IncompatibleViewModel(path, attemptedViewName, failure,
             openAsRawText: () => _ = SwitchViewAsync(FileTypeDetector.FileKind.Unidentified),
-            jumpToFailureLocation: () => _ = JumpToFailureLocationAsync(failure.ByteOffset ?? 0));
+            jumpToFailureLocation: () => _ = JumpToRawOffsetAsync(failure.ByteOffset ?? 0));
         SetCurrentDocument(incompatible, path, kind);
     }
 

@@ -48,6 +48,7 @@ public partial class MainWindow : Window
         viewModel.FindBarResetRequested += () => FindBarControl.Reset();
 
         ToastService.Requested += ShowToast;
+        RawJumpService.Requested += offset => _ = viewModel.JumpToRawOffsetAsync(offset);
 
         EmptyState.ChooseFileRequested += async (_, _) => await BrowseForFile();
         EmptyState.OpenRecentFileRequested += (_, path) => viewModel.OpenRecentFile(path);
@@ -281,7 +282,7 @@ public partial class MainWindow : Window
 
     private void OnJumpToFailureLine(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        _ = viewModel.JumpToFailureLocationAsync(viewModel.CurrentDocument?.IndexFailure?.ByteOffset ?? 0);
+        _ = viewModel.JumpToRawOffsetAsync(viewModel.CurrentDocument?.IndexFailure?.ByteOffset ?? 0);
     }
 
     private void OnDragOver(object? sender, DragEventArgs e)

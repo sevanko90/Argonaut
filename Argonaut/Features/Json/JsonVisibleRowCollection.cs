@@ -16,7 +16,7 @@ namespace Argonaut.Features.Json;
 /// </summary>
 public sealed class JsonRow
 {
-    public JsonRow(int position, int tokenIndex, int depth, JsonTokenKind kind, string? name, string value, bool hasChildren, bool isExpanded, bool isPlaceholder, string? hint = null, string? truncationHint = null)
+    public JsonRow(int position, int tokenIndex, int depth, JsonTokenKind kind, string? name, string value, bool hasChildren, bool isExpanded, bool isPlaceholder, string? hint = null, string? truncationHint = null, long? truncatedValueOffset = null)
     {
         Position = position;
         TokenIndex = tokenIndex;
@@ -29,6 +29,7 @@ public sealed class JsonRow
         IsPlaceholder = isPlaceholder;
         Hint = hint;
         TruncationHint = truncationHint;
+        TruncatedValueOffset = truncatedValueOffset;
     }
 
     /// <summary>Index into the owning JsonVisibleRowCollection's current visible list.</summary>
@@ -48,6 +49,11 @@ public sealed class JsonRow
     /// <summary>Muted note that Name and/or Value was display-capped (with the full length), or null.</summary>
     public string? TruncationHint { get; }
 
+    /// <summary>Byte offset of the overflowing value's content in the file, set only when
+    /// Value (not just Name) was truncated - lets the view offer a "view in raw" jump to
+    /// where the full value actually starts. Null otherwise.</summary>
+    public long? TruncatedValueOffset { get; }
+
     // Scalar-kind flags consumed by JsonView.axaml Classes.* bindings for per-type value
     // coloring. Container, placeholder and summary rows match none of them and keep the
     // default foreground.
@@ -55,6 +61,12 @@ public sealed class JsonRow
     public bool IsNumberValue => Kind == JsonTokenKind.Number;
     public bool IsBooleanValue => Kind is JsonTokenKind.True or JsonTokenKind.False;
     public bool IsNullValue => Kind == JsonTokenKind.Null;
+
+    // Split for JsonView.axaml: TruncationHint alone can't tell a plain informational note
+    // (name-only truncation, nothing to jump to) apart from one that should render as a
+    // clickable "view in raw" link (value truncation, which always carries an offset).
+    public bool ShowPlainTruncationHint => TruncationHint is not null && TruncatedValueOffset is null;
+    public bool ShowTruncationLink => TruncatedValueOffset is not null;
 }
 
 /// <summary>
@@ -515,7 +527,9 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
                 ? $"(name truncated — full length {FormatByteLength(token.NameLength)})"
                 : null;
 
-        return new JsonRow(position, vrow.TokenIndex, token.Depth, token.Kind, name, value, hasChildren, expanded, isPlaceholder: false, hint: hint, truncationHint: truncationHint);
+        long? truncatedValueOffset = valueTruncated ? token.Offset : null;
+
+        return new JsonRow(position, vrow.TokenIndex, token.Depth, token.Kind, name, value, hasChildren, expanded, isPlaceholder: false, hint: hint, truncationHint: truncationHint, truncatedValueOffset: truncatedValueOffset);
     }
 
     private string? BuildHint(int tokenIndex, JsonTokenInfo token)

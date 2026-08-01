@@ -60,6 +60,12 @@ public class JsonRowTruncationTests
             Assert.NotNull(row.TruncationHint);
             Assert.Contains("truncated", row.TruncationHint);
             Assert.Contains("4.9 KB", row.TruncationHint);
+
+            // Value (not just name) was truncated, so the row exposes the raw-file offset of
+            // the overflowing content for the "view in raw" link - GH issue #4.
+            Assert.Equal(index.GetToken(row.TokenIndex).Offset, row.TruncatedValueOffset);
+            Assert.True(row.ShowTruncationLink);
+            Assert.False(row.ShowPlainTruncationHint);
         }
         finally
         {
@@ -79,6 +85,8 @@ public class JsonRowTruncationTests
 
             Assert.Equal("\"short\"", row.Value);
             Assert.Null(row.TruncationHint);
+            Assert.Null(row.TruncatedValueOffset);
+            Assert.False(row.ShowTruncationLink);
         }
         finally
         {
@@ -126,6 +134,12 @@ public class JsonRowTruncationTests
 
             Assert.NotNull(row.TruncationHint);
             Assert.Contains("name truncated", row.TruncationHint);
+
+            // Only the name overflowed, not the value - nothing to jump to, so this stays a
+            // plain note rather than a "view in raw" link.
+            Assert.Null(row.TruncatedValueOffset);
+            Assert.True(row.ShowPlainTruncationHint);
+            Assert.False(row.ShowTruncationLink);
         }
         finally
         {

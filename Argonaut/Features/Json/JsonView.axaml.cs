@@ -4,11 +4,13 @@ using System.ComponentModel;
 using System.Threading.Tasks;
 using Argonaut.Features.Json.Hints;
 using Argonaut.Infrastructure;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 
 namespace Argonaut.Features.Json;
 
@@ -171,6 +173,17 @@ public partial class JsonView : UserControl
         lastRowsPressModifiers = e.KeyModifiers;
     }
 
+    private void OnRowDoubleTapped(object? sender, TappedEventArgs e)
+    {
+        // The expand button and the hint-scheme button already handle their own Click twice
+        // over during a double-tap (net no-op for the expander, opens the flyout for hint) -
+        // don't also toggle here or the expander would flip a third time.
+        if (e.Source is Visual visual && visual.FindAncestorOfType<Button>() is not null)
+            return;
+
+        OnToggleExpandClick(sender, e);
+    }
+
     private void OnPathSegmentClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         if (sender is not Control { DataContext: JsonPathSegment segment })
@@ -182,6 +195,14 @@ public partial class JsonView : UserControl
         // OnViewModelPropertyChanged re-derives the ListBox highlight/autoscroll from the
         // SelectedTokenIndex change, whether or not EnsureVisible rebuilt the row list.
         vm.SelectToken(segment.TokenIndex);
+    }
+
+    private void OnJumpToRawClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (sender is not Control { DataContext: JsonRow { TruncatedValueOffset: { } offset } })
+            return;
+
+        RawJumpService.Request(offset);
     }
 
     private void OnHintClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)

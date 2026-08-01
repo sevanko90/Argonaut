@@ -85,20 +85,30 @@
                         <StackPanel Orientation="Horizontal"
                                     Background="Transparent"
                                     Margin="{Binding Depth, Converter={StaticResource DepthToMargin}}"
-                                    PointerPressed="OnRowPointerPressed">
-                            <!-- The ▶/▼ glyph is an icon, not content: pinned to the mono family
-                                 so its fallback-resolved size doesn't change with the content
-                                 font toggle (Inter's fallback draws it noticeably larger). -->
-                            <Button Content="{Binding IsExpanded, Converter={x:Static json:ExpandGlyphConverter.Instance}}"
-                                    Click="OnToggleExpandClick"
+                                    PointerPressed="OnRowPointerPressed"
+                                    DoubleTapped="OnRowDoubleTapped">
+                            <!-- Vector triangle, not a text glyph: a ▶/▼ character picks up
+                                 font-fallback metrics that differ by platform (and even by glyph
+                                 within the same fallback chain on Windows), so the two states
+                                 rendered at visibly different sizes there. Geometry is a fixed
+                                 size everywhere. -->
+                            <!-- Button is full row height/wider than the glyph itself so the
+                                 click target isn't shrunk down to the tiny triangle's bounds. -->
+                            <Button Click="OnToggleExpandClick"
                                     IsVisible="{Binding HasChildren}"
                                     Background="Transparent"
                                     BorderThickness="0"
                                     Padding="0"
-                                    Width="16"
+                                    Width="20"
+                                    Height="22"
                                     HorizontalContentAlignment="Center"
-                                    VerticalAlignment="Center"
-                                    FontFamily="{StaticResource AppMonoFontFamily}" />
+                                    VerticalContentAlignment="Center">
+                                <Path Data="{Binding IsExpanded, Converter={x:Static json:ExpandGlyphConverter.Instance}}"
+                                      Fill="{Binding $parent[Button].Foreground}"
+                                      Stretch="Uniform"
+                                      Width="7"
+                                      Height="7" />
+                            </Button>
                             <TextBlock IsVisible="{Binding !HasChildren}"
                                        Width="16" />
                             <TextBlock search:SearchHighlight.Text="{Binding Name}"
@@ -118,11 +128,18 @@
                                        VerticalAlignment="Center"
                                        FontFamily="{DynamicResource AppContentFontFamily}" />
                             <TextBlock Text="{Binding TruncationHint}"
-                                       IsVisible="{Binding TruncationHint, Converter={x:Static json:IsNotNullConverter.Instance}}"
+                                       IsVisible="{Binding ShowPlainTruncationHint}"
                                        Foreground="{DynamicResource AppMutedTextBrush}"
                                        FontFamily="{DynamicResource AppContentFontFamily}"
                                        Margin="8,0,0,0"
                                        VerticalAlignment="Center" />
+                            <Button Classes="hintlink"
+                                    Content="{Binding TruncationHint}"
+                                    IsVisible="{Binding ShowTruncationLink}"
+                                    Click="OnJumpToRawClick"
+                                    Margin="8,0,0,0"
+                                    VerticalAlignment="Center"
+                                    ToolTip.Tip="View this value in the raw file" />
                             <Button Classes="hintlink"
                                     Content="{Binding Hint}"
                                     IsVisible="{Binding Hint, Converter={x:Static json:IsNotNullConverter.Instance}}"

@@ -86,7 +86,7 @@ chain changes.
   sets one; a pre-flight rejection never does, since it never got as far as reading a token),
   its "Line N" location is a clickable link — in the banner (`MainWindow.axaml`'s
   `JumpToFailureLineButton`) and in `IncompatibleView`'s location panel alike — that calls
-  `MainWindowViewModel.JumpToFailureLocationAsync(byteOffset)`: switches to the raw viewer (if
+  `MainWindowViewModel.JumpToRawOffsetAsync(byteOffset)`: switches to the raw viewer (if
   not already showing it) via `SwitchViewAsync`, then concrete-type-matches `CurrentDocument` to
   `RawViewModel` (same precedent as HintSettings/SetDefaultExpandDepth above) and calls
   `RawViewModel.JumpToByteOffsetAsync`, which resolves the offset to a display row via the
@@ -95,6 +95,12 @@ chain changes.
   document (closed/switched away mid-wait) surfaces as a catchable `ObjectDisposedException`
   from the now-unmapped file, not a crash - `JumpToByteOffsetAsync` swallows it, since there is
   nothing left to reveal.
+- A JSON row whose value was display-truncated (see `MaxDisplayTextLength` above) carries the
+  overflowing value's file offset (`JsonRow.TruncatedValueOffset`); its truncation hint renders
+  as a "view in raw" link (`JsonView.axaml`) that calls `RawJumpService.Request(byteOffset)` -
+  the same view-to-shell decoupling `ToastService` uses, so `JsonView` never needs a reference
+  back to `MainWindowViewModel`. `MainWindow` is the sole subscriber and forwards straight into
+  `JumpToRawOffsetAsync`.
 
 ## Views ↔ view models
 

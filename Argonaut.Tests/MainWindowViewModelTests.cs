@@ -466,7 +466,7 @@ public sealed class MainWindowViewModelTests : IDisposable
             Task.FromResult<IDocumentViewModel>(kind == FileTypeDetector.FileKind.Json ? initial : raw));
 
         await vm.OpenPathAsync(path);
-        await vm.JumpToFailureLocationAsync(12345);
+        await vm.JumpToRawOffsetAsync(12345);
 
         Assert.Same(raw, vm.CurrentDocument);
         Assert.Equal(FileTypeDetector.FileKind.Unidentified, vm.SelectedView?.Kind);

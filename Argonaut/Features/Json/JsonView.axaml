@@ -113,8 +113,11 @@
                                       Width="7"
                                       Height="7" />
                             </Button>
+                            <!-- Spacer standing in for the toggle on a leaf row. Must be exactly
+                                 the button's width, or names on rows with a triangle sit
+                                 indented relative to their leaf siblings at the same depth. -->
                             <TextBlock IsVisible="{Binding !HasChildren}"
-                                       Width="16" />
+                                       Width="20" />
                             <TextBlock search:SearchHighlight.Text="{Binding Name}"
                                        search:SearchHighlight.Suffix=": "
                                        search:SearchHighlight.Term="{Binding $parent[json:JsonView].((json:JsonViewModel)DataContext).HighlightTerm}"

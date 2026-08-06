@@ -88,12 +88,12 @@ public class JsonVisibleRowCollectionTests
     [Fact]
     public void EnsureVisible_PagesArrayLimitPastDefaultChildCap()
     {
-        // ChildCap defaults to 2000 direct children shown per expanded container; build an
+        // ChildCap defaults to 10000 direct children shown per expanded container; build an
         // array with an element well past that so EnsureVisible has to page the limit up
         // (not just expand the array) to make it reachable.
         var sb = new StringBuilder();
         sb.Append("{\"arr\":[");
-        for (int i = 0; i < 2100; i++)
+        for (int i = 0; i < 10_100; i++)
         {
             if (i > 0)
                 sb.Append(',');
@@ -133,7 +133,7 @@ public class JsonVisibleRowCollectionTests
         // search hit deep in a wide object) must page the display limit up too.
         var sb = new StringBuilder();
         sb.Append("{\"obj\":{");
-        for (int i = 0; i < 2100; i++)
+        for (int i = 0; i < 10_100; i++)
         {
             if (i > 0)
                 sb.Append(',');

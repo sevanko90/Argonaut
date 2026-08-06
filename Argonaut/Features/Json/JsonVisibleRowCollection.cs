@@ -16,7 +16,7 @@ namespace Argonaut.Features.Json;
 /// </summary>
 public sealed class JsonRow
 {
-    public JsonRow(int position, int tokenIndex, int depth, JsonTokenKind kind, string? name, string value, bool hasChildren, bool isExpanded, bool isPlaceholder, string? hint = null, string? truncationHint = null, long? truncatedValueOffset = null)
+    public JsonRow(int position, int tokenIndex, int depth, JsonTokenKind kind, string? name, string value, bool hasChildren, bool isExpanded, bool isPlaceholder, string? hint = null, string? truncationHint = null, long? truncatedValueOffset = null, int? arrayIndex = null)
     {
         Position = position;
         TokenIndex = tokenIndex;
@@ -30,6 +30,7 @@ public sealed class JsonRow
         Hint = hint;
         TruncationHint = truncationHint;
         TruncatedValueOffset = truncatedValueOffset;
+        ArrayIndex = arrayIndex;
     }
 
     /// <summary>Index into the owning JsonVisibleRowCollection's current visible list.</summary>
@@ -42,6 +43,11 @@ public sealed class JsonRow
     public bool HasChildren { get; }
     public bool IsExpanded { get; }
     public bool IsPlaceholder { get; }
+
+    /// <summary>Zero-based position among this row's array siblings, or null when its
+    /// parent isn't an array (an object member, or the document root) - drives the small
+    /// index label shown to the left of the expander for array elements only.</summary>
+    public int? ArrayIndex { get; }
 
     /// <summary>Muted decoded-value hint (e.g. a decoded date) to render after Value, or null.</summary>
     public string? Hint { get; }
@@ -527,7 +533,9 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
 
         long? truncatedValueOffset = valueTruncated ? token.Offset : null;
 
-        return new JsonRow(position, vrow.TokenIndex, token.Depth, token.Kind, name, value, hasChildren, expanded, isPlaceholder: false, hint: hint, truncationHint: truncationHint, truncatedValueOffset: truncatedValueOffset);
+        int? arrayIndex = vrow.ArrayIndex >= 0 ? vrow.ArrayIndex : null;
+
+        return new JsonRow(position, vrow.TokenIndex, token.Depth, token.Kind, name, value, hasChildren, expanded, isPlaceholder: false, hint: hint, truncationHint: truncationHint, truncatedValueOffset: truncatedValueOffset, arrayIndex: arrayIndex);
     }
 
     private string? BuildHint(int tokenIndex, JsonTokenInfo token)
@@ -636,7 +644,7 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
         var newVisible = new List<VisibleRow>(visibleRows.Count);
         visibleTreeSettled = index.TokenCount > 0; // AppendSubtree clears it on any incomplete container
         if (index.TokenCount > 0)
-            AppendSubtree(0, newVisible);
+            AppendSubtree(0, newVisible, arrayIndex: -1);
 
         var oldVisible = visibleRows;
         var oldUnsettledCollapsed = unsettledCollapsedContainerTokens;
@@ -717,9 +725,9 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
         return set;
     }
 
-    private void AppendSubtree(int tokenIndex, List<VisibleRow> into)
+    private void AppendSubtree(int tokenIndex, List<VisibleRow> into, int arrayIndex)
     {
-        into.Add(VisibleRow.ForToken(tokenIndex));
+        into.Add(VisibleRow.ForToken(tokenIndex, arrayIndex));
 
         var token = index.GetToken(tokenIndex);
         if (!IsContainer(token.Kind))
@@ -747,7 +755,7 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
                 // Show the container's own closing bracket as its own row, at the same
                 // depth as the opening one, so an expanded container's extent is visible
                 // without collapsing it back down. Closed and fully displayed - settled.
-                into.Add(VisibleRow.ForToken(containerEnd));
+                into.Add(VisibleRow.ForToken(containerEnd, arrayIndex: -1));
                 return;
             }
 
@@ -771,7 +779,7 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
             }
 
             var child = index.GetToken(childIndex);
-            AppendSubtree(childIndex, into);
+            AppendSubtree(childIndex, into, arrayIndex: token.Kind == JsonTokenKind.StartArray ? shown : -1);
             shown++;
 
             if (IsContainer(child.Kind))
@@ -893,19 +901,26 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
 
     private readonly struct VisibleRow
     {
-        private VisibleRow(int tokenIndex, int placeholderContainerTokenIndex)
+        private VisibleRow(int tokenIndex, int placeholderContainerTokenIndex, int arrayIndex)
         {
             TokenIndex = tokenIndex;
             PlaceholderContainerTokenIndex = placeholderContainerTokenIndex;
+            ArrayIndex = arrayIndex;
         }
 
-        public static VisibleRow ForToken(int tokenIndex) => new(tokenIndex, -1);
+        public static VisibleRow ForToken(int tokenIndex, int arrayIndex = -1) => new(tokenIndex, -1, arrayIndex);
 
-        public static VisibleRow ForMorePlaceholder(int containerTokenIndex) => new(-1, containerTokenIndex);
+        public static VisibleRow ForMorePlaceholder(int containerTokenIndex) => new(-1, containerTokenIndex, -1);
 
         public int TokenIndex { get; }
 
         public int PlaceholderContainerTokenIndex { get; }
+
+        /// <summary>Zero-based position among this token's array siblings, or -1 if its
+        /// parent isn't an array (an object member, or the document root) - see
+        /// AppendSubtree, the only place that knows a child's ordinal for free while
+        /// walking.</summary>
+        public int ArrayIndex { get; }
 
         public bool IsPlaceholder => TokenIndex < 0;
     }

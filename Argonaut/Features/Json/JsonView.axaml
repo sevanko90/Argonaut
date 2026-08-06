@@ -91,6 +91,19 @@
                                     Margin="{Binding Depth, Converter={StaticResource DepthToMargin}}"
                                     PointerPressed="OnRowPointerPressed"
                                     DoubleTapped="OnRowDoubleTapped">
+                            <!-- Array-element ordinal, shown only on array children (null on
+                                 object members and the root) - lets you see which index you're
+                                 about to open without expanding it. Small and fixed-width so it
+                                 doesn't affect the fixed 22px row height or shift the expander. -->
+                            <TextBlock Text="{Binding ArrayIndex}"
+                                       IsVisible="{Binding ArrayIndex, Converter={x:Static json:IsNotNullConverter.Instance}}"
+                                       FontSize="9"
+                                       Foreground="{DynamicResource AppMutedTextBrush}"
+                                       FontFamily="{DynamicResource AppContentFontFamily}"
+                                       Width="26"
+                                       TextAlignment="Right"
+                                       Margin="0,0,2,0"
+                                       VerticalAlignment="Center" />
                             <!-- Vector triangle, not a text glyph: a ▶/▼ character picks up
                                  font-fallback metrics that differ by platform (and even by glyph
                                  within the same fallback chain on Windows), so the two states

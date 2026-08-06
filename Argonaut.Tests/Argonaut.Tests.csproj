@@ -5,10 +5,17 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <!-- Exe so `dotnet run -c Release` can drive BenchmarkDotNet's Main below; `dotnet test`
+         still discovers [Fact]s via the VSTest adapter regardless of OutputType.
+         GenerateProgramFile off: Microsoft.NET.Test.Sdk auto-generates its own Main when
+         OutputType=Exe, which collides with BenchmarkProgram.Main. -->
+    <OutputType>Exe</OutputType>
+    <GenerateProgramFile>false</GenerateProgramFile>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Avalonia.Headless" Version="12.1.0" />
+    <PackageReference Include="BenchmarkDotNet" Version="0.14.0" />
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />

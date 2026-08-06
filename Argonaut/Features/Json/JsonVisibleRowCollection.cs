@@ -77,7 +77,7 @@ public sealed class JsonRow
 /// </summary>
 public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
 {
-    private const int ChildCap = 2000;
+    private const int ChildCap = 10_000;
     // Display cap for any one decoded text (a scalar value or a property name) - see
     // DisplayText for why every display path is capped. Rows past the cap render a
     // truncation hint carrying the token's real length instead.

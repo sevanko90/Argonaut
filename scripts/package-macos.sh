@@ -57,6 +57,10 @@ dotnet publish "$PROJECT" \
 echo "Packing Velopack release $PACK_VERSION for $RID..."
 rm -rf "$VELOPACK_OUT_DIR"
 vpk pack \
+    --signAppIdentity "Developer ID Application: Marc Evans (5S97A7W8W5)" \
+    --signInstallIdentity "Developer ID Installer: Marc Evans (5S97A7W8W5)" \
+    --signEntitlements "$ROOT_DIR/Argonaut/entitlements.entitlements" \
+    --notaryProfile "argonaut-notary" \
     --packId "$APP_NAME" \
     --packVersion "$PACK_VERSION" \
     --packDir "$PUBLISH_DIR" \

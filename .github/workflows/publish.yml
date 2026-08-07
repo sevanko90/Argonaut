@@ -34,9 +34,41 @@ jobs:
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: ./scripts/package-windows.ps1 -Rid ${{ matrix.rid }} -RawVersion "${{ github.event_name == 'release' && github.ref_name || '' }}"
+      - name: Import signing certs + notary credentials
+        if: matrix.os == 'macos-latest'
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          MACOS_INSTALLER_CERT_P12: ${{ secrets.MACOS_INSTALLER_CERT_P12 }}
+          MACOS_INSTALLER_CERT_PASSWORD: ${{ secrets.MACOS_INSTALLER_CERT_PASSWORD }}
+          NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/build.keychain"
+          security create-keychain -p "" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN"
+
+          echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/app.p12"
+          echo "$MACOS_INSTALLER_CERT_P12" | base64 --decode > "$RUNNER_TEMP/installer.p12"
+          security import "$RUNNER_TEMP/app.p12" -k "$KEYCHAIN" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          security import "$RUNNER_TEMP/installer.p12" -k "$KEYCHAIN" -P "$MACOS_INSTALLER_CERT_PASSWORD" -T /usr/bin/productsign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" "$KEYCHAIN"
+          rm -f "$RUNNER_TEMP/app.p12" "$RUNNER_TEMP/installer.p12"
+
+          echo "$NOTARY_KEY_P8" > "$RUNNER_TEMP/notary_key.p8"
+          xcrun notarytool store-credentials "argonaut-notary" \
+            --key "$RUNNER_TEMP/notary_key.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" \
+            --keychain "$KEYCHAIN"
+          rm -f "$RUNNER_TEMP/notary_key.p8"
       - name: Publish and pack (macOS, Velopack)
         if: matrix.os == 'macos-latest'
         run: ./scripts/package-macos.sh ${{ matrix.rid }} "${{ github.event_name == 'release' && github.ref_name || '' }}"
+      - name: Remove build keychain
+        if: always() && matrix.os == 'macos-latest'
+        run: security delete-keychain "$RUNNER_TEMP/build.keychain" || true
       - name: Collect binlog on failure
         if: failure()
         run: dotnet publish Argonaut/Argonaut.csproj -c Release -r ${{ matrix.rid }} /bl:publish-${{ matrix.rid }}.binlog

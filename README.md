@@ -67,27 +67,10 @@ I use [JetBrains Rider](https://www.jetbrains.com/rider/) for compiling / runnin
     dotnet publish
 in the application folder. 
 
-### Running the macOS release
-
-macOS quarantines downloaded applications that have not been signed and refuses to run them.
-
-You have a couple of options. You could (quite rightly!) not trust some random app you download from the internet, and build it from source.
-
-Or, extracting the zip (to leave you with a .app), moving that .app to another folder (like ~/Applications) then running this in the console seemed to work for me.
-
-    xattr -cr ~/path/to/Argonaut.app
-
-Or, you can wait until I get an Apple developer account to properly sign things. That might take a while!
-
 ## Updates
 
 Starting with this release, Windows and macOS builds check GitHub Releases for updates on
 launch (at most once every 24 hours) and offer to download and apply them - no manual
 re-download needed going forward.
-
-**If you installed Argonaut before this release**, you're on the old plain-zip/portable build
-and have no updater wired up. You'll need to manually download this release once (the
-`Setup.exe` on Windows, or the `.app`/`.pkg` on macOS); every release after that will offer to
-update itself automatically.
 
 Linux still ships as a plain zip with no auto-update, for now.

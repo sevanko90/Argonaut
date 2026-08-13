@@ -1,0 +1,252 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Keepa product response",
+  "description": "Response of the Keepa /product API. The csv array is the motivating case for schema hints: it is a fixed-layout array whose slots are identified only by position.",
+  "type": "object",
+  "properties": {
+    "timestamp": {
+      "title": "Response timestamp",
+      "description": "When Keepa generated this response, in Unix epoch milliseconds — unlike the product-level time fields, which are in Keepa minutes."
+    },
+    "tokensLeft": {
+      "title": "Tokens left",
+      "description": "API tokens remaining on the account after this request."
+    },
+    "refillIn": {
+      "title": "Refill in",
+      "description": "Milliseconds until the next token refill."
+    },
+    "refillRate": {
+      "title": "Refill rate",
+      "description": "Tokens added per minute."
+    },
+    "tokensConsumed": {
+      "title": "Tokens consumed",
+      "description": "Tokens this request cost."
+    },
+    "processingTimeInMs": {
+      "title": "Processing time",
+      "description": "Server-side time to build this response, in milliseconds."
+    },
+    "products": {
+      "title": "Products",
+      "items": { "$ref": "#/$defs/product" }
+    }
+  },
+  "$defs": {
+    "product": {
+      "title": "Product",
+      "type": "object",
+      "properties": {
+        "asin": { "title": "ASIN", "description": "Amazon Standard Identification Number." },
+        "domainId": {
+          "title": "Amazon locale",
+          "oneOf": [
+            { "const": 1, "title": "com", "description": "United States" },
+            { "const": 2, "title": "co.uk", "description": "United Kingdom" },
+            { "const": 3, "title": "de", "description": "Germany" },
+            { "const": 4, "title": "fr", "description": "France" },
+            { "const": 5, "title": "co.jp", "description": "Japan" },
+            { "const": 6, "title": "ca", "description": "Canada" },
+            { "const": 7, "title": "cn", "description": "China (not supported by Keepa)" },
+            { "const": 8, "title": "it", "description": "Italy" },
+            { "const": 9, "title": "es", "description": "Spain" },
+            { "const": 10, "title": "in", "description": "India" },
+            { "const": 11, "title": "com.mx", "description": "Mexico" },
+            { "const": 12, "title": "com.br", "description": "Brazil" },
+            { "const": 13, "title": "com.au", "description": "Australia" }
+          ]
+        },
+        "title": { "title": "Product title" },
+        "trackingSince": {
+          "title": "Tracking since",
+          "description": "First time Keepa saw this product, in Keepa minutes (minutes since 2011-01-01 UTC)."
+        },
+        "lastUpdate": {
+          "title": "Last update",
+          "description": "Last time this product's data changed, in Keepa minutes."
+        },
+        "lastPriceChange": {
+          "title": "Last price change",
+          "description": "Last time any price on this product moved, in Keepa minutes."
+        },
+        "lastRatingUpdate": {
+          "title": "Last rating update",
+          "description": "Last time the rating or review count changed, in Keepa minutes."
+        },
+        "listedSince": {
+          "title": "Listed since",
+          "description": "When the product was first listed on Amazon, in Keepa minutes."
+        },
+        "productType": {
+          "title": "Product type",
+          "oneOf": [
+            { "const": 0, "title": "Standard", "description": "A physical product with its own listing." },
+            { "const": 1, "title": "Downloadable", "description": "A digital download." },
+            { "const": 2, "title": "eBook", "description": "A Kindle or other electronic book." },
+            { "const": 3, "title": "Unknown", "description": "Keepa could not determine the type." },
+            { "const": 4, "title": "Variation parent", "description": "A parent listing whose variations are the real products." }
+          ]
+        },
+        "availabilityAmazon": {
+          "title": "Amazon availability",
+          "oneOf": [
+            { "const": -1, "title": "No Amazon offer", "description": "Amazon does not sell this product." },
+            { "const": 0, "title": "In stock", "description": "In stock and shippable." },
+            { "const": 1, "title": "Pre-orderable", "description": "Not in stock yet; orderable in advance." },
+            { "const": 2, "title": "Unknown", "description": "Amazon states no availability for this offer." },
+            { "const": 3, "title": "Backorderable", "description": "Out of stock; orders are queued until it returns." },
+            { "const": 4, "title": "Delayed", "description": "Shipping is delayed beyond the usual window." }
+          ]
+        },
+        "offers": {
+          "title": "Marketplace offers",
+          "description": "Returned only when the request's offers parameter is used. Keepa retrieves the best offers as sorted by Amazon; if a product has more offers than requested, the rest are absent. The list mixes live and historic offers — check lastSeen, or use liveOffersOrder.",
+          "items": { "$ref": "#/$defs/offer" }
+        },
+        "liveOffersOrder": {
+          "title": "Live offer order",
+          "description": "Positions in the offers array of the currently live offers, in Amazon's order — the documented alternative to filtering on each offer's lastSeen yourself."
+        },
+        "csv": {
+          "title": "Price and rank history",
+          "description": "One entry per data type, each an alternating [Keepa minute, value] series. Prices are in the locale's smallest currency unit; -1 means 'no data at that time'.",
+          "prefixItems": [
+            { "title": "Amazon price", "description": "Price of the Amazon offer itself." },
+            { "title": "New price", "description": "Lowest new marketplace price, excluding shipping." },
+            { "title": "Used price", "description": "Lowest used marketplace price, excluding shipping." },
+            { "title": "Sales rank", "description": "Sales rank in the product's root category." },
+            { "title": "List price", "description": "Manufacturer's list price." },
+            { "title": "Collectible price", "description": "Lowest collectible-condition price." },
+            { "title": "Refurbished price", "description": "Lowest refurbished-condition price." },
+            { "title": "New, FBM", "description": "Lowest new price from a merchant-fulfilled offer, including shipping." },
+            { "title": "Lightning deal price", "description": "Price during a Lightning Deal." },
+            { "title": "Warehouse price", "description": "Lowest Amazon Warehouse (used) price." },
+            { "title": "New, FBA", "description": "Lowest new price from a Fulfilled-by-Amazon offer." },
+            { "title": "New offer count", "description": "Number of new offers." },
+            { "title": "Used offer count", "description": "Number of used offers." },
+            { "title": "Refurbished offer count", "description": "Number of refurbished offers." },
+            { "title": "Collectible offer count", "description": "Number of collectible offers." },
+            { "title": "Extra info updates", "description": "When Keepa last refreshed the extended product data." },
+            { "title": "Rating", "description": "Average review rating, times 10 (45 = 4.5 stars)." },
+            { "title": "Review count", "description": "Number of customer reviews." },
+            { "title": "Buy Box price", "description": "Buy Box price including shipping." },
+            { "title": "Used, like new", "description": "Lowest 'used - like new' price including shipping." },
+            { "title": "Used, very good", "description": "Lowest 'used - very good' price including shipping." },
+            { "title": "Used, good", "description": "Lowest 'used - good' price including shipping." },
+            { "title": "Used, acceptable", "description": "Lowest 'used - acceptable' price including shipping." },
+            { "title": "Collectible, like new", "description": "Lowest 'collectible - like new' price including shipping." },
+            { "title": "Collectible, very good", "description": "Lowest 'collectible - very good' price including shipping." },
+            { "title": "Collectible, good", "description": "Lowest 'collectible - good' price including shipping." },
+            { "title": "Collectible, acceptable", "description": "Lowest 'collectible - acceptable' price including shipping." },
+            { "title": "Refurbished, shipping included", "description": "Lowest refurbished price including shipping." },
+            { "title": "eBay new", "description": "Lowest new price on eBay." },
+            { "title": "eBay used", "description": "Lowest used price on eBay." },
+            { "title": "Trade-in value", "description": "Amazon trade-in value." }
+          ]
+        }
+      }
+    },
+    "offer": {
+      "title": "Marketplace offer",
+      "description": "One marketplace offer: its seller, condition, Prime/FBA flags, coupons, and price/shipping/stock history. Offers are often outdated — the same offer keeps its offerId across requests, but the order changes and coverage has gaps.",
+      "type": "object",
+      "properties": {
+        "offerId": {
+          "title": "Offer ID",
+          "description": "Unique within this product, and stable across requests, so the same offer can be tracked over time. Unrelated to Amazon's own offer IDs, which are user-specific and short-lived."
+        },
+        "lastSeen": {
+          "title": "Last seen",
+          "description": "Last time this offer was seen and updated, in Keepa minutes. Check this before treating an offer as live."
+        },
+        "sellerId": {
+          "title": "Seller ID",
+          "description": "Merchant's seller ID, e.g. A2L77EE7U53NWQ for Amazon.com Warehouse Deals."
+        },
+        "isPrime": {
+          "title": "Prime",
+          "description": "Available via Prime shipping. Keepa cannot reliably identify Seller Fulfilled Prime."
+        },
+        "isFBA": { "title": "FBA", "description": "Fulfilled by Amazon." },
+        "isMAP": {
+          "title": "MAP restricted",
+          "description": "Price is hidden on Amazon under a minimum-advertised-price restriction. The price and shipping cost are still present here."
+        },
+        "isShippable": {
+          "title": "Shippable",
+          "description": "Currently shippable. If not, it may be temporarily out of stock, or a pre-order."
+        },
+        "isPreorder": { "title": "Pre-order", "description": "The offer is a pre-order." },
+        "isWarehouseDeal": { "title": "Warehouse Deal", "description": "The offer is an Amazon Warehouse Deal." },
+        "isAmazon": {
+          "title": "Sold by Amazon",
+          "description": "The seller is Amazon itself. Warehouse Deals, and other accounts Amazon runs under a different name, do not count."
+        },
+        "isPrimeExcl": { "title": "Prime exclusive", "description": "This offer has a discounted Prime exclusive price." },
+        "coupon": {
+          "title": "Coupon",
+          "description": "One-time coupon on this offer, absent if there is none. Positive is an absolute discount in the locale's smallest currency unit (500 = $5 off); negative is a percentage (-15 = 15% off)."
+        },
+        "couponHistory": {
+          "title": "Coupon history",
+          "description": "Flat series of [Keepa minute, coupon] pairs, same coupon encoding as the coupon field."
+        },
+        "condition": {
+          "title": "Condition",
+          "description": "Open Box conditions are coded as Used conditions.",
+          "oneOf": [
+            { "const": 0, "title": "Unknown", "description": "Keepa could not determine the condition." },
+            { "const": 1, "title": "New" },
+            { "const": 2, "title": "Used - Like New" },
+            { "const": 3, "title": "Used - Very Good" },
+            { "const": 4, "title": "Used - Good" },
+            { "const": 5, "title": "Used - Acceptable" },
+            { "const": 6, "title": "Refurbished" },
+            { "const": 7, "title": "Collectible - Like New" },
+            { "const": 8, "title": "Collectible - Very Good" },
+            { "const": 9, "title": "Collectible - Good" },
+            { "const": 10, "title": "Collectible - Acceptable" },
+            { "const": 11, "title": "Rental" }
+          ]
+        },
+        "conditionComment": {
+          "title": "Condition comment",
+          "description": "The seller's free-text description of the condition. Absent if unavailable."
+        },
+        "minOrderQty": {
+          "title": "Minimum order quantity",
+          "description": "Only present when the offer sets one."
+        },
+        "lastStockUpdate": {
+          "title": "Last stock update",
+          "description": "Most recent update of this offer's stock data, in Keepa minutes."
+        },
+        "offerCSV": {
+          "title": "Price and shipping history",
+          "description": "Flat series of [Keepa minute, price, shipping cost] triples — the last three entries are the current values. Price and shipping are in the locale's smallest currency unit (cents, yen). Shipping 0 means free shipping; -1 means not shippable or unspecified shipping; -2 in either slot means the value could not be determined."
+        },
+        "stockCSV": {
+          "title": "Stock history",
+          "description": "Flat series of [Keepa minute, stock] pairs. Present only when the request used the stock parameter, and not guaranteed to be available at all. Keepa's best attempt at the quantity — it can be wrong, for instance where per-customer limits apply."
+        },
+        "primeExclCSV": {
+          "title": "Prime exclusive price history",
+          "description": "Flat series of [Keepa minute, price] pairs, in the locale's smallest currency unit. A price of -1, or a null field, means no Prime exclusive price. Such an offer is only orderable with an active Prime subscription."
+        },
+        "offerDuplicates": {
+          "title": "Duplicate offers",
+          "description": "Near-identical offers from the same seller, in the same condition and shipping type, that were dropped from the offers list because they were not the cheapest. Absent if there are none.",
+          "items": {
+            "title": "Duplicate offer",
+            "properties": {
+              "price": { "title": "Price", "description": "In the locale's smallest currency unit." },
+              "shipping": { "title": "Shipping cost", "description": "In the locale's smallest currency unit." },
+              "conditionComment": { "title": "Condition comment" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

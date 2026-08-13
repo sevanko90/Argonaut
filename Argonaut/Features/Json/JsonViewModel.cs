@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Features.Json.Hints;
+using Argonaut.Features.Json.Schema;
 using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
 using Argonaut.Shell;
@@ -57,6 +60,11 @@ public sealed class JsonViewModel : ObservableObject, IDocumentViewModel
     /// attach to it before or during load.</summary>
     public DateHintSettings HintSettings { get; } = new();
 
+    /// <summary>Session state for schema hints: the schemas on offer, the selected one and its
+    /// parsed document. Created eagerly, like <see cref="HintSettings"/>, so the toolbar and
+    /// NdJsonViewModel can attach before or during load.</summary>
+    public JsonSchemaSettings SchemaSettings { get; } = new();
+
     /// <summary>
     /// How many container levels to auto-expand when the tree is first built. Must be set
     /// before <see cref="LoadAsync(string,IProgressReporter?)"/>/<see cref="LoadAsync(string,long,long,IProgressReporter?)"/>
@@ -103,6 +111,32 @@ public sealed class JsonViewModel : ObservableObject, IDocumentViewModel
 
     public JsonViewModel()
     {
+        SchemaSettings.SchemaChanged += OnSchemaChanged;
+        SchemaSettings.PropertyChanged += OnSchemaSettingsPropertyChanged;
+    }
+
+    /// <summary>The bound schema changed (a new selection finished loading, or was cleared) -
+    /// rebind the rows. Null-safe for the window between selection and the row collection
+    /// existing; LoadCore applies whatever is current once it creates the rows.</summary>
+    private void OnSchemaChanged(object? sender, EventArgs e)
+    {
+        if (!disposed)
+            rows?.SetSchema(SchemaSettings.Document);
+    }
+
+    /// <summary>
+    /// Persists the schema choice against this document so reopening the file restores it.
+    /// Keyed on the *selection* rather than the loaded document, so a schema that fails to parse
+    /// is still remembered as the user's choice (they'll want to fix the file, not re-pick it).
+    /// Skipped for the nested per-NDJSON-line instances, whose selection is driven from - and
+    /// persisted by - the owning NdJsonViewModel.
+    /// </summary>
+    private void OnSchemaSettingsPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is not (null or nameof(JsonSchemaSettings.SelectedEntry)) || Toolbar is null)
+            return;
+
+        SchemaSelectionPreference.Save(FilePath, SchemaSettings.SelectedEntry?.FilePath);
     }
 
     /// <summary>
@@ -177,8 +211,34 @@ public sealed class JsonViewModel : ObservableObject, IDocumentViewModel
     {
         FilePath = path;
         DefaultExpandDepth = ExpandDepthPreference.Load();
-        Toolbar = new JsonToolbarViewModel(HintSettings, DefaultExpandDepth, SetDefaultExpandDepth, NavigateToPathAsync);
-        return LoadCore(new MMapFile(path), progressReporter);
+        Toolbar = new JsonToolbarViewModel(HintSettings, SchemaSettings, DefaultExpandDepth, SetDefaultExpandDepth, NavigateToPathAsync);
+
+        var loadTask = LoadCore(new MMapFile(path), progressReporter);
+
+        // Runs alongside indexing rather than blocking the open: whichever finishes first, the
+        // other side picks the schema up (LoadCore applies whatever is current when it creates
+        // the rows; OnSchemaChanged handles the reverse order).
+        _ = ApplyInitialSchemaAsync(path);
+
+        return loadTask;
+    }
+
+    /// <summary>
+    /// Populates the schema catalog for this document and applies the initial binding, if any: a
+    /// <c>&lt;file&gt;.schema.json</c> sidecar wins, otherwise the schema last bound to this path
+    /// (see <see cref="SchemaSelectionPreference"/>). Nothing here is ever an error - a missing
+    /// sidecar and an unreadable schema folder both just mean "no schema".
+    /// </summary>
+    private async Task ApplyInitialSchemaAsync(string documentPath)
+    {
+        var (entries, preselected) = await Task.Run(() => JsonSchemaCatalog.GatherForDocument(documentPath));
+        if (disposed)
+            return;
+
+        SchemaSettings.SetEntries(entries);
+
+        if (preselected is { } entry)
+            await SchemaSettings.SelectAsync(entry);
     }
 
     /// <summary>
@@ -207,6 +267,11 @@ public sealed class JsonViewModel : ObservableObject, IDocumentViewModel
 
         rows = new JsonVisibleRowCollection(session.Index, session.File,
             new IValueHintProvider[] { new DateHintProvider(HintSettings) }, DefaultExpandDepth);
+
+        // A schema may already have been selected (sidecar/remembered, or pushed down by
+        // NdJsonViewModel) while indexing's initial batch was still being awaited.
+        if (SchemaSettings.Document is { } schema)
+            rows.SetSchema(schema);
 
         // Inference dereferences the mapping, so the session must join it before unmapping.
         session.RegisterDependentTask(InferDefaultDateSchemeAsync(session.Index, session.File, session.Token));

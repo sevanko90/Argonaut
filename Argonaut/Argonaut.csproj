@@ -22,6 +22,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Schemas the app ships with; JsonSchemaCatalog enumerates them from the output folder. -->
+    <Content Include="Schemas\**\*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="Argonaut.Tests" />
   </ItemGroup>
 

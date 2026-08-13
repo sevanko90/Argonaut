@@ -66,6 +66,14 @@
                 </Flyout>
             </Button.Flyout>
         </Button>
+        <ComboBox x:Name="SchemaCombo"
+                  ItemsSource="{Binding SchemaItems}"
+                  SelectedIndex="{Binding SelectedSchemaIndex, Mode=TwoWay}"
+                  FontSize="12"
+                  MinWidth="150"
+                  Margin="8,0,0,0"
+                  VerticalAlignment="Center"
+                  ToolTip.Tip="JSON Schema used to label values in the tree" />
         <ComboBox x:Name="ExpandDepthCombo"
                   SelectedIndex="{Binding ExpandDepthIndex, Mode=TwoWay}"
                   FontSize="12"

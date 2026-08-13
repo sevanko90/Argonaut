@@ -16,4 +16,11 @@ internal static class AppDataPaths
         RootOverride ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Argonaut");
 
     public static string GetSettingsFilePath(string fileName) => Path.Combine(Root, fileName);
+
+    /// <summary>
+    /// Folder where the user drops their own JSON Schema files (see
+    /// <c>Argonaut.Features.Json.Schema.JsonSchemaCatalog</c>). Not created here - enumeration
+    /// tolerates it being absent, and only the toolbar's "open schema folder" action creates it.
+    /// </summary>
+    public static string GetSchemasDirectory() => Path.Combine(Root, "Schemas");
 }

@@ -167,6 +167,14 @@
                                     Margin="8,0,0,0"
                                     VerticalAlignment="Center"
                                     ToolTip.Tip="Decoded date (local time) — click to change scheme" />
+                            <TextBlock Text="{Binding SchemaTitle}"
+                                       IsVisible="{Binding SchemaTitle, Converter={x:Static json:IsNotNullConverter.Instance}}"
+                                       Foreground="{DynamicResource AppMutedTextBrush}"
+                                       FontFamily="{DynamicResource AppContentFontFamily}"
+                                       TextWrapping="NoWrap"
+                                       Margin="8,0,0,0"
+                                       VerticalAlignment="Center"
+                                       ToolTip.Tip="{Binding SchemaDescription}" />
                         </StackPanel>
                     </DataTemplate>
                 </ListBox.ItemTemplate>

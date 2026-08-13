@@ -28,7 +28,7 @@ public static class JsonSchemaCatalog
     {
         var byName = new Dictionary<string, SchemaCatalogEntry>(StringComparer.OrdinalIgnoreCase);
 
-        AddFolder(byName, Path.Combine(AppContext.BaseDirectory, FolderName), isUser: false);
+        AddFolder(byName, GetBundledDirectory(), isUser: false);
 
         // Second, so a same-named user schema overwrites (shadows) the bundled one.
         AddFolder(byName, GetUserDirectory(), isUser: true);
@@ -41,6 +41,15 @@ public static class JsonSchemaCatalog
     /// <summary>Suffix that makes a schema file the sidecar of the document beside it:
     /// <c>orders.json</c> is documented by <c>orders.json.schema.json</c>.</summary>
     public const string SidecarSuffix = ".schema.json";
+
+    /// <summary>
+    /// Suffix marking a schema as reference material rather than something to bind to. Files
+    /// named this way are skipped by <see cref="Enumerate"/> and so never reach the dropdown -
+    /// which is what lets <see cref="JsonSchemaExample"/> live in the user's schema folder as a
+    /// worked example without cluttering the list. Copy such a file to a name without the suffix
+    /// to actually use it.
+    /// </summary>
+    public const string ExampleSuffix = ".example.json";
 
     /// <summary>
     /// The catalog as offered for one specific document, plus the entry that should be bound
@@ -87,6 +96,11 @@ public static class JsonSchemaCatalog
         return (entries, preselected);
     }
 
+    /// <summary>Folder of schemas shipped with the app, beside the executable. Read-only in
+    /// practice - an install directory isn't somewhere the user can save to, which is why
+    /// <see cref="JsonSchemaExample"/> copies out of here rather than pointing at it.</summary>
+    public static string GetBundledDirectory() => Path.Combine(AppContext.BaseDirectory, FolderName);
+
     public static string GetUserDirectory() => AppDataPaths.GetSchemasDirectory();
 
     /// <summary>Creates the user schema folder if it doesn't exist and returns its path.
@@ -115,10 +129,17 @@ public static class JsonSchemaCatalog
     /// </summary>
     internal static Action<string>? OpenDirectoryOverride;
 
-    /// <summary>Creates the user schema folder and reveals it in the OS file manager.</summary>
+    /// <summary>
+    /// Creates the user schema folder, seeds it with the annotated example (see
+    /// <see cref="JsonSchemaExample"/>) if that isn't already there, and reveals it in the OS file
+    /// manager. Seeding happens here rather than in <see cref="EnsureUserDirectory"/> so it is
+    /// tied to the user actually going to look at the folder.
+    /// </summary>
     public static void OpenUserDirectory()
     {
         string path = EnsureUserDirectory();
+        JsonSchemaExample.TryCopyTo(path);
+
         try
         {
             if (OpenDirectoryOverride is { } open)
@@ -136,6 +157,9 @@ public static class JsonSchemaCatalog
     {
         foreach (string file in SafeGetFiles(directory))
         {
+            if (file.EndsWith(ExampleSuffix, StringComparison.OrdinalIgnoreCase))
+                continue;
+
             string name = Path.GetFileNameWithoutExtension(file);
             byName[name] = new SchemaCatalogEntry(name, file, isUser);
         }

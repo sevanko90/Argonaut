@@ -82,6 +82,136 @@ public sealed class JsonSchemaCatalogTests : IDisposable
         Assert.Equal("Sales rank", schema.GetTitle(schema.ResolveElement(csv, 3)));
     }
 
+    /// <summary>Drives OpenUserDirectory with the file-manager launch stubbed out.</summary>
+    private static void OpenSchemaFolder()
+    {
+        JsonSchemaCatalog.OpenDirectoryOverride = _ => { };
+        try
+        {
+            JsonSchemaCatalog.OpenUserDirectory();
+        }
+        finally
+        {
+            JsonSchemaCatalog.OpenDirectoryOverride = null;
+        }
+    }
+
+    /// <summary>The example is a shipped file, not a string constant, so a rename or a dropped
+    /// Content glob would silently stop the seeding. Fail loudly at the source instead.</summary>
+    [Fact]
+    public void GeoJsonSchema_ShipsWithTheApp()
+    {
+        Assert.True(File.Exists(Path.Combine(JsonSchemaCatalog.GetBundledDirectory(), JsonSchemaExample.BundledFileName)));
+    }
+
+    /// <summary>Unlike the copy it seeds, the bundled original is a normal, bindable schema.</summary>
+    [Fact]
+    public void BundledGeoJsonSchema_IsOfferedInTheDropdown()
+    {
+        var geojson = Assert.Single(JsonSchemaCatalog.Enumerate(), e => e.DisplayName == "geojson");
+
+        Assert.False(geojson.IsUser);
+        Assert.NotNull(JsonSchemaLoader.TryLoadFile(geojson.FilePath));
+    }
+
+    [Fact]
+    public void OpeningTheSchemaFolder_SeedsTheExampleCopy()
+    {
+        OpenSchemaFolder();
+
+        Assert.True(File.Exists(Path.Combine(JsonSchemaCatalog.GetUserDirectory(), JsonSchemaExample.UserCopyFileName)));
+    }
+
+    /// <summary>The seeded copy is the same schema as the bundled one, so the whole point of the
+    /// .example.json suffix is that it doesn't show up as a second, duplicate dropdown entry.</summary>
+    [Fact]
+    public void SeededExampleCopy_DoesNotDuplicateTheBundledEntry()
+    {
+        OpenSchemaFolder();
+
+        var entries = JsonSchemaCatalog.Enumerate();
+
+        var geojson = Assert.Single(entries, e => e.DisplayName == "geojson");
+        Assert.False(geojson.IsUser); // still the bundled one, not the user copy
+        Assert.DoesNotContain(entries,
+            e => e.FilePath.EndsWith(JsonSchemaCatalog.ExampleSuffix, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>Renaming the copy to the bundled name is the documented way to take it over, and
+    /// relies on the user-shadows-bundled rule.</summary>
+    [Fact]
+    public void RenamedExampleCopy_ShadowsTheBundledSchema()
+    {
+        OpenSchemaFolder();
+        string directory = JsonSchemaCatalog.GetUserDirectory();
+        string renamed = Path.Combine(directory, JsonSchemaExample.BundledFileName);
+        File.Move(Path.Combine(directory, JsonSchemaExample.UserCopyFileName), renamed);
+
+        var geojson = Assert.Single(JsonSchemaCatalog.Enumerate(), e => e.DisplayName == "geojson");
+
+        Assert.True(geojson.IsUser);
+        Assert.Equal(renamed, geojson.FilePath);
+    }
+
+    [Fact]
+    public void OpeningTheSchemaFolder_NeverClobbersAnEditedExample()
+    {
+        OpenSchemaFolder();
+        string path = Path.Combine(JsonSchemaCatalog.GetUserDirectory(), JsonSchemaExample.UserCopyFileName);
+        File.WriteAllText(path, """{ "title": "Mine now" }""");
+
+        OpenSchemaFolder();
+
+        Assert.Equal("""{ "title": "Mine now" }""", File.ReadAllText(path));
+    }
+
+    [Fact]
+    public void ExampleSchemas_AreHiddenFromTheDropdown()
+    {
+        OpenSchemaFolder();
+        WriteUserSchema("real-one.json");
+
+        var entries = JsonSchemaCatalog.Enumerate();
+
+        Assert.Contains(entries, e => e.DisplayName == "real-one");
+        Assert.DoesNotContain(entries, e => e.FilePath.EndsWith(JsonSchemaCatalog.ExampleSuffix, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// The example is handed to users as the thing to copy, so it has to be a schema that actually
+    /// works - not just valid JSON. Loads the seeded copy through the real loader and checks the
+    /// constructs it teaches (prefixItems, oneOf/const labels, and a recursive $ref) all resolve.
+    /// </summary>
+    [Fact]
+    public void ShippedExample_IsAWorkingSchema()
+    {
+        OpenSchemaFolder();
+        string path = Path.Combine(JsonSchemaCatalog.GetUserDirectory(), JsonSchemaExample.UserCopyFileName);
+
+        var schema = JsonSchemaLoader.TryLoadFile(path);
+        Assert.NotNull(schema);
+
+        int bbox = schema!.ResolveMember(schema.RootId, "bbox"u8);
+        Assert.Equal("Min longitude", schema.GetTitle(schema.ResolveElement(bbox, 0)));
+        Assert.Equal("Max latitude", schema.GetTitle(schema.ResolveElement(bbox, 3)));
+
+        int feature = schema.ResolveElement(schema.ResolveMember(schema.RootId, "features"u8), 0);
+        Assert.Null(schema.GetTitle(feature)); // deliberately untitled - it labels every element
+
+        // The example $refs a location outside $defs; that has to resolve or it teaches a broken pattern.
+        int featureBbox = schema.ResolveMember(feature, "bbox"u8);
+        Assert.Equal("Min longitude", schema.GetTitle(schema.ResolveElement(featureBbox, 0)));
+
+        // Recursion: a geometry collection's members resolve back to the geometry definition.
+        int geometry = schema.ResolveMember(feature, "geometry"u8);
+        int nested = schema.ResolveElement(schema.ResolveMember(geometry, "geometries"u8), 0);
+        Assert.Equal("Geometry", schema.GetTitle(nested));
+
+        int geometryType = schema.ResolveMember(nested, "type"u8);
+        Assert.True(schema.TryGetEnumLabel(geometryType, "\"LineString\"", JsonTokenKind.String, out var title, out _));
+        Assert.Equal("Line", title);
+    }
+
     [Fact]
     public void Enumerate_IncludesUserSchemas_SortedByName()
     {

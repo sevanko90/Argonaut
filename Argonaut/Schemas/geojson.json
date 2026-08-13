@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+
+  "$comment": "A WORKING SCHEMA THAT DOUBLES AS THE WORKED EXAMPLE. Argonaut ships this as 'geojson' in the schema dropdown - pick it to label any GeoJSON document. Argonaut also copies it into your own schema folder as 'geojson.example.json', purely as something to read and crib from: the dropdown skips any file ending in '.example.json', so your copy does not show up twice. Edit that copy freely. Rename it to 'geojson.json' and it takes over from the built-in one, since a user schema shadows a bundled schema of the same name; rename it to anything else and it appears as its own entry alongside. Every $comment in here is guidance for you as a schema author: JSON Schema reserves $comment for schema maintainers, and Argonaut never displays it. What Argonaut DOES display: 'title' renders as the muted label after a value, and 'description' becomes that label's tooltip. A schema that matches nothing simply shows nothing - it is never an error.",
+
+  "title": "GeoJSON FeatureCollection",
+  "description": "A set of geographic features (RFC 7946).",
+
+  "properties": {
+    "type": {
+      "$comment": "CODED VALUES. To label the individual values of an enumeration, write oneOf with one const branch per value, each carrying its own title/description. That is standard JSON Schema and it keeps each label attached to its own value. Argonaut also reads the x-enumNames / x-enumDescriptions extension emitted by NSwag and openapi-generator, so generated schemas work - but do not write it by hand: those arrays match by position, so inserting one value silently shifts every label below it onto the wrong value.",
+      "title": "Object type",
+      "oneOf": [
+        { "const": "FeatureCollection", "title": "Feature collection", "description": "A document holding many features." },
+        { "const": "Feature", "title": "Feature", "description": "One geometry plus its properties." }
+      ]
+    },
+
+    "bbox": {
+      "$comment": "FIXED-LAYOUT ARRAYS -> prefixItems. Each slot here means something different, so each earns its own title, and the labels stay useful no matter how often the array repeats. This is the case prefixItems exists for. Note the labels are what makes this array readable at all: [-114.1, 51.0, -113.9, 51.2] is otherwise four anonymous numbers.",
+      "title": "Bounding box",
+      "description": "Axis-aligned extent of this object's geometry, in coordinate reference system units.",
+      "prefixItems": [
+        { "title": "Min longitude" },
+        { "title": "Min latitude" },
+        { "title": "Max longitude" },
+        { "title": "Max latitude" }
+      ]
+    },
+
+    "features": {
+      "$comment": "LONG ARRAYS OF THE SAME THING -> describe the array, not its items. Argonaut resolves 'items' for EVERY element, so a title there repeats down the whole visible column - on a 100k-feature collection it is 100k identical labels that say nothing the surrounding structure does not. Put what you want to say in the array's own description, which renders once on the array row. See $defs/feature, which deliberately has no title for this reason.",
+      "title": "Features",
+      "description": "Every feature in the collection.",
+      "items": { "$ref": "#/$defs/feature" }
+    }
+  },
+
+  "$defs": {
+    "feature": {
+      "$comment": "No title here on purpose - this definition is used as the items of a long array (see properties/features), so a title would label every element. Contrast $defs/geometry, which IS titled because it is referenced from a single-valued property and so renders once per feature. The rule of thumb: a repeated label earns its place only when it distinguishes that row from its siblings.",
+      "description": "One geographic feature: a geometry plus arbitrary application properties.",
+      "type": "object",
+      "properties": {
+        "type": { "title": "Object type" },
+        "id": { "title": "Feature ID", "description": "Optional identifier, a string or a number." },
+        "bbox": { "$ref": "#/properties/bbox" },
+        "geometry": { "$ref": "#/$defs/geometry" },
+        "properties": {
+          "$comment": "FREE-FORM OBJECTS -> additionalProperties. GeoJSON does not constrain what goes in here, so there are no named members to document. additionalProperties gives every unrecognised member the same label, which is worth doing only when it says something the key does not - here it flags that these are the author's own fields rather than part of the format.",
+          "title": "Application properties",
+          "description": "Application-specific data attached to the feature. Not defined by RFC 7946.",
+          "additionalProperties": { "title": "Custom field" }
+        }
+      }
+    },
+
+    "geometry": {
+      "$comment": "REUSE AND RECURSION -> $defs plus $ref. Argonaut resolves local '#/...' pointers, and recursion is free: a GeometryCollection's members point back at this same definition, and the walk simply follows the pointer again at each level. Remote $refs (anything that is not a local '#' pointer) are ignored - resolving them would mean network or filesystem access during what has to stay a pure, failure-free parse.",
+      "title": "Geometry",
+      "description": "The shape of a feature: a point, a line, an area, or a collection of these.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "title": "Geometry type",
+          "oneOf": [
+            { "const": "Point", "title": "Point", "description": "A single position." },
+            { "const": "LineString", "title": "Line", "description": "An ordered path through two or more positions." },
+            { "const": "Polygon", "title": "Polygon", "description": "One outer ring, then any number of holes." },
+            { "const": "MultiPoint", "title": "Multi-point" },
+            { "const": "MultiLineString", "title": "Multi-line" },
+            { "const": "MultiPolygon", "title": "Multi-polygon" },
+            { "const": "GeometryCollection", "title": "Geometry collection", "description": "A group of geometries of mixed types." }
+          ]
+        },
+        "coordinates": {
+          "$comment": "WHAT ARGONAUT CANNOT DO. The shape of this array depends on the sibling 'type' value: a bare position for Point, an array of positions for LineString, an array of rings for Polygon. Argonaut resolves the schema top-down in lockstep with the tree walk and never reads a value to pick a branch, so oneOf/anyOf STRUCTURAL branches are merged rather than discriminated - writing a branch per geometry type would not select the right one. Hence a plain description here that covers every case. The same top-down design is what makes schema hints affordable on a file too large to hold in memory, so this is a deliberate trade, not a gap to work around.",
+          "title": "Coordinates",
+          "description": "Positions as [longitude, latitude] or [longitude, latitude, elevation]. Nesting depth depends on the geometry type: a single position for Point, an array of them for LineString, an array of rings for Polygon."
+        },
+        "geometries": {
+          "title": "Member geometries",
+          "description": "Present only on a GeometryCollection.",
+          "items": { "$ref": "#/$defs/geometry" }
+        }
+      }
+    }
+  }
+}

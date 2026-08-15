@@ -117,8 +117,15 @@ candidates and let the user choose, then pin whatever they pick.
 
 An icon on container rows, visible only when a schema offering a choice is bound
 (`JsonSchemaSettings.RootOptions.Count > 0`) — otherwise it is noise on every row of every
-document. Likely a hover-revealed button in the row `DataTemplate`
-(`Argonaut/Features/Json/JsonView.axaml`), beside the existing hint/schema-label elements.
+document. Likely a hover-revealed button in a row `DataTemplate`
+(`Argonaut/Features/Json/JsonView.axaml`).
+
+Note the schema labels have since moved out of the tree row into their own gutter `ListBox` (see
+`docs/json-schema-hints-plan.md`, "Rendering: the schema gutter"), so there are now two candidate
+homes for this button: the tree row beside the `Hint` button, or the gutter cell next to the label
+it would change. The gutter reads as the better fit — it is where schema binding is already
+expressed, and it already styles container rows distinctly — but it is narrow and user-resizable,
+so a button competes with the label for width. Settle this before building.
 
 Rows carrying a pin need to say so, and need a way to remove it. A pinned row's schema label is
 currently indistinguishable from an inherited one.

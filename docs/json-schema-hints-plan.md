@@ -1,5 +1,9 @@
 # JSON Schema-driven display hints
 
+**Status: built.** Written as a plan; kept as the design record. The one place reality diverged
+from the plan is where the labels are rendered — see "Rendering: the schema gutter" below, which
+replaced the original inline-after-the-value design.
+
 ## Context
 
 Argonaut shows JSON structure from a token index only — it never holds the document in memory.
@@ -7,9 +11,9 @@ Users reading opaque payloads (fixed-layout arrays, coded enum values, terse pro
 have no way to know what a value means. A JSON Schema carries exactly that documentation in
 `title` / `description`, and schemas are small enough to hold whole in RAM.
 
-Goal: bind a schema to an open document and render its `title` inline (muted, after the value)
-with `description` as a tooltip, covering object members, positional array slots (`prefixItems`),
-and enum member labels.
+Goal: bind a schema to an open document and render its `title` alongside each row, with
+`description` on a tooltip, covering object members, positional array slots (`prefixItems`), and
+enum member labels.
 
 ### Why this is practical despite not holding the document
 
@@ -19,7 +23,7 @@ Two ways to map a document node to a schema node:
   `JsonPathBuilder.FindArrayIndex` (`Argonaut/Features/Json/JsonPathBuilder.cs:80`) is
   O(preceding siblings) — catastrophic on a million-element array.
 - **Top-down, in lockstep with the existing tree walk**: *chosen*.
-  `JsonVisibleRowCollection.AppendSubtree` (`Argonaut/Features/Json/JsonVisibleRowCollection.cs:728`)
+  `JsonVisibleRowCollection.AppendSubtree` (`Argonaut/Features/Json/JsonVisibleRowCollection.cs:840`)
   already walks the visible tree from the root and already carries the array ordinal down as a
   parameter (`arrayIndex`, used for `VisibleRow.ArrayIndex`). Carrying a schema node id down the
   same recursion is O(1) per row, needs no path building, and needs no extra mmap reads beyond
@@ -119,7 +123,7 @@ preference pattern of `ExpandDepthPreference.cs` on top of `JsonSettingsStore` �
 ## Wiring into the row pipeline
 
 ### `JsonVisibleRowCollection.cs`
-- `VisibleRow` (`:902`) gains `int SchemaNodeId` (`-1` = none); `ForToken` takes it,
+- `VisibleRow` (`:1043`) gains `int SchemaNodeId` (`-1` = none); `ForToken` takes it,
   `ForMorePlaceholder` and closing-bracket rows pass `-1`.
 - `AppendSubtree(int tokenIndex, List<VisibleRow> into, int arrayIndex, int schemaNodeId)`.
   `Rebuild()` seeds it with `schema?.RootId ?? -1`. Before recursing into each child:
@@ -136,15 +140,27 @@ preference pattern of `ExpandDepthPreference.cs` on top of `JsonSettingsStore` �
   The `schemaNodeId < 0` short-circuit means the no-schema path adds one branch per row and
   never touches the mmap. Once the schema runs out below some subtree, `-1` propagates and the
   rest of that subtree is free too.
-- `BuildRow` (`:498`) resolves display text from `vrow.SchemaNodeId`: `GetTitle`/`GetDescription`,
+- `BuildRow` (`:537`) resolves display text from `vrow.SchemaNodeId`: `GetTitle`/`GetDescription`,
   then `TryGetEnumLabel(nodeId, value, token.Kind, …)` using the `value` string it already
   decoded — an enum-member label, when matched, supersedes the node's own title.
   Enum matching is exact text; for `JsonTokenKind.Number` fall back to a `decimal`-normalized
   compare so `3` matches `3.0`. Document that as the known limit.
-- `JsonRow` (`:17`) gains `SchemaTitle` and `SchemaDescription` (both `string?`), kept separate
-  from the existing `Hint` so a row can show both a decoded date and a schema title.
-- `public void SetSchema(JsonSchemaDocument? schema)` stores it and calls `Rebuild()` —
-  schema ids live inside `visibleRows`, so unlike `InvalidateRealizedRows` (`:814`) this needs a
+- `JsonRow` (`:18`) gains three `string?`s, kept separate from the existing `Hint` so a row can
+  show both a decoded date and a schema label:
+  - `SchemaTitle` — the schema's `title` (or a matched enum member's label) and nothing else.
+  - `SchemaDescription` — the schema's `description`.
+  - `SchemaLabel` — what actually gets rendered: `SchemaTitle`, falling back to the first line of
+    `SchemaDescription`. A generated schema documents with `description` and no `title` far more
+    often than not (83% of documented properties in the OpenAPI document this was built against),
+    and those rows would otherwise render nothing — and, since the rendered element is what carries
+    the tooltip, hide their description too.
+
+  The split exists because the tooltip has to tell "titled" from "described": with one property
+  carrying both, a description-only row would draw a title/description separator above a
+  description it was only repeating. `HasSchemaTitleAndDescription` drives that separator, and
+  `IsContainerRow` drives the gutter's container-heading weight.
+- `public void SetSchema(JsonSchemaDocument? schema)` (`:946`) stores it and calls `Rebuild()` —
+  schema ids live inside `visibleRows`, so unlike `InvalidateRealizedRows` (`:955`) this needs a
   structural rebuild. Structure itself is unchanged, so it lands on `Rebuild`'s existing
   `Reset` path.
 
@@ -153,22 +169,42 @@ Note: schema hints do **not** go through `IValueHintProvider`. That interface cl
 Forcing them through it would require re-deriving the path per row — the rejected bottom-up
 approach.
 
-### `JsonView.axaml`
-One `TextBlock` appended after the existing `Hint` button (`:163-169`), same muted treatment,
-description on the tooltip:
+### Rendering: the schema gutter (`JsonView.axaml`)
 
-```xml
-<TextBlock Text="{Binding SchemaTitle}"
-           IsVisible="{Binding SchemaTitle, Converter={x:Static json:IsNotNullConverter.Instance}}"
-           Foreground="{DynamicResource AppMutedTextBrush}"
-           FontFamily="{DynamicResource AppContentFontFamily}"
-           Margin="8,0,0,0"
-           VerticalAlignment="Center"
-           ToolTip.Tip="{Binding SchemaDescription}" />
-```
+Originally planned as one muted `TextBlock` appended after the `Hint` button, inline on the row.
+That was built and then replaced: a long label competed with the value for horizontal space, and
+a narrow window pushed it out of reach entirely.
 
-Non-clickable, so a plain `TextBlock` rather than the `hintlink` `Button` style. Fixed row
-height is preserved (no wrapping, no second line).
+Labels now live in a dedicated, resizable gutter down the left-hand side.
+
+- The gutter is **its own virtualizing `ListBox` over the same `Rows` collection**, not a column
+  inside the row `DataTemplate`. The tree scrolls horizontally, and a gutter that slid away with
+  it would be useless. Both lists use identical fixed row metrics (22px height, 1px margins, 8px
+  padding), so mirroring one vertical scroll offset onto the other keeps them aligned exactly —
+  the same lazy `ScrollViewer` resolution `CsvView` uses for its sticky header. Mirrored both ways
+  so the wheel works over the gutter.
+- A `GridSplitter` makes it resizable. That is what keeps labels on one line, and so keeps every
+  row's height fixed — the alternative is wrapping labels changing row heights, which would
+  desynchronise the two lists and destroy the fixed-height assumption the whole view rests on.
+- **The column collapses to zero width when no schema is bound**, rather than hiding the `ListBox`
+  — so its internal `ScrollViewer` stays resolvable and the mirroring survives a schema being
+  unbound and rebound. A user's drag width is read back before collapsing. Not persisted across
+  sessions.
+- Cells indent with `JsonRow.Depth`, so a child's label reads as belonging to the container above
+  it. A much smaller step than the tree's and capped (6px/level, 60px ceiling vs. the tree's
+  uncapped 16px): the gutter is narrow and its labels already ellipse.
+  `DepthToMarginConverter` takes step and ceiling as properties so both use sites share it.
+- Container rows (`IsContainerRow`) get `SemiBold`. Weight only, no colour change — every
+  container is a heading, so a deep document would otherwise stack several emphasised rows.
+- The tooltip is title, a 1px rule, then description — the rule only when the row carries both.
+  The title is repeated there even with no description, since a narrow gutter ellipses it away and
+  the tooltip is the only place left to read it in full. Carried on a transparent full-width
+  `Border` so the whole cell is hoverable, collapsed entirely on rows the schema says nothing
+  about so those raise no tooltip.
+
+Not done, deliberately: the selected row is not highlighted in the gutter. Mirroring
+`SelectedIndex` onto it triggers Avalonia's auto-scroll-into-view, which fights the offset
+mirroring.
 
 ### `JsonToolbarView.axaml` / `JsonToolbarViewModel.cs`
 A `ComboBox` before the expand-depth combo, bound to `SchemaEntries` / `SelectedSchemaIndex`,
@@ -207,21 +243,31 @@ Unit tests (`Argonaut.Tests/`), following the established fixtures:
   `FindVisiblePosition` → assert `((JsonRow)rows[pos]!).SchemaTitle`). Cases: object member
   title, `prefixItems` slot title on `[1]`, enum label superseding node title, deep subtree
   where the schema runs out → `SchemaTitle` null, `SetSchema(null)` clears titles and fires
-  `Reset`, and a date hint plus schema title co-existing on one row.
+  `Reset`, and a date hint plus schema title co-existing on one row. Plus the label/title split:
+  a description-only member sets `SchemaLabel` but leaves `SchemaTitle` null (so no tooltip
+  separator), and the fallback takes the first line only, stopping at a newline or a docs-site
+  `<br>`.
+- `JsonRowKindFlagTests` — `IsContainerRow` matches the opening container kinds only, and is
+  false for placeholder rows, which borrow their container's `Kind`.
 - `JsonSchemaCatalogTests` — bundled + user merge and user-shadows-bundled, using the existing
   `AppDataPaths.RootOverride` test seam (`AppDataPaths.cs:12`) so nothing touches real settings.
 - `JsonToolbarViewModelTests` — extend for schema selection and sidecar-driven combo sync.
 
 Run: `dotnet test Argonaut.Tests`.
 
-Manual check (needed for the visual/UI half — please verify rather than me launching the app):
-open a JSON file, pick a bundled schema from the toolbar, confirm muted titles appear on
-matching rows, tooltips show descriptions, row height is unchanged, and "Open schema folder…"
-creates and opens `<AppData>/Argonaut/Schemas`. Then drop a `<file>.schema.json` beside a
-document and confirm it auto-selects on open.
+Manual check (the visual/UI half — verified by hand, not by launching the app from an agent):
+open a JSON file, pick a bundled schema from the toolbar, confirm the gutter appears with labels
+on matching rows, tooltips show title/rule/description, row heights are unchanged, the splitter
+resizes the gutter and labels ellipse rather than wrap, the gutter stays aligned with the tree
+while scrolling, it collapses again when the schema is cleared, and "Open schema folder…" creates
+and opens `<AppData>/Argonaut/Schemas`. Then drop a `<file>.schema.json` beside a document and
+confirm it auto-selects on open.
 
 ## Known limits (worth stating in code comments)
 
 - `oneOf`/`anyOf` structural branches are merged, not discriminated against actual values.
 - Enum matching is textual (with numeric normalization), not JSON-value-equality.
 - Remote `$ref`, `patternProperties`, `if`/`then`/`else` are ignored.
+- A homogeneous array resolves every element to the same `items` node, so the gutter repeats one
+  label down the whole run. Container weight plus indent is what distinguishes the array's own
+  label from its elements'; the labels themselves are genuinely identical.

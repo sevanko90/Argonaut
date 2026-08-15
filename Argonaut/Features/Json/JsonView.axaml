@@ -167,11 +167,18 @@
                                     Margin="8,0,0,0"
                                     VerticalAlignment="Center"
                                     ToolTip.Tip="Decoded date (local time) — click to change scheme" />
+                            <!-- Doubles as the description carrier: a property documented with a
+                                 description and no title falls back to its first line (see
+                                 JsonVisibleRowCollection.BuildRow), which is also what keeps the
+                                 tooltip reachable for those rows. Trimmed rather than clipped so
+                                 an ellipsis tells the reader there is more to hover for. -->
                             <TextBlock Text="{Binding SchemaTitle}"
                                        IsVisible="{Binding SchemaTitle, Converter={x:Static json:IsNotNullConverter.Instance}}"
                                        Foreground="{DynamicResource AppMutedTextBrush}"
                                        FontFamily="{DynamicResource AppContentFontFamily}"
                                        TextWrapping="NoWrap"
+                                       TextTrimming="CharacterEllipsis"
+                                       MaxWidth="360"
                                        Margin="8,0,0,0"
                                        VerticalAlignment="Center"
                                        ToolTip.Tip="{Binding SchemaDescription}" />

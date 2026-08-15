@@ -16,7 +16,7 @@ namespace Argonaut.Tests;
 public class JsonSchemaRowTests
 {
     private const string Json = """
-        {"name":"widget","status":"a","ts":1709305509,"csv":[[1,2],[3,4]],"nested":{"deep":{"deeper":1}}}
+        {"name":"widget","status":"a","ts":1709305509,"csv":[[1,2],[3,4]],"nested":{"deep":{"deeper":1}},"bare":"x","prose":"y","markup":"z"}
         """;
 
     private const string Schema = """
@@ -32,7 +32,10 @@ public class JsonSchemaRowTests
               "title": "Series",
               "prefixItems": [ { "title": "First series" }, { "title": "Second series" } ]
             },
-            "nested": { "title": "Nested" }
+            "nested": { "title": "Nested" },
+            "bare": { "description": "Only a description, no title." },
+            "prose": { "description": "First line only.\n\nSecond paragraph that must not reach the row." },
+            "markup": { "description": "Docs-site prose. </br></br> **NOTE**: not wanted on the row." }
           }
         }
         """;
@@ -96,6 +99,59 @@ public class JsonSchemaRowTests
             mmap.Dispose();
             File.Delete(path);
         }
+    }
+
+    [Fact]
+    public void DescriptionOnlyMember_FallsBackToTheDescriptionAsItsLabel()
+    {
+        WithRows((index, mmap, rows) =>
+        {
+            var row = RowFor(rows, FindMember(index, mmap, "bare"));
+
+            // Generated schemas document with `description` and no `title`, so a row that
+            // rendered only titles would show nothing - and, since the label element carries the
+            // tooltip, would hide the description too.
+            Assert.Equal("Only a description, no title.", row.SchemaTitle);
+            Assert.Equal("Only a description, no title.", row.SchemaDescription);
+        }, LoadSchema());
+    }
+
+    [Fact]
+    public void DescriptionFallback_UsesTheFirstLineOnly()
+    {
+        WithRows((index, mmap, rows) =>
+        {
+            var row = RowFor(rows, FindMember(index, mmap, "prose"));
+
+            Assert.Equal("First line only.", row.SchemaTitle);
+
+            // The tooltip keeps the whole thing.
+            Assert.Contains("Second paragraph", row.SchemaDescription);
+        }, LoadSchema());
+    }
+
+    [Fact]
+    public void DescriptionFallback_StopsAtADocsSiteLineBreak()
+    {
+        WithRows((index, mmap, rows) =>
+        {
+            var row = RowFor(rows, FindMember(index, mmap, "markup"));
+
+            // Generated docs break paragraphs with literal <br>/</br> as often as with a newline,
+            // and the raw tag must never reach the row.
+            Assert.Equal("Docs-site prose.", row.SchemaTitle);
+        }, LoadSchema());
+    }
+
+    [Fact]
+    public void ATitle_IsNeverReplacedByTheDescription()
+    {
+        WithRows((index, mmap, rows) =>
+        {
+            var row = RowFor(rows, FindMember(index, mmap, "name"));
+
+            Assert.Equal("Product name", row.SchemaTitle);
+        }, LoadSchema());
     }
 
     [Fact]

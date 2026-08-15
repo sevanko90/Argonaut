@@ -60,10 +60,11 @@ public static class JsonSchemaCatalog
     /// Pure filesystem work (two directory listings and a settings read) - call it off the UI
     /// thread.
     /// </summary>
-    public static (IReadOnlyList<SchemaCatalogEntry> Entries, SchemaCatalogEntry? Preselected) GatherForDocument(string documentPath)
+    public static (IReadOnlyList<SchemaCatalogEntry> Entries, SchemaCatalogEntry? Preselected, string? RootName) GatherForDocument(string documentPath)
     {
         var entries = new List<SchemaCatalogEntry>(Enumerate());
         SchemaCatalogEntry? preselected = null;
+        string? rootName = null;
 
         string sidecarPath = documentPath + SidecarSuffix;
         if (SafeExists(sidecarPath))
@@ -74,9 +75,13 @@ public static class JsonSchemaCatalog
         }
         else if (SchemaSelectionPreference.Load(documentPath) is { } remembered)
         {
+            // Carried even when the schema file itself can't be found: harmless if unused, and
+            // the loader drops a root name the schema no longer offers.
+            rootName = remembered.RootName;
+
             foreach (var entry in entries)
             {
-                if (string.Equals(entry.FilePath, remembered, StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(entry.FilePath, remembered.SchemaPath, StringComparison.OrdinalIgnoreCase))
                 {
                     preselected = entry;
                     break;
@@ -85,15 +90,15 @@ public static class JsonSchemaCatalog
 
             // A remembered schema that has since left the catalog folders but still exists on
             // disk stays offered, rather than the binding silently disappearing.
-            if (preselected is null && SafeExists(remembered))
+            if (preselected is null && SafeExists(remembered.SchemaPath))
             {
-                var transient = new SchemaCatalogEntry(Path.GetFileNameWithoutExtension(remembered), remembered, IsUser: true);
+                var transient = new SchemaCatalogEntry(Path.GetFileNameWithoutExtension(remembered.SchemaPath), remembered.SchemaPath, IsUser: true);
                 entries.Insert(0, transient);
                 preselected = transient;
             }
         }
 
-        return (entries, preselected);
+        return (entries, preselected, rootName);
     }
 
     /// <summary>Folder of schemas shipped with the app, beside the executable. Read-only in

@@ -16,9 +16,14 @@ public static class SchemaSelectionPreference
     private const string FileName = "schema-selection.json";
     private const int MaxEntries = 100;
 
-    /// <summary>The schema file path last bound to this document, or null if there isn't one.
-    /// The caller still has to check the schema file exists - it may have been deleted since.</summary>
-    public static string? Load(string documentPath)
+    /// <summary>
+    /// The schema last bound to this document, or null if there isn't one: the schema file path,
+    /// plus which of its named roots was bound (null for the schema's own root - and for every
+    /// selection saved before multi-root schemas existed, which is the correct reading of an
+    /// absent field). The caller still has to check the schema file exists - it may have been
+    /// deleted since, and the root may have been edited out of it.
+    /// </summary>
+    public static (string SchemaPath, string? RootName)? Load(string documentPath)
     {
         if (string.IsNullOrEmpty(documentPath))
             return null;
@@ -29,8 +34,8 @@ public static class SchemaSelectionPreference
 
         foreach (var entry in saved.Entries)
         {
-            if (PathsEqual(entry.DocumentPath, documentPath))
-                return entry.SchemaPath;
+            if (PathsEqual(entry.DocumentPath, documentPath) && entry.SchemaPath is { } path)
+                return (path, entry.RootName);
         }
 
         return null;
@@ -38,7 +43,7 @@ public static class SchemaSelectionPreference
 
     /// <summary>Records (or, with a null <paramref name="schemaPath"/>, forgets) the schema bound
     /// to a document, moving it to the front of the list.</summary>
-    public static void Save(string documentPath, string? schemaPath)
+    public static void Save(string documentPath, string? schemaPath, string? rootName = null)
     {
         if (string.IsNullOrEmpty(documentPath))
             return;
@@ -47,7 +52,7 @@ public static class SchemaSelectionPreference
 
         var entries = new List<SavedSelection>(Math.Min(existing.Count + 1, MaxEntries));
         if (schemaPath is not null)
-            entries.Add(new SavedSelection(documentPath, schemaPath));
+            entries.Add(new SavedSelection(documentPath, schemaPath, rootName));
 
         foreach (var entry in existing)
         {
@@ -68,5 +73,7 @@ public static class SchemaSelectionPreference
 
     private sealed record SavedSelections(IReadOnlyList<SavedSelection> Entries);
 
-    private sealed record SavedSelection(string DocumentPath, string SchemaPath);
+    // RootName is optional so a file written by an older build still deserialises - it simply
+    // comes back null, meaning "the schema's own root", which is what those builds always meant.
+    private sealed record SavedSelection(string DocumentPath, string SchemaPath, string? RootName = null);
 }

@@ -74,6 +74,115 @@
                   Margin="8,0,0,0"
                   VerticalAlignment="Center"
                   ToolTip.Tip="JSON Schema used to label values in the tree" />
+        <!-- A flyout rather than a combo or a submenu: a schema file holding many definitions (an
+             OpenAPI document runs to hundreds) needs a filter box AND descriptions AND a
+             match-ranked shortlist on one surface, and a menu can host none of those well. -->
+        <Button x:Name="SchemaRootButton"
+                FontSize="12"
+                MinWidth="170"
+                Margin="8,0,0,0"
+                VerticalAlignment="Center"
+                IsVisible="{Binding SchemaRootPicker.IsApplicable}"
+                ToolTip.Tip="Which schema in the file describes this document">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+                <TextBlock Text="{Binding SchemaRootPicker.ButtonText}"
+                           VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis"
+                           MaxWidth="190" />
+                <Viewbox Width="8" Height="8" VerticalAlignment="Center">
+                    <Path Fill="{DynamicResource AppMutedTextBrush}" Data="M2 4 L10 4 L6 10 Z" />
+                </Viewbox>
+            </StackPanel>
+            <Button.Flyout>
+                <Flyout Placement="BottomEdgeAlignedLeft">
+                    <StackPanel Margin="8" Spacing="8" Width="360">
+                        <TextBox Text="{Binding SchemaRootPicker.Filter, Mode=TwoWay}"
+                                 PlaceholderText="Filter types…"
+                                 FontSize="12" />
+                        <TextBlock Text="{Binding SchemaRootPicker.MatchContextText}"
+                                   IsVisible="{Binding SchemaRootPicker.HasMatchContext}"
+                                   FontSize="11"
+                                   Margin="2,0,0,0"
+                                   TextWrapping="Wrap"
+                                   Foreground="{DynamicResource AppMutedTextBrush}" />
+                        <ListBox ItemsSource="{Binding SchemaRootPicker.Picks}"
+                                 SelectedItem="{Binding SchemaRootPicker.SelectedPick, Mode=TwoWay}"
+                                 SelectionChanged="OnSchemaRootPicked"
+                                 MaxHeight="380"
+                                 BorderThickness="0"
+                                 Background="Transparent">
+                            <ListBox.Styles>
+                                <!-- Headers ride in the same list so it stays one scrollable,
+                                     filterable surface; this is what stops them being picked. -->
+                                <Style Selector="ListBoxItem" x:DataType="json:SchemaRootPick">
+                                    <Setter Property="IsEnabled" Value="{Binding IsSelectable}" />
+                                    <Setter Property="Padding" Value="8,4" />
+                                    <Setter Property="MinHeight" Value="0" />
+                                </Style>
+                            </ListBox.Styles>
+                            <ListBox.ItemTemplate>
+                                <DataTemplate x:DataType="json:SchemaRootPick">
+                                  <StackPanel>
+                                    <Border Height="1"
+                                            Margin="0,6,0,8"
+                                            IsVisible="{Binding ShowSeparator}"
+                                            Background="{DynamicResource AppBorderBrush}" />
+                                    <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
+                                        <TextBlock Grid.Column="0"
+                                                   Grid.Row="0"
+                                                   Text="{Binding Name}"
+                                                   IsVisible="{Binding IsSelectable}"
+                                                   FontSize="12"
+                                                   TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Grid.Column="0"
+                                                   Grid.Row="0"
+                                                   Grid.ColumnSpan="2"
+                                                   Text="{Binding Name}"
+                                                   IsVisible="{Binding IsHeader}"
+                                                   FontSize="11"
+                                                   FontWeight="SemiBold"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Foreground="{DynamicResource AppMutedTextBrush}" />
+                                        <StackPanel Grid.Column="1"
+                                                    Grid.Row="0"
+                                                    Orientation="Horizontal"
+                                                    Spacing="8"
+                                                    VerticalAlignment="Center">
+                                            <Border IsVisible="{Binding IsRecommended}"
+                                                    CornerRadius="3"
+                                                    Padding="5,1"
+                                                    VerticalAlignment="Center"
+                                                    Background="{DynamicResource SystemAccentColorLight2}">
+                                                <TextBlock Text="best match"
+                                                           FontSize="10"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="Black" />
+                                            </Border>
+                                            <TextBlock Text="{Binding Score}"
+                                                       IsVisible="{Binding HasScore}"
+                                                       FontSize="11"
+                                                       FontWeight="SemiBold" />
+                                            <TextBlock Text="{Binding Detail}"
+                                                       FontSize="11"
+                                                       Foreground="{DynamicResource AppMutedTextBrush}" />
+                                        </StackPanel>
+                                        <TextBlock Grid.Column="0"
+                                                   Grid.Row="1"
+                                                   Grid.ColumnSpan="2"
+                                                   Text="{Binding Description}"
+                                                   IsVisible="{Binding Description, Converter={x:Static json:IsNotNullConverter.Instance}}"
+                                                   FontSize="11"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Foreground="{DynamicResource AppMutedTextBrush}" />
+                                    </Grid>
+                                  </StackPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </StackPanel>
+                </Flyout>
+            </Button.Flyout>
+        </Button>
         <ComboBox x:Name="ExpandDepthCombo"
                   SelectedIndex="{Binding ExpandDepthIndex, Mode=TwoWay}"
                   FontSize="12"

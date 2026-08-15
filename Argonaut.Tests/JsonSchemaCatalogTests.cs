@@ -253,7 +253,7 @@ public sealed class JsonSchemaCatalogTests : IDisposable
         {
             File.WriteAllText(sidecar, """{ "title": "Sidecar" }""");
 
-            var (entries, preselected) = JsonSchemaCatalog.GatherForDocument(document);
+            var (entries, preselected, _) = JsonSchemaCatalog.GatherForDocument(document);
 
             Assert.Equal(sidecar, preselected!.Value.FilePath);
             Assert.Contains(entries, e => e.FilePath == sidecar);
@@ -271,7 +271,7 @@ public sealed class JsonSchemaCatalogTests : IDisposable
         string document = Path.GetTempFileName();
         try
         {
-            var (_, preselected) = JsonSchemaCatalog.GatherForDocument(document);
+            var (_, preselected, _) = JsonSchemaCatalog.GatherForDocument(document);
 
             Assert.Null(preselected);
         }
@@ -290,7 +290,7 @@ public sealed class JsonSchemaCatalogTests : IDisposable
             string remembered = WriteUserSchema("remembered.json");
             SchemaSelectionPreference.Save(document, remembered);
 
-            var (_, preselected) = JsonSchemaCatalog.GatherForDocument(document);
+            var (_, preselected, _) = JsonSchemaCatalog.GatherForDocument(document);
 
             Assert.Equal("remembered", preselected!.Value.DisplayName);
             Assert.Equal(remembered, preselected.Value.FilePath);
@@ -311,7 +311,7 @@ public sealed class JsonSchemaCatalogTests : IDisposable
             File.WriteAllText(loose, """{ "title": "Loose" }""");
             SchemaSelectionPreference.Save(document, loose);
 
-            var (entries, preselected) = JsonSchemaCatalog.GatherForDocument(document);
+            var (entries, preselected, _) = JsonSchemaCatalog.GatherForDocument(document);
 
             Assert.Equal(loose, preselected!.Value.FilePath);
             Assert.Contains(entries, e => e.FilePath == loose);
@@ -331,7 +331,7 @@ public sealed class JsonSchemaCatalogTests : IDisposable
         {
             SchemaSelectionPreference.Save(document, Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".json"));
 
-            var (_, preselected) = JsonSchemaCatalog.GatherForDocument(document);
+            var (_, preselected, _) = JsonSchemaCatalog.GatherForDocument(document);
 
             Assert.Null(preselected);
         }
@@ -348,13 +348,52 @@ public sealed class JsonSchemaCatalogTests : IDisposable
         try
         {
             SchemaSelectionPreference.Save(document, "/one.json");
-            Assert.Equal("/one.json", SchemaSelectionPreference.Load(document));
+            Assert.Equal(("/one.json", (string?)null), SchemaSelectionPreference.Load(document));
 
             SchemaSelectionPreference.Save(document, "/two.json");
-            Assert.Equal("/two.json", SchemaSelectionPreference.Load(document));
+            Assert.Equal(("/two.json", (string?)null), SchemaSelectionPreference.Load(document));
 
             SchemaSelectionPreference.Save(document, null);
             Assert.Null(SchemaSelectionPreference.Load(document));
+        }
+        finally
+        {
+            File.Delete(document);
+        }
+    }
+
+    [Fact]
+    public void SchemaSelectionPreference_RoundTripsTheBoundRoot()
+    {
+        string document = Path.GetTempFileName();
+        try
+        {
+            SchemaSelectionPreference.Save(document, "/api.json", "Booking");
+            Assert.Equal(("/api.json", "Booking"), SchemaSelectionPreference.Load(document));
+
+            // Re-picking the schema's own root has to clear the remembered type, not keep it.
+            SchemaSelectionPreference.Save(document, "/api.json", null);
+            Assert.Equal(("/api.json", (string?)null), SchemaSelectionPreference.Load(document));
+        }
+        finally
+        {
+            File.Delete(document);
+        }
+    }
+
+    [Fact]
+    public void GatherForDocument_CarriesTheRememberedRoot()
+    {
+        string document = Path.GetTempFileName();
+        try
+        {
+            string remembered = WriteUserSchema("api.json");
+            SchemaSelectionPreference.Save(document, remembered, "Booking");
+
+            var (_, preselected, rootName) = JsonSchemaCatalog.GatherForDocument(document);
+
+            Assert.Equal(remembered, preselected!.Value.FilePath);
+            Assert.Equal("Booking", rootName);
         }
         finally
         {
@@ -368,8 +407,8 @@ public sealed class JsonSchemaCatalogTests : IDisposable
         SchemaSelectionPreference.Save("/docs/a.json", "/schemas/a.json");
         SchemaSelectionPreference.Save("/docs/b.json", "/schemas/b.json");
 
-        Assert.Equal("/schemas/a.json", SchemaSelectionPreference.Load("/docs/a.json"));
-        Assert.Equal("/schemas/b.json", SchemaSelectionPreference.Load("/docs/b.json"));
+        Assert.Equal(("/schemas/a.json", (string?)null), SchemaSelectionPreference.Load("/docs/a.json"));
+        Assert.Equal(("/schemas/b.json", (string?)null), SchemaSelectionPreference.Load("/docs/b.json"));
     }
 
     [Fact]
@@ -379,7 +418,7 @@ public sealed class JsonSchemaCatalogTests : IDisposable
             SchemaSelectionPreference.Save($"/docs/{i}.json", $"/schemas/{i}.json");
 
         // Most-recent-first with a 100-entry cap: the newest survives, the oldest is gone.
-        Assert.Equal("/schemas/149.json", SchemaSelectionPreference.Load("/docs/149.json"));
+        Assert.Equal(("/schemas/149.json", (string?)null), SchemaSelectionPreference.Load("/docs/149.json"));
         Assert.Null(SchemaSelectionPreference.Load("/docs/0.json"));
     }
 }

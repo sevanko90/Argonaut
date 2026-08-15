@@ -53,6 +53,8 @@ public sealed class JsonToolbarViewModel : ObservableObject
         timeZoneModeIndex = (int)settings.TimeZoneMode;
         expandDepthIndex = initialExpandDepthIndex;
 
+        SchemaRootPicker = new SchemaRootPickerViewModel(schemaSettings);
+
         RebuildSchemaItems();
 
         settings.PropertyChanged += OnSettingsPropertyChanged;
@@ -91,6 +93,13 @@ public sealed class JsonToolbarViewModel : ObservableObject
             _ = schemaSettings.SelectAsync(value >= 1 && value <= entries.Count ? entries[value - 1] : null);
         }
     }
+
+    /// <summary>
+    /// The schema-type picker shown beside the schema combo, for a schema file that holds several
+    /// independently-usable schemas. Always present; hides itself via
+    /// <see cref="SchemaRootPickerViewModel.IsApplicable"/> when the bound schema holds only one.
+    /// </summary>
+    public SchemaRootPickerViewModel SchemaRootPicker { get; }
 
     /// <summary>Whether the "jump to JSONPath" text entry should be shown - false for the
     /// shared NDJSON toolbar, which has no single-document JSONPath concept.</summary>

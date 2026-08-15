@@ -108,6 +108,75 @@ public sealed class JsonToolbarViewModelTests : IDisposable
         return new SchemaCatalogEntry(name, path, IsUser: true);
     }
 
+    /// <summary>An OpenAPI document: several named roots, and a root of its own that isn't a
+    /// schema - the case the root picker exists for.</summary>
+    private static SchemaCatalogEntry WriteOpenApiSchema(string name)
+    {
+        string directory = JsonSchemaCatalog.EnsureUserDirectory();
+        string path = Path.Combine(directory, name + ".json");
+        File.WriteAllText(path, """
+            {
+              "openapi": "3.0.3",
+              "components": {
+                "schemas": {
+                  "Booking": { "title": "Booking" },
+                  "Passenger": { "title": "Passenger" }
+                }
+              }
+            }
+            """);
+        return new SchemaCatalogEntry(name, path, IsUser: true);
+    }
+
+    [Fact]
+    public void SchemaRootPicker_IsHidden_WithNoSchemaBound()
+    {
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), new JsonSchemaSettings(), 0, _ => { });
+
+        Assert.False(toolbar.SchemaRootPicker.IsApplicable);
+        Assert.Empty(toolbar.SchemaRootPicker.Picks);
+    }
+
+    [Fact]
+    public async Task SchemaRootPicker_IsHidden_ForASingleSchemaFile()
+    {
+        var schemaSettings = new JsonSchemaSettings();
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
+
+        await schemaSettings.SelectAsync(WriteSchema("plain"));
+
+        Assert.False(toolbar.SchemaRootPicker.IsApplicable);
+    }
+
+    [Fact]
+    public async Task SwitchingToASingleSchemaFile_ClearsThePicker()
+    {
+        var schemaSettings = new JsonSchemaSettings();
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
+        await schemaSettings.SelectAsync(WriteOpenApiSchema("api"), rootName: "Booking");
+
+        await schemaSettings.SelectAsync(WriteSchema("plain"));
+
+        Assert.False(toolbar.SchemaRootPicker.IsApplicable);
+        Assert.Empty(toolbar.SchemaRootPicker.Picks);
+        Assert.Null(schemaSettings.SelectedRootName);
+    }
+
+    [Fact]
+    public async Task PickerButton_ReadsTheBoundType()
+    {
+        var schemaSettings = new JsonSchemaSettings();
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
+
+        // A multi-root schema binds a root immediately rather than sitting on a placeholder.
+        await schemaSettings.SelectAsync(WriteOpenApiSchema("api"));
+        Assert.Equal("Booking", toolbar.SchemaRootPicker.ButtonText);
+
+        schemaSettings.SelectRoot("Passenger");
+        Assert.Equal("Passenger", toolbar.SchemaRootPicker.ButtonText);
+    }
+
+
     [Fact]
     public void SchemaItems_StartEmpty_WithNoSchemaAndOpenFolderOnly()
     {

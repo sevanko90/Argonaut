@@ -120,8 +120,34 @@ public sealed class JsonViewModel : ObservableObject, IDocumentViewModel
     /// existing; LoadCore applies whatever is current once it creates the rows.</summary>
     private void OnSchemaChanged(object? sender, EventArgs e)
     {
-        if (!disposed)
-            rows?.SetSchema(SchemaSettings.Document);
+        if (disposed)
+            return;
+
+        rows?.SetSchema(SchemaSettings.Document);
+        UpdateSchemaRootMatches();
+    }
+
+    /// <summary>
+    /// Scores the bound schema's selectable types against the property names this document
+    /// actually carries, so the type picker can lead with the likely answers instead of an
+    /// alphabetical list of a hundred opaque names.
+    ///
+    /// Cheap enough to run inline on the UI thread - a bounded key sample the document walk
+    /// already has the machinery for, then a linear merge per candidate - and it is only ever
+    /// reached for a schema offering a choice at all. Silent when the sample is empty: indexing
+    /// may not have reached the root's members yet, and <see cref="MonitorIndexingAsync"/> calls
+    /// back once it has.
+    /// </summary>
+    private void UpdateSchemaRootMatches()
+    {
+        if (SchemaSettings.Document is not { } schema || schema.NamedRoots.Count == 0 || session is not { } current)
+            return;
+
+        var keys = JsonDocumentKeySampler.ReadRootKeys(current.Index, current.File, out bool fromArrayElement);
+        if (keys.Count == 0)
+            return;
+
+        SchemaSettings.SetRootMatches(JsonSchemaRootMatcher.Rank(schema, keys), fromArrayElement);
     }
 
     /// <summary>
@@ -130,13 +156,17 @@ public sealed class JsonViewModel : ObservableObject, IDocumentViewModel
     /// is still remembered as the user's choice (they'll want to fix the file, not re-pick it).
     /// Skipped for the nested per-NDJSON-line instances, whose selection is driven from - and
     /// persisted by - the owning NdJsonViewModel.
+    ///
+    /// The bound root is part of the choice, and lands here a moment after the entry does (the
+    /// schema has to parse before its root is known), so this writes twice for one user action -
+    /// harmless, and it keeps "what was selected" and "which root of it" in one record.
     /// </summary>
     private void OnSchemaSettingsPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is not (null or nameof(JsonSchemaSettings.SelectedEntry)) || Toolbar is null)
+        if (e.PropertyName is not (null or nameof(JsonSchemaSettings.SelectedEntry) or nameof(JsonSchemaSettings.SelectedRootName)) || Toolbar is null)
             return;
 
-        SchemaSelectionPreference.Save(FilePath, SchemaSettings.SelectedEntry?.FilePath);
+        SchemaSelectionPreference.Save(FilePath, SchemaSettings.SelectedEntry?.FilePath, SchemaSettings.IsRootExplicitlyChosen ? SchemaSettings.SelectedRootName : null);
     }
 
     /// <summary>
@@ -231,14 +261,14 @@ public sealed class JsonViewModel : ObservableObject, IDocumentViewModel
     /// </summary>
     private async Task ApplyInitialSchemaAsync(string documentPath)
     {
-        var (entries, preselected) = await Task.Run(() => JsonSchemaCatalog.GatherForDocument(documentPath));
+        var (entries, preselected, rootName) = await Task.Run(() => JsonSchemaCatalog.GatherForDocument(documentPath));
         if (disposed)
             return;
 
         SchemaSettings.SetEntries(entries);
 
         if (preselected is { } entry)
-            await SchemaSettings.SelectAsync(entry);
+            await SchemaSettings.SelectAsync(entry, rootName);
     }
 
     /// <summary>
@@ -272,6 +302,8 @@ public sealed class JsonViewModel : ObservableObject, IDocumentViewModel
         // NdJsonViewModel) while indexing's initial batch was still being awaited.
         if (SchemaSettings.Document is { } schema)
             rows.SetSchema(schema);
+
+        UpdateSchemaRootMatches();
 
         // Inference dereferences the mapping, so the session must join it before unmapping.
         session.RegisterDependentTask(InferDefaultDateSchemeAsync(session.Index, session.File, session.Token));
@@ -316,8 +348,16 @@ public sealed class JsonViewModel : ObservableObject, IDocumentViewModel
             return;
         }
 
-        if (!disposed)
-            StatusText = $"{FilePath} — {session.Index.ItemCount:N0} {session.Index.ItemNoun}";
+        if (disposed)
+            return;
+
+        StatusText = $"{FilePath} — {session.Index.ItemCount:N0} {session.Index.ItemNoun}";
+
+        // The root's own members can be spread across the whole file (five keys, each a huge
+        // array), so the sample taken at open may have seen only the first few. Now that every
+        // token is indexed, re-score against the complete key set. Ranking only, so an earlier
+        // partial answer was never wrong to show - just less informed.
+        UpdateSchemaRootMatches();
     }
 
     /// <summary>

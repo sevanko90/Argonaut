@@ -1,7 +1,16 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 
 namespace Argonaut.Features.Json.Schema;
+
+/// <summary>
+/// One schema a document can be bound to *as its root*, named as the schema file names it.
+/// Only ever populated from the definition containers - <c>$defs</c>, <c>definitions</c>, and
+/// OpenAPI's <c>components/schemas</c> - since those are the only places a schema file holds
+/// several independently-usable schemas side by side.
+/// </summary>
+public readonly record struct SchemaRoot(string Name, int NodeId);
 
 /// <summary>
 /// An immutable, flattened JSON Schema: a node array plus O(1)/O(log n) lookups for
@@ -24,15 +33,89 @@ namespace Argonaut.Features.Json.Schema;
 public sealed class JsonSchemaDocument
 {
     private readonly JsonSchemaNode[] nodes;
+    private readonly SchemaRoot[] namedRoots;
 
-    internal JsonSchemaDocument(JsonSchemaNode[] nodes, int rootId)
+    internal JsonSchemaDocument(JsonSchemaNode[] nodes, int documentRootId, SchemaRoot[] namedRoots, bool documentRootIsUsable)
     {
         this.nodes = nodes;
-        RootId = rootId;
+        this.namedRoots = namedRoots;
+        DocumentRootId = documentRootId;
+        DocumentRootIsUsable = documentRootIsUsable;
+        RootId = documentRootId;
     }
 
-    /// <summary>Node id of the schema's root, or -1 if the schema carried nothing usable.</summary>
+    /// <summary>Rebinding constructor - shares the node array, which is immutable once the
+    /// owning document exists, so switching roots allocates nothing but the wrapper.</summary>
+    private JsonSchemaDocument(JsonSchemaDocument source, int rootId, string? rootName)
+    {
+        nodes = source.nodes;
+        namedRoots = source.namedRoots;
+        DocumentRootId = source.DocumentRootId;
+        DocumentRootIsUsable = source.DocumentRootIsUsable;
+        RootId = rootId;
+        RootName = rootName;
+    }
+
+    /// <summary>Node id the row walk starts from - the document root unless
+    /// <see cref="WithRoot"/> has rebound it to one of <see cref="NamedRoots"/>.</summary>
     public int RootId { get; }
+
+    /// <summary>Node id of the schema file's own root object, whether or not it's usable.</summary>
+    public int DocumentRootId { get; }
+
+    /// <summary>Which of <see cref="NamedRoots"/> is currently bound, or null for the document
+    /// root. Round-tripped through <see cref="Infrastructure.SchemaSelectionPreference"/>.</summary>
+    public string? RootName { get; }
+
+    /// <summary>
+    /// The independently-bindable schemas this file holds, sorted by name. Empty for an ordinary
+    /// single-schema file. Non-empty for a file with <c>$defs</c>/<c>definitions</c>, and - the
+    /// case this exists for - for an OpenAPI document, where <em>every</em> usable schema is a
+    /// named component and the document root is not a schema at all.
+    /// </summary>
+    public IReadOnlyList<SchemaRoot> NamedRoots => namedRoots;
+
+    /// <summary>
+    /// Whether the schema file's own root says anything the walk could use. False for an OpenAPI
+    /// document, whose root carries <c>openapi</c>/<c>info</c>/<c>paths</c> and no schema
+    /// keywords - which is what tells the UI to offer <see cref="NamedRoots"/> instead of a
+    /// "document root" option that would label nothing.
+    /// </summary>
+    public bool DocumentRootIsUsable { get; }
+
+    /// <summary>
+    /// Binds one of <see cref="NamedRoots"/> as the root the walk starts from, or the document
+    /// root when <paramref name="rootName"/> is null. An unknown name binds the document root
+    /// rather than failing - a schema file edited to drop a type must not break the document
+    /// that remembered it.
+    ///
+    /// Returns <c>this</c> when nothing changes, so the caller's reference-equality check (see
+    /// <see cref="JsonSchemaSettings.SetDocument"/>) correctly treats it as a no-op.
+    /// </summary>
+    public JsonSchemaDocument WithRoot(string? rootName)
+    {
+        int rootId = DocumentRootId;
+        if (rootName is not null)
+        {
+            rootId = -1;
+            foreach (var root in namedRoots)
+            {
+                if (string.Equals(root.Name, rootName, StringComparison.Ordinal))
+                {
+                    rootId = root.NodeId;
+                    break;
+                }
+            }
+
+            if (rootId < 0)
+            {
+                rootName = null;
+                rootId = DocumentRootId;
+            }
+        }
+
+        return rootId == RootId && rootName == RootName ? this : new JsonSchemaDocument(this, rootId, rootName);
+    }
 
     internal int NodeCount => nodes.Length;
 
@@ -91,6 +174,21 @@ public sealed class JsonSchemaDocument
 
         return node.ItemsId;
     }
+
+    /// <summary>
+    /// This node's declared property names, ordinally sorted (empty when it declares none).
+    /// Exposed for <see cref="JsonSchemaRootMatcher"/>, which merges them against the document's
+    /// own keys - the array is the loader's, so callers must treat it as read-only.
+    /// </summary>
+    public IReadOnlyList<byte[]> GetPropertyKeys(int nodeId)
+        => (uint)nodeId < (uint)nodes.Length
+            ? nodes[nodeId].PropertyKeysUtf8 ?? Array.Empty<byte[]>()
+            : Array.Empty<byte[]>();
+
+    /// <summary>How many properties this node declares - shown in the root picker as a cheap
+    /// way to tell a two-field wrapper from the twenty-field payload it wraps.</summary>
+    public int GetPropertyCount(int nodeId)
+        => (uint)nodeId < (uint)nodes.Length ? nodes[nodeId].PropertyKeysUtf8?.Length ?? 0 : 0;
 
     public string? GetTitle(int nodeId)
         => (uint)nodeId < (uint)nodes.Length ? nodes[nodeId].Title : null;

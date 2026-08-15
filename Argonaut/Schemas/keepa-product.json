@@ -24,6 +24,10 @@
       "title": "Tokens consumed",
       "description": "Tokens this request cost."
     },
+    "tokenFlowReduction": {
+      "title": "Token flow reduction",
+      "description": "How much this request temporarily lowers the refill rate, in tokens per minute. Sits alongside refillRate rather than replacing it: the effective rate is the refill rate less this reduction."
+    },
     "processingTimeInMs": {
       "title": "Processing time",
       "description": "Server-side time to build this response, in milliseconds."

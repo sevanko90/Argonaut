@@ -31,6 +31,20 @@ namespace Argonaut.Features.Json.Schema;
 /// <c>$defs</c>/<c>definitions</c>, local <c>#/...</c> <c>$ref</c>, <c>allOf</c>,
 /// <c>oneOf</c>/<c>anyOf</c>, <c>enum</c> with <c>x-enumNames</c>/<c>x-enumDescriptions</c>.
 ///
+/// OpenAPI documents load through this same path, because an OpenAPI Schema Object *is* a JSON
+/// Schema: 3.1 is literally JSON Schema 2020-12, and 3.0's dialect is a draft-04 subset whose
+/// extra keywords (<c>nullable</c>, <c>discriminator</c>, <c>example</c>, <c>format</c>) are ones
+/// this loader already ignores, harmlessly, since none of them change what a row displays. The
+/// only structural difference is where the schemas live, so <c>components/schemas</c> is read as
+/// a third definition container alongside <c>$defs</c>/<c>definitions</c> - which is also exactly
+/// what makes an OpenAPI document's <c>#/components/schemas/…</c> refs resolve. (Swagger 2.0
+/// needs nothing special: its schemas are already under a root <c>definitions</c>.)
+///
+/// A file with several definitions holds several independently-usable schemas, so those are
+/// surfaced as <see cref="JsonSchemaDocument.NamedRoots"/> for the caller to choose a root from.
+/// This matters most for OpenAPI, where the document root is not a schema at all and the named
+/// components are the *only* usable roots.
+///
 /// Two ways to label individual enumerated values are recognised, and they are not equals.
 /// Standard JSON Schema has no keyword for annotating the members of a bare <c>enum</c> array -
 /// the values are just values - so the portable way to document them is a <c>oneOf</c> of
@@ -107,6 +121,12 @@ public static class JsonSchemaLoader
 
         private readonly Dictionary<string, int> nodesByPointer = new(StringComparer.Ordinal);
 
+        // Definitions found at the top level, i.e. the schemas a caller may bind as a root.
+        // Only collected at depth 0 - a nested $defs is an implementation detail of the schema
+        // that owns it, not something to offer the user.
+        private readonly List<SchemaRoot> namedRoots = new();
+        private readonly HashSet<string> namedRootNames = new(StringComparer.Ordinal);
+
         public JsonSchemaDocument? Build(JsonElement root)
         {
             int rootId = CreateNode(root, "#", depth: 0);
@@ -121,8 +141,25 @@ public static class JsonSchemaLoader
             for (int i = 0; i < nodes.Count; i++)
                 MergeBranches(i, state);
 
-            return new JsonSchemaDocument(nodes.ToArray(), rootId);
+            // After the passes, so a definition that is a bare $ref to another one is judged on
+            // its materialised content rather than looking empty.
+            var roots = namedRoots.FindAll(r => IsUsable(nodes[r.NodeId]));
+            roots.Sort(static (a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
+
+            return new JsonSchemaDocument(nodes.ToArray(), rootId, roots.ToArray(), IsUsable(nodes[rootId]));
         }
+
+        /// <summary>Whether a node says anything the row walk could act on. An OpenAPI document's
+        /// root fails this - it carries <c>openapi</c>/<c>info</c>/<c>paths</c> and no schema
+        /// keywords - and so does a definition that turned out to be an empty object.</summary>
+        private static bool IsUsable(JsonSchemaNode node)
+            => node.Title is not null
+                || node.Description is not null
+                || node.PropertyKeysUtf8 is not null
+                || node.PrefixItemIds is not null
+                || node.EnumLabels is not null
+                || node.ItemsId >= 0
+                || node.AdditionalPropertiesId >= 0;
 
         /// <summary>
         /// Pass 1. Creates the node for one schema object and recurses into every subschema
@@ -160,8 +197,14 @@ public static class JsonSchemaLoader
 
             // $defs entries are unreachable structurally but must exist as nodes for $ref to
             // find them, so they're created for their pointer registration alone.
-            ReadDefinitions(element, pointer, depth, "$defs");
-            ReadDefinitions(element, pointer, depth, "definitions");
+            ReadDefinitions(element, pointer, depth, "$defs", collectRoots: depth == 0);
+            ReadDefinitions(element, pointer, depth, "definitions", collectRoots: depth == 0);
+
+            // OpenAPI 3.x keeps its schemas one level deeper. Only at the document root, since
+            // that is the sole place `components` is an OpenAPI container rather than a
+            // coincidentally-named sibling.
+            if (depth == 0 && element.TryGetProperty("components", out var components) && components.ValueKind == JsonValueKind.Object)
+                ReadDefinitions(components, pointer + "/components", depth + 1, "schemas", collectRoots: true);
 
             ReadEnumLabels(element, node);
             ReadCompositions(element, node, id, pointer, depth);
@@ -230,13 +273,24 @@ public static class JsonSchemaLoader
             return ids;
         }
 
-        private void ReadDefinitions(JsonElement element, string pointer, int depth, string keyword)
+        /// <summary>
+        /// Creates a node per entry of one definition container (<c>$defs</c>,
+        /// <c>definitions</c>, or OpenAPI's <c>components/schemas</c>). With
+        /// <paramref name="collectRoots"/> the entries are also offered as bindable roots; a name
+        /// already claimed by an earlier container keeps its first node, so the containers merge
+        /// the same "first wins" way everything else here does.
+        /// </summary>
+        private void ReadDefinitions(JsonElement element, string pointer, int depth, string keyword, bool collectRoots)
         {
             if (!element.TryGetProperty(keyword, out var definitions) || definitions.ValueKind != JsonValueKind.Object)
                 return;
 
             foreach (var definition in definitions.EnumerateObject())
-                CreateNode(definition.Value, pointer + "/" + keyword + "/" + EscapeToken(definition.Name), depth + 1);
+            {
+                int id = CreateNode(definition.Value, pointer + "/" + keyword + "/" + EscapeToken(definition.Name), depth + 1);
+                if (collectRoots && id >= 0 && namedRootNames.Add(definition.Name))
+                    namedRoots.Add(new SchemaRoot(definition.Name, id));
+            }
         }
 
         /// <summary>

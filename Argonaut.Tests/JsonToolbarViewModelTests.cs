@@ -129,6 +129,58 @@ public sealed class JsonToolbarViewModelTests : IDisposable
     }
 
     [Fact]
+    public void SchemaButtonText_ReadsNoSchema_WhenNothingIsBound()
+    {
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), new JsonSchemaSettings(), 0, _ => { });
+
+        Assert.Equal(JsonToolbarViewModel.NoSchemaLabel, toolbar.SchemaButtonText);
+    }
+
+    [Fact]
+    public async Task SchemaButtonText_IsJustTheFile_ForASingleSchemaFile()
+    {
+        var schemaSettings = new JsonSchemaSettings();
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
+
+        await schemaSettings.SelectAsync(WriteSchema("geojson"));
+
+        // Nothing to choose within it, so a "file › type" label would be noise.
+        Assert.Equal("geojson", toolbar.SchemaButtonText);
+    }
+
+    [Fact]
+    public async Task SchemaButtonText_SpansFileAndType_ForAMultiRootSchema()
+    {
+        var schemaSettings = new JsonSchemaSettings();
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
+
+        await schemaSettings.SelectAsync(WriteOpenApiSchema("api"));
+
+        Assert.Equal("api" + JsonToolbarViewModel.SchemaPathSeparator + "Booking", toolbar.SchemaButtonText);
+
+        schemaSettings.SelectRoot("Passenger");
+
+        Assert.Equal("api" + JsonToolbarViewModel.SchemaPathSeparator + "Passenger", toolbar.SchemaButtonText);
+    }
+
+    [Fact]
+    public async Task SchemaButtonText_ReturnsToNoSchema_WhenCleared()
+    {
+        var schemaSettings = new JsonSchemaSettings();
+        var entry = WriteOpenApiSchema("api");
+        schemaSettings.SetEntries(new[] { entry });
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
+
+        toolbar.SelectedSchemaIndex = 1;
+        await WaitForDocumentAsync(schemaSettings);
+        Assert.StartsWith("api", toolbar.SchemaButtonText);
+
+        toolbar.SelectedSchemaIndex = 0;
+
+        Assert.Equal(JsonToolbarViewModel.NoSchemaLabel, toolbar.SchemaButtonText);
+    }
+
+    [Fact]
     public void SchemaRootPicker_IsHidden_WithNoSchemaBound()
     {
         var toolbar = new JsonToolbarViewModel(new DateHintSettings(), new JsonSchemaSettings(), 0, _ => { });

@@ -61,7 +61,32 @@ public sealed class JsonToolbarViewModel : ObservableObject
         schemaSettings.PropertyChanged += OnSchemaSettingsPropertyChanged;
     }
 
-    /// <summary>Labels for the schema combo: "No schema", one per catalog entry, then
+    /// <summary>Separates the schema file from the type within it in <see cref="SchemaButtonText"/>.</summary>
+    public const string SchemaPathSeparator = " › ";
+
+    /// <summary>
+    /// What the schema button reads when closed: the bound schema, and the type within it when the
+    /// schema offers a choice.
+    ///
+    /// The file and the type are one question - "what describes this document" - and were two
+    /// controls only because they were built at different times. Answering it in one place is both
+    /// narrower on the toolbar and fewer clicks for the common flow of picking a schema and then a
+    /// type, which previously meant two separate popups.
+    /// </summary>
+    public string SchemaButtonText
+    {
+        get
+        {
+            if (schemaSettings.SelectedEntry is not { } entry)
+                return NoSchemaLabel;
+
+            return SchemaRootPicker.IsApplicable
+                ? entry.DisplayName + SchemaPathSeparator + SchemaRootPicker.ButtonText
+                : entry.DisplayName;
+        }
+    }
+
+    /// <summary>Labels for the schema list: "No schema", one per catalog entry, then
     /// "Open schema folder…".</summary>
     public IReadOnlyList<string> SchemaItems
     {
@@ -190,6 +215,13 @@ public sealed class JsonToolbarViewModel : ObservableObject
             RebuildSchemaItems();
         else if (e.PropertyName is nameof(JsonSchemaSettings.SelectedEntry))
             SetField(ref selectedSchemaIndex, IndexOfSelectedEntry(), nameof(SelectedSchemaIndex));
+
+        // The button label spans both halves of the choice, so it has to follow either changing.
+        if (e.PropertyName is null
+            or nameof(JsonSchemaSettings.SelectedEntry)
+            or nameof(JsonSchemaSettings.RootOptions)
+            or nameof(JsonSchemaSettings.SelectedRootName))
+            OnPropertyChanged(nameof(SchemaButtonText));
     }
 
     private void RebuildSchemaItems()

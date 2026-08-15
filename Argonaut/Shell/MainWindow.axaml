@@ -53,7 +53,12 @@
                 BorderBrush="{DynamicResource AppBorderBrush}"
                 BorderThickness="0,0,0,1"
                 Padding="16,8">
-            <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto">
+            <!-- The document toolbar takes the star column, not an Auto one. An Auto column is
+                 given its full desired width, and the toolbar's panel reports the sum of its
+                 children, so it used to squeeze the star spacer to zero and push the close
+                 button off the right edge - losing the escape hatch first, which is backwards.
+                 Constrained here instead, the toolbar wraps internally and close stays put. -->
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto">
                 <search:FindBar Grid.Column="0"
                                 x:Name="FindBarControl"
                                 IsVisible="{Binding IsFindAvailable}"
@@ -61,13 +66,15 @@
                 <ContentControl Grid.Column="1"
                                 x:Name="DocumentToolbarArea"
                                 Content="{Binding CurrentDocument.Toolbar, FallbackValue={x:Null}}"
+                                HorizontalAlignment="Left"
                                 VerticalAlignment="Center" />
-                <Border Grid.Column="3"
+                <Border Grid.Column="2"
                         Width="1"
                         Margin="12,2,12,2"
                         Background="{DynamicResource AppBorderBrush}" />
-                <Button Grid.Column="4"
+                <Button Grid.Column="3"
                         x:Name="CloseFileButton"
+                        VerticalAlignment="Center"
                         Click="OnCloseFile"
                         Classes="iconbutton"
                         ToolTip.Tip="Close file">

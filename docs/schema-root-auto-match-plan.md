@@ -15,10 +15,13 @@ Phase 1 (shipped) makes those loadable and bindable:
   `$defs`/`definitions`, which is also what makes `#/components/schemas/…` refs resolve.
 - `JsonSchemaDocument.NamedRoots` exposes the independently-bindable schemas;
   `WithRoot(name)` re-points the walk's starting node, sharing the immutable node array.
-- `DocumentRootIsUsable` is false for an OpenAPI document, so the picker offers "No type"
-  rather than a "whole document" option that would label nothing.
-- The toolbar picker is a type-to-filter `AutoCompleteBox`, not a combo — 119 entries in a flat
-  scrolling list is not a usable control.
+- `DocumentRootIsUsable` is false for an OpenAPI document, so the picker omits the "whole
+  document" entry entirely rather than offering one that would label nothing. There is no "no
+  type" entry either: binding the wrong type cannot error, so a root is always bound and "No
+  schema" is how you see nothing.
+- The toolbar picker is a filterable flyout, not a combo — 119 entries in a flat scrolling list
+  is not a usable control. (It began as an `AutoCompleteBox`, which solved filtering but not
+  discovery: type-to-filter is no help to someone who does not yet know what to type.)
 - The choice persists per document via `SchemaSelectionPreference` (schema path + root name).
 
 Phase 1 leaves the user picking the type by hand, from a list where nothing indicates which entry
@@ -63,8 +66,9 @@ precision = matched / |Kc|      // how much of the schema the document uses
 ```
 
 Rank on `coverage` first, break ties on `precision` — that prefers the tight type over a superset
-that happens to contain it. Reject outright below a `coverage` floor (start at 0.6) and reject an
-ambiguous win (top two within a small margin, say 0.05, on both measures). **Showing nothing beats
+that happens to contain it. Reject outright below a `coverage` floor (shipped as
+`MinimumCoverage = 0.5`) and reject an ambiguous win (top two within `AmbiguityMargin = 0.05` on
+both measures). **Showing nothing beats
 confidently binding the wrong type**, and a near-tie between `CommitBookingResponse` and
 `RetrieveBookingResponse` is exactly the case where the user must choose.
 
@@ -74,11 +78,11 @@ name like `data` or `id`.
 ### Root shape
 
 - Document root is an **object** → score its own keys.
-- Document root is an **array** → score element 0's keys, and bind the winner as the *items*
-  schema rather than the root. This needs `JsonSchemaDocument` to support "root is an array of
-  *C*", which `WithRoot` does not currently express. Simplest form: a synthetic node holding
-  `ItemsId = C`, appended to the node array at load time. Decide during implementation whether
-  this earns its complexity or waits.
+- Document root is an **array** → score element 0's keys. *Shipped partially*:
+  `JsonDocumentKeySampler` samples element 0 and reports it via `matchedElementOfArray`, and the
+  picker states "Matched against the first element of the array" so the result cannot be misread.
+  Binding the winner as the array's *items* schema is **not** done — `WithRoot` cannot express
+  "root is an array of C", and would need a synthetic node holding `ItemsId = C`. Still open.
 - Root is a **scalar** → no match, no picker change.
 
 ## Known weak spot: wrapper roots
@@ -87,8 +91,8 @@ name like `data` or `id`.
 scoring above correctly declines rather than guessing — confirmed against `kyteapi.json`, where
 such a root scores 0% on all 119 candidates.
 
-The fix is the same machinery aimed one level down, and it is also the better UX the picker should
-grow into: **a match affordance on container rows**. An icon on an expanded object/array row that,
+The fix is the same machinery aimed one level down: **a row-level bind button**, now written up in
+`docs/schema-row-bind-plan.md`. An icon on an expanded object/array row that,
 when clicked, scores *that node's* keys against every named root and binds the winner there. It
 subsumes auto-match (the root row is just one such node), solves wrapper roots directly (the user
 clicks `data`), and gives the user a way to correct a bad guess in place rather than hunting a
@@ -114,7 +118,9 @@ each, 100% on both measures. No name-based scorer can separate them, so `Best` d
 appear in the shortlist. Auto-binding would have picked one at random and been silently wrong half
 the time.
 
-Step 5 (per-node match affordance) remains.
+Step 5 remains, and is written up separately in `docs/schema-row-bind-plan.md` — it is a
+change to the row walk rather than to schema selection, and is deferred for want of a document
+that exhibits the problem.
 
 ## Build order
 
@@ -131,7 +137,8 @@ Step 5 (per-node match affordance) remains.
 4. **Surface the result** — the picker must show that the type was *guessed*, not chosen, and let
    one click accept or change it. An unlabelled auto-binding that turns out wrong is worse than no
    binding, because the user has no reason to distrust it.
-5. **Per-node match affordance** — the row icon and the per-token override map, as above.
+5. **Row-level bind button** — the row icon and the per-token override map. Split out into
+   `docs/schema-row-bind-plan.md`; deferred.
 
 ## Explicitly out of scope
 

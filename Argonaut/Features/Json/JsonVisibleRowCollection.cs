@@ -78,6 +78,13 @@ public sealed class JsonRow
     /// a rule between them.</summary>
     public bool HasSchemaTitleAndDescription => SchemaTitle is not null && SchemaDescription is not null;
 
+    /// <summary>Whether this row opens a container, so the schema gutter can render its label as a
+    /// heading over the child labels indented beneath it. Excludes placeholder rows, which borrow
+    /// their container's <see cref="Kind"/> but describe a display cap rather than the container
+    /// itself (they carry no schema label either way, so this only guards against later misuse).
+    /// Closing-bracket rows are <c>EndObject</c>/<c>EndArray</c> and so are excluded already.</summary>
+    public bool IsContainerRow => !IsPlaceholder && Kind is JsonTokenKind.StartObject or JsonTokenKind.StartArray;
+
     /// <summary>Muted note that Name and/or Value was display-capped (with the full length), or null.</summary>
     public string? TruncationHint { get; }
 

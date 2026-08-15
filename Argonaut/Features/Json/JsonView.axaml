@@ -54,6 +54,13 @@
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{DynamicResource AppAccentBrush}" />
         </Style>
+
+        <!-- Schema gutter: a container's label heads the run of child labels indented beneath it.
+             Weight only - every container is a heading, so a deep document would otherwise stack
+             several emphasised rows in a row, and nesting is already carried by the indent. -->
+        <Style Selector="TextBlock.schemaContainer">
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
     </UserControl.Styles>
 
     <Border BorderBrush="{DynamicResource AppBorderBrush}"
@@ -140,6 +147,7 @@
                                      the row sits. Trimmed rather than clipped so an ellipsis
                                      tells the reader there is more to hover for. -->
                                 <TextBlock Text="{Binding SchemaLabel}"
+                                           Classes.schemaContainer="{Binding IsContainerRow}"
                                            Margin="{Binding Depth, Converter={StaticResource SchemaGutterDepthToMargin}}"
                                            Foreground="{DynamicResource AppMutedTextBrush}"
                                            FontFamily="{DynamicResource AppContentFontFamily}"

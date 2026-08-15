@@ -17,10 +17,11 @@ namespace Argonaut.Features.Json;
 /// </summary>
 public sealed class JsonRow
 {
-    public JsonRow(int position, int tokenIndex, int depth, JsonTokenKind kind, string? name, string value, bool hasChildren, bool isExpanded, bool isPlaceholder, string? hint = null, string? truncationHint = null, long? truncatedValueOffset = null, int? arrayIndex = null, string? schemaTitle = null, string? schemaDescription = null)
+    public JsonRow(int position, int tokenIndex, int depth, JsonTokenKind kind, string? name, string value, bool hasChildren, bool isExpanded, bool isPlaceholder, string? hint = null, string? truncationHint = null, long? truncatedValueOffset = null, int? arrayIndex = null, string? schemaTitle = null, string? schemaDescription = null, string? schemaLabel = null)
     {
         SchemaTitle = schemaTitle;
         SchemaDescription = schemaDescription;
+        SchemaLabel = schemaLabel;
         Position = position;
         TokenIndex = tokenIndex;
         Depth = depth;
@@ -55,14 +56,27 @@ public sealed class JsonRow
     /// <summary>Muted decoded-value hint (e.g. a decoded date) to render after Value, or null.</summary>
     public string? Hint { get; }
 
-    /// <summary>Muted label from the bound JSON Schema (the matching node's <c>title</c>, or an
-    /// enum member's label) to render after Value, or null. Kept separate from <see cref="Hint"/>
-    /// so a row can carry both a decoded date and a schema title.</summary>
+    /// <summary>The bound schema's <c>title</c> for this row (or an enum member's label), or null
+    /// when the schema documents no title. This is the *real* title only - the description
+    /// fallback lives on <see cref="SchemaLabel"/> - so the tooltip can tell "titled" apart from
+    /// "described" and only draw its title/description separator when there genuinely are
+    /// both.</summary>
     public string? SchemaTitle { get; }
 
-    /// <summary>The schema's <c>description</c> for this row, shown as the tooltip on
-    /// <see cref="SchemaTitle"/>. Null when the schema documents no description.</summary>
+    /// <summary>The schema's <c>description</c> for this row, shown under the title in the schema
+    /// gutter's tooltip. Null when the schema documents no description.</summary>
     public string? SchemaDescription { get; }
+
+    /// <summary>What the schema gutter renders on this row: <see cref="SchemaTitle"/>, falling
+    /// back to the first line of <see cref="SchemaDescription"/> for the (common) generated-schema
+    /// case of a described-but-untitled property. Null when the schema says nothing here, which is
+    /// also what blanks the gutter cell. Kept separate from <see cref="Hint"/> so a row can carry
+    /// both a decoded date and a schema label.</summary>
+    public string? SchemaLabel { get; }
+
+    /// <summary>Drives the tooltip's title/description separator: only a row carrying both needs
+    /// a rule between them.</summary>
+    public bool HasSchemaTitleAndDescription => SchemaTitle is not null && SchemaDescription is not null;
 
     /// <summary>Muted note that Name and/or Value was display-capped (with the full length), or null.</summary>
     public string? TruncationHint { get; }
@@ -545,6 +559,7 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
 
         string? schemaTitle = null;
         string? schemaDescription = null;
+        string? schemaLabel = null;
         if (schema is not null && vrow.SchemaNodeId >= 0)
         {
             schemaTitle = schema.GetTitle(vrow.SchemaNodeId);
@@ -562,9 +577,9 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
             // A schema that documents a property with `description` and no `title` is the norm
             // rather than the exception once schemas are generated rather than hand-written: in a
             // real OpenAPI document 83% of documented properties carry a description only. Those
-            // rows would otherwise show nothing at all - and, since the label element is what
-            // carries the tooltip, their description would be unreachable too.
-            schemaTitle ??= FirstLine(schemaDescription);
+            // rows would otherwise show nothing at all in the gutter - and, since the gutter cell
+            // is what carries the tooltip, their description would be unreachable too.
+            schemaLabel = schemaTitle ?? FirstLine(schemaDescription);
         }
 
         string? truncationHint = valueTruncated
@@ -577,7 +592,7 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
 
         int? arrayIndex = vrow.ArrayIndex >= 0 ? vrow.ArrayIndex : null;
 
-        return new JsonRow(position, vrow.TokenIndex, token.Depth, token.Kind, name, value, hasChildren, expanded, isPlaceholder: false, hint: hint, truncationHint: truncationHint, truncatedValueOffset: truncatedValueOffset, arrayIndex: arrayIndex, schemaTitle: schemaTitle, schemaDescription: schemaDescription);
+        return new JsonRow(position, vrow.TokenIndex, token.Depth, token.Kind, name, value, hasChildren, expanded, isPlaceholder: false, hint: hint, truncationHint: truncationHint, truncatedValueOffset: truncatedValueOffset, arrayIndex: arrayIndex, schemaTitle: schemaTitle, schemaDescription: schemaDescription, schemaLabel: schemaLabel);
     }
 
     private string? BuildHint(int tokenIndex, JsonTokenInfo token)
@@ -671,14 +686,14 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
     };
 
     /// <summary>
-    /// The first line of a schema description, for use as an inline label. Descriptions are prose
+    /// The first line of a schema description, for use as a gutter label. Descriptions are prose
     /// and often several paragraphs (frequently with a trailing "Schema link: …"), so only the
     /// opening line is a candidate; the full text stays on the tooltip.
     ///
-    /// The hard cap is a measuring guard, not the visible limit - the row trims to its own width
-    /// and shows an ellipsis there - so nothing is cut short enough for the cap to be what the
-    /// user sees. Returns the original string when neither applies, so the common short
-    /// description costs no allocation.
+    /// The hard cap is a measuring guard, not the visible limit - the gutter cell trims to the
+    /// gutter's current width and shows an ellipsis there - so nothing is cut short enough for the
+    /// cap to be what the user sees. Returns the original string when neither applies, so the
+    /// common short description costs no allocation.
     /// </summary>
     private const int MaxSchemaLabelLength = 200;
 

@@ -108,11 +108,16 @@ public class JsonSchemaRowTests
         {
             var row = RowFor(rows, FindMember(index, mmap, "bare"));
 
-            // Generated schemas document with `description` and no `title`, so a row that
-            // rendered only titles would show nothing - and, since the label element carries the
+            // Generated schemas document with `description` and no `title`, so a gutter that
+            // rendered only titles would show nothing - and, since the gutter cell carries the
             // tooltip, would hide the description too.
-            Assert.Equal("Only a description, no title.", row.SchemaTitle);
+            Assert.Equal("Only a description, no title.", row.SchemaLabel);
             Assert.Equal("Only a description, no title.", row.SchemaDescription);
+
+            // The fallback must not masquerade as a real title, or the tooltip would draw a
+            // separator above a description it is only repeating.
+            Assert.Null(row.SchemaTitle);
+            Assert.False(row.HasSchemaTitleAndDescription);
         }, LoadSchema());
     }
 
@@ -123,7 +128,7 @@ public class JsonSchemaRowTests
         {
             var row = RowFor(rows, FindMember(index, mmap, "prose"));
 
-            Assert.Equal("First line only.", row.SchemaTitle);
+            Assert.Equal("First line only.", row.SchemaLabel);
 
             // The tooltip keeps the whole thing.
             Assert.Contains("Second paragraph", row.SchemaDescription);
@@ -138,8 +143,8 @@ public class JsonSchemaRowTests
             var row = RowFor(rows, FindMember(index, mmap, "markup"));
 
             // Generated docs break paragraphs with literal <br>/</br> as often as with a newline,
-            // and the raw tag must never reach the row.
-            Assert.Equal("Docs-site prose.", row.SchemaTitle);
+            // and the raw tag must never reach the gutter.
+            Assert.Equal("Docs-site prose.", row.SchemaLabel);
         }, LoadSchema());
     }
 
@@ -151,6 +156,7 @@ public class JsonSchemaRowTests
             var row = RowFor(rows, FindMember(index, mmap, "name"));
 
             Assert.Equal("Product name", row.SchemaTitle);
+            Assert.Equal("Product name", row.SchemaLabel);
         }, LoadSchema());
     }
 
@@ -163,6 +169,9 @@ public class JsonSchemaRowTests
 
             Assert.Equal("Product name", row.SchemaTitle);
             Assert.Equal("What the thing is called.", row.SchemaDescription);
+
+            // Both present, so the gutter tooltip draws its separator between them.
+            Assert.True(row.HasSchemaTitleAndDescription);
         }, LoadSchema());
     }
 

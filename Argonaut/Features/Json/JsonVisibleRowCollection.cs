@@ -5,6 +5,7 @@ using System.Text;
 using System.Threading.Tasks;
 using Avalonia.Threading;
 using Argonaut.Features.Json.Hints;
+using Argonaut.Features.Json.Schema;
 using Argonaut.Infrastructure;
 
 namespace Argonaut.Features.Json;
@@ -16,8 +17,11 @@ namespace Argonaut.Features.Json;
 /// </summary>
 public sealed class JsonRow
 {
-    public JsonRow(int position, int tokenIndex, int depth, JsonTokenKind kind, string? name, string value, bool hasChildren, bool isExpanded, bool isPlaceholder, string? hint = null, string? truncationHint = null, long? truncatedValueOffset = null, int? arrayIndex = null)
+    public JsonRow(int position, int tokenIndex, int depth, JsonTokenKind kind, string? name, string value, bool hasChildren, bool isExpanded, bool isPlaceholder, string? hint = null, string? truncationHint = null, long? truncatedValueOffset = null, int? arrayIndex = null, string? schemaTitle = null, string? schemaDescription = null, string? schemaLabel = null)
     {
+        SchemaTitle = schemaTitle;
+        SchemaDescription = schemaDescription;
+        SchemaLabel = schemaLabel;
         Position = position;
         TokenIndex = tokenIndex;
         Depth = depth;
@@ -51,6 +55,35 @@ public sealed class JsonRow
 
     /// <summary>Muted decoded-value hint (e.g. a decoded date) to render after Value, or null.</summary>
     public string? Hint { get; }
+
+    /// <summary>The bound schema's <c>title</c> for this row (or an enum member's label), or null
+    /// when the schema documents no title. This is the *real* title only - the description
+    /// fallback lives on <see cref="SchemaLabel"/> - so the tooltip can tell "titled" apart from
+    /// "described" and only draw its title/description separator when there genuinely are
+    /// both.</summary>
+    public string? SchemaTitle { get; }
+
+    /// <summary>The schema's <c>description</c> for this row, shown under the title in the schema
+    /// gutter's tooltip. Null when the schema documents no description.</summary>
+    public string? SchemaDescription { get; }
+
+    /// <summary>What the schema gutter renders on this row: <see cref="SchemaTitle"/>, falling
+    /// back to the first line of <see cref="SchemaDescription"/> for the (common) generated-schema
+    /// case of a described-but-untitled property. Null when the schema says nothing here, which is
+    /// also what blanks the gutter cell. Kept separate from <see cref="Hint"/> so a row can carry
+    /// both a decoded date and a schema label.</summary>
+    public string? SchemaLabel { get; }
+
+    /// <summary>Drives the tooltip's title/description separator: only a row carrying both needs
+    /// a rule between them.</summary>
+    public bool HasSchemaTitleAndDescription => SchemaTitle is not null && SchemaDescription is not null;
+
+    /// <summary>Whether this row opens a container, so the schema gutter can render its label as a
+    /// heading over the child labels indented beneath it. Excludes placeholder rows, which borrow
+    /// their container's <see cref="Kind"/> but describe a display cap rather than the container
+    /// itself (they carry no schema label either way, so this only guards against later misuse).
+    /// Closing-bracket rows are <c>EndObject</c>/<c>EndArray</c> and so are excluded already.</summary>
+    public bool IsContainerRow => !IsPlaceholder && Kind is JsonTokenKind.StartObject or JsonTokenKind.StartArray;
 
     /// <summary>Muted note that Name and/or Value was display-capped (with the full length), or null.</summary>
     public string? TruncationHint { get; }
@@ -110,6 +143,12 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
     private readonly JsonStructureIndex index;
     private readonly MMapFile mmap;
     private readonly IReadOnlyList<IValueHintProvider>? hintProviders;
+
+    // The bound schema, or null. Resolution happens top-down during AppendSubtree (each row
+    // inherits its parent's node id), never bottom-up from a row's path - see
+    // JsonSchemaDocument's remarks for why. With no schema bound the whole feature costs one
+    // `schemaNodeId < 0` test per row and never touches the mapping.
+    private JsonSchemaDocument? schema;
 
     // A container is expanded by default when its depth is below defaultExpandDepth; this
     // set holds only the containers where the user has explicitly toggled away from that
@@ -525,6 +564,31 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
 
         string? hint = isContainer ? null : BuildHint(vrow.TokenIndex, token);
 
+        string? schemaTitle = null;
+        string? schemaDescription = null;
+        string? schemaLabel = null;
+        if (schema is not null && vrow.SchemaNodeId >= 0)
+        {
+            schemaTitle = schema.GetTitle(vrow.SchemaNodeId);
+            schemaDescription = schema.GetDescription(vrow.SchemaNodeId);
+
+            // Enum matching reuses the value string already decoded above - no extra mmap read,
+            // no extra allocation - and a matched member label supersedes the node's own title,
+            // since "Sold by third party" says more here than "Availability".
+            if (!isContainer && schema.TryGetEnumLabel(vrow.SchemaNodeId, value, token.Kind, out var enumTitle, out var enumDescription))
+            {
+                schemaTitle = enumTitle ?? schemaTitle;
+                schemaDescription = enumDescription ?? schemaDescription;
+            }
+
+            // A schema that documents a property with `description` and no `title` is the norm
+            // rather than the exception once schemas are generated rather than hand-written: in a
+            // real OpenAPI document 83% of documented properties carry a description only. Those
+            // rows would otherwise show nothing at all in the gutter - and, since the gutter cell
+            // is what carries the tooltip, their description would be unreachable too.
+            schemaLabel = schemaTitle ?? FirstLine(schemaDescription);
+        }
+
         string? truncationHint = valueTruncated
             ? $"(truncated — full length {FormatByteLength(token.Length)})"
             : nameTruncated
@@ -535,7 +599,7 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
 
         int? arrayIndex = vrow.ArrayIndex >= 0 ? vrow.ArrayIndex : null;
 
-        return new JsonRow(position, vrow.TokenIndex, token.Depth, token.Kind, name, value, hasChildren, expanded, isPlaceholder: false, hint: hint, truncationHint: truncationHint, truncatedValueOffset: truncatedValueOffset, arrayIndex: arrayIndex);
+        return new JsonRow(position, vrow.TokenIndex, token.Depth, token.Kind, name, value, hasChildren, expanded, isPlaceholder: false, hint: hint, truncationHint: truncationHint, truncatedValueOffset: truncatedValueOffset, arrayIndex: arrayIndex, schemaTitle: schemaTitle, schemaDescription: schemaDescription, schemaLabel: schemaLabel);
     }
 
     private string? BuildHint(int tokenIndex, JsonTokenInfo token)
@@ -628,6 +692,54 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
         _ => $"{bytes / (1024.0 * 1024.0 * 1024.0):0.#} GB"
     };
 
+    /// <summary>
+    /// The first line of a schema description, for use as a gutter label. Descriptions are prose
+    /// and often several paragraphs (frequently with a trailing "Schema link: …"), so only the
+    /// opening line is a candidate; the full text stays on the tooltip.
+    ///
+    /// The hard cap is a measuring guard, not the visible limit - the gutter cell trims to the
+    /// gutter's current width and shows an ellipsis there - so nothing is cut short enough for the
+    /// cap to be what the user sees. Returns the original string when neither applies, so the
+    /// common short description costs no allocation.
+    /// </summary>
+    private const int MaxSchemaLabelLength = 200;
+
+    private static string? FirstLine(string? description)
+    {
+        if (description is null)
+            return null;
+
+        int end = description.IndexOfAny(NewLineChars);
+
+        // Descriptions written for a docs site break paragraphs with a literal line-break tag as
+        // often as with a newline, and everything after the first break is no more wanted on the
+        // row than a second paragraph would be. Both spellings occur - the real OpenAPI document
+        // this was built against uses the (invalid, but common) closing form.
+        int tag = EarliestOf(description, "<br", "</br");
+        if (tag >= 0 && (end < 0 || tag < end))
+            end = tag;
+
+        if (end < 0)
+            end = description.Length;
+        if (end > MaxSchemaLabelLength)
+            end = MaxSchemaLabelLength;
+
+        return end == description.Length ? description : description[..end].TrimEnd();
+    }
+
+    private static readonly char[] NewLineChars = { '\r', '\n' };
+
+    private static int EarliestOf(string text, string a, string b)
+    {
+        int first = text.IndexOf(a, StringComparison.OrdinalIgnoreCase);
+        int second = text.IndexOf(b, StringComparison.OrdinalIgnoreCase);
+
+        if (first < 0)
+            return second;
+
+        return second < 0 ? first : Math.Min(first, second);
+    }
+
     private static bool IsContainer(JsonTokenKind kind) => kind is JsonTokenKind.StartObject or JsonTokenKind.StartArray;
 
     /// <summary>
@@ -644,7 +756,7 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
         var newVisible = new List<VisibleRow>(visibleRows.Count);
         visibleTreeSettled = index.TokenCount > 0; // AppendSubtree clears it on any incomplete container
         if (index.TokenCount > 0)
-            AppendSubtree(0, newVisible, arrayIndex: -1);
+            AppendSubtree(0, newVisible, arrayIndex: -1, schemaNodeId: schema?.RootId ?? -1);
 
         var oldVisible = visibleRows;
         var oldUnsettledCollapsed = unsettledCollapsedContainerTokens;
@@ -725,9 +837,9 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
         return set;
     }
 
-    private void AppendSubtree(int tokenIndex, List<VisibleRow> into, int arrayIndex)
+    private void AppendSubtree(int tokenIndex, List<VisibleRow> into, int arrayIndex, int schemaNodeId)
     {
-        into.Add(VisibleRow.ForToken(tokenIndex, arrayIndex));
+        into.Add(VisibleRow.ForToken(tokenIndex, arrayIndex, schemaNodeId));
 
         var token = index.GetToken(tokenIndex);
         if (!IsContainer(token.Kind))
@@ -755,7 +867,7 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
                 // Show the container's own closing bracket as its own row, at the same
                 // depth as the opening one, so an expanded container's extent is visible
                 // without collapsing it back down. Closed and fully displayed - settled.
-                into.Add(VisibleRow.ForToken(containerEnd, arrayIndex: -1));
+                into.Add(VisibleRow.ForToken(containerEnd, arrayIndex: -1, schemaNodeId: -1));
                 return;
             }
 
@@ -779,7 +891,20 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
             }
 
             var child = index.GetToken(childIndex);
-            AppendSubtree(childIndex, into, arrayIndex: token.Kind == JsonTokenKind.StartArray ? shown : -1);
+
+            // One O(1) step down the schema, in lockstep with the step down the document. The
+            // `schemaNodeId < 0` short-circuit is what keeps the no-schema case free, and it also
+            // means that once the schema runs out below some subtree, -1 propagates and the whole
+            // rest of that subtree costs nothing either.
+            int childSchemaId = schemaNodeId < 0 || schema is null
+                ? -1
+                : token.Kind == JsonTokenKind.StartArray
+                    ? schema.ResolveElement(schemaNodeId, shown)
+                    : child.NameLength >= 0
+                        ? schema.ResolveMember(schemaNodeId, mmap.GetSpan(child.NameOffset, child.NameLength))
+                        : -1;
+
+            AppendSubtree(childIndex, into, arrayIndex: token.Kind == JsonTokenKind.StartArray ? shown : -1, schemaNodeId: childSchemaId);
             shown++;
 
             if (IsContainer(child.Kind))
@@ -811,6 +936,22 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
     /// - the ListBox re-realizes the viewport and BuildRow re-formats hints under the new
     /// settings.
     /// </summary>
+    /// <summary>
+    /// Binds (or, with null, unbinds) a JSON Schema and rebuilds the visible list. Unlike a
+    /// date-hint change - which only affects row *text*, so
+    /// <see cref="InvalidateRealizedRows"/> suffices - schema node ids are resolved during the
+    /// walk and stored in the visible rows themselves, so they can only be recomputed by
+    /// re-walking. The structure is unchanged, so this lands on Rebuild's Reset path.
+    /// </summary>
+    public void SetSchema(JsonSchemaDocument? schema)
+    {
+        if (ReferenceEquals(this.schema, schema))
+            return;
+
+        this.schema = schema;
+        Rebuild();
+    }
+
     public void InvalidateRealizedRows()
     {
         rowCache.Clear();
@@ -901,16 +1042,17 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
 
     private readonly struct VisibleRow
     {
-        private VisibleRow(int tokenIndex, int placeholderContainerTokenIndex, int arrayIndex)
+        private VisibleRow(int tokenIndex, int placeholderContainerTokenIndex, int arrayIndex, int schemaNodeId)
         {
             TokenIndex = tokenIndex;
             PlaceholderContainerTokenIndex = placeholderContainerTokenIndex;
             ArrayIndex = arrayIndex;
+            SchemaNodeId = schemaNodeId;
         }
 
-        public static VisibleRow ForToken(int tokenIndex, int arrayIndex = -1) => new(tokenIndex, -1, arrayIndex);
+        public static VisibleRow ForToken(int tokenIndex, int arrayIndex = -1, int schemaNodeId = -1) => new(tokenIndex, -1, arrayIndex, schemaNodeId);
 
-        public static VisibleRow ForMorePlaceholder(int containerTokenIndex) => new(-1, containerTokenIndex, -1);
+        public static VisibleRow ForMorePlaceholder(int containerTokenIndex) => new(-1, containerTokenIndex, -1, -1);
 
         public int TokenIndex { get; }
 
@@ -921,6 +1063,12 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
         /// AppendSubtree, the only place that knows a child's ordinal for free while
         /// walking.</summary>
         public int ArrayIndex { get; }
+
+        /// <summary>Node id in the bound <see cref="JsonSchemaDocument"/> describing this row, or
+        /// -1 when no schema is bound or the schema says nothing about this position. Resolved
+        /// once, during the walk that produced this row (see AppendSubtree), so BuildRow never
+        /// has to work out where in the schema a row sits.</summary>
+        public int SchemaNodeId { get; }
 
         public bool IsPlaceholder => TokenIndex < 0;
     }

@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Threading.Tasks;
 using Argonaut.Features.Json;
 using Argonaut.Features.Json.Hints;
+using Argonaut.Features.Json.Schema;
 using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
 using Argonaut.Shell;
@@ -85,6 +86,14 @@ public sealed class NdJsonViewModel : ObservableObject, IDocumentViewModel
     /// </summary>
     public DateHintSettings HintSettings { get; } = new();
 
+    /// <summary>
+    /// Master schema settings for the whole NDJSON file - every line of an NDJSON file has the
+    /// same shape, so one schema selection covers all of them. The parsed
+    /// <see cref="JsonSchemaDocument"/> is pushed into each line's nested JsonViewModel by
+    /// reference, so selecting a schema parses it once, not once per line viewed.
+    /// </summary>
+    public JsonSchemaSettings SchemaSettings { get; } = new();
+
     /// <summary>Default-expand depth applied to each selected line's nested JsonViewModel.</summary>
     public int DefaultExpandDepth { get; set; } = 2;
 
@@ -114,6 +123,28 @@ public sealed class NdJsonViewModel : ObservableObject, IDocumentViewModel
     public NdJsonViewModel()
     {
         HintSettings.PropertyChanged += OnMasterHintSettingsPropertyChanged;
+        SchemaSettings.SchemaChanged += OnMasterSchemaChanged;
+        SchemaSettings.PropertyChanged += OnMasterSchemaSettingsPropertyChanged;
+    }
+
+    /// <summary>Shares the newly-parsed schema with the line currently open in the tree.</summary>
+    private void OnMasterSchemaChanged(object? sender, EventArgs e)
+        => selectedLineJsonViewModel?.SchemaSettings.SetDocument(SchemaSettings.Document);
+
+    /// <summary>Persists the schema choice against the NDJSON file itself, so reopening it
+    /// restores the binding for every line.</summary>
+    private void OnMasterSchemaSettingsPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is null or nameof(JsonSchemaSettings.SelectedEntry) or nameof(JsonSchemaSettings.SelectedRootName))
+            SchemaSelectionPreference.Save(FilePath, SchemaSettings.SelectedEntry?.FilePath, SchemaSettings.IsRootExplicitlyChosen ? SchemaSettings.SelectedRootName : null);
+    }
+
+    /// <summary>Lifts the open line's schema-type match scores into the shared toolbar - see the
+    /// remark where this is subscribed.</summary>
+    private void OnChildSchemaSettingsPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (sender is JsonSchemaSettings child && e.PropertyName is null or nameof(JsonSchemaSettings.RootMatches))
+            SchemaSettings.SetRootMatches(child.RootMatches, child.MatchesDescribeArrayElements);
     }
 
     /// <summary>Pushes a master default-scheme or time-zone-mode change down into the currently
@@ -167,7 +198,10 @@ public sealed class NdJsonViewModel : ObservableObject, IDocumentViewModel
     {
         FilePath = path;
         DefaultExpandDepth = ExpandDepthPreference.Load();
-        Toolbar = new JsonToolbarViewModel(HintSettings, DefaultExpandDepth, SetDefaultExpandDepth);
+        Toolbar = new JsonToolbarViewModel(HintSettings, SchemaSettings, DefaultExpandDepth, SetDefaultExpandDepth);
+
+        // Alongside indexing, not blocking it - see JsonViewModel.ApplyInitialSchemaAsync.
+        _ = ApplyInitialSchemaAsync(path);
 
         var session = IndexedFileSession<FileOffsetIndex>.Start(new MMapFile(path), FileOffsetIndex.StartIndexing, progressReporter);
         this.session = session;
@@ -185,6 +219,20 @@ public sealed class NdJsonViewModel : ObservableObject, IDocumentViewModel
 
         UpdateStatusText();
         _ = MonitorIndexingAsync(session);
+    }
+
+    /// <summary>Populates the schema catalog and applies any sidecar/remembered binding for the
+    /// NDJSON file - see <see cref="JsonSchemaCatalog.GatherForDocument"/>.</summary>
+    private async Task ApplyInitialSchemaAsync(string documentPath)
+    {
+        var (entries, preselected, rootName) = await Task.Run(() => JsonSchemaCatalog.GatherForDocument(documentPath));
+        if (disposed)
+            return;
+
+        SchemaSettings.SetEntries(entries);
+
+        if (preselected is { } entry)
+            await SchemaSettings.SelectAsync(entry, rootName);
     }
 
     public ISearchNavigator CreateSearchNavigator() => new NdJsonSearchNavigator(this);
@@ -250,7 +298,11 @@ public sealed class NdJsonViewModel : ObservableObject, IDocumentViewModel
         var previous = SelectedLineJsonViewModel;
         SelectedLineJsonViewModel = null;
         if (previous is not null)
+        {
             previous.HintSettings.PropertyChanged -= OnChildHintSettingsPropertyChanged;
+            previous.SchemaSettings.PropertyChanged -= OnChildSchemaSettingsPropertyChanged;
+        }
+
         previous?.Dispose();
 
         _ = LoadSelectedLineJsonAsync(requestId, lineSpan);
@@ -289,6 +341,14 @@ public sealed class NdJsonViewModel : ObservableObject, IDocumentViewModel
         jsonViewModel.HintSettings.SetTimeZoneMode(HintSettings.TimeZoneMode);
         jsonViewModel.HintSettings.PropertyChanged += OnChildHintSettingsPropertyChanged;
 
+        // The already-parsed schema by reference - never re-parsed per line.
+        jsonViewModel.SchemaSettings.SetDocument(SchemaSettings.Document);
+
+        // Type matching is evidence taken from a document, and an NDJSON file's documents are its
+        // lines - the master has no keys of its own to sample. So the scores flow the other way
+        // from the schema: up from whichever line is open, into the shared toolbar.
+        jsonViewModel.SchemaSettings.PropertyChanged += OnChildSchemaSettingsPropertyChanged;
+
         SelectedLineJsonViewModel = jsonViewModel;
     }
 
@@ -306,7 +366,10 @@ public sealed class NdJsonViewModel : ObservableObject, IDocumentViewModel
 
         lines?.Dispose();
         if (selectedLineJsonViewModel is not null)
+        {
             selectedLineJsonViewModel.HintSettings.PropertyChanged -= OnChildHintSettingsPropertyChanged;
+            selectedLineJsonViewModel.SchemaSettings.PropertyChanged -= OnChildSchemaSettingsPropertyChanged;
+        }
         selectedLineJsonViewModel?.Dispose();
         this.session?.Dispose();
     }

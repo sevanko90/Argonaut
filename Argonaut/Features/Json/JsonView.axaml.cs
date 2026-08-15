@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.Linq;
 using System.Threading.Tasks;
 using Argonaut.Features.Json.Hints;
+using Argonaut.Features.Json.Schema;
 using Argonaut.Infrastructure;
 using Avalonia;
 using Avalonia.Controls;
@@ -23,10 +25,24 @@ public partial class JsonView : UserControl
     private int hintFlyoutTokenIndex = -1;
     private KeyModifiers lastRowsPressModifiers;
 
+    /// <summary>How wide the schema gutter opens, in px. Seeded with a default and thereafter
+    /// whatever the user last dragged it to, remembered across schema changes within this view so
+    /// unbinding and rebinding a schema doesn't discard a deliberate resize. Not persisted.</summary>
+    private double schemaGutterWidth = DefaultSchemaGutterWidth;
+    private const double DefaultSchemaGutterWidth = 220;
+    private const double MinSchemaGutterWidth = 40;
+    private bool schemaGutterShown;
+
+    private ScrollViewer? rowsScrollViewer;
+    private ScrollViewer? gutterScrollViewer;
+    private bool syncingScroll;
+    private JsonSchemaSettings? subscribedSchemaSettings;
+
     public JsonView()
     {
         InitializeComponent();
 
+        Loaded += OnLoaded;
         DetachedFromVisualTree += OnDetachedFromVisualTree;
         DataContextChanged += OnDataContextChanged;
         RowsListBox.SelectionChanged += OnSelectionChanged;
@@ -37,11 +53,67 @@ public partial class JsonView : UserControl
         RowsListBox.AddHandler(PointerPressedEvent, OnRowsListPointerPressed, RoutingStrategies.Tunnel);
     }
 
+    /// <summary>
+    /// Both ListBoxes' ScrollViewers come from their control themes, so they don't exist until
+    /// the visual tree is built - same lazy resolution CsvView uses for its sticky header.
+    /// </summary>
+    private void OnLoaded(object? sender, RoutedEventArgs e)
+    {
+        if (rowsScrollViewer is not null)
+            return;
+
+        rowsScrollViewer = RowsListBox.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
+        gutterScrollViewer = SchemaGutterListBox.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
+
+        if (rowsScrollViewer is not null)
+            rowsScrollViewer.ScrollChanged += OnRowsScrollChanged;
+        if (gutterScrollViewer is not null)
+            gutterScrollViewer.ScrollChanged += OnGutterScrollChanged;
+    }
+
+    // Mirrored in both directions so the wheel works over the gutter too. The gutter's viewport is
+    // slightly taller than the tree's whenever the tree shows a horizontal scrollbar, so at the
+    // very bottom the gutter can hold an offset the tree clamps away; the return mirror pulls the
+    // gutter back to the clamped value, which converges (offsets only ever shrink) in one step.
+    private void OnRowsScrollChanged(object? sender, ScrollChangedEventArgs e) => MirrorVerticalOffset(rowsScrollViewer, gutterScrollViewer);
+
+    private void OnGutterScrollChanged(object? sender, ScrollChangedEventArgs e) => MirrorVerticalOffset(gutterScrollViewer, rowsScrollViewer);
+
+    private void MirrorVerticalOffset(ScrollViewer? from, ScrollViewer? to)
+    {
+        if (syncingScroll || from is null || to is null || from.Offset.Y == to.Offset.Y)
+            return;
+
+        syncingScroll = true;
+        try
+        {
+            to.Offset = new Vector(to.Offset.X, from.Offset.Y);
+        }
+        finally
+        {
+            syncingScroll = false;
+        }
+    }
+
     private void OnDetachedFromVisualTree(object? sender, Avalonia.VisualTreeAttachmentEventArgs e)
     {
         RowsListBox.RemoveHandler(PointerPressedEvent, OnRowsListPointerPressed);
         RowsListBox.SelectionChanged -= OnSelectionChanged;
         DataContextChanged -= OnDataContextChanged;
+        Loaded -= OnLoaded;
+
+        if (rowsScrollViewer is not null)
+        {
+            rowsScrollViewer.ScrollChanged -= OnRowsScrollChanged;
+            rowsScrollViewer = null;
+        }
+
+        if (gutterScrollViewer is not null)
+        {
+            gutterScrollViewer.ScrollChanged -= OnGutterScrollChanged;
+            gutterScrollViewer = null;
+        }
+
         UnsubscribeViewModel();
 
         // Disposed synchronously here (before the content swap's trailing ItemsSource walk):
@@ -59,6 +131,9 @@ public partial class JsonView : UserControl
             subscribedViewModel = vm;
             vm.PropertyChanged += OnViewModelPropertyChanged;
 
+            subscribedSchemaSettings = vm.SchemaSettings;
+            subscribedSchemaSettings.PropertyChanged += OnSchemaSettingsPropertyChanged;
+
             if (TryGetRows(vm, out var rows))
             {
                 subscribedRows = rows;
@@ -66,6 +141,7 @@ public partial class JsonView : UserControl
             }
         }
 
+        ApplySchemaGutterVisibility();
         SyncVisualSelection();
     }
 
@@ -77,11 +153,45 @@ public partial class JsonView : UserControl
             subscribedViewModel = null;
         }
 
+        if (subscribedSchemaSettings is not null)
+        {
+            subscribedSchemaSettings.PropertyChanged -= OnSchemaSettingsPropertyChanged;
+            subscribedSchemaSettings = null;
+        }
+
         if (subscribedRows is null)
             return;
 
         subscribedRows.CollectionChanged -= OnRowsCollectionChanged;
         subscribedRows = null;
+    }
+
+    private void OnSchemaSettingsPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is null or nameof(JsonSchemaSettings.Document))
+            ApplySchemaGutterVisibility();
+    }
+
+    /// <summary>
+    /// Opens the schema gutter to its remembered width while a schema is bound, and closes it to
+    /// zero otherwise - an empty gutter would be a few hundred px of dead space on the far more
+    /// common no-schema document. Collapsing the *column* rather than hiding the ListBox keeps the
+    /// gutter realized, so its internal ScrollViewer (resolved once, on Loaded) stays valid and
+    /// the scroll mirroring survives a schema being unbound and rebound.
+    /// </summary>
+    private void ApplySchemaGutterVisibility()
+    {
+        bool show = subscribedViewModel?.SchemaSettings.Document is not null;
+        if (show == schemaGutterShown)
+            return;
+
+        // Read the user's drag back out before collapsing, or reopening would snap to the default.
+        if (!show)
+            schemaGutterWidth = Math.Max(MinSchemaGutterWidth, SchemaGutterGrid.ColumnDefinitions[0].Width.Value);
+
+        schemaGutterShown = show;
+        SchemaGutterGrid.ColumnDefinitions[0].Width = new GridLength(show ? schemaGutterWidth : 0);
+        SchemaGutterSplitter.IsVisible = show;
     }
 
     /// <summary>

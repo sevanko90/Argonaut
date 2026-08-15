@@ -6,9 +6,16 @@
              mc:Ignorable="d"
              x:Class="Argonaut.Features.Json.JsonToolbarView"
              x:DataType="json:JsonToolbarViewModel">
-    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+    <!-- Wraps rather than overflowing: at the default 1000px window this toolbar plus the find
+         bar and the close button already want more width than there is, and a horizontal
+         StackPanel would simply push the rest off-screen. Spacing comes from ItemSpacing so it
+         stays correct on a wrapped line, where a per-child left margin would not. -->
+    <WrapPanel Orientation="Horizontal"
+               ItemSpacing="8"
+               LineSpacing="6"
+               VerticalAlignment="Center">
         <Border Width="1"
-                Margin="0,2,12,2"
+                Margin="0,2,4,2"
                 Background="{DynamicResource AppBorderBrush}" />
         <Button x:Name="DateButton"
                 FontSize="12"
@@ -66,11 +73,150 @@
                 </Flyout>
             </Button.Flyout>
         </Button>
+        <!-- One control, not two: the schema file and the type within it are a single question,
+             and a flyout is the only surface that can host a filter box AND descriptions AND a
+             match-ranked shortlist - which a combo or a menu cannot. Merging them also halves
+             what this block costs on a toolbar that already wraps. -->
+        <Button x:Name="SchemaButton"
+                FontSize="12"
+                MinWidth="170"
+                VerticalAlignment="Center"
+                ToolTip.Tip="JSON Schema used to label values in the tree, and which type in it describes this document">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+                <TextBlock Text="{Binding SchemaButtonText}"
+                           VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis"
+                           MaxWidth="260" />
+                <Viewbox Width="8" Height="8" VerticalAlignment="Center">
+                    <Path Fill="{DynamicResource AppMutedTextBrush}" Data="M2 4 L10 4 L6 10 Z" />
+                </Viewbox>
+            </StackPanel>
+            <Button.Flyout>
+                <Flyout Placement="BottomEdgeAlignedLeft"
+                        IsOpen="{Binding IsSchemaFlyoutOpen, Mode=TwoWay}">
+                    <StackPanel Margin="8" Spacing="8" Width="360">
+                        <TextBlock Text="Schema"
+                                   FontSize="11"
+                                   FontWeight="SemiBold"
+                                   Margin="2,0,0,0"
+                                   Foreground="{DynamicResource AppMutedTextBrush}" />
+                        <ListBox x:Name="SchemaList"
+                                 ItemsSource="{Binding SchemaItems}"
+                                 SelectedIndex="{Binding SelectedSchemaIndex, Mode=TwoWay}"
+                                 MaxHeight="200"
+                                 BorderThickness="0"
+                                 Background="Transparent">
+                            <ListBox.Styles>
+                                <Style Selector="ListBoxItem">
+                                    <Setter Property="Padding" Value="8,4" />
+                                    <Setter Property="MinHeight" Value="0" />
+                                    <Setter Property="FontSize" Value="12" />
+                                </Style>
+                            </ListBox.Styles>
+                        </ListBox>
+                        <!-- Only for a schema holding several types; a single-schema file has
+                             nothing to choose and shows the schema list alone. -->
+                        <Border Height="1"
+                                Background="{DynamicResource AppBorderBrush}"
+                                IsVisible="{Binding SchemaRootPicker.IsApplicable}" />
+                        <TextBlock Text="Type"
+                                   FontSize="11"
+                                   FontWeight="SemiBold"
+                                   Margin="2,0,0,0"
+                                   IsVisible="{Binding SchemaRootPicker.IsApplicable}"
+                                   Foreground="{DynamicResource AppMutedTextBrush}" />
+                        <TextBox Text="{Binding SchemaRootPicker.Filter, Mode=TwoWay}"
+                                 PlaceholderText="Filter types…"
+                                 IsVisible="{Binding SchemaRootPicker.IsApplicable}"
+                                 FontSize="12" />
+                        <TextBlock Text="{Binding SchemaRootPicker.MatchContextText}"
+                                   IsVisible="{Binding SchemaRootPicker.HasMatchContext}"
+                                   FontSize="11"
+                                   Margin="2,0,0,0"
+                                   TextWrapping="Wrap"
+                                   Foreground="{DynamicResource AppMutedTextBrush}" />
+                        <ListBox ItemsSource="{Binding SchemaRootPicker.Picks}"
+                                 SelectedItem="{Binding SchemaRootPicker.SelectedPick, Mode=TwoWay}"
+                                 IsVisible="{Binding SchemaRootPicker.IsApplicable}"
+                                 MaxHeight="300"
+                                 BorderThickness="0"
+                                 Background="Transparent">
+                            <ListBox.Styles>
+                                <!-- Headers ride in the same list so it stays one scrollable,
+                                     filterable surface; this is what stops them being picked. -->
+                                <Style Selector="ListBoxItem" x:DataType="json:SchemaRootPick">
+                                    <Setter Property="IsEnabled" Value="{Binding IsSelectable}" />
+                                    <Setter Property="Padding" Value="8,4" />
+                                    <Setter Property="MinHeight" Value="0" />
+                                </Style>
+                            </ListBox.Styles>
+                            <ListBox.ItemTemplate>
+                                <DataTemplate x:DataType="json:SchemaRootPick">
+                                  <StackPanel>
+                                    <Border Height="1"
+                                            Margin="0,6,0,8"
+                                            IsVisible="{Binding ShowSeparator}"
+                                            Background="{DynamicResource AppBorderBrush}" />
+                                    <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
+                                        <TextBlock Grid.Column="0"
+                                                   Grid.Row="0"
+                                                   Text="{Binding Name}"
+                                                   IsVisible="{Binding IsSelectable}"
+                                                   FontSize="12"
+                                                   TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Grid.Column="0"
+                                                   Grid.Row="0"
+                                                   Grid.ColumnSpan="2"
+                                                   Text="{Binding Name}"
+                                                   IsVisible="{Binding IsHeader}"
+                                                   FontSize="11"
+                                                   FontWeight="SemiBold"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Foreground="{DynamicResource AppMutedTextBrush}" />
+                                        <StackPanel Grid.Column="1"
+                                                    Grid.Row="0"
+                                                    Orientation="Horizontal"
+                                                    Spacing="8"
+                                                    VerticalAlignment="Center">
+                                            <Border IsVisible="{Binding IsRecommended}"
+                                                    CornerRadius="3"
+                                                    Padding="5,1"
+                                                    VerticalAlignment="Center"
+                                                    Background="{DynamicResource SystemAccentColorLight2}">
+                                                <TextBlock Text="best match"
+                                                           FontSize="10"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="Black" />
+                                            </Border>
+                                            <TextBlock Text="{Binding Score}"
+                                                       IsVisible="{Binding HasScore}"
+                                                       FontSize="11"
+                                                       FontWeight="SemiBold" />
+                                            <TextBlock Text="{Binding Detail}"
+                                                       FontSize="11"
+                                                       Foreground="{DynamicResource AppMutedTextBrush}" />
+                                        </StackPanel>
+                                        <TextBlock Grid.Column="0"
+                                                   Grid.Row="1"
+                                                   Grid.ColumnSpan="2"
+                                                   Text="{Binding Description}"
+                                                   IsVisible="{Binding Description, Converter={x:Static json:IsNotNullConverter.Instance}}"
+                                                   FontSize="11"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Foreground="{DynamicResource AppMutedTextBrush}" />
+                                    </Grid>
+                                  </StackPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </StackPanel>
+                </Flyout>
+            </Button.Flyout>
+        </Button>
         <ComboBox x:Name="ExpandDepthCombo"
                   SelectedIndex="{Binding ExpandDepthIndex, Mode=TwoWay}"
                   FontSize="12"
                   MinWidth="130"
-                  Margin="8,0,0,0"
                   VerticalAlignment="Center"
                   ToolTip.Tip="How many levels to auto-expand when a file opens">
             <ComboBoxItem Content="Start collapsed" />
@@ -80,26 +226,31 @@
             <ComboBoxItem Content="Expand 4 levels" />
             <ComboBoxItem Content="Expand 5 levels" />
         </ComboBox>
-        <Border Width="1"
-                Margin="12,2,12,2"
-                Background="{DynamicResource AppBorderBrush}"
-                IsVisible="{Binding SupportsPathNavigation}" />
-        <TextBox x:Name="JsonPathTextBox"
-                 Text="{Binding JsonPathInput, Mode=TwoWay}"
-                 PlaceholderText="$.path.to[0]"
-                 FontSize="12"
-                 Width="180"
-                 VerticalAlignment="Center"
-                 IsVisible="{Binding SupportsPathNavigation}"
-                 KeyDown="OnJsonPathTextBoxKeyDown"
-                 ToolTip.Tip="Jump to a JSONPath, e.g. $.foo.bar[2]" />
-        <Button x:Name="GoToPathButton"
-                Content="Go"
-                Classes="accent"
-                FontSize="12"
-                Margin="8,0,0,0"
-                VerticalAlignment="Center"
-                IsVisible="{Binding SupportsPathNavigation}"
-                Click="OnGoToPathClick" />
-    </StackPanel>
+        <!-- One WrapPanel child, so the entry and its Go button wrap together: they are a single
+             control split into two elements, and a line break between them would read as two
+             unrelated things. The divider travels with them for the same reason - left behind, it
+             would trail the end of a line dividing nothing. -->
+        <StackPanel Orientation="Horizontal"
+                    Spacing="8"
+                    VerticalAlignment="Center"
+                    IsVisible="{Binding SupportsPathNavigation}">
+            <Border Width="1"
+                    Margin="0,2,0,2"
+                    Background="{DynamicResource AppBorderBrush}" />
+            <TextBox x:Name="JsonPathTextBox"
+                     Text="{Binding JsonPathInput, Mode=TwoWay}"
+                     PlaceholderText="$.path.to[0]"
+                     FontSize="12"
+                     Width="180"
+                     VerticalAlignment="Center"
+                     KeyDown="OnJsonPathTextBoxKeyDown"
+                     ToolTip.Tip="Jump to a JSONPath, e.g. $.foo.bar[2]" />
+            <Button x:Name="GoToPathButton"
+                    Content="Go"
+                    Classes="accent"
+                    FontSize="12"
+                    VerticalAlignment="Center"
+                    Click="OnGoToPathClick" />
+        </StackPanel>
+    </WrapPanel>
 </UserControl>

@@ -18,6 +18,7 @@ A cross-platform file viewer built for large files — multi-gigabyte JSON and N
 
 Argonaut was originally conceived as a viewer for large JSON files and it has first-class JSON support:
 
+- Displays documentation from JSON Schema files
 - Collapsible nodes
 - JSONPath display of selected node and go to JSONPath node option
 - Inline decoding of JS dates to readable form
@@ -30,6 +31,20 @@ Argonaut was originally conceived as a viewer for large JSON files and it has fi
 #### CSV
 
 - Comma and tab delimited files are shown in a column viewer
+
+### JSON Schema support
+
+Bind a JSON Schema to an open document and Argonaut shows what the data *means* — `title` and
+`description` from the schema, in a resizable gutter down the left, with the full text on hover.
+This is documentation, not validation: Argonaut never tells you the document is wrong.
+
+- Pick a schema from the toolbar - bundled ones, or your own dropped in the schemas folder. A
+  `<file>.schema.json` sidecar is picked up automatically, and your choice is remembered per file.
+- Documents object properties, positional array slots (`prefixItems`) and enum value labels.
+- Files holding many schemas (`$defs`, or an OpenAPI document's components) offer a type picker,
+  ranked by how well each type matches the document.
+- Handles local `$ref` (including recursive), `$defs`/`definitions`, and `allOf`/`oneOf`/`anyOf`.
+- Ignored: remote `$ref`, `patternProperties`, `if`/`then`/`else`.
 
 ### Searching
 Argonaut searches files in the background and highlights matches as it finds them (or as you scroll them into view) - searches never block the UI.
@@ -55,9 +70,9 @@ To power this view, Argonaut first needs to index the file so it can navigate it
 
 This works well for line-based files like raw text and CSV - the index is a relatively small size compared to the file.
 
-For JSON though, things get a bit more interesting. The index needs to hold a lot more than just line start, it needs to hold the position of every token (array, property, etc) so the index size is related to the depth and complexity of the JSON.
+For JSON though, things get a bit more interesting. The index needs to hold a lot more than just line start, it needs to hold the position of every token (array, property, etc) so the index size is related to the depth and complexity of the JSON rather than the file size. 
 
-It is possible (even likely) that the index for a complex JSON file could be bigger than the file itself! So Argonaut may take more RAM to load a large file than other, slower viewers. This is the tradeoff for fast viewing of large files. I think it's worth it, but YMMV.
+It is possible (even likely) that the index for a complex JSON file could be bigger than the file itself! Argonaut may take more RAM to load a large file than other, slower viewers. This is the tradeoff for fast viewing of large files. I think it's worth it, but YMMV.
 
 
 ## Running the code
@@ -69,8 +84,6 @@ in the application folder.
 
 ## Updates
 
-Starting with this release, Windows and macOS builds check GitHub Releases for updates on
-launch (at most once every 24 hours) and offer to download and apply them - no manual
-re-download needed going forward.
+Windows and macOS builds check GitHub Releases for updates on launch (at most once every 24 hours) and offer to download and apply them - no manual re-download needed going forward.
 
 Linux still ships as a plain zip with no auto-update, for now.

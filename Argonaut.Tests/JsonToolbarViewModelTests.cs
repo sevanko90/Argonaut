@@ -1,5 +1,6 @@
 using Argonaut.Features.Json;
 using Argonaut.Features.Json.Hints;
+using Argonaut.Features.Json.Schema;
 using Argonaut.Infrastructure;
 
 namespace Argonaut.Tests;
@@ -35,7 +36,7 @@ public sealed class JsonToolbarViewModelTests : IDisposable
         settings.SetUserDefault(DateDecodingScheme.JsSeconds);
         settings.SetTimeZoneMode(DateHintTimeZoneMode.Utc);
 
-        var toolbar = new JsonToolbarViewModel(settings, initialExpandDepthIndex: 3, applyExpandDepth: _ => { });
+        var toolbar = new JsonToolbarViewModel(settings, new JsonSchemaSettings(), initialExpandDepthIndex: 3, applyExpandDepth: _ => { });
 
         Assert.Equal((int)DateDecodingScheme.JsSeconds, toolbar.DateHintSchemeIndex);
         Assert.Equal((int)DateHintTimeZoneMode.Utc, toolbar.TimeZoneModeIndex);
@@ -46,7 +47,7 @@ public sealed class JsonToolbarViewModelTests : IDisposable
     public void DateHintSchemeIndex_Set_UpdatesSettings_AndLatchesUserSelected()
     {
         var settings = new DateHintSettings();
-        var toolbar = new JsonToolbarViewModel(settings, 0, _ => { });
+        var toolbar = new JsonToolbarViewModel(settings, new JsonSchemaSettings(), 0, _ => { });
 
         toolbar.DateHintSchemeIndex = (int)DateDecodingScheme.KeepaMinutes;
 
@@ -58,7 +59,7 @@ public sealed class JsonToolbarViewModelTests : IDisposable
     public void TimeZoneModeIndex_Set_UpdatesSettings()
     {
         var settings = new DateHintSettings();
-        var toolbar = new JsonToolbarViewModel(settings, 0, _ => { });
+        var toolbar = new JsonToolbarViewModel(settings, new JsonSchemaSettings(), 0, _ => { });
 
         toolbar.TimeZoneModeIndex = (int)DateHintTimeZoneMode.Utc;
 
@@ -69,7 +70,7 @@ public sealed class JsonToolbarViewModelTests : IDisposable
     public void NegativeIndexAssignments_AreIgnored()
     {
         var settings = new DateHintSettings();
-        var toolbar = new JsonToolbarViewModel(settings, 0, _ => { });
+        var toolbar = new JsonToolbarViewModel(settings, new JsonSchemaSettings(), 0, _ => { });
 
         toolbar.DateHintSchemeIndex = -1;
         toolbar.TimeZoneModeIndex = -1;
@@ -84,7 +85,7 @@ public sealed class JsonToolbarViewModelTests : IDisposable
     public void InferredDefault_SyncsComboWithoutLatchingUserSelected_AndReassigningSameValueStaysUnlatched()
     {
         var settings = new DateHintSettings();
-        var toolbar = new JsonToolbarViewModel(settings, 0, _ => { });
+        var toolbar = new JsonToolbarViewModel(settings, new JsonSchemaSettings(), 0, _ => { });
 
         // Background inference lands - the combo should follow without marking IsUserSelected.
         settings.TrySetInferredDefault(DateDecodingScheme.JsSeconds);
@@ -99,12 +100,403 @@ public sealed class JsonToolbarViewModelTests : IDisposable
         Assert.False(settings.IsUserSelected);
     }
 
+    private static SchemaCatalogEntry WriteSchema(string name)
+    {
+        string directory = JsonSchemaCatalog.EnsureUserDirectory();
+        string path = Path.Combine(directory, name + ".json");
+        File.WriteAllText(path, $$"""{ "title": "{{name}}" }""");
+        return new SchemaCatalogEntry(name, path, IsUser: true);
+    }
+
+    /// <summary>An OpenAPI document: several named roots, and a root of its own that isn't a
+    /// schema - the case the root picker exists for.</summary>
+    private static SchemaCatalogEntry WriteOpenApiSchema(string name)
+    {
+        string directory = JsonSchemaCatalog.EnsureUserDirectory();
+        string path = Path.Combine(directory, name + ".json");
+        File.WriteAllText(path, """
+            {
+              "openapi": "3.0.3",
+              "components": {
+                "schemas": {
+                  "Booking": { "title": "Booking", "properties": { "reference": {}, "passengers": {}, "flights": {} } },
+                  "Passenger": { "title": "Passenger", "properties": { "surname": {}, "dateOfBirth": {} } }
+                }
+              }
+            }
+            """);
+        return new SchemaCatalogEntry(name, path, IsUser: true);
+    }
+
+    /// <summary>Opens the flyout and picks the entry at <paramref name="index"/>, as the view does.</summary>
+    private static void PickSchema(JsonToolbarViewModel toolbar, int index)
+    {
+        toolbar.IsSchemaFlyoutOpen = true;
+        toolbar.SelectedSchemaIndex = index;
+    }
+
+    private static void Match(JsonSchemaSettings settings, params string[] documentKeys)
+        => settings.SetRootMatches(JsonSchemaRootMatcher.Rank(
+            settings.Document!,
+            documentKeys.Select(System.Text.Encoding.UTF8.GetBytes).ToArray()));
+
+    [Fact]
+    public async Task PickingASchema_LeavesTheFlyoutOpenUntilTheTypeIsKnown()
+    {
+        var schemaSettings = new JsonSchemaSettings();
+        var entry = WriteOpenApiSchema("api");
+        schemaSettings.SetEntries(new[] { entry });
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
+
+        PickSchema(toolbar, 1);
+        await WaitForDocumentAsync(schemaSettings);
+
+        // Which type fits is only known once the document has been scored, which happens later
+        // and elsewhere; closing now would hide the list the user may still need.
+        Assert.True(toolbar.IsSchemaFlyoutOpen);
+    }
+
+    [Fact]
+    public async Task AnUnambiguousMatch_ClosesTheFlyout()
+    {
+        var schemaSettings = new JsonSchemaSettings();
+        schemaSettings.SetEntries(new[] { WriteOpenApiSchema("api") });
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
+
+        PickSchema(toolbar, 1);
+        await WaitForDocumentAsync(schemaSettings);
+
+        Match(schemaSettings, "reference", "passengers", "flights");
+
+        Assert.False(toolbar.IsSchemaFlyoutOpen);
+    }
+
+    [Fact]
+    public async Task AnAmbiguousMatch_KeepsTheFlyoutOpen()
+    {
+        var schemaSettings = new JsonSchemaSettings();
+        schemaSettings.SetEntries(new[] { WriteAmbiguousSchema("ambiguous") });
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
+
+        PickSchema(toolbar, 1);
+        await WaitForDocumentAsync(schemaSettings);
+
+        Match(schemaSettings, "booking", "warnings");
+
+        // Two candidates score identically - that is exactly the choice the user has to make, so
+        // the list has to stay up.
+        Assert.True(toolbar.IsSchemaFlyoutOpen);
+    }
+
+    [Fact]
+    public async Task ASchemaWithNoTypes_ClosesTheFlyoutImmediately()
+    {
+        var schemaSettings = new JsonSchemaSettings();
+        schemaSettings.SetEntries(new[] { WriteSchema("geojson") });
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
+
+        PickSchema(toolbar, 1);
+        await WaitForDocumentAsync(schemaSettings);
+
+        // Nothing further to choose, so leaving it open would just need dismissing.
+        Assert.False(toolbar.IsSchemaFlyoutOpen);
+    }
+
+    [Fact]
+    public async Task ClearingTheSchema_ClosesTheFlyout()
+    {
+        var schemaSettings = new JsonSchemaSettings();
+        schemaSettings.SetEntries(new[] { WriteOpenApiSchema("api") });
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
+        PickSchema(toolbar, 1);
+        await WaitForDocumentAsync(schemaSettings);
+
+        toolbar.IsSchemaFlyoutOpen = true;
+        toolbar.SelectedSchemaIndex = 0;
+
+        Assert.False(toolbar.IsSchemaFlyoutOpen);
+        Assert.Null(schemaSettings.SelectedEntry);
+    }
+
+    [Fact]
+    public async Task PickingAType_ClosesTheFlyout()
+    {
+        var schemaSettings = new JsonSchemaSettings();
+        schemaSettings.SetEntries(new[] { WriteAmbiguousSchema("ambiguous") });
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
+        PickSchema(toolbar, 1);
+        await WaitForDocumentAsync(schemaSettings);
+        Assert.True(toolbar.IsSchemaFlyoutOpen);
+
+        var picker = toolbar.SchemaRootPicker;
+        picker.SelectedPick = picker.Picks.First(p => p.IsSelectable);
+
+        Assert.False(toolbar.IsSchemaFlyoutOpen);
+    }
+
+    [Fact]
+    public async Task LateMatches_NeverShutAFlyoutTheUserReopened()
+    {
+        var schemaSettings = new JsonSchemaSettings();
+        schemaSettings.SetEntries(new[] { WriteOpenApiSchema("api") });
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
+
+        PickSchema(toolbar, 1);
+        await WaitForDocumentAsync(schemaSettings);
+        Match(schemaSettings, "reference", "passengers", "flights");
+        Assert.False(toolbar.IsSchemaFlyoutOpen);
+
+        // Indexing finishing re-scores minutes later; the user is now browsing types by hand.
+        toolbar.IsSchemaFlyoutOpen = true;
+        Match(schemaSettings, "reference", "passengers", "flights");
+
+        Assert.True(toolbar.IsSchemaFlyoutOpen);
+    }
+
+    [Fact]
+    public async Task ClosingTheFlyout_ClearsTheTypeFilter()
+    {
+        var schemaSettings = new JsonSchemaSettings();
+        schemaSettings.SetEntries(new[] { WriteOpenApiSchema("api") });
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
+        PickSchema(toolbar, 1);
+        await WaitForDocumentAsync(schemaSettings);
+
+        toolbar.SchemaRootPicker.Filter = "pass";
+        toolbar.IsSchemaFlyoutOpen = false;
+
+        // Reopening starts from the whole list, not from whatever was last typed.
+        Assert.Equal(string.Empty, toolbar.SchemaRootPicker.Filter);
+    }
+
+    [Fact]
+    public void SchemaButtonText_ReadsNoSchema_WhenNothingIsBound()
+    {
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), new JsonSchemaSettings(), 0, _ => { });
+
+        Assert.Equal(JsonToolbarViewModel.NoSchemaLabel, toolbar.SchemaButtonText);
+    }
+
+    [Fact]
+    public async Task SchemaButtonText_IsJustTheFile_ForASingleSchemaFile()
+    {
+        var schemaSettings = new JsonSchemaSettings();
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
+
+        await schemaSettings.SelectAsync(WriteSchema("geojson"));
+
+        // Nothing to choose within it, so a "file › type" label would be noise.
+        Assert.Equal("geojson", toolbar.SchemaButtonText);
+    }
+
+    [Fact]
+    public async Task SchemaButtonText_SpansFileAndType_ForAMultiRootSchema()
+    {
+        var schemaSettings = new JsonSchemaSettings();
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
+
+        await schemaSettings.SelectAsync(WriteOpenApiSchema("api"));
+
+        Assert.Equal("api" + JsonToolbarViewModel.SchemaPathSeparator + "Booking", toolbar.SchemaButtonText);
+
+        schemaSettings.SelectRoot("Passenger");
+
+        Assert.Equal("api" + JsonToolbarViewModel.SchemaPathSeparator + "Passenger", toolbar.SchemaButtonText);
+    }
+
+    [Fact]
+    public async Task SchemaButtonText_ReturnsToNoSchema_WhenCleared()
+    {
+        var schemaSettings = new JsonSchemaSettings();
+        var entry = WriteOpenApiSchema("api");
+        schemaSettings.SetEntries(new[] { entry });
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
+
+        toolbar.SelectedSchemaIndex = 1;
+        await WaitForDocumentAsync(schemaSettings);
+        Assert.StartsWith("api", toolbar.SchemaButtonText);
+
+        toolbar.SelectedSchemaIndex = 0;
+
+        Assert.Equal(JsonToolbarViewModel.NoSchemaLabel, toolbar.SchemaButtonText);
+    }
+
+    /// <summary>Two types that are indistinguishable on property names - the case no name-based
+    /// scorer can settle, so the user must.</summary>
+    private static SchemaCatalogEntry WriteAmbiguousSchema(string name)
+    {
+        string directory = JsonSchemaCatalog.EnsureUserDirectory();
+        string path = Path.Combine(directory, name + ".json");
+        File.WriteAllText(path, """
+            {
+              "openapi": "3.0.3",
+              "components": {
+                "schemas": {
+                  "CommitBookingResponse": { "properties": { "booking": {}, "warnings": {} } },
+                  "RetrieveBookingResponse": { "properties": { "booking": {}, "warnings": {} } }
+                }
+              }
+            }
+            """);
+        return new SchemaCatalogEntry(name, path, IsUser: true);
+    }
+
+    [Fact]
+    public void SchemaRootPicker_IsHidden_WithNoSchemaBound()
+    {
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), new JsonSchemaSettings(), 0, _ => { });
+
+        Assert.False(toolbar.SchemaRootPicker.IsApplicable);
+        Assert.Empty(toolbar.SchemaRootPicker.Picks);
+    }
+
+    [Fact]
+    public async Task SchemaRootPicker_IsHidden_ForASingleSchemaFile()
+    {
+        var schemaSettings = new JsonSchemaSettings();
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
+
+        await schemaSettings.SelectAsync(WriteSchema("plain"));
+
+        Assert.False(toolbar.SchemaRootPicker.IsApplicable);
+    }
+
+    [Fact]
+    public async Task SwitchingToASingleSchemaFile_ClearsThePicker()
+    {
+        var schemaSettings = new JsonSchemaSettings();
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
+        await schemaSettings.SelectAsync(WriteOpenApiSchema("api"), rootName: "Booking");
+
+        await schemaSettings.SelectAsync(WriteSchema("plain"));
+
+        Assert.False(toolbar.SchemaRootPicker.IsApplicable);
+        Assert.Empty(toolbar.SchemaRootPicker.Picks);
+        Assert.Null(schemaSettings.SelectedRootName);
+    }
+
+    [Fact]
+    public async Task PickerButton_ReadsTheBoundType()
+    {
+        var schemaSettings = new JsonSchemaSettings();
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
+
+        // A multi-root schema binds a root immediately rather than sitting on a placeholder.
+        await schemaSettings.SelectAsync(WriteOpenApiSchema("api"));
+        Assert.Equal("Booking", toolbar.SchemaRootPicker.ButtonText);
+
+        schemaSettings.SelectRoot("Passenger");
+        Assert.Equal("Passenger", toolbar.SchemaRootPicker.ButtonText);
+    }
+
+
+    [Fact]
+    public void SchemaItems_StartEmpty_WithNoSchemaAndOpenFolderOnly()
+    {
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), new JsonSchemaSettings(), 0, _ => { });
+
+        Assert.Equal(new[] { JsonToolbarViewModel.NoSchemaLabel, JsonToolbarViewModel.OpenSchemaFolderLabel }, toolbar.SchemaItems);
+        Assert.Equal(0, toolbar.SelectedSchemaIndex);
+    }
+
+    [Fact]
+    public void SchemaEntries_ArrivingLate_RebuildTheCombo()
+    {
+        var schemaSettings = new JsonSchemaSettings();
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
+
+        schemaSettings.SetEntries(new[] { WriteSchema("alpha"), WriteSchema("beta") });
+
+        Assert.Equal(
+            new[] { JsonToolbarViewModel.NoSchemaLabel, "alpha", "beta", JsonToolbarViewModel.OpenSchemaFolderLabel },
+            toolbar.SchemaItems);
+    }
+
+    [Fact]
+    public async Task SelectedSchemaIndex_Set_BindsThatSchema_AndZeroClearsIt()
+    {
+        var schemaSettings = new JsonSchemaSettings();
+        var entry = WriteSchema("alpha");
+        schemaSettings.SetEntries(new[] { entry });
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
+
+        toolbar.SelectedSchemaIndex = 1;
+        await WaitForDocumentAsync(schemaSettings);
+
+        Assert.Equal(entry, schemaSettings.SelectedEntry);
+        Assert.NotNull(schemaSettings.Document);
+
+        toolbar.SelectedSchemaIndex = 0;
+
+        Assert.Null(schemaSettings.SelectedEntry);
+        Assert.Null(schemaSettings.Document);
+    }
+
+    [Fact]
+    public async Task SidecarAutoSelection_LightsUpTheCombo()
+    {
+        var schemaSettings = new JsonSchemaSettings();
+        var entry = WriteSchema("sidecar");
+        schemaSettings.SetEntries(new[] { WriteSchema("other"), entry });
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
+
+        await schemaSettings.SelectAsync(entry);
+
+        Assert.Equal(2, toolbar.SelectedSchemaIndex);
+    }
+
+    [Fact]
+    public void OpenSchemaFolderItem_OpensTheFolder_AndRevertsTheSelection()
+    {
+        var opened = new List<string>();
+        JsonSchemaCatalog.OpenDirectoryOverride = opened.Add;
+        try
+        {
+            var schemaSettings = new JsonSchemaSettings();
+            schemaSettings.SetEntries(new[] { WriteSchema("alpha") });
+            var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
+
+            toolbar.SelectedSchemaIndex = toolbar.SchemaItems.Count - 1;
+
+            Assert.Equal(new[] { JsonSchemaCatalog.GetUserDirectory() }, opened);
+            Assert.Equal(0, toolbar.SelectedSchemaIndex);
+            Assert.Null(schemaSettings.SelectedEntry);
+        }
+        finally
+        {
+            JsonSchemaCatalog.OpenDirectoryOverride = null;
+        }
+    }
+
+    [Fact]
+    public void NegativeSchemaIndex_DuringItemSwap_DoesNotClearTheBinding()
+    {
+        var schemaSettings = new JsonSchemaSettings();
+        var entry = WriteSchema("alpha");
+        schemaSettings.SetEntries(new[] { entry });
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
+        toolbar.SelectedSchemaIndex = 1;
+
+        toolbar.SelectedSchemaIndex = -1;
+
+        Assert.Equal(1, toolbar.SelectedSchemaIndex);
+        Assert.Equal(entry, schemaSettings.SelectedEntry);
+    }
+
+    /// <summary>The combo setter fires SelectAsync without awaiting it (a property setter can't),
+    /// so tests have to wait for the parse to land.</summary>
+    private static async Task WaitForDocumentAsync(JsonSchemaSettings settings)
+    {
+        for (int i = 0; i < 100 && settings.Document is null; i++)
+            await Task.Delay(10);
+    }
+
     [Fact]
     public void ExpandDepthIndex_Set_PersistsAndInvokesCallback()
     {
         var settings = new DateHintSettings();
         var applied = new List<int>();
-        var toolbar = new JsonToolbarViewModel(settings, 0, applied.Add);
+        var toolbar = new JsonToolbarViewModel(settings, new JsonSchemaSettings(), 0, applied.Add);
 
         toolbar.ExpandDepthIndex = 4;
 

@@ -32,4 +32,27 @@ public class JsonRowKindFlagTests
         Assert.Equal(isBoolean, row.IsBooleanValue);
         Assert.Equal(isNull, row.IsNullValue);
     }
+
+    [Theory]
+    [InlineData(JsonTokenKind.StartObject, true)]
+    [InlineData(JsonTokenKind.StartArray, true)]
+    [InlineData(JsonTokenKind.EndObject, false)]
+    [InlineData(JsonTokenKind.EndArray, false)]
+    [InlineData(JsonTokenKind.String, false)]
+    [InlineData(JsonTokenKind.Number, false)]
+    public void IsContainerRow_MatchesOpeningContainerKinds(JsonTokenKind kind, bool expected)
+        => Assert.Equal(expected, MakeRow(kind).IsContainerRow);
+
+    [Theory]
+    [InlineData(JsonTokenKind.StartObject)]
+    [InlineData(JsonTokenKind.StartArray)]
+    public void IsContainerRow_IsFalseForPlaceholders(JsonTokenKind kind)
+    {
+        // A "N more items" row borrows its container's Kind but describes a display cap, not the
+        // container - it must not pick up the gutter's container-heading treatment.
+        var row = new JsonRow(position: 0, tokenIndex: 0, depth: 0, kind, name: null, value: "… more items",
+            hasChildren: true, isExpanded: false, isPlaceholder: true);
+
+        Assert.False(row.IsContainerRow);
+    }
 }

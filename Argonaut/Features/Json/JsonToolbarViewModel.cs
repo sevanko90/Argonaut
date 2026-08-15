@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Threading.Tasks;
 using Argonaut.Features.Json.Hints;
+using Argonaut.Features.Json.Schema;
 using Argonaut.Infrastructure;
 
 namespace Argonaut.Features.Json;
@@ -22,17 +24,35 @@ namespace Argonaut.Features.Json;
 /// </summary>
 public sealed class JsonToolbarViewModel : ObservableObject
 {
+    /// <summary>First entry of the schema combo: "no schema bound".</summary>
+    public const string NoSchemaLabel = "No schema";
+
+    /// <summary>Last entry of the schema combo. An action rather than a selection - picking it
+    /// opens the user schema folder and reverts the combo to whatever was selected before.</summary>
+    public const string OpenSchemaFolderLabel = "Open schema folder…";
+
     private readonly DateHintSettings settings;
+    private readonly JsonSchemaSettings schemaSettings;
     private readonly Action<int> applyExpandDepth;
     private readonly Func<string, Task>? navigateToPath;
     private int dateHintSchemeIndex;
     private int timeZoneModeIndex;
     private int expandDepthIndex;
     private string jsonPathInput = string.Empty;
+    private IReadOnlyList<string> schemaItems = Array.Empty<string>();
+    private int selectedSchemaIndex;
+    private bool isSchemaFlyoutOpen;
 
-    public JsonToolbarViewModel(DateHintSettings settings, int initialExpandDepthIndex, Action<int> applyExpandDepth, Func<string, Task>? navigateToPath = null)
+    // Set when a schema is picked and the flyout is deliberately left open until we know whether
+    // the type within it is obvious. Cleared as soon as the flyout closes, so match scores
+    // arriving later - indexing completes long after the fact - can never shut a flyout the user
+    // has since reopened to browse.
+    private bool awaitingSchemaCloseDecision;
+
+    public JsonToolbarViewModel(DateHintSettings settings, JsonSchemaSettings schemaSettings, int initialExpandDepthIndex, Action<int> applyExpandDepth, Func<string, Task>? navigateToPath = null)
     {
         this.settings = settings;
+        this.schemaSettings = schemaSettings;
         this.applyExpandDepth = applyExpandDepth;
         this.navigateToPath = navigateToPath;
 
@@ -40,8 +60,111 @@ public sealed class JsonToolbarViewModel : ObservableObject
         timeZoneModeIndex = (int)settings.TimeZoneMode;
         expandDepthIndex = initialExpandDepthIndex;
 
+        SchemaRootPicker = new SchemaRootPickerViewModel(schemaSettings, closeRequested: () => IsSchemaFlyoutOpen = false);
+
+        RebuildSchemaItems();
+
         settings.PropertyChanged += OnSettingsPropertyChanged;
+        schemaSettings.PropertyChanged += OnSchemaSettingsPropertyChanged;
     }
+
+    /// <summary>Separates the schema file from the type within it in <see cref="SchemaButtonText"/>.</summary>
+    public const string SchemaPathSeparator = " › ";
+
+    /// <summary>
+    /// Two-way bound to the schema flyout's <c>IsOpen</c>, which is how it closes: a bool the view
+    /// binds, rather than the view model reaching into the view to hide a popup.
+    ///
+    /// Picking a schema does *not* close it. Which type within that schema fits this document is
+    /// only known once the file has parsed and its types have been scored, which happens a beat
+    /// later and on another object - so the flyout stays open until the answer arrives and closes
+    /// itself only when that answer is unambiguous. Everything that could go wrong (a schema that
+    /// fails to parse, a document not yet indexed far enough to sample, an NDJSON file with no
+    /// line open) simply leaves it open, which is why no timeout is needed anywhere.
+    /// </summary>
+    public bool IsSchemaFlyoutOpen
+    {
+        get => isSchemaFlyoutOpen;
+        set
+        {
+            if (!SetField(ref isSchemaFlyoutOpen, value) || value)
+                return;
+
+            awaitingSchemaCloseDecision = false;
+            SchemaRootPicker.Filter = string.Empty;
+        }
+    }
+
+    /// <summary>
+    /// What the schema button reads when closed: the bound schema, and the type within it when the
+    /// schema offers a choice.
+    ///
+    /// The file and the type are one question - "what describes this document" - and were two
+    /// controls only because they were built at different times. Answering it in one place is both
+    /// narrower on the toolbar and fewer clicks for the common flow of picking a schema and then a
+    /// type, which previously meant two separate popups.
+    /// </summary>
+    public string SchemaButtonText
+    {
+        get
+        {
+            if (schemaSettings.SelectedEntry is not { } entry)
+                return NoSchemaLabel;
+
+            return SchemaRootPicker.IsApplicable
+                ? entry.DisplayName + SchemaPathSeparator + SchemaRootPicker.ButtonText
+                : entry.DisplayName;
+        }
+    }
+
+    /// <summary>Labels for the schema list: "No schema", one per catalog entry, then
+    /// "Open schema folder…".</summary>
+    public IReadOnlyList<string> SchemaItems
+    {
+        get => schemaItems;
+        private set => SetField(ref schemaItems, value);
+    }
+
+    /// <summary>Bound two-way to the schema combo. Index 0 clears the binding, the trailing index
+    /// opens the schema folder without changing the binding, and anything between selects the
+    /// corresponding <see cref="JsonSchemaSettings.Entries"/> item.</summary>
+    public int SelectedSchemaIndex
+    {
+        get => selectedSchemaIndex;
+        set
+        {
+            // Avalonia briefly drives SelectedIndex to -1 while the item list is being swapped;
+            // that isn't a user choice and must not clear the binding.
+            if (value < 0 || !SetField(ref selectedSchemaIndex, value))
+                return;
+
+            if (value == schemaItems.Count - 1 && schemaItems.Count > 1)
+            {
+                JsonSchemaCatalog.OpenUserDirectory();
+                SetField(ref selectedSchemaIndex, IndexOfSelectedEntry(), nameof(SelectedSchemaIndex));
+                IsSchemaFlyoutOpen = false;
+                return;
+            }
+
+            var entries = schemaSettings.Entries;
+            bool clearing = value < 1 || value > entries.Count;
+            _ = schemaSettings.SelectAsync(clearing ? null : entries[value - 1]);
+
+            // Clearing the binding leaves nothing further to choose; picking one leaves the type
+            // open until the scores say whether it needs choosing at all.
+            if (clearing)
+                IsSchemaFlyoutOpen = false;
+            else
+                awaitingSchemaCloseDecision = true;
+        }
+    }
+
+    /// <summary>
+    /// The schema-type picker shown beside the schema combo, for a schema file that holds several
+    /// independently-usable schemas. Always present; hides itself via
+    /// <see cref="SchemaRootPickerViewModel.IsApplicable"/> when the bound schema holds only one.
+    /// </summary>
+    public SchemaRootPickerViewModel SchemaRootPicker { get; }
 
     /// <summary>Whether the "jump to JSONPath" text entry should be shown - false for the
     /// shared NDJSON toolbar, which has no single-document JSONPath concept.</summary>
@@ -122,5 +245,72 @@ public sealed class JsonToolbarViewModel : ObservableObject
     {
         SetField(ref dateHintSchemeIndex, (int)settings.FileDefaultScheme, nameof(DateHintSchemeIndex));
         SetField(ref timeZoneModeIndex, (int)settings.TimeZoneMode, nameof(TimeZoneModeIndex));
+    }
+
+    /// <summary>The catalog is populated asynchronously after the document opens, and a sidecar
+    /// schema selects itself - both have to light up the combo without the user touching it.</summary>
+    private void OnSchemaSettingsPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is null or nameof(JsonSchemaSettings.Entries))
+            RebuildSchemaItems();
+        else if (e.PropertyName is nameof(JsonSchemaSettings.SelectedEntry))
+            SetField(ref selectedSchemaIndex, IndexOfSelectedEntry(), nameof(SelectedSchemaIndex));
+
+        // The button label spans both halves of the choice, so it has to follow either changing.
+        if (e.PropertyName is null
+            or nameof(JsonSchemaSettings.SelectedEntry)
+            or nameof(JsonSchemaSettings.RootOptions)
+            or nameof(JsonSchemaSettings.SelectedRootName))
+            OnPropertyChanged(nameof(SchemaButtonText));
+
+        if (e.PropertyName is null
+            or nameof(JsonSchemaSettings.RootOptions)
+            or nameof(JsonSchemaSettings.RootMatches))
+            ConsiderClosingSchemaFlyout();
+    }
+
+    /// <summary>
+    /// Closes the flyout left open by a schema pick, once there is nothing left worth showing:
+    /// either the schema offers no type to choose (a single-schema file, or one that failed to
+    /// parse), or the scores identify one clearly.
+    ///
+    /// Several equally-good candidates deliberately leave it open - that is the case the user has
+    /// to settle, and closing would hide the very list they need.
+    /// </summary>
+    private void ConsiderClosingSchemaFlyout()
+    {
+        if (!awaitingSchemaCloseDecision || !isSchemaFlyoutOpen)
+            return;
+
+        if (schemaSettings.RootOptions.Count == 0 || JsonSchemaRootMatcher.Best(schemaSettings.RootMatches) is not null)
+            IsSchemaFlyoutOpen = false;
+    }
+
+    private void RebuildSchemaItems()
+    {
+        var entries = schemaSettings.Entries;
+        var items = new List<string>(entries.Count + 2) { NoSchemaLabel };
+        foreach (var entry in entries)
+            items.Add(entry.DisplayName);
+        items.Add(OpenSchemaFolderLabel);
+
+        // Items first: the index only means anything against the list it indexes into.
+        SchemaItems = items;
+        SetField(ref selectedSchemaIndex, IndexOfSelectedEntry(), nameof(SelectedSchemaIndex));
+    }
+
+    private int IndexOfSelectedEntry()
+    {
+        if (schemaSettings.SelectedEntry is not { } selected)
+            return 0;
+
+        var entries = schemaSettings.Entries;
+        for (int i = 0; i < entries.Count; i++)
+        {
+            if (entries[i] == selected)
+                return i + 1;
+        }
+
+        return 0;
     }
 }

@@ -8,6 +8,11 @@
              x:DataType="json:JsonViewModel">
     <UserControl.Resources>
         <json:DepthToMarginConverter x:Key="DepthToMargin" />
+        <!-- Gutter cells step in with their row so a child's label reads as belonging to the
+             container above it. Deliberately a much smaller step than the tree's, and capped:
+             the gutter is narrow and its labels already ellipse, so a deep document must not
+             indent them away entirely. -->
+        <json:DepthToMarginConverter x:Key="SchemaGutterDepthToMargin" IndentPerLevel="6" MaxIndent="60" />
     </UserControl.Resources>
 
     <UserControl.Styles>
@@ -49,6 +54,13 @@
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{DynamicResource AppAccentBrush}" />
         </Style>
+
+        <!-- Schema gutter: a container's label heads the run of child labels indented beneath it.
+             Weight only - every container is a heading, so a deep document would otherwise stack
+             several emphasised rows in a row, and nesting is already carried by the indent. -->
+        <Style Selector="TextBlock.schemaContainer">
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
     </UserControl.Styles>
 
     <Border BorderBrush="{DynamicResource AppBorderBrush}"
@@ -57,120 +69,219 @@
             Background="{DynamicResource AppWindowBackgroundBrush}"
             ClipToBounds="True">
         <Grid RowDefinitions="*,Auto">
-            <ListBox Grid.Row="0"
-                     x:Name="RowsListBox"
-                     ItemsSource="{Binding Rows}"
-                     SelectionMode="Single"
-                     Padding="8,8"
-                     ScrollViewer.HorizontalScrollBarVisibility="Auto">
-                <ListBox.Styles>
-                    <!-- Rounded, inset highlight instead of Fluent's flat full-bleed selection
-                         rectangle - matches the rounded hover treatment on toolbar iconbuttons. -->
-                    <Style Selector="ListBoxItem">
-                        <Setter Property="Padding" Value="0" />
-                        <Setter Property="MinHeight" Value="22" />
-                        <Setter Property="Height" Value="22" />
-                        <Setter Property="Margin" Value="0,1" />
-                        <Setter Property="CornerRadius" Value="6" />
-                    </Style>
-                </ListBox.Styles>
+            <!-- Gutter | splitter | tree. The gutter is its own virtualizing ListBox over the
+                 *same* Rows collection rather than a column inside the row template, because the
+                 tree scrolls horizontally and a gutter that slid away with it would be useless.
+                 Both lists use identical fixed row metrics (22px + 1px margins), so mirroring one
+                 vertical scroll offset onto the other keeps them aligned exactly - see
+                 JsonView.axaml.cs. Its column width is driven from code-behind (0 = no schema
+                 bound) rather than IsVisible, so the ListBox stays realized and its internal
+                 ScrollViewer stays resolvable for that mirroring. -->
+            <Grid Grid.Row="0" x:Name="SchemaGutterGrid" ColumnDefinitions="0,Auto,*">
 
-                <ListBox.ItemsPanel>
-                    <ItemsPanelTemplate>
-                        <VirtualizingStackPanel />
-                    </ItemsPanelTemplate>
-                </ListBox.ItemsPanel>
+                <ListBox Grid.Column="0"
+                         x:Name="SchemaGutterListBox"
+                         ItemsSource="{Binding Rows}"
+                         Background="{DynamicResource AppPanelBackgroundBrush}"
+                         BorderThickness="0"
+                         Focusable="False"
+                         Padding="8,8"
+                         ClipToBounds="True"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                         ScrollViewer.VerticalScrollBarVisibility="Hidden">
+                    <ListBox.Styles>
+                        <!-- Same metrics as the tree's rows, or the two lists drift apart as they
+                             scroll. Selection is the tree's job: the gutter mirrors it visually
+                             through nothing at all, so its own selected state is blanked (a
+                             stray click on the gutter must not paint a second highlight). -->
+                        <Style Selector="ListBoxItem">
+                            <Setter Property="Padding" Value="0" />
+                            <Setter Property="MinHeight" Value="22" />
+                            <Setter Property="Height" Value="22" />
+                            <Setter Property="Margin" Value="0,1" />
+                            <Setter Property="CornerRadius" Value="6" />
+                            <Setter Property="Focusable" Value="False" />
+                        </Style>
+                        <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
+                            <Setter Property="Background" Value="Transparent" />
+                        </Style>
+                        <Style Selector="ListBoxItem:selected:pointerover /template/ ContentPresenter">
+                            <Setter Property="Background" Value="Transparent" />
+                        </Style>
+                    </ListBox.Styles>
 
-                <ListBox.ItemTemplate>
-                    <DataTemplate x:DataType="json:JsonRow">
-                        <!-- Transparent background keeps the full fixed-height row hit-testable
-                             for the right-click copy handler even though the children are
-                             vertically centered (and so shorter than the row). -->
-                        <StackPanel Orientation="Horizontal"
-                                    Background="Transparent"
-                                    Margin="{Binding Depth, Converter={StaticResource DepthToMargin}}"
-                                    PointerPressed="OnRowPointerPressed"
-                                    DoubleTapped="OnRowDoubleTapped">
-                            <!-- Array-element ordinal, shown only on array children (null on
-                                 object members and the root) - lets you see which index you're
-                                 about to open without expanding it. Small and fixed-width so it
-                                 doesn't affect the fixed 22px row height or shift the expander. -->
-                            <TextBlock Text="{Binding ArrayIndex}"
-                                       IsVisible="{Binding ArrayIndex, Converter={x:Static json:IsNotNullConverter.Instance}}"
-                                       FontSize="9"
-                                       Foreground="{DynamicResource AppMutedTextBrush}"
-                                       FontFamily="{DynamicResource AppContentFontFamily}"
-                                       Width="26"
-                                       TextAlignment="Right"
-                                       Margin="0,0,2,0"
-                                       VerticalAlignment="Center" />
-                            <!-- Vector triangle, not a text glyph: a ▶/▼ character picks up
-                                 font-fallback metrics that differ by platform (and even by glyph
-                                 within the same fallback chain on Windows), so the two states
-                                 rendered at visibly different sizes there. Geometry is a fixed
-                                 size everywhere. -->
-                            <!-- Button is full row height/wider than the glyph itself so the
-                                 click target isn't shrunk down to the tiny triangle's bounds. -->
-                            <Button Click="OnToggleExpandClick"
-                                    IsVisible="{Binding HasChildren}"
-                                    Background="Transparent"
-                                    BorderThickness="0"
-                                    Padding="0"
-                                    Width="20"
-                                    Height="22"
-                                    HorizontalContentAlignment="Center"
-                                    VerticalContentAlignment="Center">
-                                <Path Data="{Binding IsExpanded, Converter={x:Static json:ExpandGlyphConverter.Instance}}"
-                                      Fill="{Binding $parent[Button].Foreground}"
-                                      Stretch="Uniform"
-                                      Width="7"
-                                      Height="7" />
-                            </Button>
-                            <!-- Spacer standing in for the toggle on a leaf row. Must be exactly
-                                 the button's width, or names on rows with a triangle sit
-                                 indented relative to their leaf siblings at the same depth. -->
-                            <TextBlock IsVisible="{Binding !HasChildren}"
-                                       Width="20" />
-                            <TextBlock search:SearchHighlight.Text="{Binding Name}"
-                                       search:SearchHighlight.Suffix=": "
-                                       search:SearchHighlight.Term="{Binding $parent[json:JsonView].((json:JsonViewModel)DataContext).HighlightTerm}"
-                                       IsVisible="{Binding Name, Converter={x:Static json:IsNotNullConverter.Instance}}"
-                                       Foreground="{DynamicResource AppAccentBrush}"
-                                       VerticalAlignment="Center"
-                                       FontFamily="{DynamicResource AppContentFontFamily}" />
-                            <TextBlock search:SearchHighlight.Text="{Binding Value}"
-                                       search:SearchHighlight.Term="{Binding $parent[json:JsonView].((json:JsonViewModel)DataContext).HighlightTerm}"
-                                       Classes.jsonString="{Binding IsStringValue}"
-                                       Classes.jsonNumber="{Binding IsNumberValue}"
-                                       Classes.jsonBool="{Binding IsBooleanValue}"
-                                       Classes.jsonNull="{Binding IsNullValue}"
-                                       TextWrapping="NoWrap"
-                                       VerticalAlignment="Center"
-                                       FontFamily="{DynamicResource AppContentFontFamily}" />
-                            <TextBlock Text="{Binding TruncationHint}"
-                                       IsVisible="{Binding ShowPlainTruncationHint}"
-                                       Foreground="{DynamicResource AppMutedTextBrush}"
-                                       FontFamily="{DynamicResource AppContentFontFamily}"
-                                       Margin="8,0,0,0"
-                                       VerticalAlignment="Center" />
-                            <Button Classes="hintlink"
-                                    Content="{Binding TruncationHint}"
-                                    IsVisible="{Binding ShowTruncationLink}"
-                                    Click="OnJumpToRawClick"
-                                    Margin="8,0,0,0"
-                                    VerticalAlignment="Center"
-                                    ToolTip.Tip="View this value in the raw file" />
-                            <Button Classes="hintlink"
-                                    Content="{Binding Hint}"
-                                    IsVisible="{Binding Hint, Converter={x:Static json:IsNotNullConverter.Instance}}"
-                                    Click="OnHintClick"
-                                    Margin="8,0,0,0"
-                                    VerticalAlignment="Center"
-                                    ToolTip.Tip="Decoded date (local time) — click to change scheme" />
-                        </StackPanel>
-                    </DataTemplate>
-                </ListBox.ItemTemplate>
-            </ListBox>
+                    <ListBox.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <VirtualizingStackPanel />
+                        </ItemsPanelTemplate>
+                    </ListBox.ItemsPanel>
+
+                    <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="json:JsonRow">
+                            <!-- Transparent full-width carrier so the tooltip is reachable from
+                                 anywhere on the row, not just the glyphs; collapsed entirely on a
+                                 row the schema says nothing about, so those rows raise no tooltip
+                                 at all. -->
+                            <Border Background="Transparent"
+                                    IsVisible="{Binding SchemaLabel, Converter={x:Static json:IsNotNullConverter.Instance}}">
+                                <ToolTip.Tip>
+                                    <StackPanel MaxWidth="420">
+                                        <!-- Title repeated here even when there's no description:
+                                             a narrow gutter ellipses it away, and the tooltip is
+                                             the only place left to read it in full. -->
+                                        <TextBlock Text="{Binding SchemaTitle}"
+                                                   IsVisible="{Binding SchemaTitle, Converter={x:Static json:IsNotNullConverter.Instance}}"
+                                                   FontWeight="SemiBold"
+                                                   TextWrapping="Wrap" />
+                                        <Border Height="1"
+                                                Margin="0,6"
+                                                Background="{DynamicResource AppBorderBrush}"
+                                                IsVisible="{Binding HasSchemaTitleAndDescription}" />
+                                        <TextBlock Text="{Binding SchemaDescription}"
+                                                   IsVisible="{Binding SchemaDescription, Converter={x:Static json:IsNotNullConverter.Instance}}"
+                                                   TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </ToolTip.Tip>
+                                <!-- Indent lives on the label, not the carrier, so the tooltip
+                                     stays reachable across the cell's whole width however deep
+                                     the row sits. Trimmed rather than clipped so an ellipsis
+                                     tells the reader there is more to hover for. -->
+                                <TextBlock Text="{Binding SchemaLabel}"
+                                           Classes.schemaContainer="{Binding IsContainerRow}"
+                                           Margin="{Binding Depth, Converter={StaticResource SchemaGutterDepthToMargin}}"
+                                           Foreground="{DynamicResource AppMutedTextBrush}"
+                                           FontFamily="{DynamicResource AppContentFontFamily}"
+                                           TextWrapping="NoWrap"
+                                           TextTrimming="CharacterEllipsis"
+                                           VerticalAlignment="Center" />
+                            </Border>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+
+                <GridSplitter Grid.Column="1"
+                              x:Name="SchemaGutterSplitter"
+                              Width="1"
+                              IsVisible="False"
+                              HorizontalAlignment="Stretch"
+                              VerticalAlignment="Stretch"
+                              Background="{DynamicResource AppBorderBrush}" />
+
+                <ListBox Grid.Column="2"
+                         x:Name="RowsListBox"
+                         ItemsSource="{Binding Rows}"
+                         SelectionMode="Single"
+                         Padding="8,8"
+                         ScrollViewer.HorizontalScrollBarVisibility="Auto">
+                    <ListBox.Styles>
+                        <!-- Rounded, inset highlight instead of Fluent's flat full-bleed selection
+                             rectangle - matches the rounded hover treatment on toolbar iconbuttons. -->
+                        <Style Selector="ListBoxItem">
+                            <Setter Property="Padding" Value="0" />
+                            <Setter Property="MinHeight" Value="22" />
+                            <Setter Property="Height" Value="22" />
+                            <Setter Property="Margin" Value="0,1" />
+                            <Setter Property="CornerRadius" Value="6" />
+                        </Style>
+                    </ListBox.Styles>
+
+                    <ListBox.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <VirtualizingStackPanel />
+                        </ItemsPanelTemplate>
+                    </ListBox.ItemsPanel>
+
+                    <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="json:JsonRow">
+                            <!-- Transparent background keeps the full fixed-height row hit-testable
+                                 for the right-click copy handler even though the children are
+                                 vertically centered (and so shorter than the row). -->
+                            <StackPanel Orientation="Horizontal"
+                                        Background="Transparent"
+                                        Margin="{Binding Depth, Converter={StaticResource DepthToMargin}}"
+                                        PointerPressed="OnRowPointerPressed"
+                                        DoubleTapped="OnRowDoubleTapped">
+                                <!-- Array-element ordinal, shown only on array children (null on
+                                     object members and the root) - lets you see which index you're
+                                     about to open without expanding it. Small and fixed-width so it
+                                     doesn't affect the fixed 22px row height or shift the expander. -->
+                                <TextBlock Text="{Binding ArrayIndex}"
+                                           IsVisible="{Binding ArrayIndex, Converter={x:Static json:IsNotNullConverter.Instance}}"
+                                           FontSize="9"
+                                           Foreground="{DynamicResource AppMutedTextBrush}"
+                                           FontFamily="{DynamicResource AppContentFontFamily}"
+                                           Width="26"
+                                           TextAlignment="Right"
+                                           Margin="0,0,2,0"
+                                           VerticalAlignment="Center" />
+                                <!-- Vector triangle, not a text glyph: a ▶/▼ character picks up
+                                     font-fallback metrics that differ by platform (and even by glyph
+                                     within the same fallback chain on Windows), so the two states
+                                     rendered at visibly different sizes there. Geometry is a fixed
+                                     size everywhere. -->
+                                <!-- Button is full row height/wider than the glyph itself so the
+                                     click target isn't shrunk down to the tiny triangle's bounds. -->
+                                <Button Click="OnToggleExpandClick"
+                                        IsVisible="{Binding HasChildren}"
+                                        Background="Transparent"
+                                        BorderThickness="0"
+                                        Padding="0"
+                                        Width="20"
+                                        Height="22"
+                                        HorizontalContentAlignment="Center"
+                                        VerticalContentAlignment="Center">
+                                    <Path Data="{Binding IsExpanded, Converter={x:Static json:ExpandGlyphConverter.Instance}}"
+                                          Fill="{Binding $parent[Button].Foreground}"
+                                          Stretch="Uniform"
+                                          Width="7"
+                                          Height="7" />
+                                </Button>
+                                <!-- Spacer standing in for the toggle on a leaf row. Must be exactly
+                                     the button's width, or names on rows with a triangle sit
+                                     indented relative to their leaf siblings at the same depth. -->
+                                <TextBlock IsVisible="{Binding !HasChildren}"
+                                           Width="20" />
+                                <TextBlock search:SearchHighlight.Text="{Binding Name}"
+                                           search:SearchHighlight.Suffix=": "
+                                           search:SearchHighlight.Term="{Binding $parent[json:JsonView].((json:JsonViewModel)DataContext).HighlightTerm}"
+                                           IsVisible="{Binding Name, Converter={x:Static json:IsNotNullConverter.Instance}}"
+                                           Foreground="{DynamicResource AppAccentBrush}"
+                                           VerticalAlignment="Center"
+                                           FontFamily="{DynamicResource AppContentFontFamily}" />
+                                <TextBlock search:SearchHighlight.Text="{Binding Value}"
+                                           search:SearchHighlight.Term="{Binding $parent[json:JsonView].((json:JsonViewModel)DataContext).HighlightTerm}"
+                                           Classes.jsonString="{Binding IsStringValue}"
+                                           Classes.jsonNumber="{Binding IsNumberValue}"
+                                           Classes.jsonBool="{Binding IsBooleanValue}"
+                                           Classes.jsonNull="{Binding IsNullValue}"
+                                           TextWrapping="NoWrap"
+                                           VerticalAlignment="Center"
+                                           FontFamily="{DynamicResource AppContentFontFamily}" />
+                                <TextBlock Text="{Binding TruncationHint}"
+                                           IsVisible="{Binding ShowPlainTruncationHint}"
+                                           Foreground="{DynamicResource AppMutedTextBrush}"
+                                           FontFamily="{DynamicResource AppContentFontFamily}"
+                                           Margin="8,0,0,0"
+                                           VerticalAlignment="Center" />
+                                <Button Classes="hintlink"
+                                        Content="{Binding TruncationHint}"
+                                        IsVisible="{Binding ShowTruncationLink}"
+                                        Click="OnJumpToRawClick"
+                                        Margin="8,0,0,0"
+                                        VerticalAlignment="Center"
+                                        ToolTip.Tip="View this value in the raw file" />
+                                <Button Classes="hintlink"
+                                        Content="{Binding Hint}"
+                                        IsVisible="{Binding Hint, Converter={x:Static json:IsNotNullConverter.Instance}}"
+                                        Click="OnHintClick"
+                                        Margin="8,0,0,0"
+                                        VerticalAlignment="Center"
+                                        ToolTip.Tip="Decoded date (local time) — click to change scheme" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Grid>
 
             <Border Grid.Row="1"
                     BorderBrush="{DynamicResource AppBorderBrush}"

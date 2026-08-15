@@ -7,6 +7,7 @@ A cross-platform file viewer built for large files — multi-gigabyte JSON and N
 - Instantly view any file contents - if the file type can't be auto-detected, the file is shown in a basic text view.
 - Specialised views for different file types
 - Files of any size are navigable almost instantly, no "loading..." spinner here! Argonaut never loads the whole file before starting to display it.
+- Displays documentation from JSON Schema files
 - Fast search and highlighting across multi-gb files
 - Searches run in the background and results are shown as soon as they become available
 - Recent files list
@@ -30,6 +31,20 @@ Argonaut was originally conceived as a viewer for large JSON files and it has fi
 #### CSV
 
 - Comma and tab delimited files are shown in a column viewer
+
+### JSON Schema support
+
+Bind a JSON Schema to an open document and Argonaut shows what the data *means* — `title` and
+`description` from the schema, in a resizable gutter down the left, with the full text on hover.
+This is documentation, not validation: Argonaut never tells you the document is wrong.
+
+- Pick a schema from the toolbar - bundled ones, or your own dropped in the schemas folder. A
+  `<file>.schema.json` sidecar is picked up automatically, and your choice is remembered per file.
+- Documents object properties, positional array slots (`prefixItems`) and enum value labels.
+- Files holding many schemas (`$defs`, or an OpenAPI document's components) offer a type picker,
+  ranked by how well each type matches the document.
+- Handles local `$ref` (including recursive), `$defs`/`definitions`, and `allOf`/`oneOf`/`anyOf`.
+- Ignored: remote `$ref`, `patternProperties`, `if`/`then`/`else`.
 
 ### Searching
 Argonaut searches files in the background and highlights matches as it finds them (or as you scroll them into view) - searches never block the UI.

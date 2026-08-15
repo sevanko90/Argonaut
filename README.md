@@ -7,7 +7,6 @@ A cross-platform file viewer built for large files — multi-gigabyte JSON and N
 - Instantly view any file contents - if the file type can't be auto-detected, the file is shown in a basic text view.
 - Specialised views for different file types
 - Files of any size are navigable almost instantly, no "loading..." spinner here! Argonaut never loads the whole file before starting to display it.
-- Displays documentation from JSON Schema files
 - Fast search and highlighting across multi-gb files
 - Searches run in the background and results are shown as soon as they become available
 - Recent files list
@@ -19,6 +18,7 @@ A cross-platform file viewer built for large files — multi-gigabyte JSON and N
 
 Argonaut was originally conceived as a viewer for large JSON files and it has first-class JSON support:
 
+- Displays documentation from JSON Schema files
 - Collapsible nodes
 - JSONPath display of selected node and go to JSONPath node option
 - Inline decoding of JS dates to readable form
@@ -70,9 +70,9 @@ To power this view, Argonaut first needs to index the file so it can navigate it
 
 This works well for line-based files like raw text and CSV - the index is a relatively small size compared to the file.
 
-For JSON though, things get a bit more interesting. The index needs to hold a lot more than just line start, it needs to hold the position of every token (array, property, etc) so the index size is related to the depth and complexity of the JSON.
+For JSON though, things get a bit more interesting. The index needs to hold a lot more than just line start, it needs to hold the position of every token (array, property, etc) so the index size is related to the depth and complexity of the JSON rather than the file size. 
 
-It is possible (even likely) that the index for a complex JSON file could be bigger than the file itself! So Argonaut may take more RAM to load a large file than other, slower viewers. This is the tradeoff for fast viewing of large files. I think it's worth it, but YMMV.
+It is possible (even likely) that the index for a complex JSON file could be bigger than the file itself! Argonaut may take more RAM to load a large file than other, slower viewers. This is the tradeoff for fast viewing of large files. I think it's worth it, but YMMV.
 
 
 ## Running the code
@@ -84,8 +84,6 @@ in the application folder.
 
 ## Updates
 
-Starting with this release, Windows and macOS builds check GitHub Releases for updates on
-launch (at most once every 24 hours) and offer to download and apply them - no manual
-re-download needed going forward.
+Windows and macOS builds check GitHub Releases for updates on launch (at most once every 24 hours) and offer to download and apply them - no manual re-download needed going forward.
 
 Linux still ships as a plain zip with no auto-update, for now.

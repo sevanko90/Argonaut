@@ -92,7 +92,8 @@
                 </Viewbox>
             </StackPanel>
             <Button.Flyout>
-                <Flyout Placement="BottomEdgeAlignedLeft">
+                <Flyout Placement="BottomEdgeAlignedLeft"
+                        IsOpen="{Binding IsSchemaFlyoutOpen, Mode=TwoWay}">
                     <StackPanel Margin="8" Spacing="8" Width="360">
                         <TextBlock Text="Schema"
                                    FontSize="11"
@@ -102,7 +103,6 @@
                         <ListBox x:Name="SchemaList"
                                  ItemsSource="{Binding SchemaItems}"
                                  SelectedIndex="{Binding SelectedSchemaIndex, Mode=TwoWay}"
-                                 SelectionChanged="OnSchemaPicked"
                                  MaxHeight="200"
                                  BorderThickness="0"
                                  Background="Transparent">
@@ -137,7 +137,6 @@
                                    Foreground="{DynamicResource AppMutedTextBrush}" />
                         <ListBox ItemsSource="{Binding SchemaRootPicker.Picks}"
                                  SelectedItem="{Binding SchemaRootPicker.SelectedPick, Mode=TwoWay}"
-                                 SelectionChanged="OnSchemaRootPicked"
                                  IsVisible="{Binding SchemaRootPicker.IsApplicable}"
                                  MaxHeight="300"
                                  BorderThickness="0"

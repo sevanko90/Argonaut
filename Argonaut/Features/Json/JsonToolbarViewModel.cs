@@ -41,6 +41,13 @@ public sealed class JsonToolbarViewModel : ObservableObject
     private string jsonPathInput = string.Empty;
     private IReadOnlyList<string> schemaItems = Array.Empty<string>();
     private int selectedSchemaIndex;
+    private bool isSchemaFlyoutOpen;
+
+    // Set when a schema is picked and the flyout is deliberately left open until we know whether
+    // the type within it is obvious. Cleared as soon as the flyout closes, so match scores
+    // arriving later - indexing completes long after the fact - can never shut a flyout the user
+    // has since reopened to browse.
+    private bool awaitingSchemaCloseDecision;
 
     public JsonToolbarViewModel(DateHintSettings settings, JsonSchemaSettings schemaSettings, int initialExpandDepthIndex, Action<int> applyExpandDepth, Func<string, Task>? navigateToPath = null)
     {
@@ -53,7 +60,7 @@ public sealed class JsonToolbarViewModel : ObservableObject
         timeZoneModeIndex = (int)settings.TimeZoneMode;
         expandDepthIndex = initialExpandDepthIndex;
 
-        SchemaRootPicker = new SchemaRootPickerViewModel(schemaSettings);
+        SchemaRootPicker = new SchemaRootPickerViewModel(schemaSettings, closeRequested: () => IsSchemaFlyoutOpen = false);
 
         RebuildSchemaItems();
 
@@ -63,6 +70,30 @@ public sealed class JsonToolbarViewModel : ObservableObject
 
     /// <summary>Separates the schema file from the type within it in <see cref="SchemaButtonText"/>.</summary>
     public const string SchemaPathSeparator = " › ";
+
+    /// <summary>
+    /// Two-way bound to the schema flyout's <c>IsOpen</c>, which is how it closes: a bool the view
+    /// binds, rather than the view model reaching into the view to hide a popup.
+    ///
+    /// Picking a schema does *not* close it. Which type within that schema fits this document is
+    /// only known once the file has parsed and its types have been scored, which happens a beat
+    /// later and on another object - so the flyout stays open until the answer arrives and closes
+    /// itself only when that answer is unambiguous. Everything that could go wrong (a schema that
+    /// fails to parse, a document not yet indexed far enough to sample, an NDJSON file with no
+    /// line open) simply leaves it open, which is why no timeout is needed anywhere.
+    /// </summary>
+    public bool IsSchemaFlyoutOpen
+    {
+        get => isSchemaFlyoutOpen;
+        set
+        {
+            if (!SetField(ref isSchemaFlyoutOpen, value) || value)
+                return;
+
+            awaitingSchemaCloseDecision = false;
+            SchemaRootPicker.Filter = string.Empty;
+        }
+    }
 
     /// <summary>
     /// What the schema button reads when closed: the bound schema, and the type within it when the
@@ -111,11 +142,20 @@ public sealed class JsonToolbarViewModel : ObservableObject
             {
                 JsonSchemaCatalog.OpenUserDirectory();
                 SetField(ref selectedSchemaIndex, IndexOfSelectedEntry(), nameof(SelectedSchemaIndex));
+                IsSchemaFlyoutOpen = false;
                 return;
             }
 
             var entries = schemaSettings.Entries;
-            _ = schemaSettings.SelectAsync(value >= 1 && value <= entries.Count ? entries[value - 1] : null);
+            bool clearing = value < 1 || value > entries.Count;
+            _ = schemaSettings.SelectAsync(clearing ? null : entries[value - 1]);
+
+            // Clearing the binding leaves nothing further to choose; picking one leaves the type
+            // open until the scores say whether it needs choosing at all.
+            if (clearing)
+                IsSchemaFlyoutOpen = false;
+            else
+                awaitingSchemaCloseDecision = true;
         }
     }
 
@@ -222,6 +262,28 @@ public sealed class JsonToolbarViewModel : ObservableObject
             or nameof(JsonSchemaSettings.RootOptions)
             or nameof(JsonSchemaSettings.SelectedRootName))
             OnPropertyChanged(nameof(SchemaButtonText));
+
+        if (e.PropertyName is null
+            or nameof(JsonSchemaSettings.RootOptions)
+            or nameof(JsonSchemaSettings.RootMatches))
+            ConsiderClosingSchemaFlyout();
+    }
+
+    /// <summary>
+    /// Closes the flyout left open by a schema pick, once there is nothing left worth showing:
+    /// either the schema offers no type to choose (a single-schema file, or one that failed to
+    /// parse), or the scores identify one clearly.
+    ///
+    /// Several equally-good candidates deliberately leave it open - that is the case the user has
+    /// to settle, and closing would hide the very list they need.
+    /// </summary>
+    private void ConsiderClosingSchemaFlyout()
+    {
+        if (!awaitingSchemaCloseDecision || !isSchemaFlyoutOpen)
+            return;
+
+        if (schemaSettings.RootOptions.Count == 0 || JsonSchemaRootMatcher.Best(schemaSettings.RootMatches) is not null)
+            IsSchemaFlyoutOpen = false;
     }
 
     private void RebuildSchemaItems()

@@ -122,12 +122,18 @@ public sealed class SchemaRootPickerViewModel : ObservableObject
 
     private readonly JsonSchemaSettings schemaSettings;
 
+    /// <summary>Raised when the user has actually chosen a type, so the owning flyout can close.
+    /// A callback rather than an event: the owner supplies it at construction and outlives this,
+    /// so there is nothing to unsubscribe.</summary>
+    private readonly Action? closeRequested;
+
     private IReadOnlyList<SchemaRootPick> picks = Array.Empty<SchemaRootPick>();
     private string filter = string.Empty;
 
-    public SchemaRootPickerViewModel(JsonSchemaSettings schemaSettings)
+    public SchemaRootPickerViewModel(JsonSchemaSettings schemaSettings, Action? closeRequested = null)
     {
         this.schemaSettings = schemaSettings;
+        this.closeRequested = closeRequested;
         schemaSettings.PropertyChanged += OnSchemaSettingsPropertyChanged;
         Rebuild();
     }
@@ -190,6 +196,9 @@ public sealed class SchemaRootPickerViewModel : ObservableObject
             // The "whole document" row binds the schema's own root, which is the null name.
             schemaSettings.SelectRoot(value.Name == DocumentRootLabel ? null : value.Name);
             OnPropertyChanged(nameof(SelectedPick));
+
+            // Choosing a type is the terminal action of the flyout - nothing follows it.
+            closeRequested?.Invoke();
         }
     }
 

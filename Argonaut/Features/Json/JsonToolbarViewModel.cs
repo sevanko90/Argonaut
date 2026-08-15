@@ -127,7 +127,12 @@ public sealed class JsonToolbarViewModel : ObservableObject
 
     /// <summary>Bound two-way to the schema combo. Index 0 clears the binding, the trailing index
     /// opens the schema folder without changing the binding, and anything between selects the
-    /// corresponding <see cref="JsonSchemaSettings.Entries"/> item.</summary>
+    /// corresponding <see cref="JsonSchemaSettings.Entries"/> item.
+    ///
+    /// The choice is *decided* here and *acted on* one dispatcher turn later: every branch either
+    /// closes the flyout or rebuilds <see cref="SchemaItems"/>, and this setter runs inside the
+    /// list's own selection commit for the click that made the choice. See
+    /// <see cref="UiDeferral"/> for why doing either inline crashes the process.</summary>
     public int SelectedSchemaIndex
     {
         get => selectedSchemaIndex;
@@ -138,24 +143,32 @@ public sealed class JsonToolbarViewModel : ObservableObject
             if (value < 0 || !SetField(ref selectedSchemaIndex, value))
                 return;
 
-            if (value == schemaItems.Count - 1 && schemaItems.Count > 1)
-            {
-                JsonSchemaCatalog.OpenUserDirectory();
-                SetField(ref selectedSchemaIndex, IndexOfSelectedEntry(), nameof(SelectedSchemaIndex));
-                IsSchemaFlyoutOpen = false;
-                return;
-            }
-
+            // Resolved now, against the list the user actually clicked in - by the time the
+            // deferred body runs, entries may have been rebuilt underneath it.
+            bool openFolder = value == schemaItems.Count - 1 && schemaItems.Count > 1;
             var entries = schemaSettings.Entries;
-            bool clearing = value < 1 || value > entries.Count;
-            _ = schemaSettings.SelectAsync(clearing ? null : entries[value - 1]);
+            bool clearing = !openFolder && (value < 1 || value > entries.Count);
+            SchemaCatalogEntry? chosen = openFolder || clearing ? null : entries[value - 1];
 
-            // Clearing the binding leaves nothing further to choose; picking one leaves the type
-            // open until the scores say whether it needs choosing at all.
-            if (clearing)
-                IsSchemaFlyoutOpen = false;
-            else
-                awaitingSchemaCloseDecision = true;
+            UiDeferral.AfterCurrentInput(() =>
+            {
+                if (openFolder)
+                {
+                    JsonSchemaCatalog.OpenUserDirectory();
+                    SetField(ref selectedSchemaIndex, IndexOfSelectedEntry(), nameof(SelectedSchemaIndex));
+                    IsSchemaFlyoutOpen = false;
+                    return;
+                }
+
+                _ = schemaSettings.SelectAsync(chosen);
+
+                // Clearing the binding leaves nothing further to choose; picking one leaves the
+                // type open until the scores say whether it needs choosing at all.
+                if (clearing)
+                    IsSchemaFlyoutOpen = false;
+                else
+                    awaitingSchemaCloseDecision = true;
+            });
         }
     }
 

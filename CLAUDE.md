@@ -37,3 +37,20 @@ UI thread resumes on the UI thread. The app leans on that guarantee as its one c
 
 If a method can be entered from either kind of thread, split it or document which side it belongs to rather
 than sprinkling `CheckAccess`.
+
+## Selection-bound setters must defer their side effects (`UiDeferral.AfterCurrentInput`)
+
+A two-way binding on `SelectedIndex`/`SelectedItem` pushes into the view model *inside* Avalonia's selection
+commit for the click that made the choice: `SelectingItemsControl.UpdateSelection` holds an open batch update
+while the setter runs, and only afterwards enumerates `SelectedItems` against the control's `ItemsSourceView`.
+So a setter that closes the popup hosting the list, or replaces the collection bound to its `ItemsSource`,
+destroys the list the still-open commit is about to index into — and the commit throws
+`ArgumentOutOfRangeException` out of `SelectedItems.GetEnumerator` on the dispatcher's input path, which is
+unhandled and kills the process.
+
+This is not the threading rule above (nothing is off-thread); it is re-entrancy. Such setters decide what was
+chosen synchronously, then hand the *acting on it* to `UiDeferral.AfterCurrentInput` so it runs a dispatcher
+turn later. Real bug: picking "Open schema folder…" in the schema flyout closed the flyout inline and crashed
+the app on the next commit (`JsonToolbarViewModel.SelectedSchemaIndex`,
+`SchemaRootPickerViewModel.SelectedPick`). Tests drive the deferral through `UiDeferral.PostOverride` via
+`DeferredUiScope`, which keeps view-model tests dispatcher-free.

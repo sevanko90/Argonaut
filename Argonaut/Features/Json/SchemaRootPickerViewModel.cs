@@ -184,6 +184,10 @@ public sealed class SchemaRootPickerViewModel : ObservableObject
     /// Bound two-way to the list's SelectedItem. Nulls and header rows are ignored: the ListBox
     /// nulls its selection as the filtered list is swapped, and acting on that would unbind the
     /// type the user just chose.
+    ///
+    /// Acting on the pick is deferred a dispatcher turn: binding a root rebuilds
+    /// <see cref="Picks"/> and closes the flyout, both of which pull the list out from under the
+    /// selection commit this setter is running inside. See <see cref="UiDeferral"/>.
     /// </summary>
     public SchemaRootPick? SelectedPick
     {
@@ -194,11 +198,16 @@ public sealed class SchemaRootPickerViewModel : ObservableObject
                 return;
 
             // The "whole document" row binds the schema's own root, which is the null name.
-            schemaSettings.SelectRoot(value.Name == DocumentRootLabel ? null : value.Name);
-            OnPropertyChanged(nameof(SelectedPick));
+            string? rootName = value.Name == DocumentRootLabel ? null : value.Name;
 
-            // Choosing a type is the terminal action of the flyout - nothing follows it.
-            closeRequested?.Invoke();
+            UiDeferral.AfterCurrentInput(() =>
+            {
+                schemaSettings.SelectRoot(rootName);
+                OnPropertyChanged(nameof(SelectedPick));
+
+                // Choosing a type is the terminal action of the flyout - nothing follows it.
+                closeRequested?.Invoke();
+            });
         }
     }
 

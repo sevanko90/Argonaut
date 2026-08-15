@@ -16,6 +16,10 @@ public sealed class JsonToolbarViewModelTests : IDisposable
 {
     private readonly string settingsRoot;
 
+    /// <summary>Acting on a schema/type pick is deferred a dispatcher turn (see
+    /// <see cref="UiDeferral"/>); this stands in for that turn.</summary>
+    private readonly DeferredUiScope ui = new();
+
     public JsonToolbarViewModelTests()
     {
         settingsRoot = Path.Combine(Path.GetTempPath(), "ArgonautTests", Guid.NewGuid().ToString("N"));
@@ -24,6 +28,7 @@ public sealed class JsonToolbarViewModelTests : IDisposable
 
     public void Dispose()
     {
+        ui.Dispose();
         AppDataPaths.RootOverride = null;
         try { if (Directory.Exists(settingsRoot)) Directory.Delete(settingsRoot, recursive: true); }
         catch { /* best-effort test cleanup */ }
@@ -129,10 +134,19 @@ public sealed class JsonToolbarViewModelTests : IDisposable
     }
 
     /// <summary>Opens the flyout and picks the entry at <paramref name="index"/>, as the view does.</summary>
-    private static void PickSchema(JsonToolbarViewModel toolbar, int index)
+    private void PickSchema(JsonToolbarViewModel toolbar, int index)
     {
         toolbar.IsSchemaFlyoutOpen = true;
+        SelectSchema(toolbar, index);
+    }
+
+    /// <summary>Sets the bound index and lets the deferred work run: the setter defers acting on
+    /// the choice by a turn (see <see cref="UiDeferral"/>), which the running app's dispatcher does
+    /// for free and a test has to do by hand.</summary>
+    private void SelectSchema(JsonToolbarViewModel toolbar, int index)
+    {
         toolbar.SelectedSchemaIndex = index;
+        ui.Pump();
     }
 
     private static void Match(JsonSchemaSettings settings, params string[] documentKeys)
@@ -212,7 +226,7 @@ public sealed class JsonToolbarViewModelTests : IDisposable
         await WaitForDocumentAsync(schemaSettings);
 
         toolbar.IsSchemaFlyoutOpen = true;
-        toolbar.SelectedSchemaIndex = 0;
+        SelectSchema(toolbar, 0);
 
         Assert.False(toolbar.IsSchemaFlyoutOpen);
         Assert.Null(schemaSettings.SelectedEntry);
@@ -230,6 +244,7 @@ public sealed class JsonToolbarViewModelTests : IDisposable
 
         var picker = toolbar.SchemaRootPicker;
         picker.SelectedPick = picker.Picks.First(p => p.IsSelectable);
+        ui.Pump();
 
         Assert.False(toolbar.IsSchemaFlyoutOpen);
     }
@@ -312,11 +327,11 @@ public sealed class JsonToolbarViewModelTests : IDisposable
         schemaSettings.SetEntries(new[] { entry });
         var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
 
-        toolbar.SelectedSchemaIndex = 1;
+        SelectSchema(toolbar, 1);
         await WaitForDocumentAsync(schemaSettings);
         Assert.StartsWith("api", toolbar.SchemaButtonText);
 
-        toolbar.SelectedSchemaIndex = 0;
+        SelectSchema(toolbar, 0);
 
         Assert.Equal(JsonToolbarViewModel.NoSchemaLabel, toolbar.SchemaButtonText);
     }
@@ -420,13 +435,13 @@ public sealed class JsonToolbarViewModelTests : IDisposable
         schemaSettings.SetEntries(new[] { entry });
         var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
 
-        toolbar.SelectedSchemaIndex = 1;
+        SelectSchema(toolbar, 1);
         await WaitForDocumentAsync(schemaSettings);
 
         Assert.Equal(entry, schemaSettings.SelectedEntry);
         Assert.NotNull(schemaSettings.Document);
 
-        toolbar.SelectedSchemaIndex = 0;
+        SelectSchema(toolbar, 0);
 
         Assert.Null(schemaSettings.SelectedEntry);
         Assert.Null(schemaSettings.Document);
@@ -456,7 +471,7 @@ public sealed class JsonToolbarViewModelTests : IDisposable
             schemaSettings.SetEntries(new[] { WriteSchema("alpha") });
             var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
 
-            toolbar.SelectedSchemaIndex = toolbar.SchemaItems.Count - 1;
+            SelectSchema(toolbar, toolbar.SchemaItems.Count - 1);
 
             Assert.Equal(new[] { JsonSchemaCatalog.GetUserDirectory() }, opened);
             Assert.Equal(0, toolbar.SelectedSchemaIndex);
@@ -468,6 +483,59 @@ public sealed class JsonToolbarViewModelTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// Regression: picking "Open schema folder…" closed the flyout from inside the ListBox's own
+    /// selection commit, which tore the list out from under it and took the process down with
+    /// "Index was out of range" from SelectingItemsControl.UpdateSelection. Nothing the setter
+    /// does may happen before the commit that called it has finished - see UiDeferral.
+    /// </summary>
+    [Fact]
+    public void PickingASchemaItem_TouchesNothingUntilTheInputEventHasFinished()
+    {
+        var opened = new List<string>();
+        JsonSchemaCatalog.OpenDirectoryOverride = opened.Add;
+        try
+        {
+            var schemaSettings = new JsonSchemaSettings();
+            schemaSettings.SetEntries(new[] { WriteSchema("alpha") });
+            var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
+            toolbar.IsSchemaFlyoutOpen = true;
+
+            toolbar.SelectedSchemaIndex = toolbar.SchemaItems.Count - 1;
+
+            Assert.Empty(opened);
+            Assert.True(toolbar.IsSchemaFlyoutOpen);
+
+            ui.Pump();
+
+            Assert.Equal(new[] { JsonSchemaCatalog.GetUserDirectory() }, opened);
+            Assert.False(toolbar.IsSchemaFlyoutOpen);
+        }
+        finally
+        {
+            JsonSchemaCatalog.OpenDirectoryOverride = null;
+        }
+    }
+
+    /// <summary>The same rule for the schema half of the flyout: binding a schema rebuilds
+    /// SchemaItems, which is the list the commit in flight is indexing into.</summary>
+    [Fact]
+    public void BindingASchema_DoesNotRunInsideTheSelectionCommit()
+    {
+        var schemaSettings = new JsonSchemaSettings();
+        var entry = WriteSchema("alpha");
+        schemaSettings.SetEntries(new[] { entry });
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
+
+        toolbar.SelectedSchemaIndex = 1;
+
+        Assert.Null(schemaSettings.SelectedEntry);
+
+        ui.Pump();
+
+        Assert.Equal(entry, schemaSettings.SelectedEntry);
+    }
+
     [Fact]
     public void NegativeSchemaIndex_DuringItemSwap_DoesNotClearTheBinding()
     {
@@ -475,9 +543,9 @@ public sealed class JsonToolbarViewModelTests : IDisposable
         var entry = WriteSchema("alpha");
         schemaSettings.SetEntries(new[] { entry });
         var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
-        toolbar.SelectedSchemaIndex = 1;
+        SelectSchema(toolbar, 1);
 
-        toolbar.SelectedSchemaIndex = -1;
+        SelectSchema(toolbar, -1);
 
         Assert.Equal(1, toolbar.SelectedSchemaIndex);
         Assert.Equal(entry, schemaSettings.SelectedEntry);

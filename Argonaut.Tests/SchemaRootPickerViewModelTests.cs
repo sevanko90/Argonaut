@@ -14,6 +14,10 @@ public sealed class SchemaRootPickerViewModelTests : IDisposable
 {
     private readonly string settingsRoot;
 
+    /// <summary>Picking a type acts a dispatcher turn later (see <see cref="UiDeferral"/>); this
+    /// stands in for that turn.</summary>
+    private readonly DeferredUiScope ui = new();
+
     public SchemaRootPickerViewModelTests()
     {
         settingsRoot = Path.Combine(Path.GetTempPath(), "ArgonautTests", Guid.NewGuid().ToString("N"));
@@ -22,6 +26,7 @@ public sealed class SchemaRootPickerViewModelTests : IDisposable
 
     public void Dispose()
     {
+        ui.Dispose();
         AppDataPaths.RootOverride = null;
         try { if (Directory.Exists(settingsRoot)) Directory.Delete(settingsRoot, recursive: true); }
         catch { /* best-effort test cleanup */ }
@@ -65,6 +70,13 @@ public sealed class SchemaRootPickerViewModelTests : IDisposable
 
     private static string[] Names(SchemaRootPickerViewModel picker)
         => picker.Picks.Select(p => p.Name).ToArray();
+
+    /// <summary>Picks a type the way the list does, then lets the deferred work run.</summary>
+    private void Pick(SchemaRootPickerViewModel picker, string name)
+    {
+        picker.SelectedPick = picker.Picks.Single(p => p.Name == name);
+        ui.Pump();
+    }
 
     [Fact]
     public async Task WithoutScores_ListsTheUnbindEntryThenEveryType()
@@ -414,11 +426,36 @@ public sealed class SchemaRootPickerViewModelTests : IDisposable
         var settings = await BoundAsync();
         var picker = new SchemaRootPickerViewModel(settings);
 
-        picker.SelectedPick = picker.Picks.Single(p => p.Name == "Booking");
+        Pick(picker, "Booking");
         Assert.Equal("Booking", settings.SelectedRootName);
 
-        picker.SelectedPick = picker.Picks.Single(p => p.Name == "Airport");
+        Pick(picker, "Airport");
         Assert.Equal("Airport", settings.SelectedRootName);
+    }
+
+    /// <summary>
+    /// Regression: binding the picked type rebuilt Picks and closed the flyout from inside the
+    /// ListBox's own selection commit, leaving that commit indexing into a list that no longer
+    /// existed - an unhandled ArgumentOutOfRangeException on the input path. See UiDeferral.
+    /// </summary>
+    [Fact]
+    public async Task SelectingAType_DoesNotBindItInsideTheSelectionCommit()
+    {
+        var settings = await BoundAsync();
+        bool closed = false;
+        var picker = new SchemaRootPickerViewModel(settings, closeRequested: () => closed = true);
+
+        picker.SelectedPick = picker.Picks.Single(p => p.Name == "Booking");
+
+        // A multi-root schema binds something the moment it loads, so the "not yet" assertion is
+        // that the *pick* hasn't landed, not that nothing is bound.
+        Assert.NotEqual("Booking", settings.SelectedRootName);
+        Assert.False(closed);
+
+        ui.Pump();
+
+        Assert.Equal("Booking", settings.SelectedRootName);
+        Assert.True(closed);
     }
 
     [Fact]
@@ -428,12 +465,14 @@ public sealed class SchemaRootPickerViewModelTests : IDisposable
         // would unbind the type the user just chose.
         var settings = await BoundAsync();
         var picker = new SchemaRootPickerViewModel(settings);
-        picker.SelectedPick = picker.Picks.Single(p => p.Name == "Booking");
+        Pick(picker, "Booking");
 
         picker.SelectedPick = null;
+        ui.Pump();
         Assert.Equal("Booking", settings.SelectedRootName);
 
         picker.SelectedPick = picker.Picks.First(p => p.IsHeader);
+        ui.Pump();
         Assert.Equal("Booking", settings.SelectedRootName);
     }
 

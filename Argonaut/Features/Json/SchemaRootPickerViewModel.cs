@@ -56,15 +56,31 @@ public sealed class SchemaRootPick
     public static SchemaRootPick Header(string caption, bool showSeparator = false)
         => new(caption, isHeader: true, null, null, null, showSeparator, isRecommended: false);
 
-    public static SchemaRootPick Type(string name, string? description, int propertyCount, double? coverage, bool isRecommended = false)
+    public static SchemaRootPick Type(string name, string? description, int propertyCount, SchemaRootMatch? match, bool isRecommended = false)
         => new(
             name,
             isHeader: false,
             description,
             propertyCount == 1 ? "1 field" : $"{propertyCount} fields",
-            coverage is { } value ? value.ToString("P0", System.Globalization.CultureInfo.CurrentCulture) : null,
+            ScoreText(match),
             showSeparator: false,
             isRecommended);
+
+    /// <summary>
+    /// The badge on a scored row. Coverage as a percentage says the useful thing for a schema that
+    /// describes the whole document, and the wrong thing for one that describes a slice of it: a
+    /// 13-field type fully present in a 100-field object is a good match wearing a "13%" label.
+    /// So a subset match is badged by what actually qualified it - all of its fields being there.
+    /// </summary>
+    private static string? ScoreText(SchemaRootMatch? match)
+    {
+        if (match is not { } scored)
+            return null;
+
+        return JsonSchemaRootMatcher.IsSubsetMatch(scored)
+            ? $"{scored.MatchedKeys}/{scored.SchemaKeys} fields"
+            : scored.Coverage.ToString("P0", System.Globalization.CultureInfo.CurrentCulture);
+    }
 }
 
 /// <summary>
@@ -254,7 +270,7 @@ public sealed class SchemaRootPickerViewModel : ObservableObject
                 DocumentRootLabel,
                 "Label the file against the schema's own root.",
                 propertyCount: schema?.GetPropertyCount(schema.DocumentRootId) ?? 0,
-                coverage: documentRootMatch?.Coverage,
+                match: documentRootMatch,
                 isRecommended: recommended == DocumentRootLabel));
         }
 
@@ -274,7 +290,7 @@ public sealed class SchemaRootPickerViewModel : ObservableObject
                     bestName,
                     Describe(schema, bestMatch.Value.NodeId),
                     bestMatch.Value.SchemaKeys,
-                    bestMatch.Value.Coverage,
+                    bestMatch.Value,
                     isRecommended: true));
             }
 
@@ -290,7 +306,7 @@ public sealed class SchemaRootPickerViewModel : ObservableObject
                 if (match.Name is not { } name || !Matches(name) || !shortlisted.Add(name))
                     continue;
 
-                section.Add(SchemaRootPick.Type(name, Describe(schema, match.NodeId), match.SchemaKeys, match.Coverage, isRecommended: false));
+                section.Add(SchemaRootPick.Type(name, Describe(schema, match.NodeId), match.SchemaKeys, match, isRecommended: false));
             }
 
             bool documentRootFits = documentRootMatch is { } root && JsonSchemaRootMatcher.IsPlausible(root);
@@ -318,7 +334,7 @@ public sealed class SchemaRootPickerViewModel : ObservableObject
             if (shortlisted.Contains(option.Name) || !Matches(option.Name))
                 continue;
 
-            rest.Add(SchemaRootPick.Type(option.Name, Describe(schema, option.NodeId), schema?.GetPropertyCount(option.NodeId) ?? 0, coverage: null));
+            rest.Add(SchemaRootPick.Type(option.Name, Describe(schema, option.NodeId), schema?.GetPropertyCount(option.NodeId) ?? 0, match: null));
         }
 
         if (rest.Count > 0)

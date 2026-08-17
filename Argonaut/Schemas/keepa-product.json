@@ -10,7 +10,7 @@
     },
     "tokensLeft": {
       "title": "Tokens left",
-      "description": "API tokens remaining on the account after this request."
+      "description": "API tokens remaining on the account after this request. Unused tokens expire after 60 minutes."
     },
     "refillIn": {
       "title": "Refill in",
@@ -18,11 +18,11 @@
     },
     "refillRate": {
       "title": "Refill rate",
-      "description": "Tokens added per minute."
+      "description": "Tokens added per minute. The bucket fills continuously, whether or not requests are being made."
     },
     "tokensConsumed": {
       "title": "Tokens consumed",
-      "description": "Tokens this request cost."
+      "description": "Tokens this request cost — one per requested ASIN, plus 6 per fetched offer page."
     },
     "tokenFlowReduction": {
       "title": "Token flow reduction",
@@ -40,8 +40,114 @@
   "$defs": {
     "product": {
       "title": "Product",
+      "description": "One ASIN's product data and price history. Read productType first — it determines which of these fields carry data at all.",
       "type": "object",
+      "$defs": {
+        "priceTypeValues": {
+          "title": "Price type array",
+          "description": "One value per csv price type, at the same index as the csv history array. Depending on the slot the value is a price in the locale's smallest currency unit, a sales rank, an offer count or a percentage. Real responses are often shorter than this list — always index by price type, never assume a length.",
+          "prefixItems": [
+            { "title": "Amazon price" },
+            { "title": "New price" },
+            { "title": "Used price" },
+            { "title": "Sales rank" },
+            { "title": "List price" },
+            { "title": "Collectible price" },
+            { "title": "Refurbished price" },
+            { "title": "New, FBM" },
+            { "title": "Lightning deal price" },
+            { "title": "Warehouse price" },
+            { "title": "New, FBA" },
+            { "title": "New offer count" },
+            { "title": "Used offer count" },
+            { "title": "Refurbished offer count" },
+            { "title": "Collectible offer count" },
+            { "title": "Extra info updates" },
+            { "title": "Rating" },
+            { "title": "Review count" },
+            { "title": "Buy Box price" },
+            { "title": "Used, like new" },
+            { "title": "Used, very good" },
+            { "title": "Used, good" },
+            { "title": "Used, acceptable" },
+            { "title": "Collectible, like new" },
+            { "title": "Collectible, very good" },
+            { "title": "Collectible, good" },
+            { "title": "Collectible, acceptable" },
+            { "title": "Refurbished, shipping included" },
+            { "title": "eBay new" },
+            { "title": "eBay used" },
+            { "title": "Trade-in value" },
+            { "title": "Rent (retired)" },
+            { "title": "Used Buy Box price" },
+            { "title": "Prime exclusive price" },
+            { "title": "New FBA offer count" },
+            { "title": "New FBM offer count" }
+          ]
+        },
+        "priceTypeExtremes": {
+          "title": "Price type extremes",
+          "description": "One entry per csv price type, at the same index as the csv history array. Each entry is [Keepa minute, value] — when the extreme occurred and what it was — or null where the price type has no data.",
+          "prefixItems": [
+            { "title": "Amazon price", "$ref": "#/$defs/product/$defs/extremePoint" },
+            { "title": "New price", "$ref": "#/$defs/product/$defs/extremePoint" },
+            { "title": "Used price", "$ref": "#/$defs/product/$defs/extremePoint" },
+            { "title": "Sales rank", "$ref": "#/$defs/product/$defs/extremePoint" },
+            { "title": "List price", "$ref": "#/$defs/product/$defs/extremePoint" },
+            { "title": "Collectible price", "$ref": "#/$defs/product/$defs/extremePoint" },
+            { "title": "Refurbished price", "$ref": "#/$defs/product/$defs/extremePoint" },
+            { "title": "New, FBM", "$ref": "#/$defs/product/$defs/extremePoint" },
+            { "title": "Lightning deal price", "$ref": "#/$defs/product/$defs/extremePoint" },
+            { "title": "Warehouse price", "$ref": "#/$defs/product/$defs/extremePoint" },
+            { "title": "New, FBA", "$ref": "#/$defs/product/$defs/extremePoint" },
+            { "title": "New offer count", "$ref": "#/$defs/product/$defs/extremePoint" },
+            { "title": "Used offer count", "$ref": "#/$defs/product/$defs/extremePoint" },
+            { "title": "Refurbished offer count", "$ref": "#/$defs/product/$defs/extremePoint" },
+            { "title": "Collectible offer count", "$ref": "#/$defs/product/$defs/extremePoint" },
+            { "title": "Extra info updates", "$ref": "#/$defs/product/$defs/extremePoint" },
+            { "title": "Rating", "$ref": "#/$defs/product/$defs/extremePoint" },
+            { "title": "Review count", "$ref": "#/$defs/product/$defs/extremePoint" },
+            { "title": "Buy Box price", "$ref": "#/$defs/product/$defs/extremePoint" },
+            { "title": "Used, like new", "$ref": "#/$defs/product/$defs/extremePoint" },
+            { "title": "Used, very good", "$ref": "#/$defs/product/$defs/extremePoint" },
+            { "title": "Used, good", "$ref": "#/$defs/product/$defs/extremePoint" },
+            { "title": "Used, acceptable", "$ref": "#/$defs/product/$defs/extremePoint" },
+            { "title": "Collectible, like new", "$ref": "#/$defs/product/$defs/extremePoint" },
+            { "title": "Collectible, very good", "$ref": "#/$defs/product/$defs/extremePoint" },
+            { "title": "Collectible, good", "$ref": "#/$defs/product/$defs/extremePoint" },
+            { "title": "Collectible, acceptable", "$ref": "#/$defs/product/$defs/extremePoint" },
+            { "title": "Refurbished, shipping included", "$ref": "#/$defs/product/$defs/extremePoint" },
+            { "title": "eBay new", "$ref": "#/$defs/product/$defs/extremePoint" },
+            { "title": "eBay used", "$ref": "#/$defs/product/$defs/extremePoint" },
+            { "title": "Trade-in value", "$ref": "#/$defs/product/$defs/extremePoint" },
+            { "title": "Rent (retired)", "$ref": "#/$defs/product/$defs/extremePoint" },
+            { "title": "Used Buy Box price", "$ref": "#/$defs/product/$defs/extremePoint" },
+            { "title": "Prime exclusive price", "$ref": "#/$defs/product/$defs/extremePoint" },
+            { "title": "New FBA offer count", "$ref": "#/$defs/product/$defs/extremePoint" },
+            { "title": "New FBM offer count", "$ref": "#/$defs/product/$defs/extremePoint" }
+          ]
+        },
+        "extremePoint": {
+          "title": "Extreme point",
+          "prefixItems": [
+            { "title": "When", "description": "In Keepa minutes." },
+            { "title": "Value", "description": "Price in the locale's smallest currency unit, or the rank/count for a non-price slot." }
+          ]
+        }
+      },
       "properties": {
+        "productType": {
+          "title": "Product type",
+          "description": "Evaluate this before anything else: it determines what data is available for the product.",
+          "oneOf": [
+            { "const": 0, "title": "Standard", "description": "Everything accessible." },
+            { "const": 1, "title": "Downloadable", "description": "A digital download. No price, rating or offers data; updated less often." },
+            { "const": 2, "title": "eBook", "description": "No price, rating or offers data; updated less often." },
+            { "const": 3, "title": "Inaccessible", "description": "No price, rating or offers data. Sales rank and offer counts update slowly, and some fields may be missing entirely." },
+            { "const": 4, "title": "Invalid", "description": "No current data — an invalid or deprecated ASIN, or another problem. May be temporary." },
+            { "const": 5, "title": "Variation parent", "description": "A parent ASIN; the variations field is set." }
+          ]
+        },
         "asin": { "title": "ASIN", "description": "Amazon Standard Identification Number." },
         "domainId": {
           "title": "Amazon locale",
@@ -57,41 +163,294 @@
             { "const": 9, "title": "es", "description": "Spain" },
             { "const": 10, "title": "in", "description": "India" },
             { "const": 11, "title": "com.mx", "description": "Mexico" },
-            { "const": 12, "title": "com.br", "description": "Brazil" },
-            { "const": 13, "title": "com.au", "description": "Australia" }
+            { "const": 12, "title": "com.br", "description": "Brazil (no longer listed in the API docs)" },
+            { "const": 13, "title": "com.au", "description": "Australia (no longer listed in the API docs)" }
           ]
         },
-        "title": { "title": "Product title" },
+        "title": {
+          "title": "Product title",
+          "description": "Amazon caps titles at 75 characters outside media categories; the overflow goes to itemHighlights, so read both for the full descriptive text. May contain unescaped HTML in rare cases."
+        },
+        "itemHighlights": {
+          "title": "Item highlights",
+          "description": "Up to 125 further characters of descriptive content — typically materials or use cases. Amazon shows it beside the title in search results."
+        },
         "trackingSince": {
           "title": "Tracking since",
           "description": "First time Keepa saw this product, in Keepa minutes (minutes since 2011-01-01 UTC)."
+        },
+        "listedSince": {
+          "title": "Listed since",
+          "description": "When the product was first listed on Amazon, in Keepa minutes. Available for some products only; 0 or -1 when it is not."
         },
         "lastUpdate": {
           "title": "Last update",
           "description": "Last time this product's data changed, in Keepa minutes."
         },
-        "lastPriceChange": {
-          "title": "Last price change",
-          "description": "Last time any price on this product moved, in Keepa minutes."
-        },
         "lastRatingUpdate": {
           "title": "Last rating update",
           "description": "Last time the rating or review count changed, in Keepa minutes."
         },
-        "listedSince": {
-          "title": "Listed since",
-          "description": "When the product was first listed on Amazon, in Keepa minutes."
+        "lastPriceChange": {
+          "title": "Last price change",
+          "description": "Last time any price on this product moved, in Keepa minutes."
         },
-        "productType": {
-          "title": "Product type",
-          "oneOf": [
-            { "const": 0, "title": "Standard", "description": "A physical product with its own listing." },
-            { "const": 1, "title": "Downloadable", "description": "A digital download." },
-            { "const": 2, "title": "eBook", "description": "A Kindle or other electronic book." },
-            { "const": 3, "title": "Unknown", "description": "Keepa could not determine the type." },
-            { "const": 4, "title": "Variation parent", "description": "A parent listing whose variations are the real products." }
-          ]
+        "lastEbayUpdate": {
+          "title": "Last eBay update",
+          "description": "Last refresh of the eBay prices, in Keepa minutes. Negative when no matching eBay listing was found."
         },
+        "lastStockUpdate": {
+          "title": "Last stock update",
+          "description": "Most recent stock-data update across this product's offers, in Keepa minutes. Set only when the stock parameter was used and stock data was collected at least once, and not every offer is refreshed together — check each offer's own lastStockUpdate."
+        },
+        "images": {
+          "title": "Images",
+          "description": "Carousel image metadata, each entry the same image in up to two resolutions. Full path: https://m.media-amazon.com/images/I/<filename>",
+          "items": {
+            "title": "Image",
+            "properties": {
+              "l": { "title": "Large filename" },
+              "lH": { "title": "Large height", "description": "Pixels." },
+              "lW": { "title": "Large width", "description": "Pixels." },
+              "m": { "title": "Medium filename" },
+              "mH": { "title": "Medium height", "description": "Pixels." },
+              "mW": { "title": "Medium width", "description": "Pixels." }
+            }
+          }
+        },
+        "rootCategory": {
+          "title": "Root category",
+          "description": "Category node ID of the product's root category, or 0 when unknown. The value 9223372036854775807 (max long) is Keepa's placeholder '?' category, used for products listed in no or non-existent categories."
+        },
+        "categories": {
+          "title": "Categories",
+          "description": "Amazon category node IDs this product is listed in. Can be empty."
+        },
+        "categoryTree": {
+          "title": "Category tree",
+          "description": "The category path in order, root first.",
+          "items": {
+            "title": "Category node",
+            "properties": {
+              "catId": { "title": "Category ID" },
+              "name": { "title": "Category name" }
+            }
+          }
+        },
+        "parentAsin": {
+          "title": "Parent ASIN",
+          "description": "The variation parent's ASIN, or null when this product has no variations."
+        },
+        "parentAsinHistory": {
+          "title": "Parent ASIN history",
+          "description": "Flat series of [Keepa minute, previous parent ASIN] pairs, the timestamp marking when that parent stopped applying. The current parent is in parentAsin. Absent when it never changed; tracked since 2024-03-18."
+        },
+        "frequentlyBoughtTogether": {
+          "title": "Frequently bought together",
+          "description": "One or two ASINs Amazon pairs with this one. Updated only when the offers parameter was used."
+        },
+        "bundleItems": {
+          "title": "Bundle items",
+          "description": "ASINs this bundle consists of. Virtual product bundles only."
+        },
+        "eanList": { "title": "EANs", "description": "First entry is the primary EAN." },
+        "upcList": { "title": "UPCs", "description": "First entry is the primary UPC." },
+        "gtinList": { "title": "GTINs", "description": "First entry is the primary GTIN." },
+        "manufacturer": { "title": "Manufacturer" },
+        "brand": { "title": "Brand" },
+        "brandStoreName": {
+          "title": "Brand store name",
+          "description": "Never set for digital products, movie rentals, product bundles, Amazon Fresh or Amazon Pantry."
+        },
+        "brandStoreUrl": {
+          "title": "Brand store URL",
+          "description": "Path only — prepend the locale's Amazon domain for the full URL."
+        },
+        "brandStoreUrlName": {
+          "title": "Brand store URL name",
+          "description": "The brand segment of the store URL path, e.g. LEGO from /stores/LEGO/page/…"
+        },
+        "websiteDisplayGroup": {
+          "title": "Website display group",
+          "description": "Groups products that behave alike, which affects how sales rank is calculated and shown — variations especially."
+        },
+        "websiteDisplayGroupName": {
+          "title": "Website display group name",
+          "description": "Readable form of websiteDisplayGroup."
+        },
+        "salesRankDisplayGroup": {
+          "title": "Sales rank display group",
+          "description": "The grouping the product's primary sales rank is based on."
+        },
+        "type": {
+          "title": "Amazon product type",
+          "description": "Amazon's own productType string, e.g. VIDEO_GAME_CONTROLLER. Unrelated to the numeric productType field."
+        },
+        "partNumber": { "title": "Part number" },
+        "binding": {
+          "title": "Binding",
+          "description": "For books, the binding; for anything else, usually the product category."
+        },
+        "scent": { "title": "Scent" },
+        "shortDescription": { "title": "Short description" },
+        "activeIngredients": { "title": "Active ingredients" },
+        "specialIngredients": { "title": "Special ingredients" },
+        "itemForm": { "title": "Item form", "description": "Physical state, e.g. Liquid." },
+        "itemTypeKeyword": { "title": "Item type keyword", "description": "e.g. body-lotions." },
+        "recommendedUsesForProduct": { "title": "Recommended uses" },
+        "pattern": { "title": "Pattern", "description": "The design on the product, e.g. Striped." },
+        "specificUsesForProduct": { "title": "Specific uses" },
+        "specialFeatures": { "title": "Special features" },
+        "businessDiscount": {
+          "title": "Business discount",
+          "description": "Highest business discount percentage. Often stale — it may not reflect current offers."
+        },
+        "lastBusinessDiscountUpdate": {
+          "title": "Last business discount update",
+          "description": "In Keepa minutes. Absent when businessDiscount has no value."
+        },
+        "safetyWarning": { "title": "Safety warning" },
+        "productBenefit": { "title": "Product benefit" },
+        "batteriesRequired": { "title": "Batteries required" },
+        "batteriesIncluded": { "title": "Batteries included" },
+        "targetAudienceKeyword": { "title": "Target audience keyword" },
+        "style": { "title": "Style" },
+        "includedComponents": { "title": "Included components", "description": "What is in the box." },
+        "material": { "title": "Material", "description": "Primary substances the product is made of." },
+        "materials": { "title": "Materials", "description": "The product's materials, as a list." },
+        "numberOfItems": { "title": "Number of items", "description": "-1 if not available." },
+        "numberOfPages": { "title": "Number of pages", "description": "-1 if not available." },
+        "publicationDate": {
+          "title": "Publication date",
+          "description": "Packed integer date: YYYY, YYYYMM or YYYYMMDD (1978, 200301, 20150409). -1 if not available."
+        },
+        "releaseDate": {
+          "title": "Release date",
+          "description": "Same packed-integer format as publicationDate. -1 if not available."
+        },
+        "contributors": {
+          "title": "Contributors",
+          "description": "Pairs of [name, role] — author, actor, director and so on."
+        },
+        "languages": {
+          "title": "Languages",
+          "description": "Entries of [name] or [name, type], e.g. [\"English\", \"Original Language\"]."
+        },
+        "model": { "title": "Model" },
+        "color": { "title": "Colour" },
+        "size": { "title": "Size" },
+        "edition": { "title": "Edition" },
+        "format": { "title": "Format" },
+        "features": {
+          "title": "Features",
+          "description": "Up to 5 bullet points, each truncated at 1000 characters. May contain HTML in rare cases."
+        },
+        "description": {
+          "title": "Description",
+          "description": "Truncated at 4000 characters, and may contain HTML markup and newlines. Refreshed only when the offers parameter is used."
+        },
+        "hazardousMaterials": {
+          "title": "Hazardous materials",
+          "description": "Shipping hazard classifications.",
+          "items": {
+            "title": "Hazard entry",
+            "properties": {
+              "aspect": { "title": "Aspect", "description": "Which classification this is, e.g. proper_shipping_name." },
+              "value": { "title": "Value" }
+            }
+          }
+        },
+        "videos": {
+          "title": "Videos",
+          "description": "Carousel and listing videos. Requires both the videos and offers parameters.",
+          "items": {
+            "title": "Video",
+            "properties": {
+              "title": { "title": "Title" },
+              "image": { "title": "Thumbnail filename" },
+              "duration": { "title": "Duration", "description": "Seconds." },
+              "creator": {
+                "title": "Creator type",
+                "description": "One of Main, Customer, Seller, Influencer, Vendor, ThirdParty, Amazon, Merchant, Brand. Main marks carousel videos, which carry no duration, title or name."
+              },
+              "name": { "title": "Creator name" },
+              "url": { "title": "Video URL" }
+            }
+          }
+        },
+        "aPlus": {
+          "title": "A+ content",
+          "description": "Enhanced listing content. Requires the aplus parameter.",
+          "items": {
+            "title": "A+ entry",
+            "properties": {
+              "module": {
+                "title": "Modules",
+                "items": {
+                  "title": "A+ module",
+                  "properties": {
+                    "text": { "title": "Text blocks" },
+                    "image": { "title": "Image URLs" },
+                    "imageAltText": { "title": "Image alt text", "description": "Same index order as image." },
+                    "video": { "title": "Video URLs" },
+                    "asin": { "title": "Comparison table ASINs" }
+                  }
+                }
+              },
+              "fromManufacturer": {
+                "title": "From manufacturer",
+                "description": "True when the content comes from the manufacturer or vendor."
+              }
+            }
+          }
+        },
+        "deals": {
+          "title": "Deal badges",
+          "description": "Deal metadata for the product's buy box. Updated only when the offers parameter is used.",
+          "items": {
+            "title": "Deal badge",
+            "properties": {
+              "accessType": {
+                "title": "Access type",
+                "description": "Who can take the deal. Keepa may add values at any time.",
+                "oneOf": [
+                  { "const": "ALL", "title": "All customers" },
+                  { "const": "PRIME_EARLY_ACCESS", "title": "Prime early access" },
+                  { "const": "PRIME_EXCLUSIVE", "title": "Prime exclusive" }
+                ]
+              },
+              "dealType": {
+                "title": "Deal type",
+                "description": "The badge's kind. Keepa may add values at any time.",
+                "oneOf": [
+                  { "const": "PRIME_DAY", "title": "Prime Day" },
+                  { "const": "PRIME_DAY_EARLY", "title": "Prime Day early" },
+                  { "const": "EARLY_ACCESS_WITH_PRIME", "title": "Early access with Prime" },
+                  { "const": "PRIME_EXCLUSIVE", "title": "Prime exclusive" },
+                  { "const": "SELLING_FAST", "title": "Selling fast" },
+                  { "const": "PRIME_SELLING_FAST", "title": "Prime selling fast" },
+                  { "const": "LIMITED_TIME_DEAL", "title": "Limited time deal" },
+                  { "const": "COUNTDOWN_ENDS_IN", "title": "Countdown" },
+                  { "const": "APP_ONLY", "title": "App only" },
+                  { "const": "CLEARANCE_NO_RETURNS", "title": "Clearance, no returns" },
+                  { "const": "SPECIAL_EVENT_SALE", "title": "Special event sale" },
+                  { "const": "GENERIC_OFFER_PROMO", "title": "Generic offer promotion" },
+                  { "const": "UNKNOWN", "title": "Unknown" }
+                ]
+              },
+              "badge": { "title": "Badge text", "description": "As shown on the product page." }
+            }
+          }
+        },
+        "packageHeight": { "title": "Package height", "description": "Millimetres. 0 or -1 if not available." },
+        "packageLength": { "title": "Package length", "description": "Millimetres. 0 or -1 if not available." },
+        "packageWidth": { "title": "Package width", "description": "Millimetres. 0 or -1 if not available." },
+        "packageWeight": { "title": "Package weight", "description": "Grams. 0 or -1 if not available." },
+        "packageQuantity": { "title": "Package quantity", "description": "Items in the package. 0 or -1 if not available." },
+        "itemHeight": { "title": "Item height", "description": "Millimetres. 0 or -1 if not available." },
+        "itemLength": { "title": "Item length", "description": "Millimetres. 0 or -1 if not available." },
+        "itemWidth": { "title": "Item width", "description": "Millimetres. 0 or -1 if not available." },
+        "itemWeight": { "title": "Item weight", "description": "Grams. 0 or -1 if not available." },
         "availabilityAmazon": {
           "title": "Amazon availability",
           "oneOf": [
@@ -100,8 +459,279 @@
             { "const": 1, "title": "Pre-orderable", "description": "Not in stock yet; orderable in advance." },
             { "const": 2, "title": "Unknown", "description": "Amazon states no availability for this offer." },
             { "const": 3, "title": "Backorderable", "description": "Out of stock; orders are queued until it returns." },
-            { "const": 4, "title": "Delayed", "description": "Shipping is delayed beyond the usual window." }
+            { "const": 4, "title": "Delayed", "description": "Shipping is delayed — availabilityAmazonDelay carries the interval." }
           ]
+        },
+        "availabilityAmazonDelay": {
+          "title": "Amazon availability delay",
+          "description": "Set when availabilityAmazon is 4: the delay interval in hours as [from, to]. [24, 48] is 'ships in 1-2 days'; [0, 288] is 'usually dispatched within 12 days'."
+        },
+        "buyBoxEligibleOfferCounts": {
+          "title": "Buy Box eligible offer counts",
+          "description": "Eight counts of offers eligible for the Buy Box, by condition and fulfilment: 0 New FBA, 1 New FBM, 2 Used FBA, 3 Used FBM, 4 Collectible FBA, 5 Collectible FBM, 6 Refurbished FBA, 7 Refurbished FBM."
+        },
+        "competitivePriceThreshold": {
+          "title": "Competitive price threshold",
+          "description": "Price derived from other retailers, Amazon sellers excluded. An offer priced above it (with shipping) may lose Buy Box eligibility."
+        },
+        "suggestedLowerPrice": {
+          "title": "Suggested lower price",
+          "description": "Amazon's suggested lower price including shipping, from historical selling prices, recent Buy Box-eligible prices and customer input."
+        },
+        "ebayListingIds": {
+          "title": "eBay listing IDs",
+          "description": "Always two entries: the lowest-priced new listing, then the lowest-priced used one. 0 or null where there is none."
+        },
+        "isEligibleForTradeIn": { "title": "Trade-in eligible" },
+        "isAdultProduct": { "title": "Adult product" },
+        "isHeatSensitive": { "title": "Heat sensitive", "description": "e.g. meltable." },
+        "isMerchOnDemand": { "title": "Merch on Demand" },
+        "isHaul": { "title": "Amazon Haul", "description": "Only basic product information is available for Haul products." },
+        "launchpad": {
+          "title": "Launchpad",
+          "description": "Listed in the Launchpad category, in which case salesRankReference is not available."
+        },
+        "audienceRating": {
+          "title": "Audience rating",
+          "description": "Age suitability of the media, e.g. PG-13."
+        },
+        "ingredients": { "title": "Ingredients" },
+        "urlSlug": { "title": "URL slug", "description": "The product listing's URL slug." },
+        "returnRate": {
+          "title": "Return rate",
+          "description": "Customer return rate band.",
+          "oneOf": [
+            { "const": 1, "title": "Low", "description": "Low return rate." },
+            { "const": 2, "title": "High", "description": "High return rate." }
+          ]
+        },
+        "isEligibleForSuperSaverShipping": {
+          "title": "Free shipping eligible",
+          "description": "Whether the buy box qualifies for free shipping."
+        },
+        "fbaFees": {
+          "title": "FBA fees",
+          "description": "Pick & pack fee for this product, in the locale's smallest currency unit, based on its dimensions and weight at an assumed selling price — the current offer price, else the last known one, else 100.00.",
+          "properties": {
+            "lastUpdate": { "title": "Last update", "description": "In Keepa minutes." },
+            "pickAndPackFee": { "title": "Pick & pack fee" }
+          }
+        },
+        "variableClosingFee": {
+          "title": "Variable closing fee",
+          "description": "In the locale's smallest currency unit. Absent when not applicable."
+        },
+        "referralFeePercentage": {
+          "title": "Referral fee percentage",
+          "description": "Amazon's referral fee at the assumed selling price (see fbaFees)."
+        },
+        "variations": {
+          "title": "Variations",
+          "description": "Up to 4000 currently available variations. Requires the offers parameter for live data.",
+          "items": {
+            "title": "Variation",
+            "properties": {
+              "asin": { "title": "ASIN" },
+              "image": { "title": "Swatch image", "description": "Not every variation has one." },
+              "attributes": {
+                "title": "Attributes",
+                "description": "One entry per variation theme.",
+                "items": {
+                  "title": "Attribute",
+                  "properties": {
+                    "dimension": { "title": "Dimension", "description": "The theme, e.g. Size." },
+                    "value": { "title": "Value" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "historicalVariations": {
+          "title": "Historical variations",
+          "description": "Unlisted (historical or out of stock) variation ASINs. Requires the historical-variations parameter."
+        },
+        "coupon": {
+          "title": "Buy Box coupon",
+          "description": "Two entries: the one-time coupon, then the Subscribe & Save first-order coupon (which applies to the initial S&S order only, not to later deliveries). Each is 0 for none, positive for an absolute discount in the locale's smallest currency unit, negative for a percentage. Always present, but only refreshed when the offers parameter is used."
+        },
+        "couponHistory": {
+          "title": "Buy Box coupon history",
+          "description": "Flat series of [Keepa minute, one-time coupon, Subscribe & Save coupon] triples, same encoding as coupon. Tracked since 2024-06-15."
+        },
+        "promotions": {
+          "title": "Promotions",
+          "description": "Active promotions; not all can be provided. Refreshed only when the offers parameter is used.",
+          "items": {
+            "title": "Promotion",
+            "properties": {
+              "type": { "title": "Type", "description": "Currently only SNS (Subscribe & Save)." },
+              "amount": { "title": "Discounted price" },
+              "discountPercent": { "title": "Discount percent" },
+              "snsBulkDiscountPercent": {
+                "title": "S&S bulk discount percent",
+                "description": "Bulk discount on repeat deliveries. 0 when there is none, absent when unknown."
+              }
+            }
+          }
+        },
+        "unitCount": {
+          "title": "Unit count",
+          "description": "Per-unit pricing data.",
+          "properties": {
+            "unitValue": {
+              "title": "Unit value",
+              "description": "Total net quantity shipped for the ASIN — a 12-pack of 6 fl oz bottles is 72, a 2-litre bottle is 2, a pack of 12 pens is 12."
+            },
+            "unitType": { "title": "Unit type", "description": "What is being measured, e.g. fluid ounces." },
+            "eachUnitCount": {
+              "title": "Each unit count",
+              "description": "Units in one 'each', an 'each' being the smallest component carrying its own UPC."
+            }
+          }
+        },
+        "stats": {
+          "title": "Statistics",
+          "description": "Pre-computed price and rank statistics. Present only when the stats parameter was used, whose value also sets 'the interval' the interval-based fields below cover (a day count, or an explicit date range). Documented here are the arrays indexed by csv price type plus the rest of the always-present core group; the Buy Box, offer and stock groups (buyBox*, retrievedOfferCount, sellerIdsLowest*, offerCount*, stock*) are returned but not labelled.",
+          "type": "object",
+          "properties": {
+            "current": {
+              "title": "Current values",
+              "description": "Last known value per price type. -1 where no offer was available.",
+              "$ref": "#/$defs/product/$defs/priceTypeValues"
+            },
+            "avg": {
+              "title": "Interval average",
+              "description": "Weighted mean over the interval the request's stats parameter asked for. -1 where there was no offer or too little data.",
+              "$ref": "#/$defs/product/$defs/priceTypeValues"
+            },
+            "avg30": {
+              "title": "30-day average",
+              "description": "Weighted mean over the last 30 days, independent of the requested interval.",
+              "$ref": "#/$defs/product/$defs/priceTypeValues"
+            },
+            "avg90": {
+              "title": "90-day average",
+              "description": "Weighted mean over the last 90 days, independent of the requested interval.",
+              "$ref": "#/$defs/product/$defs/priceTypeValues"
+            },
+            "avg180": {
+              "title": "180-day average",
+              "description": "Weighted mean over the last 180 days, independent of the requested interval.",
+              "$ref": "#/$defs/product/$defs/priceTypeValues"
+            },
+            "avg365": {
+              "title": "365-day average",
+              "description": "Weighted mean over the last 365 days, independent of the requested interval.",
+              "$ref": "#/$defs/product/$defs/priceTypeValues"
+            },
+            "atIntervalStart": {
+              "title": "Value at interval start",
+              "description": "What each price type read at the start of the requested interval. -1 where there was no offer or too little data.",
+              "$ref": "#/$defs/product/$defs/priceTypeValues"
+            },
+            "min": {
+              "title": "All-time low",
+              "description": "Lowest value ever registered per price type.",
+              "$ref": "#/$defs/product/$defs/priceTypeExtremes"
+            },
+            "max": {
+              "title": "All-time high",
+              "description": "Highest value ever registered per price type.",
+              "$ref": "#/$defs/product/$defs/priceTypeExtremes"
+            },
+            "minInInterval": {
+              "title": "Interval low",
+              "description": "Lowest value per price type within the requested interval.",
+              "$ref": "#/$defs/product/$defs/priceTypeExtremes"
+            },
+            "maxInInterval": {
+              "title": "Interval high",
+              "description": "Highest value per price type within the requested interval.",
+              "$ref": "#/$defs/product/$defs/priceTypeExtremes"
+            },
+            "outOfStockPercentageInInterval": {
+              "title": "Out of stock %, interval",
+              "description": "Percentage of the requested interval each price type had no offer: 0 never, 100 always, 25 a quarter of the time. -1 where there is too little data or the slot is not a price. Slots are named for their price type, as everywhere in this group.",
+              "$ref": "#/$defs/product/$defs/priceTypeValues"
+            },
+            "outOfStockPercentage30": {
+              "title": "Out of stock %, 30 days",
+              "description": "Same measure as outOfStockPercentageInInterval, over the last 30 days.",
+              "$ref": "#/$defs/product/$defs/priceTypeValues"
+            },
+            "outOfStockPercentage90": {
+              "title": "Out of stock %, 90 days",
+              "description": "Same measure as outOfStockPercentageInInterval, over the last 90 days.",
+              "$ref": "#/$defs/product/$defs/priceTypeValues"
+            },
+            "outOfStockPercentage180": {
+              "title": "Out of stock %, 180 days",
+              "description": "Same measure as outOfStockPercentageInInterval, over the last 180 days.",
+              "$ref": "#/$defs/product/$defs/priceTypeValues"
+            },
+            "outOfStockPercentage365": {
+              "title": "Out of stock %, 365 days",
+              "description": "Same measure as outOfStockPercentageInInterval, over the last 365 days.",
+              "$ref": "#/$defs/product/$defs/priceTypeValues"
+            },
+            "lastOffersUpdate": {
+              "title": "Last offers update",
+              "description": "Last refresh of the offer information, in Keepa minutes."
+            },
+            "salesRankDrops30": {
+              "title": "Sales rank drops, 30 days",
+              "description": "Count of drops from a high rank number to a low one in the last 30 days — the usual proxy for sales."
+            },
+            "salesRankDrops90": { "title": "Sales rank drops, 90 days" },
+            "salesRankDrops180": { "title": "Sales rank drops, 180 days" },
+            "salesRankDrops365": { "title": "Sales rank drops, 365 days" },
+            "totalOfferCount": {
+              "title": "Total offer count",
+              "description": "Offers across all conditions. Per-condition counts live in the count slots of current (11 New, 12 Used, 13 Refurbished, 14 Collectible)."
+            },
+            "lightningDealInfo": {
+              "title": "Lightning Deal window",
+              "description": "Always [start, end] in Keepa minutes, or null if the product never had a Lightning Deal. An upcoming deal has end -1; a live deal has a past start and a future end; a finished one has both in the past.",
+              "prefixItems": [
+                { "title": "Start", "description": "In Keepa minutes, UTC." },
+                { "title": "End", "description": "In Keepa minutes, UTC. -1 for an announced deal that has not started." }
+              ]
+            }
+          }
+        },
+        "salesRankReference": {
+          "title": "Sales rank reference",
+          "description": "Category node ID the main sales rank belongs to. -1 when unavailable, -2 when the product is in Launchpad."
+        },
+        "salesRankReferenceHistory": {
+          "title": "Sales rank reference history",
+          "description": "Flat series of [Keepa minute, category node ID] pairs — what the historical sales ranks in csv were measured against. -1 unavailable, -2 Launchpad."
+        },
+        "salesRanks": {
+          "title": "Sales rank histories",
+          "description": "One entry per category: the key is the category ID, the value a flat [Keepa minute, rank] series."
+        },
+        "lastSoldUpdate": {
+          "title": "Last sold update",
+          "description": "Last refresh of monthlySold, in Keepa minutes."
+        },
+        "monthlySold": {
+          "title": "Monthly sold",
+          "description": "Amazon's 'bought past month' figure — a bracketed floor, not an estimate (1000 means at least 1000). Variation-specific, and unset for most ASINs."
+        },
+        "monthlySoldHistory": {
+          "title": "Monthly sold history",
+          "description": "Flat series of [Keepa minute, monthlySold] pairs."
+        },
+        "reviews": {
+          "title": "Reviews",
+          "description": "Variation-specific rating and review count histories. Requires the rating parameter, and cannot be forced to update; for non-variation-specific figures use the csv RATING and COUNT_REVIEWS entries. The ratingCount history stopped updating on 2025-04-09, when Amazon removed the data point.",
+          "properties": {
+            "lastUpdate": { "title": "Last update", "description": "In Keepa minutes." },
+            "ratingCount": { "title": "Rating count history", "description": "Flat [Keepa minute, count] series." },
+            "reviewCount": { "title": "Review count history", "description": "Flat [Keepa minute, count] series." }
+          }
         },
         "offers": {
           "title": "Marketplace offers",
@@ -110,43 +740,65 @@
         },
         "liveOffersOrder": {
           "title": "Live offer order",
-          "description": "Positions in the offers array of the currently live offers, in Amazon's order — the documented alternative to filtering on each offer's lastSeen yourself."
+          "description": "Positions in the offers array of the currently live offers, in Amazon's order — the documented alternative to filtering on each offer's lastSeen yourself. A repeated index marks a higher-priced duplicate Keepa dropped, pointing at the cheaper offer it kept."
+        },
+        "buyBoxSellerIdHistory": {
+          "title": "Buy Box seller history",
+          "description": "Flat series of [Keepa minute, seller ID] pairs. Seller ID -1 means the Buy Box was suppressed; -2 means the seller could not be identified or the product was out of stock. Requires the offers or buybox parameter."
+        },
+        "buyBoxUsedHistory": {
+          "title": "Used Buy Box history",
+          "description": "Flat series of [Keepa minute, seller ID, condition, isFBA] quadruples, all as strings. Condition is 2 Like New, 3 Very Good, 4 Good, 5 Acceptable; isFBA is 1 or 0. An empty seller ID means no offer qualified. Requires the offers or buybox parameter."
+        },
+        "isRedirectASIN": {
+          "title": "Redirected ASIN",
+          "description": "Amazon redirects this ASIN to another — typically an unavailable variation pointing at an available one. Valid only when the offers parameter was used."
+        },
+        "isSNS": { "title": "Subscribe & Save", "description": "The Buy Box is available for Subscribe & Save." },
+        "offersSuccessful": {
+          "title": "Offers retrieved",
+          "description": "Whether fresh offer information could be fetched. A product with no marketplace offers at all still returns true — there was simply no offer page to fetch. Valid only when the offers parameter was used."
         },
         "csv": {
           "title": "Price and rank history",
-          "description": "One entry per data type, each an alternating [Keepa minute, value] series. Prices are in the locale's smallest currency unit; -1 means 'no data at that time'.",
+          "description": "One entry per data type, indexed by position; null where that history does not exist. Most are [Keepa minute, value] pairs, but the *_SHIPPING types are [Keepa minute, price, shipping] triples. Prices are in the locale's smallest currency unit; -1 means 'no offer in that interval'. Entries are appended only when the value changes, not on every update. Keepa may append new types without notice, so never assume a fixed length.",
           "prefixItems": [
             { "title": "Amazon price", "description": "Price of the Amazon offer itself." },
-            { "title": "New price", "description": "Lowest new marketplace price, excluding shipping." },
-            { "title": "Used price", "description": "Lowest used marketplace price, excluding shipping." },
-            { "title": "Sales rank", "description": "Sales rank in the product's root category." },
-            { "title": "List price", "description": "Manufacturer's list price." },
-            { "title": "Collectible price", "description": "Lowest collectible-condition price." },
-            { "title": "Refurbished price", "description": "Lowest refurbished-condition price." },
-            { "title": "New, FBM", "description": "Lowest new price from a merchant-fulfilled offer, including shipping." },
-            { "title": "Lightning deal price", "description": "Price during a Lightning Deal." },
-            { "title": "Warehouse price", "description": "Lowest Amazon Warehouse (used) price." },
-            { "title": "New, FBA", "description": "Lowest new price from a Fulfilled-by-Amazon offer." },
-            { "title": "New offer count", "description": "Number of new offers." },
+            { "title": "New price", "description": "Lowest marketplace New price, Amazon included. Entries before 2026-02-23 are the lowest listing price; from that date they are the lowest landing price (listing price plus shipping)." },
+            { "title": "Used price", "description": "Lowest marketplace Used price. Same listing/landing price change on 2026-02-23 as the New price." },
+            { "title": "Sales rank", "description": "Sales rank in the product's root category. Not every product has one — variations usually do not." },
+            { "title": "List price", "description": "Manufacturer's list price (MSRP)." },
+            { "title": "Collectible price", "description": "Lowest collectible-condition price. Same listing/landing price change on 2026-02-23 as the New price." },
+            { "title": "Refurbished price", "description": "Lowest refurbished-condition price. Same listing/landing price change on 2026-02-23 as the New price." },
+            { "title": "New, FBM", "description": "[time, price, shipping] triples. Lowest third-party New price from a merchant-fulfilled offer, Amazon excluded, shipping included. Requires the offers parameter." },
+            { "title": "Lightning deal price", "description": "Price during a Lightning Deal. A live deal shows as a final entry with a future date and price -1; the same shape with no active deal announces an upcoming one. Use the stats object's current price to sidestep this." },
+            { "title": "Warehouse price", "description": "Lowest Amazon Warehouse (used) price. Requires the offers parameter." },
+            { "title": "New, FBA", "description": "Lowest third-party New price fulfilled by Amazon, excluding Amazon and Warehouse. Requires the offers parameter." },
+            { "title": "New offer count", "description": "Number of marketplace merchants selling this as new." },
             { "title": "Used offer count", "description": "Number of used offers." },
             { "title": "Refurbished offer count", "description": "Number of refurbished offers." },
             { "title": "Collectible offer count", "description": "Number of collectible offers." },
-            { "title": "Extra info updates", "description": "When Keepa last refreshed the extended product data." },
-            { "title": "Rating", "description": "Average review rating, times 10 (45 = 4.5 stars)." },
-            { "title": "Review count", "description": "Number of customer reviews." },
-            { "title": "Buy Box price", "description": "Buy Box price including shipping." },
-            { "title": "Used, like new", "description": "Lowest 'used - like new' price including shipping." },
-            { "title": "Used, very good", "description": "Lowest 'used - very good' price including shipping." },
-            { "title": "Used, good", "description": "Lowest 'used - good' price including shipping." },
-            { "title": "Used, acceptable", "description": "Lowest 'used - acceptable' price including shipping." },
-            { "title": "Collectible, like new", "description": "Lowest 'collectible - like new' price including shipping." },
-            { "title": "Collectible, very good", "description": "Lowest 'collectible - very good' price including shipping." },
-            { "title": "Collectible, good", "description": "Lowest 'collectible - good' price including shipping." },
-            { "title": "Collectible, acceptable", "description": "Lowest 'collectible - acceptable' price including shipping." },
-            { "title": "Refurbished, shipping included", "description": "Lowest refurbished price including shipping." },
-            { "title": "eBay new", "description": "Lowest new price on eBay." },
-            { "title": "eBay used", "description": "Lowest used price on eBay." },
-            { "title": "Trade-in value", "description": "Amazon trade-in value." }
+            { "title": "Extra info updates", "description": "When Keepa last refreshed the offers-parameter data (offers, aPlus, videos, isSNS, isRedirectASIN, and the csv types that require offers). Those refresh rarely, so this is how you tell 'unchanged' from 'not looked at'. The magnitude is how many offers were fetched; a negative value means more existed than were fetched." },
+            { "title": "Rating", "description": "Average review rating, times 10 (45 = 4.5 stars). Requires the offers parameter." },
+            { "title": "Review count", "description": "Number of customer reviews. Requires the offers parameter." },
+            { "title": "Buy Box price", "description": "[time, price, shipping] triples. New Buy Box price including shipping; -1 when nothing qualified or the Buy Box was a used offer. Requires the offers parameter." },
+            { "title": "Used, like new", "description": "[time, price, shipping] triples. Requires the offers parameter." },
+            { "title": "Used, very good", "description": "[time, price, shipping] triples. Requires the offers parameter." },
+            { "title": "Used, good", "description": "[time, price, shipping] triples. Requires the offers parameter." },
+            { "title": "Used, acceptable", "description": "[time, price, shipping] triples. Requires the offers parameter." },
+            { "title": "Collectible, like new", "description": "[time, price, shipping] triples. Requires the offers parameter." },
+            { "title": "Collectible, very good", "description": "[time, price, shipping] triples. Requires the offers parameter." },
+            { "title": "Collectible, good", "description": "[time, price, shipping] triples. Requires the offers parameter." },
+            { "title": "Collectible, acceptable", "description": "[time, price, shipping] triples. Requires the offers parameter." },
+            { "title": "Refurbished, shipping included", "description": "[time, price, shipping] triples. Requires the offers parameter." },
+            { "title": "eBay new", "description": "[time, price, shipping] triples. Lowest new price on the matching eBay locale. eBay listings often carry wrong product codes, so treat these prices with caution; they also update on a different schedule to Amazon's." },
+            { "title": "eBay used", "description": "[time, price, shipping] triples. Lowest used price on the matching eBay locale, with the same caveats as eBay new." },
+            { "title": "Trade-in value", "description": "Amazon trade-in value. Not available in every locale." },
+            { "title": "Rent (retired)", "description": "Never populated. The slot is kept so the positions after it line up." },
+            { "title": "Used Buy Box price", "description": "[time, price, shipping] triples. Used Buy Box price in any sub-condition; -1 when no offer qualified. Requires the offers parameter." },
+            { "title": "Prime exclusive price", "description": "Lowest Prime exclusive New offer. Requires the offers parameter." },
+            { "title": "New FBA offer count", "description": "Number of New offers fulfilled by Amazon, the Amazon offer included. Added March 2026." },
+            { "title": "New FBM offer count", "description": "Number of merchant-fulfilled New offers. Added March 2026." }
           ]
         }
       }

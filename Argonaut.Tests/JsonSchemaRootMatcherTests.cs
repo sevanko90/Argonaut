@@ -225,6 +225,128 @@ public class JsonSchemaRootMatcherTests
         Assert.Empty(JsonSchemaRootMatcher.Rank(schema, Keys("a")));
     }
 
+    /// <summary>
+    /// The shipped Keepa schema's real proportions: a root describing the API envelope, and a
+    /// `product` def that documents a handful of the ~100 fields a live product object carries.
+    /// `catalogue` is the noise a partial schema has to beat - it shares more of the document's
+    /// keys than `product` does while accounting for almost none of itself.
+    /// </summary>
+    private const string PartialSchema = """
+        {
+          "title": "Product response",
+          "properties": { "timestamp": {}, "tokensLeft": {}, "products": {} },
+          "$defs": {
+            "product": {
+              "properties": { "asin": {}, "domainId": {}, "title": {}, "csv": {}, "offers": {} }
+            },
+            "catalogue": {
+              "properties": {
+                "brand": {}, "categories": {}, "imagesCSV": {}, "manufacturer": {}, "stats": {},
+                "salesRanks": {}, "lastUpdate": {}, "color": {}, "size": {},
+                "c1": {}, "c2": {}, "c3": {}, "c4": {}, "c5": {}, "c6": {}, "c7": {}, "c8": {},
+                "c9": {}, "c10": {}, "c11": {}, "c12": {}, "c13": {}, "c14": {}, "c15": {},
+                "c16": {}, "c17": {}, "c18": {}, "c19": {}, "c20": {}, "c21": {}
+              }
+            }
+          }
+        }
+        """;
+
+    /// <summary>A live product object: everything `product` declares, plus much more besides.</summary>
+    private static IReadOnlyList<byte[]> LiveProductKeys() => Keys(
+        "asin", "domainId", "title", "csv", "offers",
+        "brand", "categories", "imagesCSV", "manufacturer", "stats", "salesRanks", "lastUpdate",
+        "color", "size", "model", "partNumber", "packageHeight", "packageWeight", "eanList", "upcList");
+
+    [Fact]
+    public void Best_RecommendsAPartialSchemaThatTheDocumentFullyContains()
+    {
+        var ranked = JsonSchemaRootMatcher.Rank(Parse(PartialSchema), LiveProductKeys());
+
+        // 5 of 20 document keys is 25% coverage - far under the coverage floor - but every field
+        // the type declares is present. Rejecting this leaves the user picking `product` by hand
+        // on every such document, which is the whole complaint.
+        var best = JsonSchemaRootMatcher.Best(ranked);
+        Assert.Equal("product", best!.Value.Name);
+        Assert.Equal(1.0, best.Value.Precision);
+        Assert.True(best.Value.Coverage < JsonSchemaRootMatcher.MinimumCoverage);
+        Assert.True(JsonSchemaRootMatcher.IsSubsetMatch(best.Value));
+    }
+
+    [Fact]
+    public void Rank_PutsAFullyPresentSubsetAboveHigherCoverageNoise()
+    {
+        var ranked = JsonSchemaRootMatcher.Rank(Parse(PartialSchema), LiveProductKeys());
+
+        // `catalogue` shares 9 keys to `product`'s 5, so coverage alone would order it first and
+        // leave Best reading a candidate that qualifies on neither measure.
+        Assert.Equal("product", ranked[0].Name);
+        Assert.Equal("catalogue", ranked[1].Name);
+        Assert.True(ranked[1].Coverage > ranked[0].Coverage);
+        Assert.False(JsonSchemaRootMatcher.IsPlausible(ranked[1]));
+    }
+
+    [Fact]
+    public void Best_StillRecommendsTheEnvelopeForTheWholeResponse()
+    {
+        // The other half of the same schema: the container document must keep matching the root,
+        // not get pulled onto a def by the new path.
+        var ranked = JsonSchemaRootMatcher.Rank(Parse(PartialSchema), Keys("timestamp", "tokensLeft", "products"));
+
+        Assert.Null(JsonSchemaRootMatcher.Best(ranked)!.Value.Name);
+    }
+
+    [Fact]
+    public void Best_DeclinesForASmallTypeFullyPresentInABigDocument()
+    {
+        // Precision on its own is what MinimumPreciseMatchedKeys guards: three common names
+        // landing in a twenty-key document is coincidence, not identification.
+        var schema = Parse("""
+            {
+              "openapi": "3.0.3",
+              "components": {
+                "schemas": { "Stamp": { "properties": { "asin": {}, "title": {}, "lastUpdate": {} } } }
+              }
+            }
+            """);
+
+        var ranked = JsonSchemaRootMatcher.Rank(schema, LiveProductKeys());
+
+        Assert.Equal(1.0, ranked[0].Precision);
+        Assert.Null(JsonSchemaRootMatcher.Best(ranked));
+    }
+
+    [Fact]
+    public void Best_DeclinesBetweenTwoEquallyContainedSubsets()
+    {
+        // Two partial types both fully present: the new path must decline the same way the
+        // coverage path does rather than picking whichever sorted first.
+        var schema = Parse("""
+            {
+              "openapi": "3.0.3",
+              "components": {
+                "schemas": {
+                  "ProductA": { "properties": { "asin": {}, "domainId": {}, "title": {}, "csv": {}, "offers": {} } },
+                  "ProductB": { "properties": { "asin": {}, "domainId": {}, "title": {}, "csv": {}, "stats": {} } }
+                }
+              }
+            }
+            """);
+
+        var ranked = JsonSchemaRootMatcher.Rank(schema, LiveProductKeys());
+
+        Assert.Null(JsonSchemaRootMatcher.Best(ranked));
+    }
+
+    [Fact]
+    public void IsSubsetMatch_IsFalseForATypeThatExplainsTheWholeDocument()
+    {
+        var ranked = JsonSchemaRootMatcher.Rank(Parse(Api), Keys("line1", "city", "postcode"));
+
+        Assert.True(JsonSchemaRootMatcher.IsPlausible(ranked[0]));
+        Assert.False(JsonSchemaRootMatcher.IsSubsetMatch(ranked[0]));
+    }
+
     [Fact]
     public void RealWorldShape_PrefersThePayloadOverTheEnvelope()
     {

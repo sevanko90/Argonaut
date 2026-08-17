@@ -119,6 +119,35 @@ public sealed class SchemaRootPickerViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task ASubsetMatch_IsBadgedByItsFieldsPresent_NotByItsCoverage()
+    {
+        var settings = await BoundAsync("""
+            {
+              "openapi": "3.0.3",
+              "components": {
+                "schemas": {
+                  "Product": {
+                    "properties": { "asin": {}, "domainId": {}, "title": {}, "csv": {}, "offers": {} }
+                  }
+                }
+              }
+            }
+            """);
+        var picker = new SchemaRootPickerViewModel(settings);
+
+        Match(settings,
+            "asin", "domainId", "title", "csv", "offers",
+            "brand", "categories", "imagesCSV", "manufacturer", "stats", "salesRanks", "lastUpdate",
+            "color", "size", "model");
+
+        // 33% coverage on a type that is entirely present reads as a bad guess, so the badge says
+        // what actually qualified it.
+        var product = picker.Picks.Single(p => p.Name == "Product");
+        Assert.True(product.IsRecommended);
+        Assert.Equal("5/5 fields", product.Score);
+    }
+
+    [Fact]
     public async Task RunnersUp_SitUnderAnOtherHeading_NotAlongsideTheWinner()
     {
         var settings = await BoundAsync("""

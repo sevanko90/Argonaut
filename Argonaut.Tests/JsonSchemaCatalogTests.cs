@@ -82,6 +82,84 @@ public sealed class JsonSchemaCatalogTests : IDisposable
         Assert.Equal("Sales rank", schema.GetTitle(schema.ResolveElement(csv, 3)));
     }
 
+    /// <summary>
+    /// The csv slots added after index 30 are only correct if every slot before them is present,
+    /// including the retired RENT slot at 31 that Keepa never populates. Drop that placeholder and
+    /// every label from 32 on silently describes the wrong series - the one failure mode of a
+    /// positional layout that no amount of reading the tree would reveal.
+    /// </summary>
+    [Fact]
+    public void BundledKeepaSchema_KeepsTheCsvSlotsAfterTheRetiredRentEntry()
+    {
+        var keepa = Assert.Single(JsonSchemaCatalog.Enumerate(), e => e.DisplayName == "keepa-product");
+        var schema = JsonSchemaLoader.TryLoadFile(keepa.FilePath)!;
+
+        int product = schema.ResolveElement(schema.ResolveMember(schema.RootId, "products"u8), 0);
+        int csv = schema.ResolveMember(product, "csv"u8);
+
+        Assert.Equal("Rent (retired)", schema.GetTitle(schema.ResolveElement(csv, 31)));
+        Assert.Equal("Used Buy Box price", schema.GetTitle(schema.ResolveElement(csv, 32)));
+        Assert.Equal("Prime exclusive price", schema.GetTitle(schema.ResolveElement(csv, 33)));
+        Assert.Equal("New FBA offer count", schema.GetTitle(schema.ResolveElement(csv, 34)));
+        Assert.Equal("New FBM offer count", schema.GetTitle(schema.ResolveElement(csv, 35)));
+    }
+
+    /// <summary>
+    /// The stats arrays are indexed by csv price type, and say so by pointing at one shared list of
+    /// 36 slot names through a nested $defs. That leans on two loader behaviours at once - a $ref
+    /// resolving to a definition nested inside another definition, and a slot keeping its own title
+    /// while taking the ref's structure - so it is worth a test rather than an assumption.
+    /// </summary>
+    [Fact]
+    public void BundledKeepaSchema_LabelsTheStatsArraysByPriceType()
+    {
+        var keepa = Assert.Single(JsonSchemaCatalog.Enumerate(), e => e.DisplayName == "keepa-product");
+        var schema = JsonSchemaLoader.TryLoadFile(keepa.FilePath)!;
+
+        int product = schema.ResolveElement(schema.ResolveMember(schema.RootId, "products"u8), 0);
+        int stats = schema.ResolveMember(product, "stats"u8);
+
+        int current = schema.ResolveMember(stats, "current"u8);
+        Assert.Equal("Buy Box price", schema.GetTitle(schema.ResolveElement(current, 18)));
+        Assert.Equal("Prime exclusive price", schema.GetTitle(schema.ResolveElement(schema.ResolveMember(stats, "avg90"u8), 33)));
+
+        // Same names one level deeper: each min/max slot keeps its price-type title and takes its
+        // [when, value] pair shape from the shared extremePoint definition.
+        int minSalesRank = schema.ResolveElement(schema.ResolveMember(stats, "min"u8), 3);
+        Assert.Equal("Sales rank", schema.GetTitle(minSalesRank));
+        Assert.Equal("When", schema.GetTitle(schema.ResolveElement(minSalesRank, 0)));
+        Assert.Equal("Value", schema.GetTitle(schema.ResolveElement(minSalesRank, 1)));
+    }
+
+    /// <summary>The nested price-type definitions are an implementation detail of the product
+    /// schema, not types a user would bind - they must not turn up in the type picker.</summary>
+    [Fact]
+    public void BundledKeepaSchema_OffersOnlyProductAndOfferAsRoots()
+    {
+        var keepa = Assert.Single(JsonSchemaCatalog.Enumerate(), e => e.DisplayName == "keepa-product");
+        var schema = JsonSchemaLoader.TryLoadFile(keepa.FilePath)!;
+
+        Assert.Equal(new[] { "offer", "product" }, schema.NamedRoots.Select(r => r.Name).ToArray());
+    }
+
+    /// <summary>
+    /// The `product` def is what a bare product document binds to, and it only wins that match on
+    /// precision - every field it declares being present - so a thin def puts the user back to
+    /// picking the type by hand. See JsonSchemaRootMatcher.MinimumPrecision.
+    /// </summary>
+    [Fact]
+    public void BundledKeepaSchema_DeclaresTheFullProductFieldSet()
+    {
+        var keepa = Assert.Single(JsonSchemaCatalog.Enumerate(), e => e.DisplayName == "keepa-product");
+        var schema = JsonSchemaLoader.TryLoadFile(keepa.FilePath)!;
+
+        int product = schema.ResolveElement(schema.ResolveMember(schema.RootId, "products"u8), 0);
+
+        Assert.True(schema.GetPropertyCount(product) > 100);
+        foreach (var field in new[] { "stats"u8.ToArray(), "salesRanks"u8.ToArray(), "monthlySold"u8.ToArray(), "categoryTree"u8.ToArray() })
+            Assert.True(schema.ResolveMember(product, field) >= 0, $"missing {System.Text.Encoding.UTF8.GetString(field)}");
+    }
+
     /// <summary>Drives OpenUserDirectory with the file-manager launch stubbed out.</summary>
     private static void OpenSchemaFolder()
     {

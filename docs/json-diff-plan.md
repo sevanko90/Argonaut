@@ -123,6 +123,22 @@ no measurable regression on the non-diff path.
   needs the whole child list buffered per level, which is unaffordable on a 10M-element container.
 - **Arrays combine sequentially** — order is semantic there.
 
+### The invariant everything downstream leans on
+
+**A node's hash covers its content and nothing else — not its own key, not its path, not its
+parent.** Note where the name goes in the object rule above: `mix(nameHash, valueHash)` is folded
+into the *parent's* accumulator, so a child's own hash never contains its key.
+
+Two things follow, and both are load-bearing:
+
+1. A subtree's hash is **invariant under relocation**. Move it under a different parent, at a
+   different depth, under a different key, and the hash is bit-identical. This is what makes
+   cross-parent move detection possible at all (Stage 2).
+2. Token *index* is never identity, only a handle into the log. Nothing in the diff ever compares
+   "the node at position N on each side" — object children match by name, array children by
+   anchored hash. Index shifts caused by an insertion or a relocation are structurally incapable of
+   producing spurious differences.
+
 A slot of 0 means "not final yet". Readers assert against it; the diff only runs post-`IsComplete`,
 so it should be unreachable.
 
@@ -191,6 +207,81 @@ document is done. Otherwise descend:
   is O(depth) with nothing materialized).
 
 - **Arrays** — see Stage 3.
+
+Note what this descent does *not* do: it matches children only *within* a level, so a subtree that
+moved to a **different parent** appears as `Removed` at its old path plus `Added` at its new one.
+Correct, but it reads as a rewrite. The reconciliation pass below fixes that.
+
+### Cross-parent move reconciliation
+
+Runs after the descent, over the emitted records. Cheap precisely because `Added`/`Removed` subtrees
+are emitted whole and never descended into — this pass is bounded by the size of the *change*, not
+the document, and the Merkle short-circuit already guarantees a small change yields few records.
+
+1. Bucket `Removed` container records by hash; bucket `Added` container records by hash.
+2. A hash present in both buckets **exactly once on each side** pairs up: replace the two records
+   with one `Moved` carrying both token indexes. Paths are built lazily by `JsonPathBuilder`
+   (O(depth), nothing materialized) only when the row is actually rendered.
+3. A hash appearing 2+ times on either side is ambiguous — leave those as `Added`/`Removed`. Same
+   unique-anchor rule Stage 3 applies to arrays.
+
+Deliberate limits:
+
+- **Containers only.** A scalar `1`/`true`/`""` hashes identically everywhere by design; including
+  scalars would emit constant spurious "moves".
+- **Property rename with unchanged content** (`{"a": X}` → `{"b": X}`) is the same phenomenon and
+  falls out of this pass for free — no separate rename detection needed.
+- **Moved *and* modified will not match**, because the hash genuinely changed. See below — this one
+  is a real hole, not an acceptable limitation.
+
+### Similarity pairing (v2, designed here so the v1 shape doesn't preclude it)
+
+Exact-hash pairing only catches subtrees that moved *unchanged*. Move a block and edit one value
+inside it and both sides fall through to `Removed` + `Added`.
+
+**The cost is not cosmetic.** Because neither side was descended into, the interior diff is lost
+too: relocating a 200-key config block while changing one port renders as 200 removed rows and 200
+added rows, with nothing marking the 199 that are identical. That is worse than a line differ would
+manage, which is not a defensible place for a semantic diff to land.
+
+The fix runs on the residue left *after* exact-hash pairing, which for a normal diff is a handful of
+records — the Merkle short-circuit guarantees it.
+
+1. For each surviving unmatched pair (removed `R`, added `A`), score by **direct-child hash
+   overlap**: collect each side's `(nameHash, valueHash)` set for direct children only — O(children),
+   each child reachable in O(1) via `EndIndex` skipping — and take the Jaccard index.
+2. Pair greedily by descending score, mutually-best-match, above a threshold (start ~0.5).
+3. A paired container is emitted as `Moved` **and then run back through the ordinary descent**, so
+   the result is `Moved` on the container plus `Modified` on the single leaf that actually changed.
+   No new rendering machinery — it composes with everything above.
+
+Guards, all of which matter:
+
+- Same container kind only (object↔object, array↔array).
+- Skip the whole pass when `|R| × |A|` exceeds a pair cap (~1000). A degenerate diff falls back to
+  plain `Added`/`Removed` rather than going quadratic.
+- **Direct children only, no recursive similarity.** Recursive scoring is where the cost would
+  actually live, and it buys little over one level.
+- **One round only.** The reconciliation-triggered descent emits its own unmatched `Added`/`Removed`
+  records; those do *not* get a second similarity pass. This is what makes termination trivial
+  rather than a fixpoint argument with a depth cap. Exact-hash pairs need no follow-up descent at
+  all, since their content is unchanged by definition.
+
+**Sequenced after v1 deliberately.** Not for cost — the pass is cheap. The threshold and the greedy
+pairing want tuning against real diffs, and there is no way to tune them before the exact-hash pass
+exists to show how much residue actually falls through. Ship exact-hash, measure the residue, set
+the threshold from evidence. What v1 must not do is foreclose it: keep the reconciliation pass a
+distinct stage over records (not fused into the descent), and keep the descent re-entrant on an
+arbitrary (leftToken, rightToken) pair rather than assuming it only ever starts at the roots.
+
+Tests (v1): relocate a subtree across parents ⇒ exactly one `Moved`, zero `Added`/`Removed`;
+relocate one of two identical subtrees ⇒ stays `Added`/`Removed` (ambiguous); rename a key over
+unchanged container content ⇒ one `Moved`; relocate *and* edit ⇒ `Added`/`Removed` (asserting the
+known v1 hole, so the v2 pass has a test to flip).
+
+Tests (v2): relocate *and* edit ⇒ one `Moved` plus `Modified` on the changed leaf only; two
+similar-but-distinct candidates ⇒ the higher-scoring pair wins and the other stays `Added`/`Removed`;
+residue beyond the pair cap ⇒ pass skipped, no quadratic blowup, results identical to v1.
 
 ### Merged key order (for rendering)
 
@@ -317,7 +408,7 @@ sealed class JsonDiffRow
     DiffStatus Status;
     int Depth;
     bool IsExpanded;
-    string? MoveBadge;      // "moved from [2] to [0]"
+    string? MoveBadge;      // "moved from [2] to [0]", or "moved from /config/db"
 }
 ```
 
@@ -335,6 +426,12 @@ behaviour, identical `isPureAppend` optimization.
 
 Default expand state comes free from the walk: `Unchanged` containers collapse (rendering
 `foo: {5 keys, unchanged}`), changed subtrees auto-expand down to the differing leaf.
+
+A **cross-parent `Moved`** row has two positions in the merged tree — its old one and its new one —
+and rendering it in only one leaves a hole in the other pane. Render it at *both*: at the source, a
+collapsed stub reading `db: moved to /meta/db →`; at the destination, the real row badged
+`↕ moved from /config/db`, collapsed by default since its content is unchanged. Both stubs carry
+both token indexes, so clicking either reveals the other via `EnsureVisible`.
 
 ### Three-stage reveal
 
@@ -392,6 +489,9 @@ Suggested order: 0.1 → 0.2 → 1 → 2 → 3 → 0.3 → 4 → 5.
 
 ## Deferred to follow-ups
 
+- **Similarity pairing for moved-and-edited containers** — designed in Stage 2, sequenced after v1.
+  The highest-value item on this list: without it, a relocated-and-edited block loses its interior
+  diff entirely.
 - Find across both panes.
 - Two independent schema gutters.
 - Diff as a reopenable recent-files entry.

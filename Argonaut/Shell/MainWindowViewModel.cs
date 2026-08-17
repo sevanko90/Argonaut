@@ -175,9 +175,12 @@ public sealed class MainWindowViewModel : ObservableObject
     /// location's "Line N" link (the JSON banner's and the incompatible placeholder's alike)
     /// and behind <see cref="RawJumpService"/> requests (e.g. JsonView's "view in raw" link
     /// on a truncated value). Concrete-type match on <see cref="RawViewModel"/> because "jump
-    /// to an offset" is a raw-viewer-specific capability, not part of
-    /// <see cref="IDocumentViewModel"/> - same precedent as the shell reaching
-    /// HintSettings/SetDefaultExpandDepth (see docs/architecture.md).
+    /// to an offset" is meaningful for exactly one view - every other document kind would have
+    /// to implement it as a no-op - so it stays off <see cref="IDocumentViewModel"/>, whose job
+    /// is the surface *every* document genuinely shares. This is the shell's only such match:
+    /// per-view state and behaviour otherwise reach their view through the document's own
+    /// injected <see cref="IDocumentViewModel.Toolbar"/>, never through a shell type-switch
+    /// (see docs/architecture.md).
     /// </summary>
     public async Task JumpToRawOffsetAsync(long byteOffset)
     {

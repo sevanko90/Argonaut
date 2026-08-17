@@ -23,13 +23,35 @@ chain changes.
 
 - `IDocumentViewModel` (`Shell/IDocumentViewModel.cs`) is the shell's slim view of one open
   document: `FilePath`, observable `StatusText`, `CreateSearchNavigator()` (nullable — null for
-  a document with nothing searchable), `CanHandleFileType(FileKind)`, and observable
-  `IndexFailure`. Implemented by `JsonViewModel`, `NdJsonViewModel`, `CsvViewModel`,
-  `RawViewModel`, and the placeholder `IncompatibleViewModel`.
+  a document with nothing searchable), `CanHandleFileType(FileKind)`, observable
+  `IndexFailure`, and `Toolbar`. Implemented by `JsonViewModel`, `NdJsonViewModel`,
+  `CsvViewModel`, `RawViewModel`, and the placeholder `IncompatibleViewModel`.
 - Each document view model owns its whole status line (initial, live indexing %, complete,
   failed, and — NDJSON — selected-line), which the shell mirrors into the status bar.
-- Deliberately NOT on the interface (kept until the planned per-view injectable toolbar):
-  `HintSettings` and `SetDefaultExpandDepth`. The shell reaches these by concrete-type match.
+- **Per-view toolbars are injected, not type-switched.** `IDocumentViewModel.Toolbar` is
+  `object?` — null for a document with no toolbar (CSV) — and `MainWindow.axaml` binds
+  `DocumentToolbarArea.Content` straight to `CurrentDocument.Toolbar`, resolving it through
+  `Window.DataTemplates` keyed on the concrete toolbar type (`JsonToolbarViewModel` →
+  `JsonToolbarView`, `RawToolbarViewModel` → `RawToolbarView`). `object?` is the honest
+  contract because the shell never calls a member on it; the toolbar region therefore swaps
+  with the document itself, and adding a new document view means adding one toolbar view
+  model plus one `DataTemplate`, with no shell logic to touch.
+- Consequently the shell reaches into a document view model for **nothing** except
+  `JumpToRawOffsetAsync`'s `RawViewModel` match (see below). Toolbar-driven state is passed
+  *down* at construction instead: the owning document view model builds its
+  `JsonToolbarViewModel` in `LoadAsync`, handing it that document's own `DateHintSettings`
+  and `JsonSchemaSettings` instances plus a `SetDefaultExpandDepth` callback (and, JSON only,
+  a `NavigateToPathAsync` callback — NDJSON omits it, which hides the path entry via
+  `SupportsPathNavigation`). The toolbar mutates the settings objects it was given; the
+  document observes them.
+- That "hand down the settings object" shape is what lets one toolbar serve a view hosting
+  another view: `NdJsonViewModel` keeps *master* `HintSettings`/`SchemaSettings`/
+  `DefaultExpandDepth` for the whole file and fans them into the currently selected line's
+  nested `JsonViewModel` — `SetDefaultExpandDepth` forwards to it directly, the parsed
+  `JsonSchemaDocument` is pushed by reference (parsed once, not once per line), and the
+  hint-settings pair is mirrored in both directions with an `IsUserSelected` guard so an
+  inferred default flowing up doesn't ping-pong against the master flowing down. A future
+  multi-pane view (e.g. a diff) follows the same pattern rather than adding shell knowledge.
 
 ## View catalog & the view switcher
 
@@ -88,7 +110,8 @@ chain changes.
   `JumpToFailureLineButton`) and in `IncompatibleView`'s location panel alike — that calls
   `MainWindowViewModel.JumpToRawOffsetAsync(byteOffset)`: switches to the raw viewer (if
   not already showing it) via `SwitchViewAsync`, then concrete-type-matches `CurrentDocument` to
-  `RawViewModel` (same precedent as HintSettings/SetDefaultExpandDepth above) and calls
+  `RawViewModel` — the shell's only such match, because "jump to a byte offset" is meaningful
+  for exactly one view and so has no place on `IDocumentViewModel` — and calls
   `RawViewModel.JumpToByteOffsetAsync`, which resolves the offset to a display row via the
   existing `RawOffsetRowResolver` (waiting out an in-progress scan if needed - the same machinery
   `RawSearchNavigator` uses for a search reveal) and selects it. A resolve that outlives the

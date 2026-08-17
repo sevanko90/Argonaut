@@ -20,10 +20,15 @@ namespace Argonaut.Features.Json.Schema;
 public static class JsonDocumentKeySampler
 {
     /// <summary>
-    /// Past this many keys nothing further discriminates between candidate types, and the cost of
-    /// looking has to stay bounded on a document the app never holds in memory.
+    /// The cost of looking has to stay bounded on a document the app never holds in memory, but
+    /// the cap is not purely a cost knob: a truncated sample makes a schema key that sits past it
+    /// look *absent*, which drags down the precision
+    /// <see cref="JsonSchemaRootMatcher.MinimumPrecision"/> reads. So it has to clear the widest
+    /// object a schema realistically describes - a live Keepa product runs to about a hundred
+    /// members - rather than the narrowest one that still discriminates. Beyond this we are into
+    /// objects used as maps, where no schema type is the answer anyway.
     /// </summary>
-    public const int MaxKeys = 64;
+    public const int MaxKeys = 256;
 
     /// <summary>
     /// The outermost object's property names, or empty when there is no object to read them from

@@ -47,7 +47,8 @@ public readonly record struct SchemaRootMatch(
 public static class JsonSchemaRootMatcher
 {
     /// <summary>A candidate has to explain at least this much of the document to be offered as a
-    /// match rather than merely listed. Below it, the honest answer is "no idea".</summary>
+    /// match rather than merely listed. Below it, the honest answer is "no idea" - unless the
+    /// candidate qualifies on precision instead, see <see cref="MinimumPrecision"/>.</summary>
     public const double MinimumCoverage = 0.5;
 
     /// <summary>
@@ -56,6 +57,29 @@ public static class JsonSchemaRootMatcher
     /// to go on.
     /// </summary>
     public const int MinimumMatchedKeys = 2;
+
+    /// <summary>
+    /// The second way to qualify: near enough every property the *candidate* declares is present
+    /// in the document, even though the document carries far more besides.
+    ///
+    /// This is what a partial schema looks like. The bundled Keepa schema declares 13 properties
+    /// for a product; a real Keepa product object carries about a hundred. Scored on coverage
+    /// alone that type explains 13% of the document and is rejected, so the one schema that
+    /// obviously fits gets dumped into the alphabetical list and has to be found by hand. Scored
+    /// on precision it is 13 of 13 - every field the schema knows about is there, and nothing it
+    /// claims is missing.
+    ///
+    /// Not 1.0, because a schema written against one API version and pointed at the next is still
+    /// the right answer with a field or two retired.
+    /// </summary>
+    public const double MinimumPrecision = 0.9;
+
+    /// <summary>
+    /// Guards the precision path against the failure precision has on its own: a three-property
+    /// type scores 100% on any document that happens to carry those three names. Enough declared
+    /// properties all landing is evidence; a handful is coincidence.
+    /// </summary>
+    public const int MinimumPreciseMatchedKeys = 4;
 
     /// <summary>Two candidates this close are not distinguishable on names alone, so neither is
     /// promoted - the user has to choose between (say) a Commit and a Retrieve response that
@@ -95,6 +119,14 @@ public static class JsonSchemaRootMatcher
 
         matches.Sort(static (a, b) =>
         {
+            // Qualifying candidates lead, whichever way they qualified. Coverage alone can't order
+            // them any more: a precision-qualified subset scores *below* junk that shares more
+            // names with the document, and callers (the picker's shortlist loop, Best) read the
+            // head of this list expecting the plausible ones to be contiguous.
+            int byPlausible = IsPlausible(b).CompareTo(IsPlausible(a));
+            if (byPlausible != 0)
+                return byPlausible;
+
             int byCoverage = b.Coverage.CompareTo(a.Coverage);
             if (byCoverage != 0)
                 return byCoverage;
@@ -144,7 +176,7 @@ public static class JsonSchemaRootMatcher
             return null;
 
         var best = ranked[0];
-        if (best.MatchedKeys < MinimumMatchedKeys || best.Coverage < MinimumCoverage)
+        if (!IsPlausible(best))
             return null;
 
         if (ranked.Count > 1)
@@ -160,9 +192,22 @@ public static class JsonSchemaRootMatcher
 
     /// <summary>Whether a scored candidate is good enough to sit in the "best match" section,
     /// which is a lower bar than <see cref="Best"/>: several plausible types listed together is
-    /// an honest answer to an ambiguous document, where auto-selecting one would not be.</summary>
+    /// an honest answer to an ambiguous document, where auto-selecting one would not be.
+    ///
+    /// Either measure can qualify a candidate, because they answer different questions and a real
+    /// schema can be strong on one and weak on the other. A complete schema explains the document
+    /// (coverage); a partial one is fully accounted for by it (precision). Requiring both would
+    /// reject every schema that documents less than half of what an API actually returns, which is
+    /// most hand-written ones.</summary>
     public static bool IsPlausible(SchemaRootMatch match)
-        => match.MatchedKeys >= MinimumMatchedKeys && match.Coverage >= MinimumCoverage;
+        => (match.MatchedKeys >= MinimumMatchedKeys && match.Coverage >= MinimumCoverage)
+        || (match.MatchedKeys >= MinimumPreciseMatchedKeys && match.Precision >= MinimumPrecision);
+
+    /// <summary>Whether a candidate qualified only as a subset of the document - every field the
+    /// schema declares is present, but the document carries much more besides. The picker says so
+    /// rather than badging such a match with its (honest, but alarming) coverage percentage.</summary>
+    public static bool IsSubsetMatch(SchemaRootMatch match)
+        => IsPlausible(match) && match.Coverage < MinimumCoverage;
 
     private static List<byte[]> SortedDistinct(IReadOnlyList<byte[]> keys)
     {

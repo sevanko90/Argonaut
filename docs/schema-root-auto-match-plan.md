@@ -66,14 +66,48 @@ precision = matched / |Kc|      // how much of the schema the document uses
 ```
 
 Rank on `coverage` first, break ties on `precision` — that prefers the tight type over a superset
-that happens to contain it. Reject outright below a `coverage` floor (shipped as
-`MinimumCoverage = 0.5`) and reject an ambiguous win (top two within `AmbiguityMargin = 0.05` on
-both measures). **Showing nothing beats
-confidently binding the wrong type**, and a near-tie between `CommitBookingResponse` and
-`RetrieveBookingResponse` is exactly the case where the user must choose.
+that happens to contain it. Reject an ambiguous win (top two within `AmbiguityMargin = 0.05` on
+both measures). **Showing nothing beats confidently binding the wrong type**, and a near-tie
+between `CommitBookingResponse` and `RetrieveBookingResponse` is exactly the case where the user
+must choose.
 
 Also require `matched >= 2` — a single-key document root matches dozens of types on one common
 name like `data` or `id`.
+
+### Two ways to qualify
+
+A candidate is offered if **either** measure clears its bar:
+
+| path | bar | the schema it describes |
+| --- | --- | --- |
+| coverage | `coverage >= MinimumCoverage` (0.5), `matched >= MinimumMatchedKeys` (2) | complete — it explains the document |
+| precision | `precision >= MinimumPrecision` (0.9), `matched >= MinimumPreciseMatchedKeys` (4) | partial — the document accounts for all of it |
+
+Coverage alone was the shipped rule and it silently excluded every hand-written schema that
+documents less of an API than the API returns. The bundled `keepa-product.json` is the case: its
+`$defs/product` declares 13 properties, a live Keepa product object carries about a hundred, so a
+document that *is* a bare product scores 13% coverage, fails the floor, and lands unranked in the
+alphabetical list — the user picks `product` by hand every single time. On precision it is 13 of
+13: nothing the type claims is missing.
+
+Each measure fails on its own in a different direction, which is why both bars exist and why the
+precision path carries the higher `matched` floor: precision alone makes a three-property type the
+answer for any document carrying those three names. Neither path can be relaxed into the other.
+
+Because plausibility is no longer monotone in coverage, `Rank` sorts **qualifying candidates
+first**, then by coverage and precision as before. Callers read the head of the list expecting the
+plausible ones to be contiguous (`Best` takes `ranked[0]`; the picker's shortlist loop breaks at
+the first implausible entry), and a precision-qualified subset otherwise sorts below unqualified
+noise that happens to share more names.
+
+`MinimumPrecision` is 0.9 rather than 1.0 so a schema one API version behind still matches, and
+`JsonDocumentKeySampler.MaxKeys` had to rise from 64 to 256 for the same reason: a truncated key
+sample makes a schema property that sits past the cap look absent, and precision is exactly the
+measure that punishes an absent property.
+
+The picker badges a subset match as `13/13 fields` rather than as its coverage percentage — a
+correct match wearing a "13%" label reads as a bad guess (`SchemaRootPick.ScoreText`,
+`JsonSchemaRootMatcher.IsSubsetMatch`).
 
 ### Root shape
 
@@ -84,6 +118,13 @@ name like `data` or `id`.
   Binding the winner as the array's *items* schema is **not** done — `WithRoot` cannot express
   "root is an array of C", and would need a synthetic node holding `ItemsId = C`. Still open.
 - Root is a **scalar** → no match, no picker change.
+
+## Known weak spot: partial schemas that are *also* ambiguous
+
+Two partial types both fully contained in the same document (`ProductA` and `ProductB` differing by
+one field) tie on both measures and `Best` declines, same as for the envelope case. Correct, but it
+means the precision path helps least on schemas that carry several near-identical partial types.
+Nothing to do about it without reading values.
 
 ## Known weak spot: wrapper roots
 
@@ -110,13 +151,18 @@ Steps 1–4 below have shipped. `JsonSchemaRootMatcher` ranks, `JsonDocumentKeyS
 evidence, `JsonViewModel.UpdateSchemaRootMatches` wires them together, and
 `SchemaRootPickerViewModel` presents the result as a filterable two-section flyout.
 
-**Ranking, not auto-binding.** Nothing binds a type by itself. The picker leads with the likely
-answers and the user clicks one. This was a deliberate narrowing of the original goal: measured
-against the real `kyteapi.json`, the top two candidates for a response envelope
+Since then the matcher also qualifies on precision (see "Two ways to qualify"), so a partial schema
+pointed at a document it fully describes a slice of — the bundled Keepa `product` against a bare
+product object — is recommended and bound instead of being buried in the full list.
+
+**Binding only on an unambiguous win.** `JsonSchemaSettings.SetRootMatches` re-points a *defaulted*
+root at `Best`, and never touches one the user chose (or one restored from
+`SchemaSelectionPreference`, which was a choice once). Everything short of a clear winner is left
+to the picker, which leads with the likely answers. That restraint is what the thresholds buy:
+measured against the real `kyteapi.json`, the top two candidates for a response envelope
 (`CommitBookingResponse` and `RetrieveBookingResponse`) are *identical* on property names — 5 of 5
 each, 100% on both measures. No name-based scorer can separate them, so `Best` declines and both
-appear in the shortlist. Auto-binding would have picked one at random and been silently wrong half
-the time.
+appear in the shortlist rather than one being picked at random and silently wrong half the time.
 
 Step 5 remains, and is written up separately in `docs/schema-row-bind-plan.md` — it is a
 change to the row walk rather than to schema selection, and is deferred for want of a document

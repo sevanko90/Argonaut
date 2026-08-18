@@ -117,16 +117,14 @@ public sealed class JsonRow
 public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
 {
     private const int ChildCap = 10_000;
-    // Display cap for any one decoded text (a scalar value or a property name) - see
-    // DisplayText for why every display path is capped. Rows past the cap render a
-    // truncation hint carrying the token's real length instead.
-    internal const int MaxDisplayTextLength = DisplayText.MaxLength;
+    // Alias kept for callers/tests; the cap itself lives with the row-text machinery in
+    // JsonRowFactory.
+    internal const int MaxDisplayTextLength = JsonRowFactory.MaxDisplayTextLength;
     // Hard ceiling on how far repeated "show more" clicks can page a single container's
     // children into the visible list. Rebuild() re-walks the whole visible tree on every
     // toggle (see class remarks), so without this cap, paging through a container with
     // millions of children one "show more" click at a time degrades to O(n^2).
     private const int MaxDisplayedChildrenPerContainer = 20_000;
-    private const int ChildCountCap = 50_000;
     private const int RowCacheCapacity = 1000;
     // Every tick that actually finds new tokens hands the visible ListBox a CollectionChanged
     // notification, which forces Avalonia's VirtualizingStackPanel to redo virtualization/
@@ -143,6 +141,7 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
     private readonly JsonStructureIndex index;
     private readonly MMapFile mmap;
     private readonly IReadOnlyList<IValueHintProvider>? hintProviders;
+    private readonly JsonRowFactory rowFactory;
 
     // The bound schema, or null. Resolution happens top-down during AppendSubtree (each row
     // inherits its parent's node id), never bottom-up from a row's path - see
@@ -160,17 +159,10 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
     private readonly Dictionary<int, int> expandedChildLimit = new();
     private int defaultExpandDepth;
 
-    private readonly Dictionary<int, LinkedListNode<(int Position, JsonRow Row)>> rowCache = new();
-    private readonly LinkedList<(int Position, JsonRow Row)> rowCacheOrder = new();
-
-    // A container's direct-child count is immutable once its EndIndex is known (and
-    // DescribeChildCount only runs then), so entries never need invalidating and the
-    // cache intentionally survives Rebuild - without it, every collapsed container in
-    // view recounts up to ChildCountCap tokens on every growth-poll rebuild.
-    private readonly Dictionary<int, int> childCountCache = new();
+    private readonly LruCache<int, JsonRow> rowCache = new(RowCacheCapacity);
 
     private List<VisibleRow> visibleRows = new();
-    private DispatcherTimer? growthTimer;
+    private IndexGrowthMonitor? growthMonitor;
     private int lastRebuildTokenCount = -1;
 
     // Token indices of currently-visible collapsed containers whose EndIndex isn't known
@@ -196,6 +188,7 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
         this.mmap = mmap;
         this.defaultExpandDepth = Math.Max(0, defaultExpandDepth);
         this.hintProviders = hintProviders;
+        this.rowFactory = new JsonRowFactory(index, mmap, hintProviders);
 
         if (hintProviders is not null)
         {
@@ -511,26 +504,11 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
 
     private JsonRow GetRow(int position)
     {
-        if (rowCache.TryGetValue(position, out var node))
-        {
-            rowCacheOrder.Remove(node);
-            rowCacheOrder.AddFirst(node);
-            return node.Value.Row;
-        }
+        if (rowCache.TryGetValue(position, out var cached))
+            return cached;
 
         var row = BuildRow(position, visibleRows[position]);
-
-        var newNode = new LinkedListNode<(int, JsonRow)>((position, row));
-        rowCacheOrder.AddFirst(newNode);
-        rowCache[position] = newNode;
-
-        if (rowCache.Count > RowCacheCapacity)
-        {
-            var lru = rowCacheOrder.Last!;
-            rowCacheOrder.RemoveLast();
-            rowCache.Remove(lru.Value.Position);
-        }
-
+        rowCache.Set(position, row);
         return row;
     }
 
@@ -550,194 +528,10 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
         }
 
         var token = index.GetToken(vrow.TokenIndex);
-        bool nameTruncated = false;
-        string? name = token.NameLength >= 0 ? ReadText(token.NameOffset, token.NameLength, out nameTruncated) : null;
         bool isContainer = IsContainer(token.Kind);
         bool expanded = isContainer && IsExpanded(vrow.TokenIndex, token.Depth);
 
-        bool valueTruncated = false;
-        string value = isContainer
-            ? BuildContainerSummary(vrow.TokenIndex, token, expanded)
-            : BuildScalarText(token, out valueTruncated);
-
-        bool hasChildren = isContainer && (token.EndIndex < 0 || token.EndIndex > vrow.TokenIndex + 1);
-
-        string? hint = isContainer ? null : BuildHint(vrow.TokenIndex, token);
-
-        string? schemaTitle = null;
-        string? schemaDescription = null;
-        string? schemaLabel = null;
-        if (schema is not null && vrow.SchemaNodeId >= 0)
-        {
-            schemaTitle = schema.GetTitle(vrow.SchemaNodeId);
-            schemaDescription = schema.GetDescription(vrow.SchemaNodeId);
-
-            // Enum matching reuses the value string already decoded above - no extra mmap read,
-            // no extra allocation - and a matched member label supersedes the node's own title,
-            // since "Sold by third party" says more here than "Availability".
-            if (!isContainer && schema.TryGetEnumLabel(vrow.SchemaNodeId, value, token.Kind, out var enumTitle, out var enumDescription))
-            {
-                schemaTitle = enumTitle ?? schemaTitle;
-                schemaDescription = enumDescription ?? schemaDescription;
-            }
-
-            // A schema that documents a property with `description` and no `title` is the norm
-            // rather than the exception once schemas are generated rather than hand-written: in a
-            // real OpenAPI document 83% of documented properties carry a description only. Those
-            // rows would otherwise show nothing at all in the gutter - and, since the gutter cell
-            // is what carries the tooltip, their description would be unreachable too.
-            schemaLabel = schemaTitle ?? FirstLine(schemaDescription);
-        }
-
-        string? truncationHint = valueTruncated
-            ? $"(truncated — full length {FormatByteLength(token.Length)})"
-            : nameTruncated
-                ? $"(name truncated — full length {FormatByteLength(token.NameLength)})"
-                : null;
-
-        long? truncatedValueOffset = valueTruncated ? token.Offset : null;
-
-        int? arrayIndex = vrow.ArrayIndex >= 0 ? vrow.ArrayIndex : null;
-
-        return new JsonRow(position, vrow.TokenIndex, token.Depth, token.Kind, name, value, hasChildren, expanded, isPlaceholder: false, hint: hint, truncationHint: truncationHint, truncatedValueOffset: truncatedValueOffset, arrayIndex: arrayIndex, schemaTitle: schemaTitle, schemaDescription: schemaDescription, schemaLabel: schemaLabel);
-    }
-
-    private string? BuildHint(int tokenIndex, JsonTokenInfo token)
-    {
-        if (hintProviders is null)
-            return null;
-
-        // No classifiable value (a date in some encoding) is anywhere near this long; skip
-        // early rather than hand providers a span over a pathologically large token.
-        if (token.Length > MaxDisplayTextLength)
-            return null;
-
-        foreach (var provider in hintProviders)
-        {
-            if (!provider.IsActive)
-                continue;
-
-            if (provider.TryClassify(token.Kind, mmap.GetSpan(token.Offset, token.Length), out var candidate))
-            {
-                string? hint = provider.FormatHint(in candidate, tokenIndex);
-                if (hint is not null)
-                    return hint;
-            }
-        }
-
-        return null;
-    }
-
-    private string BuildContainerSummary(int tokenIndex, JsonTokenInfo token, bool expanded)
-    {
-        string open = token.Kind == JsonTokenKind.StartObject ? "{" : "[";
-        if (expanded)
-            return open;
-
-        string close = token.Kind == JsonTokenKind.StartObject ? "}" : "]";
-        string countText = token.EndIndex >= 0 ? DescribeChildCount(tokenIndex, token) : "…";
-        return $"{open} {countText} {close}";
-    }
-
-    private string DescribeChildCount(int containerTokenIndex, JsonTokenInfo container)
-    {
-        string label = container.Kind == JsonTokenKind.StartObject ? "member" : "item";
-
-        if (!childCountCache.TryGetValue(containerTokenIndex, out int count))
-        {
-            int i = containerTokenIndex + 1;
-            int end = container.EndIndex;
-
-            while (i < end && count <= ChildCountCap)
-            {
-                var t = index.GetToken(i);
-                count++;
-                i = IsContainer(t.Kind) ? t.EndIndex + 1 : i + 1;
-            }
-
-            childCountCache[containerTokenIndex] = count;
-        }
-
-        return count > ChildCountCap ? $"{ChildCountCap}+ {label}s" : $"{count} {label}{(count == 1 ? "" : "s")}";
-    }
-
-    private string BuildScalarText(JsonTokenInfo token, out bool truncated)
-    {
-        switch (token.Kind)
-        {
-            case JsonTokenKind.Null: truncated = false; return "null";
-            case JsonTokenKind.True: truncated = false; return "true";
-            case JsonTokenKind.False: truncated = false; return "false";
-            case JsonTokenKind.EndObject: truncated = false; return "}";
-            case JsonTokenKind.EndArray: truncated = false; return "]";
-            case JsonTokenKind.Number: return ReadText(token.Offset, token.Length, out truncated);
-            default:
-                string text = ReadText(token.Offset, token.Length, out truncated);
-                // A truncated string keeps its opening quote but gets no closing one: the
-                // value visibly continues past the ellipsis. This also keeps copy-value's
-                // quote stripping (first + last char) correct - it removes the quote and
-                // the ellipsis, leaving exactly the truncated raw text.
-                return truncated ? "\"" + text : "\"" + text + "\"";
-        }
-    }
-
-    private string ReadText(long offset, int length, out bool truncated)
-        => DisplayText.Read(mmap, offset, length, out truncated, MaxDisplayTextLength);
-
-    private static string FormatByteLength(int bytes) => bytes switch
-    {
-        < 1024 => $"{bytes:N0} bytes",
-        < 1024 * 1024 => $"{bytes / 1024.0:0.#} KB",
-        < 1024 * 1024 * 1024 => $"{bytes / (1024.0 * 1024.0):0.#} MB",
-        _ => $"{bytes / (1024.0 * 1024.0 * 1024.0):0.#} GB"
-    };
-
-    /// <summary>
-    /// The first line of a schema description, for use as a gutter label. Descriptions are prose
-    /// and often several paragraphs (frequently with a trailing "Schema link: …"), so only the
-    /// opening line is a candidate; the full text stays on the tooltip.
-    ///
-    /// The hard cap is a measuring guard, not the visible limit - the gutter cell trims to the
-    /// gutter's current width and shows an ellipsis there - so nothing is cut short enough for the
-    /// cap to be what the user sees. Returns the original string when neither applies, so the
-    /// common short description costs no allocation.
-    /// </summary>
-    private const int MaxSchemaLabelLength = 200;
-
-    private static string? FirstLine(string? description)
-    {
-        if (description is null)
-            return null;
-
-        int end = description.IndexOfAny(NewLineChars);
-
-        // Descriptions written for a docs site break paragraphs with a literal line-break tag as
-        // often as with a newline, and everything after the first break is no more wanted on the
-        // row than a second paragraph would be. Both spellings occur - the real OpenAPI document
-        // this was built against uses the (invalid, but common) closing form.
-        int tag = EarliestOf(description, "<br", "</br");
-        if (tag >= 0 && (end < 0 || tag < end))
-            end = tag;
-
-        if (end < 0)
-            end = description.Length;
-        if (end > MaxSchemaLabelLength)
-            end = MaxSchemaLabelLength;
-
-        return end == description.Length ? description : description[..end].TrimEnd();
-    }
-
-    private static readonly char[] NewLineChars = { '\r', '\n' };
-
-    private static int EarliestOf(string text, string a, string b)
-    {
-        int first = text.IndexOf(a, StringComparison.OrdinalIgnoreCase);
-        int second = text.IndexOf(b, StringComparison.OrdinalIgnoreCase);
-
-        if (first < 0)
-            return second;
-
-        return second < 0 ? first : Math.Min(first, second);
+        return rowFactory.BuildRow(position, vrow.TokenIndex, vrow.ArrayIndex, vrow.SchemaNodeId, expanded);
     }
 
     private static bool IsContainer(JsonTokenKind kind) => kind is JsonTokenKind.StartObject or JsonTokenKind.StartArray;
@@ -789,7 +583,6 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
         }
 
         rowCache.Clear();
-        rowCacheOrder.Clear();
 
         RaiseCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
     }
@@ -949,89 +742,42 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
             return;
 
         this.schema = schema;
+        rowFactory.Schema = schema;
         Rebuild();
     }
 
     public void InvalidateRealizedRows()
     {
         rowCache.Clear();
-        rowCacheOrder.Clear();
         RaiseCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
     }
 
     private void OnHintsChanged(object? sender, EventArgs e) => InvalidateRealizedRows();
 
+    /// <summary>
+    /// Starts the <see cref="IndexGrowthMonitor"/> that keeps the visible list tracking the
+    /// still-growing index: the poll tick per <see cref="GrowthPollInterval"/>, plus one
+    /// immediate final refresh when the indexing task stops (see the monitor's remarks).
+    /// The refresh skips the rebuild once the visible tree is settled - token growth can't
+    /// change any visible row then, and ToggleExpand into an unindexed region re-clears the
+    /// flag via its own Rebuild, so refreshes resume rebuilding when it matters again.
+    /// Only ever runs on the UI thread (JsonVisibleRowCollection is always constructed there).
+    /// </summary>
     private void StartGrowthMonitor()
     {
-        growthTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = GrowthPollInterval };
-        growthTimer.Tick += OnGrowthTick;
-        growthTimer.Start();
-
-        _ = AwaitIndexingCompletionAsync();
-    }
-
-    /// <summary>
-    /// The growth-poll timer trades live-update frequency against a known Avalonia panel
-    /// glitch (see GrowthPollInterval's remarks), which means a file that finishes indexing
-    /// well within one poll interval would otherwise keep showing only the construction-time
-    /// Rebuild until the next tick caught up - a multi-second wait on a file that's actually
-    /// already fully indexed. Awaiting the indexing task directly - regardless of success,
-    /// failure or cancellation, since MarkComplete runs in RunIndexing's finally either way -
-    /// guarantees one immediate final rebuild the moment indexing actually stops, independent
-    /// of the poll cadence. Called from StartGrowthMonitor, which only ever runs on the UI
-    /// thread (JsonVisibleRowCollection is always constructed there), so this await resumes
-    /// there too - no explicit dispatch needed.
-    /// </summary>
-    private async Task AwaitIndexingCompletionAsync()
-    {
-        try
-        {
-            await index.IndexingTask;
-        }
-        catch
-        {
-            // Failure/cancellation is already recorded via index.Failure; only IsComplete
-            // (set unconditionally in RunIndexing's finally) matters here.
-        }
-
-        if (IsDisposed || growthTimer is null)
-            return; // disposed, or a regular tick already ran the final rebuild and stopped this
-
-        if (!visibleTreeSettled && index.TokenCount != lastRebuildTokenCount)
-            Rebuild();
-
-        growthTimer.Stop();
-        growthTimer.Tick -= OnGrowthTick;
-        growthTimer = null;
-    }
-
-    private void OnGrowthTick(object? sender, EventArgs e)
-    {
-        bool complete = index.IsComplete;
-
-        // Once the visible tree is settled, token growth can't change any visible row,
-        // so skip the rebuild (and its Reset event, which forces the viewport to
-        // re-realize everything). ToggleExpand into an unindexed region re-clears the
-        // flag via its own Rebuild, so ticks resume rebuilding when it matters again.
-        if (!visibleTreeSettled && index.TokenCount != lastRebuildTokenCount)
-            Rebuild();
-
-        if (complete)
-        {
-            growthTimer!.Stop();
-            growthTimer.Tick -= OnGrowthTick;
-            growthTimer = null;
-        }
+        growthMonitor = new IndexGrowthMonitor(GrowthPollInterval, index.IndexingTask,
+            isComplete: () => index.IsComplete,
+            refresh: () =>
+            {
+                if (!IsDisposed && !visibleTreeSettled && index.TokenCount != lastRebuildTokenCount)
+                    Rebuild();
+            });
     }
 
     protected override void DisposeCore()
     {
-        if (growthTimer is not null)
-        {
-            growthTimer.Stop();
-            growthTimer.Tick -= OnGrowthTick;
-            growthTimer = null;
-        }
+        growthMonitor?.Dispose();
+        growthMonitor = null;
 
         if (hintProviders is not null)
         {

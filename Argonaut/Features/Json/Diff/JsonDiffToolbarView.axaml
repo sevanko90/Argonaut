@@ -19,5 +19,25 @@
                   IsChecked="{Binding ChangesOnly}"
                   VerticalAlignment="Center"
                   ToolTip.Tip="Hide unchanged rows" />
+        <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+            <Button Classes="iconbutton compact"
+                    Click="OnPreviousDiff"
+                    ToolTip.Tip="Previous difference">
+                <Viewbox Width="12" Height="12">
+                    <!-- Material "keyboard_arrow_up" -->
+                    <Path Fill="{DynamicResource AppMutedTextBrush}"
+                          Data="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z" />
+                </Viewbox>
+            </Button>
+            <Button Classes="iconbutton compact"
+                    Click="OnNextDiff"
+                    ToolTip.Tip="Next difference">
+                <Viewbox Width="12" Height="12">
+                    <!-- Material "keyboard_arrow_down" -->
+                    <Path Fill="{DynamicResource AppMutedTextBrush}"
+                          Data="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z" />
+                </Viewbox>
+            </Button>
+        </StackPanel>
     </StackPanel>
 </UserControl>

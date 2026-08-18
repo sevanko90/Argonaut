@@ -359,6 +359,41 @@ public sealed class JsonDiffRowCollection : MemoryMappedCollectionBase
         }
     }
 
+    /// <summary>
+    /// Finds the next (direction +1) or previous (-1) actual-change row from
+    /// <paramref name="fromPosition"/> (-1 = before the start), wrapping around. A change
+    /// row is a record row that is Added, Removed, Moved, or a value-level Modified -
+    /// descended containers are path, and sub-rows belong to the block above them, so
+    /// both are skipped. O(visible rows); null when the visible list holds no change.
+    /// </summary>
+    public int? FindNextChange(int fromPosition, int direction)
+    {
+        int count = visibleRows.Count;
+        if (count == 0)
+            return null;
+
+        for (int step = 1; step <= count; step++)
+        {
+            int position = (((fromPosition + step * direction) % count) + count) % count;
+            var vrow = visibleRows[position];
+            if (vrow.Kind != RowKind.Record)
+                continue;
+
+            var record = session.Diff.GetRecord(vrow.RecordIndex);
+            bool isChange = record.Status switch
+            {
+                DiffStatus.Added or DiffStatus.Removed or DiffStatus.Moved => true,
+                DiffStatus.Modified => !RecordHasChildRecords(record),
+                _ => false
+            };
+
+            if (isChange)
+                return position;
+        }
+
+        return null;
+    }
+
     // ── Row materialization ────────────────────────────────────────────────────────────
 
     private JsonDiffRow GetRow(int position)
@@ -440,8 +475,16 @@ public sealed class JsonDiffRowCollection : MemoryMappedCollectionBase
 
         string? note = record.IsAlignmentApproximate ? "alignment approximate" : null;
 
+        // The split behind the two Modified stylings: a descended container is the PATH to
+        // a change; an undescended Modified record (leaf, kind mismatch, approximate
+        // array) is where the data itself differs.
+        bool hasChildRecords = RecordHasChildRecords(record);
+        bool isValueChanged = record.Status == DiffStatus.Modified && !hasChildRecords;
+        bool isChangedPath = record.Status == DiffStatus.Modified && hasChildRecords;
+
         return new JsonDiffRow(position, left, right, record.Status, record.Depth,
-            hasChildren, expanded, isPlaceholder: false, moveBadge: moveBadge, note: note);
+            hasChildren, expanded, isPlaceholder: false, moveBadge: moveBadge, note: note,
+            isValueChanged: isValueChanged, isChangedPath: isChangedPath);
     }
 
     protected override void DisposeCore()

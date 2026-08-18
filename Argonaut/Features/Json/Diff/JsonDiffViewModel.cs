@@ -28,6 +28,16 @@ public sealed class JsonDiffViewModel : ObservableObject, IDocumentViewModel
     private IndexFailure? indexFailure;
     private volatile bool disposed;
 
+    private int? selectedPosition;
+    private bool sourceShowsPath;
+    private bool targetShowsPath;
+    private string sourcePrefix = string.Empty;
+    private string sourceChanged = string.Empty;
+    private string sourceSuffix = string.Empty;
+    private string targetPrefix = string.Empty;
+    private string targetChanged = string.Empty;
+    private string targetSuffix = string.Empty;
+
     public string FilePath { get; private set; } = string.Empty;
 
     public string RightFilePath { get; private set; } = string.Empty;
@@ -54,6 +64,171 @@ public sealed class JsonDiffViewModel : ObservableObject, IDocumentViewModel
 
     public ISearchNavigator? CreateSearchNavigator() => null;
 
+    // ── Selection and the source/target context bar ────────────────────────────────────
+
+    /// <summary>
+    /// Visible-list position of the selected row, or null. Set by the view on click and by
+    /// the go-to-next/previous-diff actions (the view mirrors changes back into the
+    /// ListBox); every change recomputes the context bar below.
+    /// </summary>
+    public int? SelectedPosition
+    {
+        get => selectedPosition;
+        set
+        {
+            if (!SetField(ref selectedPosition, value))
+                return;
+
+            UpdateContext();
+        }
+    }
+
+    public bool HasSelection => SelectedRow is not null;
+
+    private JsonDiffRow? SelectedRow =>
+        rows is { } r && selectedPosition is { } p && p >= 0 && p < r.Count
+            ? r[p] as JsonDiffRow
+            : null;
+
+    public void GoToNextDiff() => GoToDiff(1);
+
+    public void GoToPreviousDiff() => GoToDiff(-1);
+
+    private void GoToDiff(int direction)
+    {
+        if (rows is not { } r)
+            return;
+
+        if (r.FindNextChange(selectedPosition ?? -1, direction) is { } position)
+            SelectedPosition = position;
+    }
+
+    /// <summary>Per-row display mode of the context bar: the selected value (default) or
+    /// the row's JSONPath. Independent per side, toggled by the bar's swap buttons.</summary>
+    public bool SourceShowsPath
+    {
+        get => sourceShowsPath;
+        set
+        {
+            if (SetField(ref sourceShowsPath, value))
+            {
+                OnPropertyChanged(nameof(SourceModeLabel));
+                UpdateContext();
+            }
+        }
+    }
+
+    public bool TargetShowsPath
+    {
+        get => targetShowsPath;
+        set
+        {
+            if (SetField(ref targetShowsPath, value))
+            {
+                OnPropertyChanged(nameof(TargetModeLabel));
+                UpdateContext();
+            }
+        }
+    }
+
+    /// <summary>The swap buttons name what clicking switches TO.</summary>
+    public string SourceModeLabel => sourceShowsPath ? "value" : "path";
+
+    public string TargetModeLabel => targetShowsPath ? "value" : "path";
+
+    public void ToggleSourceMode() => SourceShowsPath = !SourceShowsPath;
+
+    public void ToggleTargetMode() => TargetShowsPath = !TargetShowsPath;
+
+    // The context lines are split into prefix/changed/suffix runs so the view can paint
+    // just the differing characters. Path mode and no-diff cases put everything in the
+    // prefix run.
+    public string SourcePrefix { get => sourcePrefix; private set => SetField(ref sourcePrefix, value); }
+    public string SourceChanged { get => sourceChanged; private set => SetField(ref sourceChanged, value); }
+    public string SourceSuffix { get => sourceSuffix; private set => SetField(ref sourceSuffix, value); }
+    public string TargetPrefix { get => targetPrefix; private set => SetField(ref targetPrefix, value); }
+    public string TargetChanged { get => targetChanged; private set => SetField(ref targetChanged, value); }
+    public string TargetSuffix { get => targetSuffix; private set => SetField(ref targetSuffix, value); }
+
+    private void UpdateContext()
+    {
+        var row = SelectedRow;
+        OnPropertyChanged(nameof(HasSelection));
+
+        if (row is null || row.IsPlaceholder || session is null)
+        {
+            (SourcePrefix, SourceChanged, SourceSuffix) = (string.Empty, string.Empty, string.Empty);
+            (TargetPrefix, TargetChanged, TargetSuffix) = (string.Empty, string.Empty, string.Empty);
+            return;
+        }
+
+        // Deliberately the rows' own display strings: JsonRowFactory built them through
+        // DisplayText.Read, so they are already capped at DisplayText.MaxLength (1KB) with
+        // an ellipsis - a pathological multi-MB scalar never gets decoded here, and the
+        // char-diff below runs over at most 1KB per side.
+        string? leftValue = row.Left?.Value;
+        string? rightValue = row.Right?.Value;
+
+        // Only an Added/Removed row's lone value is "all change"; a Moved row's content is
+        // unchanged by definition, so its single side renders plain.
+        bool highlightWhole = row.Status is DiffStatus.Added or DiffStatus.Removed;
+
+        (SourcePrefix, SourceChanged, SourceSuffix) = sourceShowsPath
+            ? (PathFor(row, target: false) ?? string.Empty, string.Empty, string.Empty)
+            : ContextRuns(leftValue, rightValue, highlightWhole);
+
+        (TargetPrefix, TargetChanged, TargetSuffix) = targetShowsPath
+            ? (PathFor(row, target: true) ?? string.Empty, string.Empty, string.Empty)
+            : ContextRuns(rightValue, leftValue, highlightWhole);
+    }
+
+    private string? PathFor(JsonDiffRow row, bool target)
+    {
+        if (session is not { } s)
+            return null;
+
+        // Mirrored rows (unchanged subtrees) reuse the left JsonRow on both panes; the
+        // left-derived path is structurally valid for the right document there, since the
+        // subtree is identical by definition.
+        if (target && row.Right is { } right && !ReferenceEquals(row.Right, row.Left))
+            return JsonPathBuilder.Build(s.Right.Index, s.Right.File, right.TokenIndex);
+
+        return row.Left is { } left ? JsonPathBuilder.Build(s.Left.Index, s.Left.File, left.TokenIndex)
+            : row.Right is { } r ? JsonPathBuilder.Build(s.Right.Index, s.Right.File, r.TokenIndex)
+            : null;
+    }
+
+    private static (string Prefix, string Changed, string Suffix) ContextRuns(string? value, string? other, bool highlightWhole)
+    {
+        if (value is null)
+            return (string.Empty, string.Empty, string.Empty);
+
+        if (other is null)
+            return highlightWhole ? (string.Empty, value, string.Empty) : (value, string.Empty, string.Empty);
+
+        return SplitByCommonAffixes(value, other);
+    }
+
+    /// <summary>
+    /// The character-level diff behind the context bar's highlight: the longest common
+    /// prefix and suffix bracket the span that actually differs. Inputs are the
+    /// display-capped row values (never wrapped, so a single differing span reads well);
+    /// identical strings yield an empty Changed run.
+    /// </summary>
+    internal static (string Prefix, string Changed, string Suffix) SplitByCommonAffixes(string value, string other)
+    {
+        int prefix = 0;
+        int max = Math.Min(value.Length, other.Length);
+        while (prefix < max && value[prefix] == other[prefix])
+            prefix++;
+
+        int suffix = 0;
+        while (suffix < max - prefix && value[value.Length - 1 - suffix] == other[other.Length - 1 - suffix])
+            suffix++;
+
+        return (value[..prefix], value[prefix..(value.Length - suffix)], value[^suffix..]);
+    }
+
     public bool CanHandleFileType(FileTypeDetector.FileKind fileType) => false;
 
     /// <summary>
@@ -74,7 +249,9 @@ public sealed class JsonDiffViewModel : ObservableObject, IDocumentViewModel
 
         Toolbar = new JsonDiffToolbarViewModel(
             Path.GetFileName(leftPath), Path.GetFileName(rightPath),
-            setChangesOnly: value => { if (rows is { } r) r.ChangesOnly = value; });
+            setChangesOnly: value => { if (rows is { } r) r.ChangesOnly = value; },
+            goToPreviousDiff: GoToPreviousDiff,
+            goToNextDiff: GoToNextDiff);
 
         // A small initial batch so the preview's first paint isn't empty (mirrors
         // JsonViewModel.LoadCore); a tiny file completes the wait via MarkComplete instead.

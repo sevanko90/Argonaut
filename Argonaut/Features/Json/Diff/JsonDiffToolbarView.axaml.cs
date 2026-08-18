@@ -8,4 +8,16 @@ public partial class JsonDiffToolbarView : UserControl
     {
         InitializeComponent();
     }
+
+    private void OnPreviousDiff(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is JsonDiffToolbarViewModel vm)
+            vm.GoToPreviousDiff();
+    }
+
+    private void OnNextDiff(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is JsonDiffToolbarViewModel vm)
+            vm.GoToNextDiff();
+    }
 }

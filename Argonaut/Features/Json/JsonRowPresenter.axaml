@@ -16,6 +16,7 @@
                    VerticalAlignment="Center"
                    FontFamily="{DynamicResource AppContentFontFamily}" />
         <TextBlock Text="{Binding Value}"
+                   Classes="rowValue"
                    Classes.jsonString="{Binding IsStringValue}"
                    Classes.jsonNumber="{Binding IsNumberValue}"
                    Classes.jsonBool="{Binding IsBooleanValue}"

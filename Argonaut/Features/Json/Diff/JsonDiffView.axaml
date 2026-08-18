@@ -12,18 +12,28 @@
         <StyleInclude Source="/Features/Json/JsonRowStyles.axaml" />
 
         <!-- Status tints: low-alpha overlays chosen to read on light and dark themes alike,
-             painted per pane so an Added row tints only where the content actually is. -->
+             painted per pane so an Added row tints only where the content actually is.
+             Modified is split in two: a faint tint marks containers on the PATH to a change
+             (open these), while the change itself gets the strong highlight painted on the
+             value text alone (see .valueChanged below) - so the eye lands on the data that
+             differs, not on a whole uniformly-amber line. -->
         <Style Selector="Border.diffAdded">
             <Setter Property="Background" Value="#2E4CAF50" />
         </Style>
         <Style Selector="Border.diffRemoved">
             <Setter Property="Background" Value="#2EF44336" />
         </Style>
-        <Style Selector="Border.diffModified">
-            <Setter Property="Background" Value="#24FFC107" />
+        <Style Selector="Border.diffPath">
+            <Setter Property="Background" Value="#12FFC107" />
+        </Style>
+        <Style Selector="Border.diffLeaf">
+            <Setter Property="Background" Value="#1FFFC107" />
         </Style>
         <Style Selector="Border.diffMoved">
             <Setter Property="Background" Value="#2E2196F3" />
+        </Style>
+        <Style Selector="json|JsonRowPresenter.valueChanged TextBlock.rowValue">
+            <Setter Property="Background" Value="#59FFC107" />
         </Style>
     </UserControl.Styles>
 
@@ -32,7 +42,9 @@
             CornerRadius="8"
             Background="{DynamicResource AppWindowBackgroundBrush}"
             ClipToBounds="True">
-        <ListBox x:Name="RowsListBox"
+        <Grid RowDefinitions="*,Auto">
+        <ListBox Grid.Row="0"
+                 x:Name="RowsListBox"
                  ItemsSource="{Binding Rows}"
                  SelectionMode="Single"
                  Padding="8,8"
@@ -93,24 +105,28 @@
 
                         <Border Grid.Column="1"
                                 Classes.diffRemoved="{Binding IsRemoved}"
-                                Classes.diffModified="{Binding IsModified}"
+                                Classes.diffPath="{Binding IsChangedPath}"
+                                Classes.diffLeaf="{Binding IsValueChanged}"
                                 Classes.diffMoved="{Binding IsMoved}"
                                 IsVisible="{Binding !IsPlaceholder}"
                                 CornerRadius="4"
                                 Padding="4,0"
                                 Margin="0,0,8,0">
-                            <json:JsonRowPresenter DataContext="{Binding Left}" />
+                            <json:JsonRowPresenter DataContext="{Binding Left}"
+                                                   Classes.valueChanged="{Binding $parent[ListBoxItem].((diff:JsonDiffRow)DataContext).IsValueChanged}" />
                         </Border>
 
                         <Border Grid.Column="2"
                                 Classes.diffAdded="{Binding IsAdded}"
-                                Classes.diffModified="{Binding IsModified}"
+                                Classes.diffPath="{Binding IsChangedPath}"
+                                Classes.diffLeaf="{Binding IsValueChanged}"
                                 Classes.diffMoved="{Binding IsMoved}"
                                 IsVisible="{Binding !IsPlaceholder}"
                                 CornerRadius="4"
                                 Padding="4,0">
                             <StackPanel Orientation="Horizontal">
-                                <json:JsonRowPresenter DataContext="{Binding Right}" />
+                                <json:JsonRowPresenter DataContext="{Binding Right}"
+                                                       Classes.valueChanged="{Binding $parent[ListBoxItem].((diff:JsonDiffRow)DataContext).IsValueChanged}" />
                                 <TextBlock Text="{Binding MoveBadge}"
                                            IsVisible="{Binding HasMoveBadge}"
                                            Foreground="{DynamicResource AppMutedTextBrush}"
@@ -130,5 +146,73 @@
                 </DataTemplate>
             </ListBox.ItemTemplate>
         </ListBox>
+
+        <!-- Context bar: two fixed lines showing the selected row's source (left document)
+             and target (right document) side - the value by default, its JSONPath via the
+             per-line swap link. Values never wrap (they trim with an ellipsis), and the
+             Run split paints exactly the characters that differ between the two sides. -->
+        <Border Grid.Row="1"
+                BorderBrush="{DynamicResource AppBorderBrush}"
+                BorderThickness="0,1,0,0"
+                Background="{DynamicResource AppPanelBackgroundBrush}"
+                Padding="8,4">
+            <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="Auto,Auto,*">
+                <TextBlock Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3"
+                           Text="No selection"
+                           FontSize="11"
+                           IsVisible="{Binding !HasSelection}"
+                           Foreground="{DynamicResource AppMutedTextBrush}"
+                           FontFamily="{DynamicResource AppContentFontFamily}" />
+
+                <TextBlock Grid.Row="0" Grid.Column="0"
+                           Text="source"
+                           Width="44"
+                           FontSize="11"
+                           IsVisible="{Binding HasSelection}"
+                           Foreground="{DynamicResource AppMutedTextBrush}"
+                           VerticalAlignment="Center" />
+                <Button Grid.Row="0" Grid.Column="1"
+                        Classes="hintlink"
+                        FontSize="11"
+                        Content="{Binding SourceModeLabel}"
+                        IsVisible="{Binding HasSelection}"
+                        Click="OnToggleSourceMode"
+                        Margin="0,0,12,0"
+                        VerticalAlignment="Center"
+                        ToolTip.Tip="Swap between the selected value and its JSONPath" />
+                <TextBlock Grid.Row="0" Grid.Column="2"
+                           FontSize="11"
+                           IsVisible="{Binding HasSelection}"
+                           TextWrapping="NoWrap"
+                           TextTrimming="CharacterEllipsis"
+                           VerticalAlignment="Center"
+                           FontFamily="{DynamicResource AppContentFontFamily}"><Run Text="{Binding SourcePrefix}" /><Run Text="{Binding SourceChanged}" Background="#59FFC107" /><Run Text="{Binding SourceSuffix}" /></TextBlock>
+
+                <TextBlock Grid.Row="1" Grid.Column="0"
+                           Text="target"
+                           Width="44"
+                           FontSize="11"
+                           IsVisible="{Binding HasSelection}"
+                           Foreground="{DynamicResource AppMutedTextBrush}"
+                           VerticalAlignment="Center" />
+                <Button Grid.Row="1" Grid.Column="1"
+                        Classes="hintlink"
+                        FontSize="11"
+                        Content="{Binding TargetModeLabel}"
+                        IsVisible="{Binding HasSelection}"
+                        Click="OnToggleTargetMode"
+                        Margin="0,0,12,0"
+                        VerticalAlignment="Center"
+                        ToolTip.Tip="Swap between the selected value and its JSONPath" />
+                <TextBlock Grid.Row="1" Grid.Column="2"
+                           FontSize="11"
+                           IsVisible="{Binding HasSelection}"
+                           TextWrapping="NoWrap"
+                           TextTrimming="CharacterEllipsis"
+                           VerticalAlignment="Center"
+                           FontFamily="{DynamicResource AppContentFontFamily}"><Run Text="{Binding TargetPrefix}" /><Run Text="{Binding TargetChanged}" Background="#59FFC107" /><Run Text="{Binding TargetSuffix}" /></TextBlock>
+            </Grid>
+        </Border>
+        </Grid>
     </Border>
 </UserControl>

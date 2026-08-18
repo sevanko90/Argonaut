@@ -13,14 +13,23 @@ namespace Argonaut.Features.Json.Diff;
 public sealed class JsonDiffToolbarViewModel : ObservableObject
 {
     private readonly Action<bool> setChangesOnly;
+    private readonly Action goToPreviousDiff;
+    private readonly Action goToNextDiff;
     private bool changesOnly;
 
-    public JsonDiffToolbarViewModel(string leftFileName, string rightFileName, Action<bool> setChangesOnly)
+    public JsonDiffToolbarViewModel(string leftFileName, string rightFileName, Action<bool> setChangesOnly,
+        Action goToPreviousDiff, Action goToNextDiff)
     {
         LeftFileName = leftFileName;
         RightFileName = rightFileName;
         this.setChangesOnly = setChangesOnly;
+        this.goToPreviousDiff = goToPreviousDiff;
+        this.goToNextDiff = goToNextDiff;
     }
+
+    public void GoToPreviousDiff() => goToPreviousDiff();
+
+    public void GoToNextDiff() => goToNextDiff();
 
     public string LeftFileName { get; }
 

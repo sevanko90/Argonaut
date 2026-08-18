@@ -10,7 +10,8 @@ namespace Argonaut.Features.Json.Diff;
 public sealed class JsonDiffRow
 {
     public JsonDiffRow(int position, JsonRow? left, JsonRow? right, DiffStatus status, int depth,
-        bool hasChildren, bool isExpanded, bool isPlaceholder, string? moveBadge = null, string? note = null, string? placeholderText = null)
+        bool hasChildren, bool isExpanded, bool isPlaceholder, string? moveBadge = null, string? note = null, string? placeholderText = null,
+        bool isValueChanged = false, bool isChangedPath = false)
     {
         Position = position;
         Left = left;
@@ -23,6 +24,8 @@ public sealed class JsonDiffRow
         MoveBadge = moveBadge;
         Note = note;
         PlaceholderText = placeholderText;
+        IsValueChanged = isValueChanged;
+        IsChangedPath = isChangedPath;
     }
 
     /// <summary>Index into the owning collection's current visible list.</summary>
@@ -51,6 +54,15 @@ public sealed class JsonDiffRow
 
     /// <summary>The display-cap placeholder's text; null on real rows.</summary>
     public string? PlaceholderText { get; }
+
+    /// <summary>A Modified row whose VALUE is the change (a leaf, or an undescended
+    /// approximate container) - the actual data difference. Drives the strong highlight
+    /// on the value text itself, distinct from the whole-row path tint.</summary>
+    public bool IsValueChanged { get; }
+
+    /// <summary>A Modified container that was descended into - not itself a change, but on
+    /// the path to one. Drives the faint "open me" tint that guides the eye down the tree.</summary>
+    public bool IsChangedPath { get; }
 
     // Classes.* bindings for the row tint.
     public bool IsAdded => Status == DiffStatus.Added;

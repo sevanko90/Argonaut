@@ -7,28 +7,34 @@
          diff view's two panes (diff plan stage 0.3). Interaction wiring - expanders, hint
          and truncation-jump buttons, search highlighting - stays with the hosting view; the
          JSON view keeps its richer inline template for exactly that reason. Renders nothing
-         when no row is bound (an absent diff side). -->
-    <StackPanel Orientation="Horizontal"
-                IsVisible="{Binding Converter={x:Static json:IsNotNullConverter.Instance}}">
-        <TextBlock Text="{Binding Name, StringFormat='{}{0}: '}"
+         when no row is bound (an absent diff side).
+
+         A Grid (not a horizontal StackPanel): a StackPanel measures children at infinite
+         width, so a long value would report its full width upward and push the diff's right
+         pane off screen. The star column bounds the value to whatever the host actually
+         has, and the value trims with an ellipsis there - detail lives in the context bar. -->
+    <Grid ColumnDefinitions="Auto,*"
+          IsVisible="{Binding Converter={x:Static json:IsNotNullConverter.Instance}}">
+        <TextBlock Grid.Column="0"
+                   Text="{Binding Name, StringFormat='{}{0}: '}"
                    IsVisible="{Binding Name, Converter={x:Static json:IsNotNullConverter.Instance}}"
                    Foreground="{DynamicResource AppAccentBrush}"
+                   TextWrapping="NoWrap"
+                   TextTrimming="CharacterEllipsis"
+                   MaxWidth="280"
                    VerticalAlignment="Center"
                    FontFamily="{DynamicResource AppContentFontFamily}" />
-        <TextBlock Text="{Binding Value}"
+        <TextBlock Grid.Column="1"
+                   Text="{Binding Value}"
                    Classes="rowValue"
                    Classes.jsonString="{Binding IsStringValue}"
                    Classes.jsonNumber="{Binding IsNumberValue}"
                    Classes.jsonBool="{Binding IsBooleanValue}"
                    Classes.jsonNull="{Binding IsNullValue}"
                    TextWrapping="NoWrap"
+                   TextTrimming="CharacterEllipsis"
+                   HorizontalAlignment="Left"
                    VerticalAlignment="Center"
                    FontFamily="{DynamicResource AppContentFontFamily}" />
-        <TextBlock Text="{Binding TruncationHint}"
-                   IsVisible="{Binding TruncationHint, Converter={x:Static json:IsNotNullConverter.Instance}}"
-                   Foreground="{DynamicResource AppMutedTextBrush}"
-                   FontFamily="{DynamicResource AppContentFontFamily}"
-                   Margin="8,0,0,0"
-                   VerticalAlignment="Center" />
-    </StackPanel>
+    </Grid>
 </UserControl>

@@ -5,7 +5,10 @@
              x:Class="Argonaut.Features.Json.Diff.JsonDiffView"
              x:DataType="diff:JsonDiffViewModel">
     <UserControl.Resources>
-        <json:DepthToMarginConverter x:Key="DepthToMargin" />
+        <!-- Capped, unlike the JSON view's: the diff has no horizontal scrolling (both
+             panes must stay visible), so past this depth rows stop stepping right and
+             just stay aligned with each other. -->
+        <json:DepthToMarginConverter x:Key="DepthToMargin" MaxIndent="240" />
     </UserControl.Resources>
 
     <UserControl.Styles>
@@ -43,12 +46,16 @@
             Background="{DynamicResource AppWindowBackgroundBrush}"
             ClipToBounds="True">
         <Grid RowDefinitions="*,Auto">
+        <!-- Horizontal scrolling deliberately OFF, unlike the JSON view: a long value would
+             otherwise widen the row and push the whole right pane past the window edge.
+             Rows are bounded to the viewport, the two panes split it structurally, and
+             overlong values trim with an ellipsis - the context bar carries the detail. -->
         <ListBox Grid.Row="0"
                  x:Name="RowsListBox"
                  ItemsSource="{Binding Rows}"
                  SelectionMode="Single"
                  Padding="8,8"
-                 ScrollViewer.HorizontalScrollBarVisibility="Auto">
+                 ScrollViewer.HorizontalScrollBarVisibility="Disabled">
             <ListBox.Styles>
                 <!-- Same fixed row metrics as the JSON view, for the same virtualization
                      reasons. -->
@@ -124,23 +131,32 @@
                                 IsVisible="{Binding !IsPlaceholder}"
                                 CornerRadius="4"
                                 Padding="4,0">
-                            <StackPanel Orientation="Horizontal">
-                                <json:JsonRowPresenter DataContext="{Binding Right}"
+                            <!-- Grid, not StackPanel, for the same infinite-measure reason
+                                 as the presenter's own layout: the value must trim, and the
+                                 badges must never be pushed out of view by it. -->
+                            <Grid ColumnDefinitions="*,Auto,Auto">
+                                <json:JsonRowPresenter Grid.Column="0"
+                                                       DataContext="{Binding Right}"
                                                        Classes.valueChanged="{Binding $parent[ListBoxItem].((diff:JsonDiffRow)DataContext).IsValueChanged}" />
-                                <TextBlock Text="{Binding MoveBadge}"
+                                <TextBlock Grid.Column="1"
+                                           Text="{Binding MoveBadge}"
                                            IsVisible="{Binding HasMoveBadge}"
                                            Foreground="{DynamicResource AppMutedTextBrush}"
                                            FontFamily="{DynamicResource AppContentFontFamily}"
+                                           TextWrapping="NoWrap"
+                                           TextTrimming="CharacterEllipsis"
+                                           MaxWidth="320"
                                            Margin="8,0,0,0"
                                            VerticalAlignment="Center" />
-                                <TextBlock Text="{Binding Note}"
+                                <TextBlock Grid.Column="2"
+                                           Text="{Binding Note}"
                                            IsVisible="{Binding HasNote}"
                                            Foreground="{DynamicResource AppMutedTextBrush}"
                                            FontStyle="Italic"
                                            FontFamily="{DynamicResource AppContentFontFamily}"
                                            Margin="8,0,0,0"
                                            VerticalAlignment="Center" />
-                            </StackPanel>
+                            </Grid>
                         </Border>
                     </Grid>
                 </DataTemplate>

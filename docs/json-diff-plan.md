@@ -1,5 +1,40 @@
 # Semantic JSON diff — implementation plan
 
+> **Implementation status (2026-08-18, branch `json-diff`):** stages 0–5 implemented
+> (`JsonRowFactory`/`LruCache`/`IndexGrowthMonitor`, content hashes, `JsonDiffIndex`,
+> `JsonDiffSession`, `JsonDiffRowCollection`/`JsonDiffViewModel`/views, shell "Compare
+> with…"). Deliberate deviations from this plan, each noted inline at the relevant spot
+> in the code:
+>
+> 1. `StartIndexing` grew an **overload** instead of an optional `JsonIndexOptions`
+>    parameter — optional parameters don't participate in method-group-to-delegate
+>    conversion, which existing call sites rely on.
+> 2. Move reconciliation **mutates the two records in place** (volatile,
+>    `StatusBits`-gated) rather than "replacing them with one `Moved`" — the record log
+>    is append-only, and stage 5 renders both positions anyway.
+> 3. Arrays past `MaxAlignableArrayElements` are **not descended at all** (badged
+>    approximate) instead of falling back to positional per-element records — positional
+>    records for a 10M-element array (~240MB) would break the memory budget.
+> 4. The number canonicalization decision: plain-integer spelling when it fits,
+>    normalized scientific otherwise; see `JsonContentHasher` remarks.
+> 5. The differ runs on a dedicated 32MB-stack thread — the descent recurses per nesting
+>    level (up to the index's 4095 depth cap), too deep for a 1MB pool-thread stack.
+> 6. Three-stage reveal, stage 1: the pre-diff live view is a **left-document preview**
+>    (right pane fills when records stream) rather than both panes rendering live.
+> 7. Stage 0.3 is partial: styles are shared (`JsonRowStyles.axaml`) and the diff panes
+>    use a shared `JsonRowPresenter`, but `JsonView` keeps its inline row template — its
+>    interaction wiring (search highlight, hint/jump buttons) is exactly the part the
+>    plan says stays with the host, and swapping its template couldn't be visually
+>    verified in this pass.
+> 8. Expanded **Unchanged** subtrees mirror left-document content into both panes (the
+>    right pane shows left key order); expanded Moved/Added/Removed subtrees walk their
+>    own side. Closing-bracket rows and per-row date hints/schema gutter are not in the
+>    diff view yet.
+>
+> Still open from "Deferred to follow-ups", additionally: changelist summary pane,
+> leaf-level character diff, `EnsureVisible` linking between a move's two ends, paging
+> ("show more") for capped diff levels.
+
 Diff two JSON documents **by meaning** (path + content identity), not by position (byte offset,
 line number, key order), without ever building an object graph and without regressing the
 per-token memory budget the index already fought down to 24 bytes.

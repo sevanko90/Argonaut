@@ -1,0 +1,134 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:json="clr-namespace:Argonaut.Features.Json"
+             xmlns:diff="clr-namespace:Argonaut.Features.Json.Diff"
+             x:Class="Argonaut.Features.Json.Diff.JsonDiffView"
+             x:DataType="diff:JsonDiffViewModel">
+    <UserControl.Resources>
+        <json:DepthToMarginConverter x:Key="DepthToMargin" />
+    </UserControl.Resources>
+
+    <UserControl.Styles>
+        <StyleInclude Source="/Features/Json/JsonRowStyles.axaml" />
+
+        <!-- Status tints: low-alpha overlays chosen to read on light and dark themes alike,
+             painted per pane so an Added row tints only where the content actually is. -->
+        <Style Selector="Border.diffAdded">
+            <Setter Property="Background" Value="#2E4CAF50" />
+        </Style>
+        <Style Selector="Border.diffRemoved">
+            <Setter Property="Background" Value="#2EF44336" />
+        </Style>
+        <Style Selector="Border.diffModified">
+            <Setter Property="Background" Value="#24FFC107" />
+        </Style>
+        <Style Selector="Border.diffMoved">
+            <Setter Property="Background" Value="#2E2196F3" />
+        </Style>
+    </UserControl.Styles>
+
+    <Border BorderBrush="{DynamicResource AppBorderBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Background="{DynamicResource AppWindowBackgroundBrush}"
+            ClipToBounds="True">
+        <ListBox x:Name="RowsListBox"
+                 ItemsSource="{Binding Rows}"
+                 SelectionMode="Single"
+                 Padding="8,8"
+                 ScrollViewer.HorizontalScrollBarVisibility="Auto">
+            <ListBox.Styles>
+                <!-- Same fixed row metrics as the JSON view, for the same virtualization
+                     reasons. -->
+                <Style Selector="ListBoxItem">
+                    <Setter Property="Padding" Value="0" />
+                    <Setter Property="MinHeight" Value="22" />
+                    <Setter Property="Height" Value="22" />
+                    <Setter Property="Margin" Value="0,1" />
+                    <Setter Property="CornerRadius" Value="6" />
+                </Style>
+            </ListBox.Styles>
+
+            <ListBox.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <VirtualizingStackPanel />
+                </ItemsPanelTemplate>
+            </ListBox.ItemsPanel>
+
+            <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="diff:JsonDiffRow">
+                    <!-- One row, both panes: alignment is structural (a two-column grid per
+                         row), so scroll sync is free and virtualization never skews the
+                         sides. Indent + expander live once, on the left edge, driven by the
+                         MERGED depth. -->
+                    <Grid ColumnDefinitions="Auto,*,*" Background="Transparent"
+                          DoubleTapped="OnRowDoubleTapped">
+                        <StackPanel Grid.Column="0" Orientation="Horizontal"
+                                    Margin="{Binding Depth, Converter={StaticResource DepthToMargin}}">
+                            <Button Click="OnToggleExpandClick"
+                                    IsVisible="{Binding HasChildren}"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    Padding="0"
+                                    Width="20"
+                                    Height="22"
+                                    HorizontalContentAlignment="Center"
+                                    VerticalContentAlignment="Center">
+                                <Path Data="{Binding IsExpanded, Converter={x:Static json:ExpandGlyphConverter.Instance}}"
+                                      Fill="{Binding $parent[Button].Foreground}"
+                                      Stretch="Uniform"
+                                      Width="7"
+                                      Height="7" />
+                            </Button>
+                            <TextBlock IsVisible="{Binding !HasChildren}" Width="20" />
+                        </StackPanel>
+
+                        <!-- The display-cap placeholder spans the content area. -->
+                        <TextBlock Grid.Column="1" Grid.ColumnSpan="2"
+                                   Text="{Binding PlaceholderText}"
+                                   IsVisible="{Binding IsPlaceholder}"
+                                   Foreground="{DynamicResource AppMutedTextBrush}"
+                                   FontFamily="{DynamicResource AppContentFontFamily}"
+                                   VerticalAlignment="Center" />
+
+                        <Border Grid.Column="1"
+                                Classes.diffRemoved="{Binding IsRemoved}"
+                                Classes.diffModified="{Binding IsModified}"
+                                Classes.diffMoved="{Binding IsMoved}"
+                                IsVisible="{Binding !IsPlaceholder}"
+                                CornerRadius="4"
+                                Padding="4,0"
+                                Margin="0,0,8,0">
+                            <json:JsonRowPresenter DataContext="{Binding Left}" />
+                        </Border>
+
+                        <Border Grid.Column="2"
+                                Classes.diffAdded="{Binding IsAdded}"
+                                Classes.diffModified="{Binding IsModified}"
+                                Classes.diffMoved="{Binding IsMoved}"
+                                IsVisible="{Binding !IsPlaceholder}"
+                                CornerRadius="4"
+                                Padding="4,0">
+                            <StackPanel Orientation="Horizontal">
+                                <json:JsonRowPresenter DataContext="{Binding Right}" />
+                                <TextBlock Text="{Binding MoveBadge}"
+                                           IsVisible="{Binding HasMoveBadge}"
+                                           Foreground="{DynamicResource AppMutedTextBrush}"
+                                           FontFamily="{DynamicResource AppContentFontFamily}"
+                                           Margin="8,0,0,0"
+                                           VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding Note}"
+                                           IsVisible="{Binding HasNote}"
+                                           Foreground="{DynamicResource AppMutedTextBrush}"
+                                           FontStyle="Italic"
+                                           FontFamily="{DynamicResource AppContentFontFamily}"
+                                           Margin="8,0,0,0"
+                                           VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+    </Border>
+</UserControl>

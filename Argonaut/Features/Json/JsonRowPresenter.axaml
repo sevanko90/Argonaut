@@ -1,0 +1,33 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:json="clr-namespace:Argonaut.Features.Json"
+             x:Class="Argonaut.Features.Json.JsonRowPresenter"
+             x:DataType="json:JsonRow">
+    <!-- The read-only content of one JSON row (name, value, truncation note), shared by the
+         diff view's two panes (diff plan stage 0.3). Interaction wiring - expanders, hint
+         and truncation-jump buttons, search highlighting - stays with the hosting view; the
+         JSON view keeps its richer inline template for exactly that reason. Renders nothing
+         when no row is bound (an absent diff side). -->
+    <StackPanel Orientation="Horizontal"
+                IsVisible="{Binding Converter={x:Static json:IsNotNullConverter.Instance}}">
+        <TextBlock Text="{Binding Name, StringFormat='{}{0}: '}"
+                   IsVisible="{Binding Name, Converter={x:Static json:IsNotNullConverter.Instance}}"
+                   Foreground="{DynamicResource AppAccentBrush}"
+                   VerticalAlignment="Center"
+                   FontFamily="{DynamicResource AppContentFontFamily}" />
+        <TextBlock Text="{Binding Value}"
+                   Classes.jsonString="{Binding IsStringValue}"
+                   Classes.jsonNumber="{Binding IsNumberValue}"
+                   Classes.jsonBool="{Binding IsBooleanValue}"
+                   Classes.jsonNull="{Binding IsNullValue}"
+                   TextWrapping="NoWrap"
+                   VerticalAlignment="Center"
+                   FontFamily="{DynamicResource AppContentFontFamily}" />
+        <TextBlock Text="{Binding TruncationHint}"
+                   IsVisible="{Binding TruncationHint, Converter={x:Static json:IsNotNullConverter.Instance}}"
+                   Foreground="{DynamicResource AppMutedTextBrush}"
+                   FontFamily="{DynamicResource AppContentFontFamily}"
+                   Margin="8,0,0,0"
+                   VerticalAlignment="Center" />
+    </StackPanel>
+</UserControl>

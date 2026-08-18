@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Argonaut.Features.Json.Diff;
 using Argonaut.Features.Raw;
 using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
@@ -195,6 +196,61 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         get => recentFiles;
         private set => SetField(ref recentFiles, value);
+    }
+
+    /// <summary>True when "Compare with…" applies: the current document is being viewed as
+    /// JSON. The semantic diff is a JSON-tree feature; other kinds have no tree to align.</summary>
+    public bool CanCompare => currentKind == FileTypeDetector.FileKind.Json;
+
+    /// <summary>
+    /// Diffs the currently open file (left) against <paramref name="rightPath"/> (right),
+    /// replacing the current document with a <see cref="JsonDiffViewModel"/>. Entered
+    /// explicitly - never via <see cref="FileTypeDetector"/> - so the published document
+    /// carries <see cref="FileTypeDetector.FileKind.Unknown"/>: the view switcher shows no
+    /// selection for it, and picking any view there re-indexes the left file as that kind
+    /// through the normal switch path, disposing the diff on the way out. Not added to
+    /// recent files in v1 (a diff is not a reopenable path).
+    /// </summary>
+    public async Task CompareWithAsync(string rightPath)
+    {
+        if (currentFilePath is null || string.IsNullOrWhiteSpace(rightPath))
+            return;
+
+        var normalizedRight = Path.GetFullPath(rightPath);
+        if (!File.Exists(normalizedRight))
+            return;
+
+        string leftPath = currentFilePath;
+        var requestId = ++openRequestId;
+
+        // Same pre-swap discipline as every open/switch: a live find scan holds spans over
+        // the outgoing MMapFile, and the outgoing load's reporter must go quiet first.
+        await DetachFindAsync();
+        FindBarResetRequested?.Invoke();
+        indexProgressReporter?.Stop();
+        StatusText = $"Comparing {leftPath} with {normalizedRight}…";
+
+        var document = new JsonDiffViewModel();
+        try
+        {
+            await document.LoadAsync(leftPath, normalizedRight);
+        }
+        catch (Exception ex)
+        {
+            OpenDebugLog.Write($"CompareWith: load threw: {ex}");
+            document.Dispose();
+            if (requestId == openRequestId)
+                StatusText = $"{leftPath} — failed to open comparison";
+            return;
+        }
+
+        if (requestId != openRequestId)
+        {
+            document.Dispose();
+            return;
+        }
+
+        PublishDocument(document, leftPath, FileTypeDetector.FileKind.Unknown, addToRecents: false);
     }
 
     public ThemeMode ThemeMode
@@ -504,6 +560,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
         OnPropertyChanged(nameof(IsFileOpen));
         OnPropertyChanged(nameof(FilePath));
+        OnPropertyChanged(nameof(CanCompare));
         NotifyFailurePropertiesChanged();
     }
 

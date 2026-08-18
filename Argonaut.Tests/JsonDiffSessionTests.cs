@@ -179,7 +179,7 @@ public class JsonDiffSessionTests
     }
 
     [Fact]
-    public void CancellationMidBuild_LeavesNoPartiallyFinalContainerHash()
+    public async Task CancellationMidBuild_LeavesNoPartiallyFinalContainerHash()
     {
         string path = WriteLargeTempJson();
         try
@@ -189,7 +189,7 @@ public class JsonDiffSessionTests
             var index = JsonStructureIndex.StartIndexing(file, new JsonIndexOptions { ComputeContentHashes = true }, cancellationToken: cts.Token);
 
             cts.Cancel();
-            try { index.IndexingTask.Wait(); } catch { /* cancellation observed */ }
+            try { await index.IndexingTask; } catch { /* cancellation observed */ }
 
             // If the scan was stopped mid-file, the root array never closed - its hash slot
             // must still hold the sentinel 0, never a partial value. (If the scan happened

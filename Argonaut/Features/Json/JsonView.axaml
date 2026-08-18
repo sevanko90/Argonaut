@@ -16,51 +16,8 @@
     </UserControl.Resources>
 
     <UserControl.Styles>
-        <Style Selector="TextBlock.jsonString">
-            <Setter Property="Foreground" Value="{DynamicResource AppJsonStringBrush}" />
-        </Style>
-        <Style Selector="TextBlock.jsonNumber">
-            <Setter Property="Foreground" Value="{DynamicResource AppJsonNumberBrush}" />
-        </Style>
-        <Style Selector="TextBlock.jsonBool">
-            <Setter Property="Foreground" Value="{DynamicResource AppJsonBoolBrush}" />
-        </Style>
-        <Style Selector="TextBlock.jsonNull">
-            <Setter Property="Foreground" Value="{DynamicResource AppJsonNullBrush}" />
-        </Style>
-
-        <Style Selector="Button.pathlink">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Padding" Value="0" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Foreground" Value="{DynamicResource AppAccentBrush}" />
-            <Setter Property="TextBlock.TextDecorations" Value="Underline" />
-        </Style>
-        <Style Selector="Button.pathlink:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{DynamicResource AppAccentHoverBrush}" />
-        </Style>
-
-        <Style Selector="Button.hintlink">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Padding" Value="0" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Foreground" Value="{DynamicResource AppMutedTextBrush}" />
-            <Setter Property="FontFamily" Value="{DynamicResource AppContentFontFamily}" />
-        </Style>
-        <Style Selector="Button.hintlink:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{DynamicResource AppAccentBrush}" />
-        </Style>
-
-        <!-- Schema gutter: a container's label heads the run of child labels indented beneath it.
-             Weight only - every container is a heading, so a deep document would otherwise stack
-             several emphasised rows in a row, and nesting is already carried by the indent. -->
-        <Style Selector="TextBlock.schemaContainer">
-            <Setter Property="FontWeight" Value="SemiBold" />
-        </Style>
+        <!-- Row-content styles shared with JsonDiffView - see JsonRowStyles.axaml. -->
+        <StyleInclude Source="/Features/Json/JsonRowStyles.axaml" />
     </UserControl.Styles>
 
     <Border BorderBrush="{DynamicResource AppBorderBrush}"

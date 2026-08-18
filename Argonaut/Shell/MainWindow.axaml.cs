@@ -306,6 +306,24 @@ public partial class MainWindow : Window
         return file?.TryGetLocalPath();
     }
 
+    private async void OnCompareFile(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Choose the JSON file to compare with",
+            AllowMultiple = false
+        });
+
+        if (files.Count == 0)
+            return;
+
+        var path = files[0].TryGetLocalPath();
+        if (path is null)
+            return;
+
+        await viewModel.CompareWithAsync(path);
+    }
+
     private async Task BrowseForFile()
     {
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions

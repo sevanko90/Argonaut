@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.Threading.Tasks;
+using Argonaut.Infrastructure;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 
@@ -146,5 +149,31 @@ public partial class JsonDiffView : UserControl
     {
         if (DataContext is JsonDiffViewModel vm)
             vm.ToggleTargetMode();
+    }
+
+    private async void OnCopySourceClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is not JsonDiffViewModel vm)
+            return;
+
+        await CopyToClipboardAsync(vm.SourcePrefix + vm.SourceChanged + vm.SourceSuffix);
+    }
+
+    private async void OnCopyTargetClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is not JsonDiffViewModel vm)
+            return;
+
+        await CopyToClipboardAsync(vm.TargetPrefix + vm.TargetChanged + vm.TargetSuffix);
+    }
+
+    private async Task CopyToClipboardAsync(string text)
+    {
+        var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+        if (clipboard is null)
+            return;
+
+        await clipboard.SetTextAsync(text);
+        ToastService.Show("Copied to clipboard");
     }
 }

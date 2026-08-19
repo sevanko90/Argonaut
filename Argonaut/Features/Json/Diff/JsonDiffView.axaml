@@ -172,8 +172,8 @@
                 BorderThickness="0,1,0,0"
                 Background="{DynamicResource AppPanelBackgroundBrush}"
                 Padding="8,4">
-            <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="Auto,Auto,*">
-                <TextBlock Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3"
+            <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="Auto,Auto,*,Auto">
+                <TextBlock Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="4"
                            Text="No selection"
                            FontSize="11"
                            IsVisible="{Binding !HasSelection}"
@@ -203,6 +203,18 @@
                            TextTrimming="CharacterEllipsis"
                            VerticalAlignment="Center"
                            FontFamily="{DynamicResource AppContentFontFamily}"><Run Text="{Binding SourcePrefix}" /><Run Text="{Binding SourceChanged}" Background="#59FFC107" /><Run Text="{Binding SourceSuffix}" /></TextBlock>
+                <Button Grid.Row="0" Grid.Column="3"
+                        x:Name="CopySourceButton"
+                        Classes="iconbutton compact"
+                        Click="OnCopySourceClick"
+                        IsVisible="{Binding HasSelection}"
+                        ToolTip.Tip="Copy"
+                        Margin="8,0,0,0">
+                    <Viewbox Width="12" Height="12">
+                        <Path Fill="{DynamicResource AppMutedTextBrush}"
+                              Data="M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z" />
+                    </Viewbox>
+                </Button>
 
                 <TextBlock Grid.Row="1" Grid.Column="0"
                            Text="target"
@@ -227,6 +239,18 @@
                            TextTrimming="CharacterEllipsis"
                            VerticalAlignment="Center"
                            FontFamily="{DynamicResource AppContentFontFamily}"><Run Text="{Binding TargetPrefix}" /><Run Text="{Binding TargetChanged}" Background="#59FFC107" /><Run Text="{Binding TargetSuffix}" /></TextBlock>
+                <Button Grid.Row="1" Grid.Column="3"
+                        x:Name="CopyTargetButton"
+                        Classes="iconbutton compact"
+                        Click="OnCopyTargetClick"
+                        IsVisible="{Binding HasSelection}"
+                        ToolTip.Tip="Copy"
+                        Margin="8,0,0,0">
+                    <Viewbox Width="12" Height="12">
+                        <Path Fill="{DynamicResource AppMutedTextBrush}"
+                              Data="M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z" />
+                    </Viewbox>
+                </Button>
             </Grid>
         </Border>
         </Grid>

@@ -11,7 +11,8 @@ public sealed class JsonDiffRow
 {
     public JsonDiffRow(int position, JsonRow? left, JsonRow? right, DiffStatus status, int depth,
         bool hasChildren, bool isExpanded, bool isPlaceholder, string? moveBadge = null, string? note = null, string? placeholderText = null,
-        bool isValueChanged = false, bool isChangedPath = false)
+        bool isValueChanged = false, bool isChangedPath = false,
+        int? mirrorLeftContainerToken = null, int? mirrorRightContainerToken = null)
     {
         Position = position;
         Left = left;
@@ -26,6 +27,8 @@ public sealed class JsonDiffRow
         PlaceholderText = placeholderText;
         IsValueChanged = isValueChanged;
         IsChangedPath = isChangedPath;
+        MirrorLeftContainerToken = mirrorLeftContainerToken;
+        MirrorRightContainerToken = mirrorRightContainerToken;
     }
 
     /// <summary>Index into the owning collection's current visible list.</summary>
@@ -63,6 +66,14 @@ public sealed class JsonDiffRow
     /// <summary>A Modified container that was descended into - not itself a change, but on
     /// the path to one. Drives the faint "open me" tint that guides the eye down the tree.</summary>
     public bool IsChangedPath { get; }
+
+    /// <summary>For a SubMirror row only (unchanged content walked off the left document
+    /// into both panes): the enclosing undescended record's left/right container tokens,
+    /// letting the target-side JSONPath be spliced from the right container's real path
+    /// instead of reusing the left path verbatim - which is wrong once an ancestor moved.</summary>
+    public int? MirrorLeftContainerToken { get; }
+
+    public int? MirrorRightContainerToken { get; }
 
     // Classes.* bindings for the row tint.
     public bool IsAdded => Status == DiffStatus.Added;

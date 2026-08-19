@@ -233,6 +233,43 @@ public class JsonDiffContextTests
         }
     }
 
+    [Fact]
+    public async Task MirroredSubRow_UnderIndexShiftedAncestor_TargetPathUsesRightContainerIndex()
+    {
+        // {"id":1,"nested":[3,4]} is byte-identical on both sides, so the array aligner
+        // matches it as a single unique-hash anchor - but "gone"/"new" around it mean its
+        // own array index shifts from items[1] (left) to items[0] (right). It's Unchanged
+        // and undescended (no diff sub-records), so expanding it - and then its "nested"
+        // child - token-walks the LEFT document into both panes (mirrored). The target path
+        // for a leaf under it must reflect the RIGHT document's items[0], not items[1].
+        var (vm, l, r) = await LoadAsync(
+            """{"items":["gone",{"id":1,"nested":[3,4]}]}""",
+            """{"items":[{"id":1,"nested":[3,4]},"new"]}""");
+        try
+        {
+            var rows = Materialize(vm.Rows);
+            var anchor = Assert.Single(rows, x => x.Status == DiffStatus.Unchanged && x.HasChildren);
+
+            vm.Rows.ToggleExpand(anchor.Position);
+            rows = Materialize(vm.Rows);
+            var nested = Assert.Single(rows, x => x.Left is { Name: "nested" });
+
+            vm.Rows.ToggleExpand(nested.Position);
+            rows = Materialize(vm.Rows);
+            var three = Assert.Single(rows, x => x.Left is { Value: "3" });
+            Assert.Same(three.Left, three.Right); // mirrored, per the walk's own contract
+
+            vm.SelectedPosition = three.Position;
+            vm.ToggleTargetMode();
+
+            Assert.Equal("$.items[0].nested[0]", vm.TargetPrefix);
+        }
+        finally
+        {
+            Cleanup(vm, l, r);
+        }
+    }
+
     // ── The affix split itself ─────────────────────────────────────────────────────────
 
     [Theory]

@@ -77,6 +77,50 @@ public static class JsonPathBuilder
     /// sibling subtrees in O(1) via each sibling's EndIndex - the same pattern
     /// <see cref="JsonVisibleRowCollection.DescribeChildCount"/> uses for child counts.
     /// </summary>
+    /// <summary>
+    /// Builds just the path segments from <paramref name="stopAtToken"/> (exclusive) down to
+    /// <paramref name="tokenIndex"/> (inclusive) - the same ancestor walk as
+    /// <see cref="BuildSegments"/>, but stopping at a given container instead of the root, and
+    /// without a leading "$" segment. Used to splice a mirrored row's path onto a different
+    /// document's path for that container: the container itself may sit at a different path
+    /// in each document (e.g. its parent array element moved), but the walk below it is
+    /// structurally identical by construction, so re-deriving only that suffix - still just
+    /// O(depth) - gives the correct full path without re-walking or re-indexing anything.
+    /// </summary>
+    public static IReadOnlyList<JsonPathSegment> BuildRelativeSegments(JsonStructureIndex index, MMapFile mmap, int tokenIndex, int stopAtToken)
+    {
+        var raw = new List<(string Text, int TokenIndex)>();
+        int current = tokenIndex;
+
+        while (current != stopAtToken)
+        {
+            var token = index.GetToken(current);
+            int parentIndex = token.ParentIndex;
+
+            string text = token.NameLength >= 0
+                ? FormatMemberSegment(ReadText(mmap, token.NameOffset, token.NameLength))
+                : $"[{FindArrayIndex(index, parentIndex, current)}]";
+
+            raw.Add((text, current));
+
+            if (parentIndex == -1)
+                break; // defensive: stopAtToken wasn't actually an ancestor
+
+            current = parentIndex;
+        }
+
+        raw.Reverse();
+
+        var segments = new List<JsonPathSegment>(raw.Count);
+        foreach (var (text, tok) in raw)
+        {
+            string label = text.Length > 0 && text[0] == '[' ? text : "." + text;
+            segments.Add(new JsonPathSegment(label, tok));
+        }
+
+        return segments;
+    }
+
     private static int FindArrayIndex(JsonStructureIndex index, int parentIndex, int targetTokenIndex)
     {
         int i = parentIndex + 1;

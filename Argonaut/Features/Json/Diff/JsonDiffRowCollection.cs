@@ -52,7 +52,10 @@ public sealed class JsonDiffRowCollection : MemoryMappedCollectionBase
         }
 
         public RowKind Kind { get; }
-        public int RecordIndex { get; }   // -1 for sub/preview/placeholder rows
+        // Record rows: their own index. SubMirror rows: the enclosing undescended record's
+        // index (needed to splice the target-side path - see JsonDiffRow.MirrorRightContainerToken).
+        // -1 for every other sub/preview/placeholder row.
+        public int RecordIndex { get; }
         public int Token { get; }         // sub rows: the token on their side; -1 otherwise
         public ushort Depth { get; }
         public int ArrayIndex { get; }    // sub rows: ordinal among array siblings, or -1
@@ -294,9 +297,11 @@ public sealed class JsonDiffRowCollection : MemoryMappedCollectionBase
                 break;
             default:
                 // Unchanged - genuinely present on both sides; rendered from the left
-                // document into both panes (identical content by definition).
+                // document into both panes (identical content by definition). recordIndex
+                // rides along on every sub-row so the target path can later be spliced from
+                // this record's own RightToken (see JsonDiffRow.MirrorRightContainerToken).
                 if (record.LeftToken >= 0)
-                    WalkTokenChildren(RowKind.SubMirror, leftTokenOverrides, record.LeftToken, record.Depth, record.Status, into);
+                    WalkTokenChildren(RowKind.SubMirror, leftTokenOverrides, record.LeftToken, record.Depth, record.Status, into, recordIndex);
                 break;
         }
 
@@ -304,22 +309,22 @@ public sealed class JsonDiffRowCollection : MemoryMappedCollectionBase
     }
 
     /// <summary>Adds one token's sub-row and recurses into it when expanded.</summary>
-    private void WalkTokenSubtree(RowKind kind, HashSet<int> overrides, int token, int depth, int arrayIndex, DiffStatus tint, List<DiffVisibleRow> into)
+    private void WalkTokenSubtree(RowKind kind, HashSet<int> overrides, int token, int depth, int arrayIndex, DiffStatus tint, List<DiffVisibleRow> into, int mirrorRecordIndex = -1)
     {
-        into.Add(new DiffVisibleRow(kind, -1, token, (ushort)depth, arrayIndex, tint));
+        into.Add(new DiffVisibleRow(kind, mirrorRecordIndex, token, (ushort)depth, arrayIndex, tint));
 
         var index = SideIndex(kind != RowKind.SubRight);
         var info = index.GetToken(token);
         if (!IsContainer(info.Kind) || !IsSubExpanded(overrides, token, depth))
             return;
 
-        WalkTokenChildren(kind, overrides, token, depth, tint, into);
+        WalkTokenChildren(kind, overrides, token, depth, tint, into, mirrorRecordIndex);
     }
 
     /// <summary>Walks one container's direct children (same skip-by-EndIndex pattern as
     /// everywhere else), respecting the display cap and stopping at unindexed regions the
     /// way the preview needs while its side is still streaming in.</summary>
-    private void WalkTokenChildren(RowKind kind, HashSet<int> overrides, int containerToken, int depth, DiffStatus tint, List<DiffVisibleRow> into)
+    private void WalkTokenChildren(RowKind kind, HashSet<int> overrides, int containerToken, int depth, DiffStatus tint, List<DiffVisibleRow> into, int mirrorRecordIndex = -1)
     {
         var index = SideIndex(kind != RowKind.SubRight);
         var container = index.GetToken(containerToken);
@@ -343,7 +348,7 @@ public sealed class JsonDiffRowCollection : MemoryMappedCollectionBase
             }
 
             var child = index.GetToken(childIndex);
-            WalkTokenSubtree(kind, overrides, childIndex, depth + 1, isArray ? shown : -1, tint, into);
+            WalkTokenSubtree(kind, overrides, childIndex, depth + 1, isArray ? shown : -1, tint, into, mirrorRecordIndex);
             shown++;
 
             if (IsContainer(child.Kind))
@@ -431,8 +436,18 @@ public sealed class JsonDiffRowCollection : MemoryMappedCollectionBase
                 var right = vrow.Kind == RowKind.SubRight ? jsonRow
                     : vrow.Kind == RowKind.SubMirror ? jsonRow : null;
 
+                int? mirrorLeftContainer = null;
+                int? mirrorRightContainer = null;
+                if (vrow.Kind == RowKind.SubMirror && vrow.RecordIndex >= 0)
+                {
+                    var mirrorRecord = session.Diff.GetRecord(vrow.RecordIndex);
+                    mirrorLeftContainer = mirrorRecord.LeftToken;
+                    mirrorRightContainer = mirrorRecord.RightToken >= 0 ? mirrorRecord.RightToken : null;
+                }
+
                 return new JsonDiffRow(position, left, right, vrow.Tint, vrow.Depth,
-                    hasChildren, expanded, isPlaceholder: false);
+                    hasChildren, expanded, isPlaceholder: false,
+                    mirrorLeftContainerToken: mirrorLeftContainer, mirrorRightContainerToken: mirrorRightContainer);
             }
         }
     }

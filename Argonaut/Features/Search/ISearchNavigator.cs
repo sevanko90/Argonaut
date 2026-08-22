@@ -42,14 +42,20 @@ public interface ISearchNavigator
     Task RevealAsync(int fileIndex, SearchMatch match, CancellationToken ct) => RevealAsync(match, ct);
 
     /// <summary>
-    /// Sort key placing a match in the single merged order find steps through. Byte offset is
-    /// exactly right for one file; a multi-file navigator returns a key in ITS displayed order
-    /// instead, so next/previous reads down the screen rather than exhausting one file before
-    /// starting the next.
+    /// Sort key placing a match in the single merged order find steps through, or null for a
+    /// match that is not a navigable stop at all. Byte offset is exactly right for one file; a
+    /// multi-file navigator returns a key in ITS displayed order instead, so next/previous
+    /// reads down the screen rather than exhausting one file before starting the next.
     ///
-    /// Called on the UI thread, synchronously, a couple of times per find step - it must not
-    /// block, and should stay stable as the user expands and collapses rows (a key derived
-    /// from visible row positions would not).
+    /// Null is for a match the viewer cannot show. The diff renders some regions from one
+    /// document into both panes, so bytes matched in the other one are on nobody's screen -
+    /// stopping there would highlight nothing and, since the row it falls back to sits above
+    /// the one just visited, would read as find-next jumping backwards. Skipping such matches
+    /// is not lossy: what they matched is not displayed anywhere.
+    ///
+    /// Called on the UI thread, synchronously, a few times per find step - it must not block,
+    /// and should stay stable as the user expands and collapses rows (a key derived from
+    /// visible row positions would not).
     /// </summary>
-    long OrderKey(int fileIndex, SearchMatch match) => match.Offset;
+    long? OrderKey(int fileIndex, SearchMatch match) => match.Offset;
 }

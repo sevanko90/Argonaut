@@ -141,20 +141,34 @@ public sealed class FindController
         }
     }
 
-    /// <summary>Waits until file <paramref name="i"/> either has a next match to offer or has
-    /// finished scanning. False when a newer request took over mid-wait.</summary>
+    /// <summary>
+    /// Waits until file <paramref name="i"/> either has a navigable match to offer beyond its
+    /// cursor or has finished scanning. Matches the viewer cannot show (a null
+    /// <see cref="ISearchNavigator.OrderKey"/>) are consumed by moving the cursor over them, so
+    /// a long run of them costs one scan in total rather than one per find press.
+    /// False when a newer request took over mid-wait.
+    /// </summary>
     private async Task<bool> EnsureForwardCandidateAsync(int i, long request)
     {
         var session = sessions[i];
-        while (cursors[i] + 1 >= session.MatchCount && !session.IsComplete)
+        while (true)
         {
+            while (cursors[i] + 1 < session.MatchCount)
+            {
+                if (navigator!.OrderKey(i, session.GetMatch(cursors[i] + 1)) is not null)
+                    return true;
+
+                cursors[i]++;
+            }
+
+            if (session.IsComplete)
+                return true;
+
             statusChanged("Searching…");
             await session.WaitForMatchCountAsync(cursors[i] + 2);
             if (request != requestId)
                 return false;
         }
-
-        return true;
     }
 
     /// <summary>
@@ -183,12 +197,13 @@ public sealed class FindController
 
         cursors[file]++;
         currentFile = file;
-        currentKey = KeyAt(active, file, cursors[file]);
+        currentKey = KeyAt(active, file, cursors[file]) ?? long.MaxValue;
         mergedOrdinal = wrapped ? 0 : mergedOrdinal + 1;
         return true;
     }
 
-    /// <summary>Lowest-keyed candidate among each file's next unconsumed match.</summary>
+    /// <summary>Lowest-keyed candidate among each file's next navigable match. Skipped matches
+    /// are stepped over here too, for the wrap case that re-enters without the ensure pass.</summary>
     private bool TryPickForward(FileSearchSession[] active, out int file)
     {
         file = -1;
@@ -196,11 +211,17 @@ public sealed class FindController
 
         for (int i = 0; i < active.Length; i++)
         {
+            while (cursors[i] + 1 < active[i].MatchCount
+                && navigator!.OrderKey(i, active[i].GetMatch(cursors[i] + 1)) is null)
+            {
+                cursors[i]++;
+            }
+
             int candidate = cursors[i] + 1;
             if (candidate >= active[i].MatchCount)
                 continue;
 
-            long key = KeyAt(active, i, candidate);
+            long key = KeyAt(active, i, candidate) ?? long.MaxValue;
             if (file < 0 || key < best)
             {
                 file = i;
@@ -231,11 +252,10 @@ public sealed class FindController
         {
             // Every file's cursor sits at or before the selection; only the file the selection
             // came from sits exactly ON it, so that one has to step an extra place back.
-            int candidate = i == currentFile ? cursors[i] - 1 : cursors[i];
-            if (candidate < 0 || candidate >= active[i].MatchCount)
+            int candidate = PreviousNavigable(active, i, i == currentFile ? cursors[i] - 1 : cursors[i], out long key);
+            if (candidate < 0)
                 continue;
 
-            long key = KeyAt(active, i, candidate);
             if (file < 0 || key > best)
             {
                 file = i;
@@ -252,11 +272,10 @@ public sealed class FindController
 
             for (int i = 0; i < active.Length; i++)
             {
-                int candidate = active[i].MatchCount - 1;
+                int candidate = PreviousNavigable(active, i, active[i].MatchCount - 1, out long key);
                 if (candidate < 0)
                     continue;
 
-                long key = KeyAt(active, i, candidate);
                 if (file < 0 || key > best)
                 {
                     file = i;
@@ -277,7 +296,8 @@ public sealed class FindController
 
         // Restore the cursor invariant everywhere else: no other file may still point past the
         // new selection. One step back normally moves each by at most one; a wrap resets them
-        // from the end, which this same walk brings down to the right place.
+        // from the end, which this same walk brings down to the right place. A skipped match
+        // has no key and is simply stepped over.
         for (int i = 0; i < active.Length; i++)
         {
             if (i == file)
@@ -286,15 +306,38 @@ public sealed class FindController
             if (wrapped)
                 cursors[i] = active[i].MatchCount - 1;
 
-            while (cursors[i] >= 0 && KeyAt(active, i, cursors[i]) > currentKey)
+            while (cursors[i] >= 0)
+            {
+                long? key = KeyAt(active, i, cursors[i]);
+                if (key is { } value && value <= currentKey)
+                    break;
+
                 cursors[i]--;
+            }
         }
 
         mergedOrdinal = wrapped ? total - 1 : mergedOrdinal - 1;
         return true;
     }
 
-    private long KeyAt(FileSearchSession[] active, int file, int index)
+    /// <summary>Walks down from <paramref name="from"/> to the first match the viewer can show,
+    /// or -1 when there is none at or before it.</summary>
+    private int PreviousNavigable(FileSearchSession[] active, int file, int from, out long key)
+    {
+        for (int i = Math.Min(from, active[file].MatchCount - 1); i >= 0; i--)
+        {
+            if (KeyAt(active, file, i) is { } found)
+            {
+                key = found;
+                return i;
+            }
+        }
+
+        key = 0;
+        return -1;
+    }
+
+    private long? KeyAt(FileSearchSession[] active, int file, int index)
         => navigator!.OrderKey(file, active[file].GetMatch(index));
 
     private static int TotalMatches(FileSearchSession[] active)

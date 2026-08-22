@@ -183,6 +183,59 @@ public class JsonDiffFindTests
     }
 
     [Fact]
+    public async Task Find_MirroredRegion_TheRightDocumentCopyIsNotASecondStop()
+    {
+        // "outer" is unchanged, so it is one undescended record walked from the LEFT document
+        // into both panes - the right file's bytes there are never rendered. Both files match
+        // "needle", but only one of those is on screen, so find must offer exactly one stop.
+        // Before suppression the right copy became a second stop that fell back to the record
+        // row ABOVE the real one, so find-next appeared to jump backwards.
+        using var h = await LoadAsync(
+            """{"outer":{"deep":"needle"},"x":1}""",
+            """{"outer":{"deep":"needle"},"x":2}""");
+
+        await h.Controller.FindAsync("needle", 1);
+        int first = h.Vm.SelectedPosition!.Value;
+        Assert.Equal("deep", h.SelectedRow().Left!.Name);
+
+        // Stepping on wraps straight back to the same single stop - it never lands on the
+        // enclosing "outer" record row.
+        await h.Controller.FindAsync("needle", 1);
+        Assert.Equal(first, h.Vm.SelectedPosition!.Value);
+
+        await h.Controller.FindAsync("needle", -1);
+        Assert.Equal(first, h.Vm.SelectedPosition!.Value);
+    }
+
+    [Fact]
+    public async Task Find_RightOnlyTextOnAModifiedLeaf_IsStillReachable()
+    {
+        // Guards against over-suppressing: a Modified record's own row renders BOTH panes, so
+        // text that exists only in the right document there is genuinely on screen and must
+        // still be findable.
+        using var h = await LoadAsync("""{"a":"cat"}""", """{"a":"zebra"}""");
+
+        await h.Controller.FindAsync("zebra", 1);
+
+        Assert.NotNull(h.Vm.SelectedPosition);
+        Assert.Equal("\"zebra\"", h.SelectedRow().Right!.Value);
+    }
+
+    [Fact]
+    public async Task Find_MovedSubtree_IsReachableAtTheEndThatRendersIt()
+    {
+        // A move renders its content at ONE end (the destination shows the right document), so
+        // the suppression rule has to follow the record rather than assume "left wins".
+        using var h = await LoadAsync("[\"needle\",\"b\",\"c\"]", "[\"b\",\"c\",\"needle\"]");
+
+        await h.Controller.FindAsync("needle", 1);
+
+        Assert.NotNull(h.Vm.SelectedPosition);
+        var row = h.SelectedRow();
+        Assert.Equal("\"needle\"", (row.Left ?? row.Right)!.Value);
+    }
+
+    [Fact]
     public async Task Find_NoMatchInEitherDocument_ReportsNoMatches()
     {
         using var h = await LoadAsync("""{"a":1}""", """{"a":2}""");

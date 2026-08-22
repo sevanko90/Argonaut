@@ -105,7 +105,7 @@ public sealed class JsonDiffViewModel : ObservableObject, IDocumentViewModel
     /// <summary>Where a match sits in the merged order find steps through - see
     /// <see cref="JsonDiffRowCollection.RowOrderKey"/>. Synchronous and best-effort: a match in
     /// a region not yet indexed sorts last rather than blocking the step.</summary>
-    public long MatchOrderKey(bool leftSide, SearchMatch match)
+    public long? MatchOrderKey(bool leftSide, SearchMatch match)
     {
         if (session is not { } s || rows is null)
             return match.Offset;

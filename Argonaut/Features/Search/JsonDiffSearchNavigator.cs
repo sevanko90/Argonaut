@@ -41,6 +41,6 @@ public sealed class JsonDiffSearchNavigator : ISearchNavigator
     public Task RevealAsync(int fileIndex, SearchMatch match, CancellationToken ct)
         => viewModel.RevealMatchAsync(leftSide: fileIndex == LeftFile, match, ct);
 
-    public long OrderKey(int fileIndex, SearchMatch match)
+    public long? OrderKey(int fileIndex, SearchMatch match)
         => viewModel.MatchOrderKey(leftSide: fileIndex == LeftFile, match);
 }

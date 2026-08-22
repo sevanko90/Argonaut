@@ -547,17 +547,48 @@ public sealed class JsonDiffRowCollection : MemoryMappedCollectionBase
     /// (see <see cref="Search.ISearchNavigator.OrderKey"/>). Keyed on the owning RECORD, not on
     /// a visible row position, so it stays put as the user expands and collapses; long.MaxValue
     /// for a token no record covers yet, which parks it at the end rather than at the start.
+    ///
+    /// Null when this side's bytes are not what that part of the tree renders, so find skips
+    /// the match entirely: an undescended subtree is walked from ONE document into both panes
+    /// (the left one for Unchanged, whichever end a Moved record sits at), so the other
+    /// document's bytes there are on nobody's screen. They are not lost - identical content is
+    /// being displayed, found via the side that is actually rendered - and stopping on them
+    /// would highlight nothing while appearing to jump backwards up the tree.
     /// </summary>
-    public long RowOrderKey(bool leftSide, int token)
+    public long? RowOrderKey(bool leftSide, int token)
     {
         int owner = FindRecordCovering(leftSide, token);
         if (owner < 0)
             return long.MaxValue;
 
-        // Within one record only its own sub-walk side contributes rows, so ordering the tail
-        // by raw token index is document order for whichever side that is.
-        return ((long)owner << 32) | (uint)token;
+        var record = session.Diff.GetRecord(owner);
+        int ownerToken = leftSide ? record.LeftToken : record.RightToken;
+
+        // The record's own row. It shows each side in its own pane, so a match in either is
+        // genuinely on screen and worth a stop - except on a Moved record, which renders one
+        // end only. Sorted ahead of everything below it, left pane first.
+        if (token == ownerToken)
+        {
+            bool rendered = leftSide ? RecordRowShowsLeft(record) : RecordRowShowsRight(record);
+            return rendered ? ((long)owner << 32) | (uint)(leftSide ? 0 : 1) : null;
+        }
+
+        // Below the record, one document supplies both panes - see TokenSubWalkIsLeft.
+        if (TokenSubWalkIsLeft(record) != leftSide)
+            return null;
+
+        // Only one side contributes rows down here, so ordering the tail by raw token index is
+        // document order for it. Offset past the two record-row keys above.
+        return ((long)owner << 32) | ((uint)token + 2);
     }
+
+    // Which panes a record's OWN row fills - the predicate form of BuildRecordRow's showLeft/
+    // showRight, which is a different question from which document its sub-rows come from.
+    private static bool RecordRowShowsLeft(JsonDiffRecord record)
+        => record.LeftToken >= 0 && (record.Status != DiffStatus.Moved || record.IsMoveSource);
+
+    private static bool RecordRowShowsRight(JsonDiffRecord record)
+        => record.RightToken >= 0 && (record.Status != DiffStatus.Moved || !record.IsMoveSource);
 
     /// <summary>Which document an undescended record's token sub-rows are walked from - see the
     /// switch in <see cref="WalkRecordSubtree"/>, of which this is the predicate form.</summary>

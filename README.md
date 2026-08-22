@@ -19,6 +19,7 @@ A cross-platform file viewer built for large files — multi-gigabyte JSON and N
 Argonaut was originally conceived as a viewer for large JSON files and it has first-class JSON support:
 
 - Displays documentation from JSON Schema files
+- Semantic JSON Diff
 - Collapsible nodes
 - JSONPath display of selected node and go to JSONPath node option
 - Inline decoding of JS dates to readable form
@@ -32,11 +33,11 @@ Argonaut was originally conceived as a viewer for large JSON files and it has fi
 
 - Comma and tab delimited files are shown in a column viewer
 
-### JSON Schema support
+### JSON Schema support for documentation
 
 Bind a JSON Schema to an open document and Argonaut shows what the data *means* — `title` and
 `description` from the schema, in a resizable gutter down the left, with the full text on hover.
-This is documentation, not validation: Argonaut never tells you the document is wrong.
+This is documentation only - we're not validating correctness. Argonaut attempts to match any selected schema to the document by testing properties, nothing bad happens if it can't find a match. 
 
 - Pick a schema from the toolbar - bundled ones, or your own dropped in the schemas folder. A
   `<file>.schema.json` sidecar is picked up automatically, and your choice is remembered per file.
@@ -46,8 +47,14 @@ This is documentation, not validation: Argonaut never tells you the document is 
 - Handles local `$ref` (including recursive), `$defs`/`definitions`, and `allOf`/`oneOf`/`anyOf`.
 - Ignored: remote `$ref`, `patternProperties`, `if`/`then`/`else`.
 
+### Semantic JSON Diff
+
+Unlike regular diff tools, Argonaut understands that JSON structure carries a *meaning* and uses this to show real differences in the data instead of just reporting that a line changed. This means that, for example, moving a property from the top of an object to the bottom won't show as a diff because in JSON terms the object it represents is unchanged.
+
+This also means that you can't rely on the visible node structure of the target document being the same as the underlying file (because the two views are synchronised to the shape of the source document). If you want to find something in the target document, use the JSONPath view to show exactly where it is. 
+
 ### Searching
-Argonaut searches files in the background and highlights matches as it finds them (or as you scroll them into view) - searches never block the UI.
+Argonaut searches files in the background and highlights matches as it finds them (or as you scroll them into view) - searches never block the UI. 
 
 #### JSON searching
 Searches run against the underlying file, not the rendered display. This means that if you want to search for a specific `property:value` instance you need to search for it as it would appear in the file, quoting the property:
@@ -56,6 +63,7 @@ Searches run against the underlying file, not the rendered display. This means t
 ❌: `property:value`  
 ✅: `"property":value`
 
+For the JSON Diff view, searches run across both files but the next/previous options move to the next or previous relevant row, not the specific search match. This is by design and keeps the next/previous behaviour intuitive. 
 
 ## Tech stack
 

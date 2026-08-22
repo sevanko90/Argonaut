@@ -67,9 +67,6 @@ public sealed class JsonDiffViewModel : ObservableObject, IDocumentViewModel
 
     public Task IndexingTask => session?.Diff.IndexingTask ?? Task.CompletedTask;
 
-    /// <summary>Whether the record log is finished - find resolves matches against it.</summary>
-    public bool DiffComplete => session?.Diff.IsComplete ?? false;
-
     /// <summary>
     /// The active find term, highlighted in both panes' rows (see SearchHighlight, threaded
     /// through JsonRowPresenter). Null when no find is active.

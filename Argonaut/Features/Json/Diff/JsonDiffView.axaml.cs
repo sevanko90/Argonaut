@@ -87,12 +87,16 @@ public partial class JsonDiffView : UserControl
         if (RowsListBox.SelectedIndex == index)
             return;
 
+        // Deliberately NO ScrollIntoView: AutoScrollToSelectedItem (on by default) already
+        // brings the new selection into view, which is all the JSON view does. Calling it as
+        // well made every find press walk the virtualizing panel to the target index, and the
+        // walk materializes rows as it goes - each one decoding text from the mapping. Once
+        // find had expanded the list to six figures that cost tens of seconds per press, while
+        // the same search in the JSON view stayed instant.
         suppressSelectionEvents = true;
         try
         {
             RowsListBox.SelectedIndex = index;
-            if (index >= 0)
-                RowsListBox.ScrollIntoView(index);
         }
         finally
         {

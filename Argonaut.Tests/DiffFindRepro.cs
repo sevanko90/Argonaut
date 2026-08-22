@@ -55,6 +55,46 @@ public class DiffFindRepro
     }
 
     [Fact]
+    public async Task Compare_RowGrowth_DiffVersusJsonView()
+    {
+        if (!Available) return;
+
+        // --- single JSON view on the same file + term (the fast case) ---
+        var jvm = new Argonaut.Features.Json.JsonViewModel();
+        await jvm.LoadAsync(Left);
+        try { await jvm.IndexingTask; } catch { }
+        var jController = new FindController(_ => { }, () => null);
+        jController.Attach(jvm.CreateSearchNavigator());
+        try
+        {
+            for (int i = 0; i < 20; i++)
+            {
+                var sw = Stopwatch.StartNew();
+                await jController.FindAsync(Term, 1);
+                sw.Stop();
+                if (i % 5 == 0 || i == 19)
+                    Console.WriteLine($"JSON  step {i,2} rows={jvm.Rows?.Count,8} ms={sw.ElapsedMilliseconds}");
+            }
+        }
+        finally { await jController.DetachAsync(); jvm.Dispose(); }
+
+        // --- diff on the pair ---
+        var (vm, controller, _) = await LoadAsync();
+        try
+        {
+            for (int i = 0; i < 20; i++)
+            {
+                var sw = Stopwatch.StartNew();
+                await controller.FindAsync(Term, 1);
+                sw.Stop();
+                if (i % 5 == 0 || i == 19)
+                    Console.WriteLine($"DIFF  step {i,2} rows={vm.Rows.Count,8} ms={sw.ElapsedMilliseconds} pos={vm.SelectedPosition}");
+            }
+        }
+        finally { await controller.DetachAsync(); vm.Dispose(); }
+    }
+
+    [Fact]
     public async Task Diagnose_KeyVersusPosition()
     {
         if (!Available) return;

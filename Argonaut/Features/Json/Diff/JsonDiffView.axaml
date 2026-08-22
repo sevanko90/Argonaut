@@ -198,16 +198,26 @@
                         ToolTip.Tip="Swap between the selected value and its JSONPath" />
                 <TextBlock Grid.Row="0" Grid.Column="2"
                            FontSize="11"
-                           IsVisible="{Binding HasSelection}"
+                           IsVisible="{Binding ShowSourceValue}"
                            TextWrapping="NoWrap"
                            TextTrimming="CharacterEllipsis"
                            VerticalAlignment="Center"
                            FontFamily="{DynamicResource AppContentFontFamily}"><Run Text="{Binding SourcePrefix}" /><Run Text="{Binding SourceChanged}" Background="#59FFC107" /><Run Text="{Binding SourceSuffix}" /></TextBlock>
+                <TextBlock Grid.Row="0" Grid.Column="2"
+                           Text="{Binding SourcePlaceholder}"
+                           FontSize="11"
+                           FontStyle="Italic"
+                           IsVisible="{Binding SourcePlaceholder, Converter={x:Static json:IsNotNullConverter.Instance}}"
+                           TextWrapping="NoWrap"
+                           TextTrimming="CharacterEllipsis"
+                           VerticalAlignment="Center"
+                           Foreground="{DynamicResource AppMutedTextBrush}" />
                 <Button Grid.Row="0" Grid.Column="3"
                         x:Name="CopySourceButton"
                         Classes="iconbutton compact"
                         Click="OnCopySourceClick"
                         IsVisible="{Binding HasSelection}"
+                        IsEnabled="{Binding ShowSourceValue}"
                         ToolTip.Tip="Copy"
                         Margin="8,0,0,0">
                     <Viewbox Width="12" Height="12">
@@ -234,16 +244,26 @@
                         ToolTip.Tip="Swap between the selected value and its JSONPath" />
                 <TextBlock Grid.Row="1" Grid.Column="2"
                            FontSize="11"
-                           IsVisible="{Binding HasSelection}"
+                           IsVisible="{Binding ShowTargetValue}"
                            TextWrapping="NoWrap"
                            TextTrimming="CharacterEllipsis"
                            VerticalAlignment="Center"
                            FontFamily="{DynamicResource AppContentFontFamily}"><Run Text="{Binding TargetPrefix}" /><Run Text="{Binding TargetChanged}" Background="#59FFC107" /><Run Text="{Binding TargetSuffix}" /></TextBlock>
+                <TextBlock Grid.Row="1" Grid.Column="2"
+                           Text="{Binding TargetPlaceholder}"
+                           FontSize="11"
+                           FontStyle="Italic"
+                           IsVisible="{Binding TargetPlaceholder, Converter={x:Static json:IsNotNullConverter.Instance}}"
+                           TextWrapping="NoWrap"
+                           TextTrimming="CharacterEllipsis"
+                           VerticalAlignment="Center"
+                           Foreground="{DynamicResource AppMutedTextBrush}" />
                 <Button Grid.Row="1" Grid.Column="3"
                         x:Name="CopyTargetButton"
                         Classes="iconbutton compact"
                         Click="OnCopyTargetClick"
                         IsVisible="{Binding HasSelection}"
+                        IsEnabled="{Binding ShowTargetValue}"
                         ToolTip.Tip="Copy"
                         Margin="8,0,0,0">
                     <Viewbox Width="12" Height="12">

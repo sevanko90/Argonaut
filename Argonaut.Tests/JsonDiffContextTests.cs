@@ -177,16 +177,50 @@ public class JsonDiffContextTests
     }
 
     [Fact]
-    public async Task AddedRow_TargetValueFullyHighlighted_SourceEmpty()
+    public async Task AddedRow_TargetValuePlain_SourceShowsAddedPlaceholder()
     {
         var (vm, l, r) = await LoadAsync("""{"a":1}""", """{"a":1,"new":"hello"}""");
         try
         {
             vm.GoToNextDiff();
 
+            // The target is the whole change (a new property), not a partial edit against
+            // some prior value - so it renders plain, no yellow "changed" run.
+            Assert.Equal("\"hello\"", vm.TargetPrefix);
+            Assert.Equal(string.Empty, vm.TargetChanged);
+            Assert.Null(vm.TargetPlaceholder);
+            Assert.True(vm.ShowTargetValue);
+
+            // The source line has no row at all - a placeholder explains why instead of a
+            // blank line, and the value runs are suppressed.
             Assert.Equal(string.Empty, vm.SourcePrefix + vm.SourceChanged + vm.SourceSuffix);
-            Assert.Equal(string.Empty, vm.TargetPrefix);
-            Assert.Equal("\"hello\"", vm.TargetChanged);
+            Assert.NotNull(vm.SourcePlaceholder);
+            Assert.Contains("added", vm.SourcePlaceholder);
+            Assert.False(vm.ShowSourceValue);
+        }
+        finally
+        {
+            Cleanup(vm, l, r);
+        }
+    }
+
+    [Fact]
+    public async Task RemovedRow_SourceValuePlain_TargetShowsDeletedPlaceholder()
+    {
+        var (vm, l, r) = await LoadAsync("""{"a":1,"gone":"bye"}""", """{"a":1}""");
+        try
+        {
+            vm.GoToNextDiff();
+
+            Assert.Equal("\"bye\"", vm.SourcePrefix);
+            Assert.Equal(string.Empty, vm.SourceChanged);
+            Assert.Null(vm.SourcePlaceholder);
+            Assert.True(vm.ShowSourceValue);
+
+            Assert.Equal(string.Empty, vm.TargetPrefix + vm.TargetChanged + vm.TargetSuffix);
+            Assert.NotNull(vm.TargetPlaceholder);
+            Assert.Contains("deleted", vm.TargetPlaceholder);
+            Assert.False(vm.ShowTargetValue);
         }
         finally
         {

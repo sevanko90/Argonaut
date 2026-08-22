@@ -37,6 +37,8 @@ public sealed class JsonDiffViewModel : ObservableObject, IDocumentViewModel
     private string targetPrefix = string.Empty;
     private string targetChanged = string.Empty;
     private string targetSuffix = string.Empty;
+    private string? sourcePlaceholder;
+    private string? targetPlaceholder;
 
     public string FilePath { get; private set; } = string.Empty;
 
@@ -150,6 +152,23 @@ public sealed class JsonDiffViewModel : ObservableObject, IDocumentViewModel
     public string TargetChanged { get => targetChanged; private set => SetField(ref targetChanged, value); }
     public string TargetSuffix { get => targetSuffix; private set => SetField(ref targetSuffix, value); }
 
+    /// <summary>Non-null when the row simply doesn't exist on the source side (Added, or the
+    /// destination stub of a Moved row) - the context bar shows this instead of an empty
+    /// value line, and instead of the diff runs above.</summary>
+    public string? SourcePlaceholder { get => sourcePlaceholder; private set => SetField(ref sourcePlaceholder, value); }
+
+    /// <summary>Same as <see cref="SourcePlaceholder"/>, for the target side (Removed, or the
+    /// source stub of a Moved row).</summary>
+    public string? TargetPlaceholder { get => targetPlaceholder; private set => SetField(ref targetPlaceholder, value); }
+
+    /// <summary>Whether the source line's value/path runs (as opposed to
+    /// <see cref="SourcePlaceholder"/>) should be shown.</summary>
+    public bool ShowSourceValue => HasSelection && SourcePlaceholder is null;
+
+    /// <summary>Whether the target line's value/path runs (as opposed to
+    /// <see cref="TargetPlaceholder"/>) should be shown.</summary>
+    public bool ShowTargetValue => HasSelection && TargetPlaceholder is null;
+
     private void UpdateContext()
     {
         var row = SelectedRow;
@@ -159,6 +178,10 @@ public sealed class JsonDiffViewModel : ObservableObject, IDocumentViewModel
         {
             (SourcePrefix, SourceChanged, SourceSuffix) = (string.Empty, string.Empty, string.Empty);
             (TargetPrefix, TargetChanged, TargetSuffix) = (string.Empty, string.Empty, string.Empty);
+            SourcePlaceholder = null;
+            TargetPlaceholder = null;
+            OnPropertyChanged(nameof(ShowSourceValue));
+            OnPropertyChanged(nameof(ShowTargetValue));
             return;
         }
 
@@ -169,17 +192,51 @@ public sealed class JsonDiffViewModel : ObservableObject, IDocumentViewModel
         string? leftValue = row.Left?.Value;
         string? rightValue = row.Right?.Value;
 
-        // Only an Added/Removed row's lone value is "all change"; a Moved row's content is
-        // unchanged by definition, so its single side renders plain.
-        bool highlightWhole = row.Status is DiffStatus.Added or DiffStatus.Removed;
+        SourcePlaceholder = sourceShowsPath ? null : AbsenceReason(row, side: row.Left);
+        TargetPlaceholder = targetShowsPath ? null : AbsenceReason(row, side: row.Right);
 
+        // A side with no row of its own has nothing to render as a value - its placeholder
+        // above says why. The OTHER side then renders plain: there's no counterpart to diff
+        // against, and highlighting it whole would claim its entire text is "the change"
+        // when really the whole row is the change, which the placeholder already states.
         (SourcePrefix, SourceChanged, SourceSuffix) = sourceShowsPath
             ? (PathFor(row, target: false) ?? string.Empty, string.Empty, string.Empty)
-            : ContextRuns(leftValue, rightValue, highlightWhole);
+            : SourcePlaceholder is not null
+                ? (string.Empty, string.Empty, string.Empty)
+                : TargetPlaceholder is not null
+                    ? (leftValue ?? string.Empty, string.Empty, string.Empty)
+                    : SplitByCommonAffixes(leftValue ?? string.Empty, rightValue ?? string.Empty);
 
         (TargetPrefix, TargetChanged, TargetSuffix) = targetShowsPath
             ? (PathFor(row, target: true) ?? string.Empty, string.Empty, string.Empty)
-            : ContextRuns(rightValue, leftValue, highlightWhole);
+            : TargetPlaceholder is not null
+                ? (string.Empty, string.Empty, string.Empty)
+                : SourcePlaceholder is not null
+                    ? (rightValue ?? string.Empty, string.Empty, string.Empty)
+                    : SplitByCommonAffixes(rightValue ?? string.Empty, leftValue ?? string.Empty);
+
+        OnPropertyChanged(nameof(ShowSourceValue));
+        OnPropertyChanged(nameof(ShowTargetValue));
+    }
+
+    /// <summary>Why <paramref name="side"/> (the row's <c>Left</c> or <c>Right</c>) has no
+    /// value to show: null when the row exists there. A Moved row hides one side by design
+    /// (its content renders once, at the destination) and already carries a description on
+    /// <see cref="JsonDiffRow.MoveBadge"/>; Added/Removed fall back to a plain statement.</summary>
+    private static string? AbsenceReason(JsonDiffRow row, JsonRow? side)
+    {
+        if (side is not null)
+            return null;
+
+        if (row.MoveBadge is { } badge)
+            return badge;
+
+        return row.Status switch
+        {
+            DiffStatus.Added => "property added — not present here",
+            DiffStatus.Removed => "property deleted — not present here",
+            _ => "not present here",
+        };
     }
 
     private string? PathFor(JsonDiffRow row, bool target)
@@ -215,17 +272,6 @@ public sealed class JsonDiffViewModel : ObservableObject, IDocumentViewModel
         return row.Left is { } left ? JsonPathBuilder.Build(s.Left.Index, s.Left.File, left.TokenIndex)
             : row.Right is { } r ? JsonPathBuilder.Build(s.Right.Index, s.Right.File, r.TokenIndex)
             : null;
-    }
-
-    private static (string Prefix, string Changed, string Suffix) ContextRuns(string? value, string? other, bool highlightWhole)
-    {
-        if (value is null)
-            return (string.Empty, string.Empty, string.Empty);
-
-        if (other is null)
-            return highlightWhole ? (string.Empty, value, string.Empty) : (value, string.Empty, string.Empty);
-
-        return SplitByCommonAffixes(value, other);
     }
 
     /// <summary>

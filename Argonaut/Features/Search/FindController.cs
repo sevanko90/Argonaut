@@ -53,10 +53,11 @@ public sealed class FindController
 
     private int cursor = -1;
 
-    // The selected stop's identity, which survives a re-sort; the cursor index does not, since
-    // a match arriving late can sort ahead of it.
-    private int currentFileIndex = -1;
-    private int currentMatchIndex = -1;
+    // The selected stop's ROW key, which survives both a re-sort and the dedupe; the cursor
+    // index survives neither, since a match arriving late can sort ahead of it and the entry
+    // the cursor pointed at can be the one collapsed away.
+    private long currentKey;
+    private bool hasCurrent;
 
     private long requestId;
     private CancellationTokenSource? revealCts;
@@ -207,8 +208,8 @@ public sealed class FindController
             }
 
             stop = stops[cursor];
-            currentFileIndex = stop.File;
-            currentMatchIndex = stop.MatchIndex;
+            currentKey = stop.Key;
+            hasCurrent = true;
             UpdateStatusLocked(wrapped);
         }
 
@@ -317,13 +318,28 @@ public sealed class FindController
             return byFile != 0 ? byFile : a.MatchIndex.CompareTo(b.MatchIndex);
         });
 
+        // Collapse to one stop per ROW. Several occurrences can share a row - a property name
+        // and its own value, or the row's source and target panes - and find stops there once.
+        // Equal keys mean the same row by construction: RowOrderKey keys a record's row without
+        // regard to which pane matched, and everything below it by token, one token per row.
+        int write = 0;
+        for (int read = 0; read < stops.Count; read++)
+        {
+            if (write > 0 && stops[write - 1].Key == stops[read].Key)
+                continue;
+
+            stops[write++] = stops[read];
+        }
+
+        stops.RemoveRange(write, stops.Count - write);
+
         cursor = -1;
-        if (currentFileIndex < 0)
+        if (!hasCurrent)
             return;
 
         for (int i = 0; i < stops.Count; i++)
         {
-            if (stops[i].File == currentFileIndex && stops[i].MatchIndex == currentMatchIndex)
+            if (stops[i].Key == currentKey)
             {
                 cursor = i;
                 return;
@@ -381,8 +397,8 @@ public sealed class FindController
             sessionTerm = null;
             stops.Clear();
             cursor = -1;
-            currentFileIndex = -1;
-            currentMatchIndex = -1;
+            currentKey = 0;
+            hasCurrent = false;
         }
 
         foreach (var session in old)
@@ -434,6 +450,10 @@ public sealed class FindController
         UpdateStatus(wrapped: false);
     }
 
+    /// <summary>Trims the plural off a count of one, so a lone result is not "1 rows".</summary>
+    private static string Pluralize(string plural, int count)
+        => count == 1 && plural.EndsWith('s') ? plural[..^1] : plural;
+
     private void UpdateStatus(bool wrapped)
     {
         lock (gate)
@@ -453,9 +473,10 @@ public sealed class FindController
         }
         else
         {
+            string? unit = navigator?.StopUnit;
             text = cursor >= 0
-                ? $"{cursor + 1:N0} of {stops.Count:N0}"
-                : $"{stops.Count:N0} matches";
+                ? $"{cursor + 1:N0} of {stops.Count:N0}{(unit is null ? "" : " " + unit)}"
+                : $"{stops.Count:N0} {Pluralize(unit ?? "matches", stops.Count)}";
 
             if (!complete)
             {

@@ -58,4 +58,13 @@ public interface ISearchNavigator
     /// visible row positions would not).
     /// </summary>
     long? OrderKey(int fileIndex, SearchMatch match) => match.Offset;
+
+    /// <summary>
+    /// What one stop counts, when that is not simply one occurrence of the term. Null - the
+    /// default - means the two are the same and the status needs no qualifier. The diff returns
+    /// "rows" because several occurrences can share a row (a property name and its value; the
+    /// same row's two panes) and it stops on the row once, so its count would otherwise look
+    /// like it had lost matches the user can plainly see highlighted.
+    /// </summary>
+    string? StopUnit => null;
 }

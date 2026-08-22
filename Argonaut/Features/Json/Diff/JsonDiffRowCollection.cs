@@ -676,13 +676,15 @@ public sealed class JsonDiffRowCollection : MemoryMappedCollectionBase
         var record = session.Diff.GetRecord(owner);
         int ownerToken = leftSide ? record.LeftToken : record.RightToken;
 
-        // The record's own row. It shows each side in its own pane, so a match in either is
-        // genuinely on screen and worth a stop - except on a Moved record, which renders one
-        // end only. Sorted ahead of everything below it, left pane first.
+        // The record's own row, which fills both panes. Deliberately keyed WITHOUT which side
+        // the match came from: find stops once per row, so the same key for both panes is what
+        // collapses "the term is in the source and the target of this row" into one stop.
+        // Suppressed only where that pane is not drawn at all, which is a Moved record - it
+        // renders one end only. Sorts ahead of everything below it.
         if (token == ownerToken)
         {
             bool rendered = leftSide ? RecordRowShowsLeft(record) : RecordRowShowsRight(record);
-            return rendered ? ((long)owner << 32) | (uint)(leftSide ? 0 : 1) : null;
+            return rendered ? (long)owner << 32 : null;
         }
 
         // Below the record, one document supplies both panes - see TokenSubWalkIsLeft.
@@ -698,7 +700,8 @@ public sealed class JsonDiffRowCollection : MemoryMappedCollectionBase
             return null;
 
         // Only one side contributes rows down here, so ordering the tail by raw token index is
-        // document order for it. Offset past the two record-row keys above.
+        // document order for it - and one token is one row, so this is already row-keyed.
+        // Offset past the record-row key above, which is zero.
         return ((long)owner << 32) | ((uint)token + 2);
     }
 

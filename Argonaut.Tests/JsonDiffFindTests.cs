@@ -131,17 +131,30 @@ public class JsonDiffFindTests
     }
 
     [Fact]
-    public async Task Find_CountsStopsInBothDocuments()
+    public async Task Find_BothPanesOfOneRow_AreASingleStop()
     {
-        // "needle" on each side of a Modified leaf. That row renders BOTH panes, so both are
-        // genuinely on screen and both are stops.
+        // "needle" on each side of a Modified leaf: two occurrences, but one row. Find stops
+        // there once, so pressing next always moves rather than appearing to do nothing.
         using var h = await LoadAsync(
             """{"a":"needle-left"}""",
             """{"a":"needle-right"}""");
 
         await h.Controller.FindAsync("needle", 1);
 
-        await AssertSettlesOnAsync(h, "1 of 2");
+        await AssertSettlesOnAsync(h, "1 of 1 rows");
+    }
+
+    [Fact]
+    public async Task Find_SeveralOccurrencesInOneRow_AreASingleStop()
+    {
+        // The name and the value of the same property both match. Still one row, one stop.
+        using var h = await LoadAsync(
+            """{"gone":"a gone value","x":1}""",
+            """{"x":2}""");
+
+        await h.Controller.FindAsync("gone", 1);
+
+        await AssertSettlesOnAsync(h, "1 of 1 rows");
     }
 
     [Fact]
@@ -157,7 +170,7 @@ public class JsonDiffFindTests
 
         await h.Controller.FindAsync("needle", 1);
 
-        await AssertSettlesOnAsync(h, "1 of 1");
+        await AssertSettlesOnAsync(h, "1 of 1 rows");
     }
 
     [Fact]

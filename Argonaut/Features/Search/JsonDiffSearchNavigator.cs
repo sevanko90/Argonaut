@@ -43,4 +43,10 @@ public sealed class JsonDiffSearchNavigator : ISearchNavigator
 
     public long? OrderKey(int fileIndex, SearchMatch match)
         => viewModel.MatchOrderKey(leftSide: fileIndex == LeftFile, match);
+
+    /// <summary>Stops are rows, not raw occurrences - matches sharing a row collapse into one.
+    /// Deliberately visible in the status: an unchanged object whose members were reordered
+    /// renders from the left document into both panes, so the right file's copies highlight but
+    /// are the same rows, and a count of occurrences would not add up to what is on screen.</summary>
+    public string? StopUnit => "rows";
 }

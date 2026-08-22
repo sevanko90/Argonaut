@@ -108,6 +108,40 @@ public class JsonDiffContextTests
     }
 
     [Fact]
+    public async Task GoToNextDiff_FindsChangeUnderManuallyCollapsedAncestor_AndExpandsIt()
+    {
+        // "nested" auto-expands by default (a Modified container on the path to a change),
+        // so collapse it by hand first - that's the state the bug report described: a diff
+        // hidden by a collapsed ancestor that navigation must still be able to reach.
+        var (vm, l, r) = await LoadAsync(
+            """{"a":1,"nested":{"changed":2}}""",
+            """{"a":1,"nested":{"changed":9}}""");
+        try
+        {
+            var nested = Assert.Single(Materialize(vm.Rows), x => x.Left is { Name: "nested" });
+            Assert.True(nested.IsExpanded);
+
+            vm.Rows.ToggleExpand(nested.Position);
+            Assert.DoesNotContain(Materialize(vm.Rows), x => x.IsValueChanged);
+
+            vm.GoToNextDiff();
+
+            Assert.NotNull(vm.SelectedPosition);
+            var rows = Materialize(vm.Rows);
+            var found = rows[vm.SelectedPosition!.Value];
+            Assert.True(found.IsValueChanged);
+            Assert.Equal("changed", found.Left!.Name);
+
+            var reopened = Assert.Single(rows, x => x.Left is { Name: "nested" });
+            Assert.True(reopened.IsExpanded);
+        }
+        finally
+        {
+            Cleanup(vm, l, r);
+        }
+    }
+
+    [Fact]
     public async Task GoToNextDiff_IdenticalDocuments_NoSelection()
     {
         var (vm, l, r) = await LoadAsync("""{"a":1}""", """{"a":1}""");

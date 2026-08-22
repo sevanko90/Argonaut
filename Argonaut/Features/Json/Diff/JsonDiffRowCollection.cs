@@ -52,9 +52,12 @@ public sealed class JsonDiffRowCollection : MemoryMappedCollectionBase
         }
 
         public RowKind Kind { get; }
-        // Record rows: their own index. SubMirror rows: the enclosing undescended record's
-        // index (needed to splice the target-side path - see JsonDiffRow.MirrorRightContainerToken).
-        // -1 for every other sub/preview/placeholder row.
+        // Record rows: their own index. Every sub row (SubLeft/SubRight/SubMirror): the
+        // enclosing undescended record's index - needed by SubMirror to splice the
+        // target-side path (see JsonDiffRow.MirrorRightContainerToken), and by every kind to
+        // let FindNextChange recover "which record owns this visible row" regardless of
+        // collapse state. -1 only for a child-cap Placeholder that caps token children
+        // directly (no single owning record).
         public int RecordIndex { get; }
         public int Token { get; }         // sub rows: the token on their side; -1 otherwise
         public ushort Depth { get; }
@@ -279,21 +282,24 @@ public sealed class JsonDiffRowCollection : MemoryMappedCollectionBase
         }
 
         // Whole-subtree record: token-level sub-rows from the side that has the content.
+        // recordIndex rides along on every sub-row here too (not just the mirror case below)
+        // so FindNextChange can recover "which record does this visible row belong to" from
+        // any row, not only Kind.Record ones - see DiffVisibleRow.RecordIndex.
         switch (record.Status)
         {
             case DiffStatus.Removed:
-                WalkTokenChildren(RowKind.SubLeft, leftTokenOverrides, record.LeftToken, record.Depth, DiffStatus.Removed, into);
+                WalkTokenChildren(RowKind.SubLeft, leftTokenOverrides, record.LeftToken, record.Depth, DiffStatus.Removed, into, recordIndex);
                 break;
             case DiffStatus.Added:
-                WalkTokenChildren(RowKind.SubRight, rightTokenOverrides, record.RightToken, record.Depth, DiffStatus.Added, into);
+                WalkTokenChildren(RowKind.SubRight, rightTokenOverrides, record.RightToken, record.Depth, DiffStatus.Added, into, recordIndex);
                 break;
             case DiffStatus.Moved:
                 // A move's content lives on one side of the row: the stub keeps the left
                 // pane (old position), the destination the right pane (new position).
                 if (record.IsMoveSource)
-                    WalkTokenChildren(RowKind.SubLeft, leftTokenOverrides, record.LeftToken, record.Depth, DiffStatus.Moved, into);
+                    WalkTokenChildren(RowKind.SubLeft, leftTokenOverrides, record.LeftToken, record.Depth, DiffStatus.Moved, into, recordIndex);
                 else if (record.RightToken >= 0)
-                    WalkTokenChildren(RowKind.SubRight, rightTokenOverrides, record.RightToken, record.Depth, DiffStatus.Moved, into);
+                    WalkTokenChildren(RowKind.SubRight, rightTokenOverrides, record.RightToken, record.Depth, DiffStatus.Moved, into, recordIndex);
                 break;
             default:
                 // Unchanged - genuinely present on both sides; rendered from the left
@@ -365,26 +371,32 @@ public sealed class JsonDiffRowCollection : MemoryMappedCollectionBase
     }
 
     /// <summary>
-    /// Finds the next (direction +1) or previous (-1) actual-change row from
-    /// <paramref name="fromPosition"/> (-1 = before the start), wrapping around. A change
-    /// row is a record row that is Added, Removed, Moved, or a value-level Modified -
-    /// descended containers are path, and sub-rows belong to the block above them, so
-    /// both are skipped. O(visible rows); null when the visible list holds no change.
+    /// Finds the next (direction +1) or previous (-1) actual change from
+    /// <paramref name="fromPosition"/> (-1 = before the start), wrapping around, and expands
+    /// whatever collapsed ancestors stand between it and visibility so the result is always
+    /// a valid, showing position. A change is a record that is Added, Removed, Moved, or a
+    /// value-level Modified - descended containers are path, not themselves a change.
+    ///
+    /// Walks <see cref="JsonDiffIndex"/>'s record log directly rather than the visible-row
+    /// projection: the log is already in merged render order (same order the fully-expanded
+    /// list would have), so stepping through it finds every change regardless of collapse
+    /// state - unlike the visible list, which skips anything nested under a collapsed
+    /// container entirely. O(record count) to search, plus a rebuild only when an ancestor
+    /// actually needed expanding; null when the log holds no change.
     /// </summary>
     public int? FindNextChange(int fromPosition, int direction)
     {
-        int count = visibleRows.Count;
+        var diff = session.Diff;
+        int count = diff.RecordCount;
         if (count == 0)
             return null;
 
+        int fromRecord = OwnerRecordIndex(fromPosition) ?? -1;
+
         for (int step = 1; step <= count; step++)
         {
-            int position = (((fromPosition + step * direction) % count) + count) % count;
-            var vrow = visibleRows[position];
-            if (vrow.Kind != RowKind.Record)
-                continue;
-
-            var record = session.Diff.GetRecord(vrow.RecordIndex);
+            int recordIndex = (((fromRecord + step * direction) % count) + count) % count;
+            var record = diff.GetRecord(recordIndex);
             bool isChange = record.Status switch
             {
                 DiffStatus.Added or DiffStatus.Removed or DiffStatus.Moved => true,
@@ -393,10 +405,55 @@ public sealed class JsonDiffRowCollection : MemoryMappedCollectionBase
             };
 
             if (isChange)
-                return position;
+                return RevealAndLocate(recordIndex);
         }
 
         return null;
+    }
+
+    /// <summary>The record that owns the visible row at <paramref name="position"/> - itself
+    /// for a Kind.Record row, its enclosing undescended record for a sub-row - or null when
+    /// out of range or unowned (a token-cap Placeholder). Used only as a rough anchor to
+    /// resume stepping the record log from the current selection; imprecision here (e.g. an
+    /// out-of-date position after an intervening rebuild) only shifts where the cyclic search
+    /// starts; it can't cause a change to be missed.</summary>
+    private int? OwnerRecordIndex(int position)
+    {
+        if (position < 0 || position >= visibleRows.Count)
+            return null;
+
+        int recordIndex = visibleRows[position].RecordIndex;
+        return recordIndex >= 0 ? recordIndex : null;
+    }
+
+    /// <summary>Expands every collapsed ancestor of <paramref name="recordIndex"/> - at most
+    /// one rebuild, batching every override flip first - then returns that record's own row
+    /// position in the (possibly now-different) visible list.</summary>
+    private int RevealAndLocate(int recordIndex)
+    {
+        var diff = session.Diff;
+        bool changed = false;
+        for (int ancestor = diff.GetRecord(recordIndex).ParentRecord; ancestor >= 0; ancestor = diff.GetRecord(ancestor).ParentRecord)
+        {
+            if (IsRecordExpanded(diff.GetRecord(ancestor)))
+                continue;
+
+            Toggle(recordOverrides, ancestor);
+            changed = true;
+        }
+
+        if (changed)
+            Rebuild();
+
+        for (int i = 0; i < visibleRows.Count; i++)
+        {
+            if (visibleRows[i].Kind == RowKind.Record && visibleRows[i].RecordIndex == recordIndex)
+                return i;
+        }
+
+        // Every ancestor was just confirmed expanded (or already was), so the record's row
+        // must be in the walk - this would only trip if the log itself were inconsistent.
+        throw new InvalidOperationException($"Diff record {recordIndex} not found after revealing its ancestors.");
     }
 
     // ── Row materialization ────────────────────────────────────────────────────────────

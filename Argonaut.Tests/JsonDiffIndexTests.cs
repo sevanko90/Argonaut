@@ -218,6 +218,50 @@ public class JsonDiffIndexTests
         Assert.True(root.IsAlignmentApproximate);
     }
 
+    [Fact]
+    public async Task ArrayAtExactCap_IsFullyAligned()
+    {
+        int count = JsonDiffIndex.MaxAlignableArrayElements;
+        string prefix = string.Join(',', Enumerable.Range(0, count - 1));
+        string left = $"[{prefix},{count - 1}]";
+        string right = $"[{prefix},-1]";
+        using var f = await DiffFixture.CreateAsync(left, right);
+
+        Assert.False(f.Records[0].IsAlignmentApproximate);
+        Assert.Equal(count + 1, f.Records.Count); // root plus every aligned element
+        Assert.Equal(count - 1, CountStatus(f.Records, DiffStatus.Unchanged));
+        Assert.Equal(2, CountStatus(f.Records, DiffStatus.Modified)); // root plus changed tail
+    }
+
+    [Fact]
+    public async Task RandomScalarArrays_AlignmentConsumesEveryOrdinalExactlyOnce()
+    {
+        var random = new Random(0x5EED);
+        for (int iteration = 0; iteration < 100; iteration++)
+        {
+            int[] left = Enumerable.Range(0, random.Next(1, 80))
+                .Select(_ => random.Next(20)).ToArray();
+            int[] right = Enumerable.Range(0, random.Next(1, 80))
+                .Select(_ => random.Next(20)).ToArray();
+
+            using var f = await DiffFixture.CreateAsync(
+                $"[{string.Join(',', left)}]",
+                $"[{string.Join(',', right)}]");
+
+            var children = f.Records.Where(r => r.ParentRecord == 0).ToList();
+            Assert.Equal(Enumerable.Range(0, left.Length),
+                children.Where(r => r.LeftArrayIndex >= 0).Select(r => r.LeftArrayIndex).Order());
+            Assert.Equal(Enumerable.Range(0, right.Length),
+                children.Where(r => r.RightArrayIndex >= 0).Select(r => r.RightArrayIndex).Order());
+
+            foreach (var record in children.Where(r => r.LeftArrayIndex >= 0 && r.RightArrayIndex >= 0))
+            {
+                bool equal = left[record.LeftArrayIndex] == right[record.RightArrayIndex];
+                Assert.Equal(equal, record.Status is DiffStatus.Unchanged or DiffStatus.Moved);
+            }
+        }
+    }
+
     // ── Cross-parent move reconciliation ───────────────────────────────────────────────
 
     [Fact]

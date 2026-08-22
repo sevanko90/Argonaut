@@ -1,5 +1,7 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Infrastructure;
@@ -381,11 +383,10 @@ public sealed class JsonDiffIndex : AppendLogIndexBase<JsonDiffIndex.PackedDiffR
         // Right name-hash -> ordinal. Duplicate keys (valid but degenerate JSON) keep the
         // last occurrence, mirroring how JSON consumers resolve duplicates.
         var rightByName = new Dictionary<ulong, int>(rightChildren.Count);
-        var rightNameHashes = new ulong[rightChildren.Count];
         for (int j = 0; j < rightChildren.Count; j++)
         {
-            rightNameHashes[j] = NameHash(this.rightIndex, this.rightFile, rightChildren[j]);
-            rightByName[rightNameHashes[j]] = j;
+            ulong nameHash = NameHash(this.rightIndex, this.rightFile, rightChildren[j]);
+            rightByName[nameHash] = j;
         }
 
         var matchOfLeft = new int[leftChildren.Count];
@@ -473,6 +474,91 @@ public sealed class JsonDiffIndex : AppendLogIndexBase<JsonDiffIndex.PackedDiffR
         Insert
     }
 
+    private readonly record struct IndexPair(int Left, int Right);
+
+    private struct HashStats
+    {
+        public int Count;
+        public int Ordinal;
+    }
+
+    /// <summary>A small growable buffer whose backing storage comes from ArrayPool. Array
+    /// alignment creates several O(children) work lists; returning them after each level keeps
+    /// repeated/nested diffs from feeding large temporary arrays to Gen2/LOH.</summary>
+    private sealed class PooledBuffer<T> : IDisposable where T : struct
+    {
+        private T[] buffer;
+
+        public PooledBuffer(int initialCapacity = 16)
+        {
+            this.buffer = ArrayPool<T>.Shared.Rent(Math.Max(1, initialCapacity));
+        }
+
+        public int Count { get; private set; }
+
+        public T this[int index]
+        {
+            get => this.buffer[index];
+            set => this.buffer[index] = value;
+        }
+
+        public Span<T> Span => this.buffer.AsSpan(0, this.Count);
+
+        public void Add(T item)
+        {
+            if (this.Count == this.buffer.Length)
+            {
+                var grown = ArrayPool<T>.Shared.Rent(this.buffer.Length * 2);
+                this.buffer.AsSpan(0, this.Count).CopyTo(grown);
+                ArrayPool<T>.Shared.Return(this.buffer);
+                this.buffer = grown;
+            }
+
+            this.buffer[this.Count++] = item;
+        }
+
+        public void Dispose()
+        {
+            var returned = this.buffer;
+            this.buffer = Array.Empty<T>();
+            this.Count = 0;
+            if (returned.Length > 0)
+                ArrayPool<T>.Shared.Return(returned);
+        }
+    }
+
+    /// <summary>The minimum state that must survive into recursive record emission. Hash
+    /// histograms, hash arrays, anchor/LIS state and Myers traces are all released by
+    /// BuildArrayAlignment before this plan is returned, so nested changed arrays do not retain
+    /// every ancestor level's full scratch working set.</summary>
+    private sealed class ArrayAlignmentPlan : IDisposable
+    {
+        public ArrayAlignmentPlan(PooledBuffer<int> leftChildren, PooledBuffer<int> rightChildren,
+            ElementKind[] rightKind, int[] rightPartner, bool[] leftConsumed)
+        {
+            this.LeftChildren = leftChildren;
+            this.RightChildren = rightChildren;
+            this.RightKind = rightKind;
+            this.RightPartner = rightPartner;
+            this.LeftConsumed = leftConsumed;
+        }
+
+        public PooledBuffer<int> LeftChildren { get; }
+        public PooledBuffer<int> RightChildren { get; }
+        public ElementKind[] RightKind { get; }
+        public int[] RightPartner { get; }
+        public bool[] LeftConsumed { get; }
+
+        public void Dispose()
+        {
+            this.LeftChildren.Dispose();
+            this.RightChildren.Dispose();
+            ArrayPool<ElementKind>.Shared.Return(this.RightKind);
+            ArrayPool<int>.Shared.Return(this.RightPartner);
+            ArrayPool<bool>.Shared.Return(this.LeftConsumed);
+        }
+    }
+
     /// <summary>
     /// Aligns and emits one array level. Returns false when either side exceeds
     /// <see cref="MaxAlignableArrayElements"/> - the caller badges the container
@@ -480,64 +566,15 @@ public sealed class JsonDiffIndex : AppendLogIndexBase<JsonDiffIndex.PackedDiffR
     /// </summary>
     private bool DiffArrayChildren(int leftContainer, int rightContainer, int depth, int parentRecord)
     {
-        if (CountChildrenExceeds(this.leftIndex, leftContainer, MaxAlignableArrayElements)
-            || CountChildrenExceeds(this.rightIndex, rightContainer, MaxAlignableArrayElements))
-        {
+        using var plan = BuildArrayAlignment(leftContainer, rightContainer);
+        if (plan is null)
             return false;
-        }
 
-        var leftChildren = CollectChildren(this.leftIndex, leftContainer);
-        var rightChildren = CollectChildren(this.rightIndex, rightContainer);
-
-        var leftHashes = new ulong[leftChildren.Count];
-        for (int i = 0; i < leftChildren.Count; i++)
-            leftHashes[i] = LeftHash(leftChildren[i]);
-        var rightHashes = new ulong[rightChildren.Count];
-        for (int j = 0; j < rightChildren.Count; j++)
-            rightHashes[j] = RightHash(rightChildren[j]);
-
-        // Anchor pass, O(N): hashes appearing exactly once on each side pair up.
-        var leftCounts = CountByHash(leftHashes, out var leftOrdinalOfUnique);
-        var rightCounts = CountByHash(rightHashes, out var rightOrdinalOfUnique);
-
-        var uniquePairs = new List<(int Left, int Right)>();
-        for (int i = 0; i < leftHashes.Length; i++)
-        {
-            ulong hash = leftHashes[i];
-            if (leftCounts[hash] == 1 && rightCounts.TryGetValue(hash, out int rc) && rc == 1)
-                uniquePairs.Add((i, rightOrdinalOfUnique[hash]));
-        }
-
-        // Stable anchors are the longest increasing run of unique pairs; unique pairs that
-        // cross that order are genuine relocations - in-array moves.
-        var isStable = LongestIncreasingByRight(uniquePairs);
-
-        var rightKind = new ElementKind[rightChildren.Count];
-        var rightPartner = new int[rightChildren.Count];
-        var leftConsumed = new bool[leftChildren.Count];
-
-        for (int p = 0; p < uniquePairs.Count; p++)
-        {
-            var (li, rj) = uniquePairs[p];
-            rightKind[rj] = isStable[p] ? ElementKind.Match : ElementKind.MovedIn;
-            rightPartner[rj] = li;
-            leftConsumed[li] = true;
-        }
-
-        // Between consecutive stable anchors, align the leftover (non-unique / non-moved)
-        // runs with Myers over the hash sequences, then pair leftover delete+insert runs
-        // positionally so changed elements recurse instead of rendering as remove+add.
-        int gapLeftStart = 0, gapRightStart = 0;
-        foreach (var (anchorLeft, anchorRight) in StableAnchorsInOrder(uniquePairs, isStable))
-        {
-            AlignGap(gapLeftStart, anchorLeft, gapRightStart, anchorRight,
-                leftHashes, rightHashes, leftConsumed, rightKind, rightPartner);
-            gapLeftStart = anchorLeft + 1;
-            gapRightStart = anchorRight + 1;
-        }
-
-        AlignGap(gapLeftStart, leftChildren.Count, gapRightStart, rightChildren.Count,
-            leftHashes, rightHashes, leftConsumed, rightKind, rightPartner);
+        var leftChildren = plan.LeftChildren;
+        var rightChildren = plan.RightChildren;
+        var rightKind = plan.RightKind;
+        var rightPartner = plan.RightPartner;
+        var leftConsumed = plan.LeftConsumed;
 
         // Emission in merged order: walk the right side, interleaving Removed rows at the
         // positions the aligned pairs pin down.
@@ -586,78 +623,212 @@ public sealed class JsonDiffIndex : AppendLogIndexBase<JsonDiffIndex.PackedDiffR
         return true;
     }
 
-    private static bool CountChildrenExceeds(JsonStructureIndex index, int containerToken, int cap)
+    /// <summary>Builds one array level's alignment plan. Child collection and the cap check are
+    /// one pass (the old path walked every in-cap array twice). Only the compact emission plan is
+    /// returned; all other large scratch buffers are pooled/returned before recursive emission.</summary>
+    private ArrayAlignmentPlan? BuildArrayAlignment(int leftContainer, int rightContainer)
     {
+        var leftChildren = CollectChildrenCapped(this.leftIndex, leftContainer, MaxAlignableArrayElements);
+        if (leftChildren is null)
+            return null;
+
+        var rightChildren = CollectChildrenCapped(this.rightIndex, rightContainer, MaxAlignableArrayElements);
+        if (rightChildren is null)
+        {
+            leftChildren.Dispose();
+            return null;
+        }
+
+        ElementKind[]? rightKind = null;
+        int[]? rightPartner = null;
+        bool[]? leftConsumed = null;
+        ulong[]? leftHashes = null;
+        ulong[]? rightHashes = null;
+        bool transferred = false;
+
+        try
+        {
+            int leftCount = leftChildren.Count;
+            int rightCount = rightChildren.Count;
+
+            leftHashes = ArrayPool<ulong>.Shared.Rent(Math.Max(1, leftCount));
+            rightHashes = ArrayPool<ulong>.Shared.Rent(Math.Max(1, rightCount));
+            for (int i = 0; i < leftCount; i++)
+                leftHashes[i] = LeftHash(leftChildren[i]);
+            for (int j = 0; j < rightCount; j++)
+                rightHashes[j] = RightHash(rightChildren[j]);
+
+            // One dictionary per side carries both values the old code split across two:
+            // occurrence count and the ordinal (consulted only when Count == 1).
+            var leftStats = BuildHashStats(leftHashes, leftCount);
+            var rightStats = BuildHashStats(rightHashes, rightCount);
+
+            using var uniquePairs = new PooledBuffer<IndexPair>(Math.Min(leftCount, rightCount));
+            for (int i = 0; i < leftCount; i++)
+            {
+                ulong hash = leftHashes[i];
+                if (leftStats[hash].Count == 1 && rightStats.TryGetValue(hash, out var right) && right.Count == 1)
+                    uniquePairs.Add(new IndexPair(i, right.Ordinal));
+            }
+
+            var isStable = ArrayPool<bool>.Shared.Rent(Math.Max(1, uniquePairs.Count));
+            try
+            {
+                isStable.AsSpan(0, uniquePairs.Count).Clear();
+                MarkLongestIncreasingByRight(uniquePairs, isStable);
+
+                rightKind = ArrayPool<ElementKind>.Shared.Rent(Math.Max(1, rightCount));
+                rightPartner = ArrayPool<int>.Shared.Rent(Math.Max(1, rightCount));
+                leftConsumed = ArrayPool<bool>.Shared.Rent(Math.Max(1, leftCount));
+                rightKind.AsSpan(0, rightCount).Clear();
+                leftConsumed.AsSpan(0, leftCount).Clear();
+
+                for (int p = 0; p < uniquePairs.Count; p++)
+                {
+                    var pair = uniquePairs[p];
+                    rightKind[pair.Right] = isStable[p] ? ElementKind.Match : ElementKind.MovedIn;
+                    rightPartner[pair.Right] = pair.Left;
+                    leftConsumed[pair.Left] = true;
+                }
+
+                // Between consecutive stable anchors, align the leftover (non-unique /
+                // non-moved) runs with Myers, then positionally pair the remaining edits.
+                int gapLeftStart = 0, gapRightStart = 0;
+                for (int p = 0; p < uniquePairs.Count; p++)
+                {
+                    if (!isStable[p])
+                        continue;
+
+                    var anchor = uniquePairs[p];
+                    // Adjacent anchors have no gap. On a mostly-unchanged 100K array that is
+                    // nearly every pair, so entering AlignGap anyway created hundreds of
+                    // thousands of empty pooled-buffer wrappers for no work.
+                    if (gapLeftStart < anchor.Left || gapRightStart < anchor.Right)
+                    {
+                        AlignGap(gapLeftStart, anchor.Left, gapRightStart, anchor.Right,
+                            leftHashes, rightHashes, leftConsumed, rightKind, rightPartner);
+                    }
+                    gapLeftStart = anchor.Left + 1;
+                    gapRightStart = anchor.Right + 1;
+                }
+
+                if (gapLeftStart < leftCount || gapRightStart < rightCount)
+                {
+                    AlignGap(gapLeftStart, leftCount, gapRightStart, rightCount,
+                        leftHashes, rightHashes, leftConsumed, rightKind, rightPartner);
+                }
+            }
+            finally
+            {
+                ArrayPool<bool>.Shared.Return(isStable);
+            }
+
+            var result = new ArrayAlignmentPlan(leftChildren, rightChildren, rightKind, rightPartner, leftConsumed);
+            transferred = true;
+            return result;
+        }
+        finally
+        {
+            if (leftHashes is not null)
+                ArrayPool<ulong>.Shared.Return(leftHashes);
+            if (rightHashes is not null)
+                ArrayPool<ulong>.Shared.Return(rightHashes);
+
+            if (!transferred)
+            {
+                leftChildren.Dispose();
+                rightChildren.Dispose();
+                if (rightKind is not null)
+                    ArrayPool<ElementKind>.Shared.Return(rightKind);
+                if (rightPartner is not null)
+                    ArrayPool<int>.Shared.Return(rightPartner);
+                if (leftConsumed is not null)
+                    ArrayPool<bool>.Shared.Return(leftConsumed);
+            }
+        }
+    }
+
+    private static PooledBuffer<int>? CollectChildrenCapped(JsonStructureIndex index, int containerToken, int cap)
+    {
+        var children = new PooledBuffer<int>(Math.Min(256, cap));
         int end = index.GetToken(containerToken).EndIndex;
         int i = containerToken + 1;
-        int count = 0;
         while (i < end)
         {
-            if (++count > cap)
-                return true;
+            if (children.Count == cap)
+            {
+                children.Dispose();
+                return null;
+            }
+
+            children.Add(i);
             var token = index.GetToken(i);
             i = IsContainer(token.Kind) ? token.EndIndex + 1 : i + 1;
         }
 
-        return false;
+        return children;
     }
 
-    private static Dictionary<ulong, int> CountByHash(ulong[] hashes, out Dictionary<ulong, int> ordinalOfUnique)
+    private static Dictionary<ulong, HashStats> BuildHashStats(ulong[] hashes, int count)
     {
-        var counts = new Dictionary<ulong, int>(hashes.Length);
-        ordinalOfUnique = new Dictionary<ulong, int>(hashes.Length);
-        for (int i = 0; i < hashes.Length; i++)
+        var stats = new Dictionary<ulong, HashStats>(count);
+        for (int i = 0; i < count; i++)
         {
-            counts[hashes[i]] = counts.TryGetValue(hashes[i], out int c) ? c + 1 : 1;
-            ordinalOfUnique[hashes[i]] = i; // only consulted when count == 1, so last-write is fine
+            ref var value = ref CollectionsMarshal.GetValueRefOrAddDefault(stats, hashes[i], out bool exists);
+            if (exists)
+            {
+                value.Count++;
+                value.Ordinal = i;
+            }
+            else
+            {
+                value = new HashStats { Count = 1, Ordinal = i };
+            }
         }
 
-        return counts;
+        return stats;
     }
 
     /// <summary>Marks the longest increasing (by right ordinal) subsequence of the pair
     /// list, which is already sorted by left ordinal. Patience algorithm, O(n log n).</summary>
-    private static bool[] LongestIncreasingByRight(List<(int Left, int Right)> pairs)
+    private static void MarkLongestIncreasingByRight(PooledBuffer<IndexPair> pairs, bool[] isStable)
     {
-        var isStable = new bool[pairs.Count];
         if (pairs.Count == 0)
-            return isStable;
+            return;
 
-        var tails = new List<int>();          // indexes into pairs
-        var predecessor = new int[pairs.Count];
+        var tails = ArrayPool<int>.Shared.Rent(pairs.Count);
+        var predecessor = ArrayPool<int>.Shared.Rent(pairs.Count);
+        int tailsCount = 0;
 
-        for (int p = 0; p < pairs.Count; p++)
+        try
         {
-            int right = pairs[p].Right;
-            int lo = 0, hi = tails.Count;
-            while (lo < hi)
+            for (int p = 0; p < pairs.Count; p++)
             {
-                int mid = (lo + hi) / 2;
-                if (pairs[tails[mid]].Right < right)
-                    lo = mid + 1;
+                int right = pairs[p].Right;
+                int lo = 0, hi = tailsCount;
+                while (lo < hi)
+                {
+                    int mid = (lo + hi) / 2;
+                    if (pairs[tails[mid]].Right < right)
+                        lo = mid + 1;
+                    else
+                        hi = mid;
+                }
+
+                predecessor[p] = lo > 0 ? tails[lo - 1] : -1;
+                if (lo == tailsCount)
+                    tails[tailsCount++] = p;
                 else
-                    hi = mid;
+                    tails[lo] = p;
             }
 
-            predecessor[p] = lo > 0 ? tails[lo - 1] : -1;
-            if (lo == tails.Count)
-                tails.Add(p);
-            else
-                tails[lo] = p;
+            for (int p = tails[tailsCount - 1]; p >= 0; p = predecessor[p])
+                isStable[p] = true;
         }
-
-        for (int p = tails[^1]; p >= 0; p = predecessor[p])
-            isStable[p] = true;
-
-        return isStable;
-    }
-
-    private static IEnumerable<(int Left, int Right)> StableAnchorsInOrder(List<(int Left, int Right)> pairs, bool[] isStable)
-    {
-        for (int p = 0; p < pairs.Count; p++)
+        finally
         {
-            if (isStable[p])
-                yield return pairs[p];
+            ArrayPool<int>.Shared.Return(tails);
+            ArrayPool<int>.Shared.Return(predecessor);
         }
     }
 
@@ -671,14 +842,14 @@ public sealed class JsonDiffIndex : AppendLogIndexBase<JsonDiffIndex.PackedDiffR
         ulong[] leftHashes, ulong[] rightHashes, bool[] leftConsumed, ElementKind[] rightKind, int[] rightPartner)
     {
         // Materialize the gap's live ordinals (usually tiny - anchors carry the bulk).
-        var gapLeft = new List<int>();
+        using var gapLeft = new PooledBuffer<int>();
         for (int i = leftStart; i < leftEnd; i++)
         {
             if (!leftConsumed[i])
                 gapLeft.Add(i);
         }
 
-        var gapRight = new List<int>();
+        using var gapRight = new PooledBuffer<int>();
         for (int j = rightStart; j < rightEnd; j++)
         {
             if (rightKind[j] == ElementKind.Unassigned)
@@ -688,8 +859,8 @@ public sealed class JsonDiffIndex : AppendLogIndexBase<JsonDiffIndex.PackedDiffR
         if (gapLeft.Count == 0 || gapRight.Count == 0)
             return;
 
-        var script = MyersDiff(gapLeft, gapRight, leftHashes, rightHashes);
-        if (script is null)
+        using var matches = new PooledBuffer<IndexPair>();
+        if (!TryMyersDiff(gapLeft, gapRight, leftHashes, rightHashes, matches))
         {
             // Edit distance beyond the cap: positional pairing - still recursed, so the
             // common "every element tweaked" case renders as per-element Modified.
@@ -721,8 +892,9 @@ public sealed class JsonDiffIndex : AppendLogIndexBase<JsonDiffIndex.PackedDiffR
             }
         }
 
-        foreach (var (li, rj) in script)
+        for (int m = 0; m < matches.Count; m++)
         {
+            var (li, rj) = matches[m];
             PairRuns(li, rj);
             rightKind[gapRight[rj]] = ElementKind.Match;
             rightPartner[gapRight[rj]] = gapLeft[li];
@@ -735,80 +907,106 @@ public sealed class JsonDiffIndex : AppendLogIndexBase<JsonDiffIndex.PackedDiffR
     }
 
     /// <summary>
-    /// Greedy Myers over the two gap hash sequences, returning matched index pairs (into
-    /// the gap lists) in order - or null when the edit distance exceeds
-    /// <see cref="MaxMyersEditDistance"/> (caller falls back to positional pairing).
+    /// Greedy Myers over the two gap hash sequences, appending matched index pairs (into
+    /// the gap lists) in order. Returns false when the edit distance exceeds
+    /// <see cref="MaxMyersEditDistance"/> (caller falls back to positional pairing). The
+    /// backtrack trace stores only the parity-valid diagonals for each d, cutting it from a
+    /// rectangular ~526K ints to ~132K at the cap, and both trace/vector come from pools.
     /// </summary>
-    private static List<(int Left, int Right)>? MyersDiff(List<int> gapLeft, List<int> gapRight, ulong[] leftHashes, ulong[] rightHashes)
+    private static bool TryMyersDiff(PooledBuffer<int> gapLeft, PooledBuffer<int> gapRight,
+        ulong[] leftHashes, ulong[] rightHashes, PooledBuffer<IndexPair> matches)
     {
         int n = gapLeft.Count, m = gapRight.Count;
         int maxD = Math.Min(n + m, MaxMyersEditDistance);
         int offset = maxD;
 
-        var v = new int[2 * maxD + 1];
-        var trace = new List<int[]>();
+        var v = ArrayPool<int>.Shared.Rent(2 * maxD + 1);
+        int traceLength = (maxD + 1) * (maxD + 2) / 2;
+        var trace = ArrayPool<int>.Shared.Rent(traceLength);
+        v.AsSpan(0, 2 * maxD + 1).Clear();
 
         bool Equal(int i, int j) => leftHashes[gapLeft[i]] == rightHashes[gapRight[j]];
 
         int finalD = -1;
-        for (int d = 0; d <= maxD && finalD < 0; d++)
+        try
         {
-            trace.Add((int[])v.Clone());
-            for (int k = -d; k <= d; k += 2)
+            for (int d = 0; d <= maxD && finalD < 0; d++)
             {
-                int x = k == -d || (k != d && v[offset + k - 1] < v[offset + k + 1])
-                    ? v[offset + k + 1]
-                    : v[offset + k - 1] + 1;
-                int y = x - k;
-                while (x < n && y < m && Equal(x, y))
+                for (int k = -d; k <= d; k += 2)
                 {
-                    x++;
-                    y++;
+                    int x = k == -d || (k != d && v[offset + k - 1] < v[offset + k + 1])
+                        ? v[offset + k + 1]
+                        : v[offset + k - 1] + 1;
+                    int y = x - k;
+                    while (x < n && y < m && Equal(x, y))
+                    {
+                        x++;
+                        y++;
+                    }
+
+                    v[offset + k] = x;
+                    if (x >= n && y >= m)
+                    {
+                        finalD = d;
+                        break;
+                    }
                 }
 
-                v[offset + k] = x;
-                if (x >= n && y >= m)
-                {
-                    finalD = d;
-                    break;
-                }
+                int traceStart = d * (d + 1) / 2;
+                for (int ordinal = 0, k = -d; ordinal <= d; ordinal++, k += 2)
+                    trace[traceStart + ordinal] = v[offset + k];
             }
-        }
 
-        if (finalD < 0)
-            return null;
+            if (finalD < 0)
+                return false;
 
-        // Backtrack, collecting the diagonal (match) runs.
-        var matches = new List<(int Left, int Right)>();
-        int cx = n, cy = m;
-        for (int d = finalD; d > 0; d--)
-        {
-            var pv = trace[d];
-            int k = cx - cy;
-            int prevK = k == -d || (k != d && pv[offset + k - 1] < pv[offset + k + 1]) ? k + 1 : k - 1;
-            int px = pv[offset + prevK];
-            int py = px - prevK;
-
-            while (cx > px && cy > py && cx > 0 && cy > 0)
+            // Backtrack, collecting diagonal (match) runs in reverse order.
+            int cx = n, cy = m;
+            for (int d = finalD; d > 0; d--)
             {
-                matches.Add((cx - 1, cy - 1));
+                int k = cx - cy;
+                int previousD = d - 1;
+                int previousStart = previousD * (previousD + 1) / 2;
+
+                int leftK = k - 1;
+                int rightK = k + 1;
+                int leftX = leftK >= -previousD && leftK <= previousD
+                    ? trace[previousStart + (leftK + previousD) / 2]
+                    : int.MinValue;
+                int rightX = rightK >= -previousD && rightK <= previousD
+                    ? trace[previousStart + (rightK + previousD) / 2]
+                    : int.MinValue;
+
+                int prevK = k == -d || (k != d && leftX < rightX) ? rightK : leftK;
+                int px = trace[previousStart + (prevK + previousD) / 2];
+                int py = px - prevK;
+
+                while (cx > px && cy > py && cx > 0 && cy > 0)
+                {
+                    matches.Add(new IndexPair(cx - 1, cy - 1));
+                    cx--;
+                    cy--;
+                }
+
+                cx = px;
+                cy = py;
+            }
+
+            while (cx > 0 && cy > 0)
+            {
+                matches.Add(new IndexPair(cx - 1, cy - 1));
                 cx--;
                 cy--;
             }
 
-            cx = px;
-            cy = py;
+            matches.Span.Reverse();
+            return true;
         }
-
-        while (cx > 0 && cy > 0)
+        finally
         {
-            matches.Add((cx - 1, cy - 1));
-            cx--;
-            cy--;
+            ArrayPool<int>.Shared.Return(v);
+            ArrayPool<int>.Shared.Return(trace);
         }
-
-        matches.Reverse();
-        return matches;
     }
 
     // ── Cross-parent move reconciliation ───────────────────────────────────────────────

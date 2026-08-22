@@ -26,6 +26,11 @@ namespace Argonaut.Features.Json.Diff;
 public sealed class JsonDiffRowCollection : MemoryMappedCollectionBase
 {
     private const int ChildCap = 10_000;
+
+    /// <summary>Ceiling the per-container limit pages up to, matching the JSON view's. Find
+    /// pages a container up to here to reach a match past the initial <see cref="ChildCap"/>;
+    /// a token beyond even this stays unreachable and is not offered as a stop.</summary>
+    private const int MaxDisplayedChildrenPerContainer = 20_000;
     private const int RowCacheCapacity = 1000;
     // Same interval/rationale as JsonVisibleRowCollection.GrowthPollInterval.
     private static readonly TimeSpan GrowthPollInterval = TimeSpan.FromMilliseconds(1500);
@@ -76,8 +81,17 @@ public sealed class JsonDiffRowCollection : MemoryMappedCollectionBase
     private readonly HashSet<int> leftTokenOverrides = new();
     private readonly HashSet<int> rightTokenOverrides = new();
 
+    // Raised display limits, over the default ChildCap, for containers find had to page up to
+    // reach a match - keyed the same way the override sets are (record index / token per side).
+    // Empty unless find (or a future "show more") needed one, so the common path pays nothing.
+    private readonly Dictionary<int, int> recordChildLimit = new();
+    private readonly Dictionary<int, int> leftTokenChildLimit = new();
+    private readonly Dictionary<int, int> rightTokenChildLimit = new();
+
     private readonly LruCache<int, JsonDiffRow> rowCache = new(RowCacheCapacity);
     private List<DiffVisibleRow> visibleRows = new();
+    private int[]? leftStartOrder;
+    private int[]? rightStartOrder;
     private IndexGrowthMonitor? growthMonitor;
     private (int Records, int LeftTokens) lastRebuildCounts = (-1, -1);
     private bool finalRebuildDone;
@@ -174,6 +188,27 @@ public sealed class JsonDiffRowCollection : MemoryMappedCollectionBase
         Rebuild();
     }
 
+    private static int ChildLimit(Dictionary<int, int> limits, int key)
+        => limits.TryGetValue(key, out int limit) ? limit : ChildCap;
+
+    /// <summary>Raises <paramref name="key"/>'s display limit far enough to include the child at
+    /// <paramref name="childPosition"/>, in whole ChildCap pages and never past the ceiling.
+    /// True when the limit actually moved. Mirrors JsonVisibleRowCollection.EnsureVisible's
+    /// paging, so "find reached it" and "the user clicked show more enough times" agree.</summary>
+    private static bool PageUpTo(Dictionary<int, int> limits, int key, int childPosition)
+    {
+        int current = ChildLimit(limits, key);
+        if (childPosition < current)
+            return false;
+
+        int needed = Math.Min(MaxDisplayedChildrenPerContainer, ((childPosition / ChildCap) + 1) * ChildCap);
+        if (needed <= current)
+            return false;
+
+        limits[key] = needed;
+        return true;
+    }
+
     private static void Toggle(HashSet<int> overrides, int key)
     {
         if (!overrides.Remove(key))
@@ -266,9 +301,10 @@ public sealed class JsonDiffRowCollection : MemoryMappedCollectionBase
         {
             int j = recordIndex + 1;
             int shown = 0;
+            int cap = ChildLimit(recordChildLimit, recordIndex);
             while (j < diff.RecordCount && diff.GetRecord(j).ParentRecord == recordIndex)
             {
-                if (shown >= ChildCap)
+                if (shown >= cap)
                 {
                     into.Add(new DiffVisibleRow(RowKind.Placeholder, recordIndex, -1, (ushort)(record.Depth + 1), -1, record.Status));
                     break;
@@ -339,6 +375,7 @@ public sealed class JsonDiffRowCollection : MemoryMappedCollectionBase
 
         int childIndex = containerToken + 1;
         int shown = 0;
+        int cap = ChildLimit(kind == RowKind.SubRight ? rightTokenChildLimit : leftTokenChildLimit, containerToken);
         while (true)
         {
             if (containerEnd >= 0 && childIndex >= containerEnd)
@@ -347,7 +384,7 @@ public sealed class JsonDiffRowCollection : MemoryMappedCollectionBase
             if (childIndex >= index.TokenCount)
                 return; // still indexing (preview); a growth rebuild catches up
 
-            if (shown >= ChildCap)
+            if (shown >= cap)
             {
                 into.Add(new DiffVisibleRow(RowKind.Placeholder, -1, containerToken, (ushort)(depth + 1), -1, tint));
                 return;
@@ -496,7 +533,7 @@ public sealed class JsonDiffRowCollection : MemoryMappedCollectionBase
         var record = session.Diff.GetRecord(owner);
         int ownerToken = leftSide ? record.LeftToken : record.RightToken;
 
-        bool changed = ExpandRecordAncestors(owner);
+        bool changed = ExpandRecordAncestors(owner) | PageUpToRecord(owner);
 
         // The record's own row IS the token's row - nothing below it needs opening.
         if (token != ownerToken && TokenSubWalkIsLeft(record) == leftSide && !RecordHasChildRecords(record))
@@ -508,15 +545,23 @@ public sealed class JsonDiffRowCollection : MemoryMappedCollectionBase
             }
 
             var overrides = leftSide ? leftTokenOverrides : rightTokenOverrides;
+            var limits = leftSide ? leftTokenChildLimit : rightTokenChildLimit;
             var index = SideIndex(leftSide);
 
             // Sub-rows sit at merged depth >= 1, where IsSubExpanded's default is collapsed -
             // so membership of the override set is exactly "expanded" for them, and adding is
-            // exactly "expand". Walks strictly between the token and the record's own token.
-            for (int ancestor = index.GetToken(token).ParentIndex;
-                 ancestor >= 0 && ancestor != ownerToken;
-                 ancestor = index.GetToken(ancestor).ParentIndex)
+            // exactly "expand". Walks strictly between the token and the record's own token,
+            // opening each ancestor AND paging its display limit far enough to include the
+            // child on the way down - an expanded ancestor still hides a child past its cap.
+            for (int child = token, ancestor = index.GetToken(token).ParentIndex;
+                 ancestor >= 0;
+                 child = ancestor, ancestor = index.GetToken(ancestor).ParentIndex)
             {
+                changed |= PageUpTo(limits, ancestor, SideChildPosition(leftSide, ancestor, child));
+
+                if (ancestor == ownerToken)
+                    break;
+
                 changed |= overrides.Add(ancestor);
             }
         }
@@ -538,7 +583,74 @@ public sealed class JsonDiffRowCollection : MemoryMappedCollectionBase
                 return i;
         }
 
-        return LocateRecordRow(owner);
+        // Deliberately NOT falling back to the record's own row. That row sits above the token,
+        // so selecting it sends find-next backwards up the tree - the very thing that made
+        // stepping through a large diff feel broken. RowOrderKey screens out the tokens that
+        // genuinely cannot be drawn, so reaching here means "nothing to move to"; leaving the
+        // selection alone is the honest answer.
+        return null;
+    }
+
+    /// <summary>Raises the record-child display limit on every ancestor of
+    /// <paramref name="recordIndex"/> far enough to include the child leading to it.</summary>
+    private bool PageUpToRecord(int recordIndex)
+    {
+        var diff = session.Diff;
+        bool changed = false;
+
+        for (int child = recordIndex, parent = diff.GetRecord(recordIndex).ParentRecord;
+             parent >= 0;
+             child = parent, parent = diff.GetRecord(parent).ParentRecord)
+        {
+            changed |= PageUpTo(recordChildLimit, parent, RecordChildPosition(parent, child));
+        }
+
+        return changed;
+    }
+
+    /// <summary>Ordinal of <paramref name="child"/> among its parent record's direct children,
+    /// walking the same subtree-skipping chain the render walk uses.</summary>
+    private int RecordChildPosition(int parent, int child)
+    {
+        var diff = session.Diff;
+        int position = 0;
+        int j = parent + 1;
+        while (j < diff.RecordCount && j != child && diff.GetRecord(j).ParentRecord == parent)
+        {
+            var record = diff.GetRecord(j);
+            j = record.SubtreeEnd < 0 ? diff.RecordCount : record.SubtreeEnd;
+            position++;
+        }
+
+        return position;
+    }
+
+    /// <summary>Ordinal of <paramref name="child"/> among its container's direct token children
+    /// - the same EndIndex-skipping walk WalkTokenChildren does when it renders them.</summary>
+    private int SideChildPosition(bool leftSide, int containerToken, int child)
+    {
+        var index = SideIndex(leftSide);
+        int position = 0;
+        int childIndex = containerToken + 1;
+
+        while (childIndex < index.TokenCount && childIndex != child)
+        {
+            var token = index.GetToken(childIndex);
+            if (IsContainer(token.Kind))
+            {
+                if (token.EndIndex < 0)
+                    break;
+                childIndex = token.EndIndex + 1;
+            }
+            else
+            {
+                childIndex++;
+            }
+
+            position++;
+        }
+
+        return position;
     }
 
     /// <summary>
@@ -577,6 +689,14 @@ public sealed class JsonDiffRowCollection : MemoryMappedCollectionBase
         if (TokenSubWalkIsLeft(record) != leftSide)
             return null;
 
+        // Nothing below this record is drawn from tokens at all: a descended record's children
+        // are its child RECORDS, and an approximate array is deliberately never opened. Either
+        // way the token has no row, so it is not a stop - without this the reveal would fall
+        // back to the record's own row, which sits above the stop just visited and reads as
+        // find-next running backwards.
+        if (RecordHasChildRecords(record) || record.IsAlignmentApproximate)
+            return null;
+
         // Only one side contributes rows down here, so ordering the tail by raw token index is
         // document order for it. Offset past the two record-row keys above.
         return ((long)owner << 32) | ((uint)token + 2);
@@ -610,37 +730,70 @@ public sealed class JsonDiffRowCollection : MemoryMappedCollectionBase
     private int FindRecordCovering(bool leftSide, int token)
     {
         var diff = session.Diff;
-        if (diff.RecordCount == 0 || !RecordCovers(diff.GetRecord(0), leftSide, token))
+        var order = StartOrder(leftSide);
+        if (order.Length == 0)
             return -1;
 
-        int current = 0;
-        while (true)
+        // Greatest record whose subtree STARTS at or before the token. In merged (DFS) order
+        // that is the deepest candidate; if its subtree ends before the token, the token sits
+        // in a gap and the covering record is one of its ancestors.
+        int lo = 0, hi = order.Length - 1, found = -1;
+        while (lo <= hi)
         {
-            var record = diff.GetRecord(current);
-            int end = record.SubtreeEnd < 0 ? diff.RecordCount : record.SubtreeEnd;
-            int next = -1;
-
-            int j = current + 1;
-            while (j < end && j < diff.RecordCount)
+            int mid = lo + (hi - lo) / 2;
+            if (StartToken(diff.GetRecord(order[mid]), leftSide) <= token)
             {
-                var child = diff.GetRecord(j);
-                if (child.ParentRecord != current)
-                    break;
-
-                if (RecordCovers(child, leftSide, token))
-                {
-                    next = j;
-                    break;
-                }
-
-                j = child.SubtreeEnd < 0 ? diff.RecordCount : child.SubtreeEnd;
+                found = mid;
+                lo = mid + 1;
             }
-
-            if (next < 0)
-                return current;
-
-            current = next;
+            else
+            {
+                hi = mid - 1;
+            }
         }
+
+        for (int candidate = found >= 0 ? order[found] : -1; candidate >= 0; candidate = diff.GetRecord(candidate).ParentRecord)
+        {
+            if (RecordCovers(diff.GetRecord(candidate), leftSide, token))
+                return candidate;
+        }
+
+        return -1;
+    }
+
+    private static int StartToken(JsonDiffRecord record, bool leftSide)
+        => leftSide ? record.LeftToken : record.RightToken;
+
+    /// <summary>
+    /// Record indices that touch this side, ordered by the token their subtree starts at, so
+    /// <see cref="FindRecordCovering"/> is a binary search rather than a walk down the record
+    /// tree scanning siblings from the start of each level. That scan was O(records before the
+    /// match), which made every find press on a large file cost more than the last.
+    ///
+    /// Built once, lazily, and only if find is actually used - the record log is append-only
+    /// and final by the time a diff is searchable, so it never needs invalidating. One int per
+    /// record per side; the tokens themselves are read back through GetRecord rather than
+    /// copied, to keep this a fraction of what the log it indexes already costs.
+    /// </summary>
+    private int[] StartOrder(bool leftSide)
+    {
+        ref int[]? cached = ref leftSide ? ref leftStartOrder : ref rightStartOrder;
+        if (cached is not null)
+            return cached;
+
+        var diff = session.Diff;
+        int count = diff.RecordCount;
+        var order = new List<int>(count);
+        for (int i = 0; i < count; i++)
+        {
+            if (StartToken(diff.GetRecord(i), leftSide) >= 0)
+                order.Add(i);
+        }
+
+        var array = order.ToArray();
+        Array.Sort(array, (a, b) => StartToken(diff.GetRecord(a), leftSide).CompareTo(StartToken(diff.GetRecord(b), leftSide)));
+        cached = array;
+        return array;
     }
 
     /// <summary>Whether <paramref name="token"/> lies within this record's subtree on the given

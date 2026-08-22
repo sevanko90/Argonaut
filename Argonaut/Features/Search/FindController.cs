@@ -50,6 +50,12 @@ public sealed class FindController
     private long requestId;
     private CancellationTokenSource? revealCts;
 
+    /// <summary>Depth of the press queue behind an in-flight find - see <see cref="FindAsync"/>.</summary>
+    private const int MaxQueuedFinds = 8;
+
+    private bool running;
+    private readonly Queue<(string Term, int Direction)> queued = new();
+
     public FindController(Action<string?> statusChanged, Func<IProgressReporter?> progressReporterFactory)
     {
         this.statusChanged = statusChanged;
@@ -68,8 +74,43 @@ public sealed class FindController
     /// <summary>
     /// Finds the next (<paramref name="direction"/> &gt;= 0) or previous match of
     /// <paramref name="term"/>, starting fresh background scans when the term changed.
+    ///
+    /// Presses are SERIALIZED, not run concurrently. The shell fires these and forgets them
+    /// (`_ = FindAsync(...)` on Enter), so holding the key starts one call per repeat, and each
+    /// does synchronous work the UI thread cannot be preempted out of - revealing a match
+    /// rebuilds the row list. Left overlapping, those pile up faster than they drain and the
+    /// window stops painting. Queued presses still each advance one match; only a leaned-on key
+    /// past <see cref="MaxQueuedFinds"/> is dropped, which is the case where the user cannot be
+    /// tracking individual steps anyway.
     /// </summary>
     public async Task FindAsync(string term, int direction)
+    {
+        if (running)
+        {
+            if (queued.Count < MaxQueuedFinds)
+                queued.Enqueue((term, direction));
+            return;
+        }
+
+        running = true;
+        try
+        {
+            await FindCoreAsync(term, direction);
+
+            while (queued.Count > 0)
+            {
+                var (nextTerm, nextDirection) = queued.Dequeue();
+                await FindCoreAsync(nextTerm, nextDirection);
+            }
+        }
+        finally
+        {
+            running = false;
+            queued.Clear();
+        }
+    }
+
+    private async Task FindCoreAsync(string term, int direction)
     {
         if (navigator is null || string.IsNullOrEmpty(term))
             return;

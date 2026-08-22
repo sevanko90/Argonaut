@@ -9,21 +9,18 @@ namespace Argonaut.Tests;
 /// Measures the time/allocation cost of one <see cref="JsonVisibleRowCollection.Rebuild"/>
 /// (triggered indirectly via <see cref="JsonVisibleRowCollection.ToggleExpand"/> on an
 /// unrelated container) while a top-level 10-element array has elements 3, 5 and 9 expanded
-/// - each a nested array of 10,000 numbers. RevealLimit stands in for "the display cap":
-/// 2000 is today's default single-reveal ChildCap; 10000 is reached via the same public
-/// "show more" path (repeated ToggleExpand on the placeholder row) the UI already uses, since
-/// Rebuild's cost depends on how many rows are currently visible, not on how they got
-/// revealed - this measures the same quantity a raised ChildCap would produce without
-/// touching product code.
+/// - each a nested array large enough to exercise both the initial reveal and one "show more"
+/// page. The parameters reference the production constants so cap changes cannot silently
+/// make the benchmark measure a mislabeled size or search for a nonexistent placeholder.
 /// </summary>
 [MemoryDiagnoser]
 public class RebuildCostBenchmarks
 {
     private const int OuterCount = 10;
-    private const int InnerCount = 10_000;
+    private const int InnerCount = JsonVisibleRowCollection.MaxDisplayedChildrenPerContainer;
     private static readonly int[] ExpandedElements = { 3, 5, 9 };
 
-    [Params(2000, 10000)]
+    [Params(JsonVisibleRowCollection.ChildCap, JsonVisibleRowCollection.MaxDisplayedChildrenPerContainer)]
     public int RevealLimit { get; set; }
 
     private string path = null!;
@@ -78,14 +75,14 @@ public class RebuildCostBenchmarks
     {
         int pos = rows.FindVisiblePosition(arrayTokenIndex)
             ?? throw new InvalidOperationException("element array not visible");
-        rows.ToggleExpand(pos); // reveals up to the default ChildCap (2000)
-        int revealed = 2000;
+        rows.ToggleExpand(pos); // reveals the first production-sized page
+        int revealed = JsonVisibleRowCollection.ChildCap;
 
         while (revealed < revealLimit)
         {
             int placeholderPos = FindPlaceholderPosition(rows);
             rows.ToggleExpand(placeholderPos); // "show more": bumps the limit by ChildCap
-            revealed += 2000;
+            revealed += JsonVisibleRowCollection.ChildCap;
         }
     }
 

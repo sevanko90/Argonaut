@@ -1,5 +1,6 @@
 using System;
 using System.Threading;
+using System.Threading.Tasks;
 using Argonaut.Infrastructure;
 
 namespace Argonaut.Features.Json.Diff;
@@ -23,6 +24,7 @@ namespace Argonaut.Features.Json.Diff;
 public sealed class JsonDiffSession : IDisposable
 {
     private readonly CancellationTokenSource diffCts;
+    private readonly Task hashReleaseTask;
     private bool disposed;
 
     public IndexedFileSession<JsonStructureIndex> Left { get; }
@@ -45,7 +47,12 @@ public sealed class JsonDiffSession : IDisposable
         this.Right = right;
         this.Diff = diff;
         this.diffCts = diffCts;
+        this.hashReleaseTask = ReleaseContentHashesWhenFinishedAsync(left, right, diff);
     }
+
+    /// <summary>Completes after both index writers and the diff reader have stopped and their
+    /// now-unused content-hash logs have been released. Internal for deterministic tests.</summary>
+    internal Task HashReleaseTask => this.hashReleaseTask;
 
     /// <summary>
     /// Opens both files, starts both indexers (with content hashes - the whole point) and
@@ -91,6 +98,26 @@ public sealed class JsonDiffSession : IDisposable
         }
     }
 
+    private static async Task ReleaseContentHashesWhenFinishedAsync(
+        IndexedFileSession<JsonStructureIndex> left,
+        IndexedFileSession<JsonStructureIndex> right,
+        JsonDiffIndex diff)
+    {
+        try
+        {
+            await Task.WhenAll(left.IndexingTask, right.IndexingTask, diff.IndexingTask).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Failed/cancelled producers are still safe to release once every task stopped.
+        }
+        finally
+        {
+            left.Index.ReleaseContentHashes();
+            right.Index.ReleaseContentHashes();
+        }
+    }
+
     public void Dispose()
     {
         if (this.disposed)
@@ -103,6 +130,7 @@ public sealed class JsonDiffSession : IDisposable
 
         this.Left.Dispose();
         this.Right.Dispose();
+        try { this.hashReleaseTask.Wait(); } catch { /* release task deliberately absorbs producer failures */ }
         this.diffCts.Dispose();
     }
 }

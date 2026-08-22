@@ -81,12 +81,15 @@ public partial class MainWindow : Window
             EmptyState.SetRecentFiles(viewModel.RecentFiles);
     }
 
-    public async Task OpenInitialFileAsync(string path)
+    /// <param name="second">A second command-line path (e.g. `argonaut a.json b.json`), or
+    /// null for the single-file case. See <see cref="MainWindowViewModel.OpenPathsAsync"/> for
+    /// how the pair decides between diff mode and opening <paramref name="first"/> alone.</param>
+    public async Task OpenInitialFileAsync(string? first, string? second = null)
     {
-        OpenDebugLog.Write($"OpenInitialFileAsync: {path}");
+        OpenDebugLog.Write($"OpenInitialFileAsync: first={first}, second={second}");
         try
         {
-            await viewModel.OpenPathAsync(path);
+            await viewModel.OpenPathsAsync(first, second);
             OpenDebugLog.Write($"OpenInitialFileAsync completed, currentFilePath={viewModel.FilePath ?? "<null>"}");
         }
         catch (Exception ex)

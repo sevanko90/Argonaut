@@ -121,17 +121,43 @@ public class JsonDiffFindTests
         Assert.Null(h.Vm.HighlightTerm);
     }
 
-    [Fact]
-    public async Task Find_CountsMatchesFromBothDocuments()
+    /// <summary>The final count lands once both scans finish, which is a beat after the press.</summary>
+    private static async Task AssertSettlesOnAsync(Harness h, string expected)
     {
-        // "needle" once on each side, in properties that differ - two matches, not one.
+        for (int i = 0; i < 200 && !h.Statuses.Contains(expected); i++)
+            await Task.Delay(10);
+
+        Assert.Contains(expected, h.Statuses);
+    }
+
+    [Fact]
+    public async Task Find_CountsStopsInBothDocuments()
+    {
+        // "needle" on each side of a Modified leaf. That row renders BOTH panes, so both are
+        // genuinely on screen and both are stops.
         using var h = await LoadAsync(
             """{"a":"needle-left"}""",
             """{"a":"needle-right"}""");
 
         await h.Controller.FindAsync("needle", 1);
 
-        Assert.Contains(h.Statuses, s => s is not null && s.Contains("of 2"));
+        await AssertSettlesOnAsync(h, "1 of 2");
+    }
+
+    [Fact]
+    public async Task Find_CountsPlacesItWillStop_NotTimesTheBytesOccur()
+    {
+        // The heart of the stop list: "needle" occurs in BOTH files, but the unchanged "outer"
+        // subtree is rendered from the left document into both panes, so the right file's copy
+        // is not on screen and find will never stop there. The count has to say 1, not 2 -
+        // otherwise it advertises a stop that cannot be reached and the numbering skips.
+        using var h = await LoadAsync(
+            """{"outer":{"deep":"needle"},"x":1}""",
+            """{"outer":{"deep":"needle"},"x":2}""");
+
+        await h.Controller.FindAsync("needle", 1);
+
+        await AssertSettlesOnAsync(h, "1 of 1");
     }
 
     [Fact]

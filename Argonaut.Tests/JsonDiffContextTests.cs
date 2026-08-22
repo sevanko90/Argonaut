@@ -239,6 +239,34 @@ public class JsonDiffContextTests
     }
 
     [Fact]
+    public async Task AddedRow_SwappingSourceToPathMode_StillShowsAddedPlaceholder_NotAPhantomPath()
+    {
+        // Swapping to path mode used to bypass the placeholder and fall back to PathFor,
+        // which for a null Left resolves the RIGHT side's path instead - a path for a
+        // property that doesn't exist on the source at all.
+        var (vm, l, r) = await LoadAsync("""{"a":1}""", """{"a":1,"new":"hello"}""");
+        try
+        {
+            vm.GoToNextDiff();
+            vm.ToggleSourceMode();
+
+            Assert.Equal("value", vm.SourceModeLabel); // toggled TO path, reads as swap-to-value
+            Assert.Equal(string.Empty, vm.SourcePrefix + vm.SourceChanged + vm.SourceSuffix);
+            Assert.NotNull(vm.SourcePlaceholder);
+            Assert.Contains("added", vm.SourcePlaceholder);
+            Assert.False(vm.ShowSourceValue);
+
+            // The target side is unaffected and still shows its real path when swapped too.
+            vm.ToggleTargetMode();
+            Assert.Equal("$.new", vm.TargetPrefix);
+        }
+        finally
+        {
+            Cleanup(vm, l, r);
+        }
+    }
+
+    [Fact]
     public async Task RemovedRow_SourceValuePlain_TargetShowsDeletedPlaceholder()
     {
         var (vm, l, r) = await LoadAsync("""{"a":1,"gone":"bye"}""", """{"a":1}""");
@@ -255,6 +283,30 @@ public class JsonDiffContextTests
             Assert.NotNull(vm.TargetPlaceholder);
             Assert.Contains("deleted", vm.TargetPlaceholder);
             Assert.False(vm.ShowTargetValue);
+        }
+        finally
+        {
+            Cleanup(vm, l, r);
+        }
+    }
+
+    [Fact]
+    public async Task RemovedRow_SwappingTargetToPathMode_StillShowsDeletedPlaceholder_NotAPhantomPath()
+    {
+        var (vm, l, r) = await LoadAsync("""{"a":1,"gone":"bye"}""", """{"a":1}""");
+        try
+        {
+            vm.GoToNextDiff();
+            vm.ToggleTargetMode();
+
+            Assert.Equal(string.Empty, vm.TargetPrefix + vm.TargetChanged + vm.TargetSuffix);
+            Assert.NotNull(vm.TargetPlaceholder);
+            Assert.Contains("deleted", vm.TargetPlaceholder);
+            Assert.False(vm.ShowTargetValue);
+
+            // The source side is unaffected and still shows its real path when swapped too.
+            vm.ToggleSourceMode();
+            Assert.Equal("$.gone", vm.SourcePrefix);
         }
         finally
         {

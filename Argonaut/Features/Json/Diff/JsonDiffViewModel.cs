@@ -192,25 +192,25 @@ public sealed class JsonDiffViewModel : ObservableObject, IDocumentViewModel
         string? leftValue = row.Left?.Value;
         string? rightValue = row.Right?.Value;
 
-        SourcePlaceholder = sourceShowsPath ? null : AbsenceReason(row, side: row.Left);
-        TargetPlaceholder = targetShowsPath ? null : AbsenceReason(row, side: row.Right);
+        // Absence is a property of the SIDE, not of path-vs-value mode: a side with no row of
+        // its own has no path to show any more than it has a value to show (PathFor's
+        // fallback would otherwise hand back the *other* side's path - a phantom that reads
+        // as "here's where this lives" for a property that, on this side, doesn't exist).
+        SourcePlaceholder = AbsenceReason(row, side: row.Left);
+        TargetPlaceholder = AbsenceReason(row, side: row.Right);
 
-        // A side with no row of its own has nothing to render as a value - its placeholder
-        // above says why. The OTHER side then renders plain: there's no counterpart to diff
-        // against, and highlighting it whole would claim its entire text is "the change"
-        // when really the whole row is the change, which the placeholder already states.
-        (SourcePrefix, SourceChanged, SourceSuffix) = sourceShowsPath
-            ? (PathFor(row, target: false) ?? string.Empty, string.Empty, string.Empty)
-            : SourcePlaceholder is not null
-                ? (string.Empty, string.Empty, string.Empty)
+        (SourcePrefix, SourceChanged, SourceSuffix) = SourcePlaceholder is not null
+            ? (string.Empty, string.Empty, string.Empty)
+            : sourceShowsPath
+                ? (PathFor(row, target: false) ?? string.Empty, string.Empty, string.Empty)
                 : TargetPlaceholder is not null
                     ? (leftValue ?? string.Empty, string.Empty, string.Empty)
                     : SplitByCommonAffixes(leftValue ?? string.Empty, rightValue ?? string.Empty);
 
-        (TargetPrefix, TargetChanged, TargetSuffix) = targetShowsPath
-            ? (PathFor(row, target: true) ?? string.Empty, string.Empty, string.Empty)
-            : TargetPlaceholder is not null
-                ? (string.Empty, string.Empty, string.Empty)
+        (TargetPrefix, TargetChanged, TargetSuffix) = TargetPlaceholder is not null
+            ? (string.Empty, string.Empty, string.Empty)
+            : targetShowsPath
+                ? (PathFor(row, target: true) ?? string.Empty, string.Empty, string.Empty)
                 : SourcePlaceholder is not null
                     ? (rightValue ?? string.Empty, string.Empty, string.Empty)
                     : SplitByCommonAffixes(rightValue ?? string.Empty, leftValue ?? string.Empty);

@@ -431,6 +431,21 @@ public sealed class JsonDiffRowCollection : MemoryMappedCollectionBase
     /// position in the (possibly now-different) visible list.</summary>
     private int RevealAndLocate(int recordIndex)
     {
+        if (ExpandRecordAncestors(recordIndex))
+            Rebuild();
+
+        if (LocateRecordRow(recordIndex) is { } position)
+            return position;
+
+        // Every ancestor was just confirmed expanded (or already was), so the record's row
+        // must be in the walk - this would only trip if the log itself were inconsistent.
+        throw new InvalidOperationException($"Diff record {recordIndex} not found after revealing its ancestors.");
+    }
+
+    /// <summary>Flips every collapsed ancestor of <paramref name="recordIndex"/> to expanded,
+    /// without rebuilding - the caller batches that. True when anything actually changed.</summary>
+    private bool ExpandRecordAncestors(int recordIndex)
+    {
         var diff = session.Diff;
         bool changed = false;
         for (int ancestor = diff.GetRecord(recordIndex).ParentRecord; ancestor >= 0; ancestor = diff.GetRecord(ancestor).ParentRecord)
@@ -442,18 +457,175 @@ public sealed class JsonDiffRowCollection : MemoryMappedCollectionBase
             changed = true;
         }
 
-        if (changed)
-            Rebuild();
+        return changed;
+    }
 
+    private int? LocateRecordRow(int recordIndex)
+    {
         for (int i = 0; i < visibleRows.Count; i++)
         {
             if (visibleRows[i].Kind == RowKind.Record && visibleRows[i].RecordIndex == recordIndex)
                 return i;
         }
 
-        // Every ancestor was just confirmed expanded (or already was), so the record's row
-        // must be in the walk - this would only trip if the log itself were inconsistent.
-        throw new InvalidOperationException($"Diff record {recordIndex} not found after revealing its ancestors.");
+        return null;
+    }
+
+    // ── Revealing a token (find) ───────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Makes the row showing <paramref name="token"/> of the left (or right) document visible,
+    /// expanding whatever records and sub-rows stand in the way, and returns its position.
+    /// Backs find, which resolves a match's byte offset to a token on one side and needs the
+    /// merged list to show it - the diff's counterpart to JsonVisibleRowCollection.EnsureVisible.
+    ///
+    /// Falls back to the enclosing record's own row (rather than failing) whenever the exact
+    /// token has no row of its own: the display cap elided it, or - the structural case - it
+    /// lives inside a region rendered from the OTHER side. An undescended Unchanged subtree is
+    /// walked off the left document into both panes, so a right-document token in there is
+    /// never a row; its content is on screen, mirrored, at the record it belongs to.
+    ///
+    /// Null only when the token belongs to no record at all (nothing indexed yet).
+    /// </summary>
+    public int? EnsureVisible(bool leftSide, int token)
+    {
+        int owner = FindRecordCovering(leftSide, token);
+        if (owner < 0)
+            return null;
+
+        var record = session.Diff.GetRecord(owner);
+        int ownerToken = leftSide ? record.LeftToken : record.RightToken;
+
+        bool changed = ExpandRecordAncestors(owner);
+
+        // The record's own row IS the token's row - nothing below it needs opening.
+        if (token != ownerToken && TokenSubWalkIsLeft(record) == leftSide && !RecordHasChildRecords(record))
+        {
+            if (!IsRecordExpanded(record))
+            {
+                Toggle(recordOverrides, owner);
+                changed = true;
+            }
+
+            var overrides = leftSide ? leftTokenOverrides : rightTokenOverrides;
+            var index = SideIndex(leftSide);
+
+            // Sub-rows sit at merged depth >= 1, where IsSubExpanded's default is collapsed -
+            // so membership of the override set is exactly "expanded" for them, and adding is
+            // exactly "expand". Walks strictly between the token and the record's own token.
+            for (int ancestor = index.GetToken(token).ParentIndex;
+                 ancestor >= 0 && ancestor != ownerToken;
+                 ancestor = index.GetToken(ancestor).ParentIndex)
+            {
+                changed |= overrides.Add(ancestor);
+            }
+        }
+
+        if (changed)
+            Rebuild();
+
+        for (int i = 0; i < visibleRows.Count; i++)
+        {
+            var vrow = visibleRows[i];
+            if (vrow.Kind == RowKind.Record)
+            {
+                if (vrow.RecordIndex == owner && token == ownerToken)
+                    return i;
+                continue;
+            }
+
+            if (vrow.Kind != RowKind.Placeholder && vrow.Token == token && (vrow.Kind != RowKind.SubRight) == leftSide)
+                return i;
+        }
+
+        return LocateRecordRow(owner);
+    }
+
+    /// <summary>
+    /// Where <paramref name="token"/> falls in the merged display order, as a sortable key -
+    /// what lets one find bar interleave matches from both documents into a single sequence
+    /// (see <see cref="Search.ISearchNavigator.OrderKey"/>). Keyed on the owning RECORD, not on
+    /// a visible row position, so it stays put as the user expands and collapses; long.MaxValue
+    /// for a token no record covers yet, which parks it at the end rather than at the start.
+    /// </summary>
+    public long RowOrderKey(bool leftSide, int token)
+    {
+        int owner = FindRecordCovering(leftSide, token);
+        if (owner < 0)
+            return long.MaxValue;
+
+        // Within one record only its own sub-walk side contributes rows, so ordering the tail
+        // by raw token index is document order for whichever side that is.
+        return ((long)owner << 32) | (uint)token;
+    }
+
+    /// <summary>Which document an undescended record's token sub-rows are walked from - see the
+    /// switch in <see cref="WalkRecordSubtree"/>, of which this is the predicate form.</summary>
+    private static bool TokenSubWalkIsLeft(JsonDiffRecord record) => record.Status switch
+    {
+        DiffStatus.Added => false,
+        DiffStatus.Removed => true,
+        DiffStatus.Moved => record.IsMoveSource,
+        _ => true, // Unchanged/undescended: mirrored from the left document into both panes.
+    };
+
+    /// <summary>
+    /// The deepest record whose subtree on <paramref name="leftSide"/> contains
+    /// <paramref name="token"/>, or -1. Descends the record tree the same way the walk does
+    /// (children scanned by ParentRecord, whole subtrees skipped via SubtreeEnd), so it costs
+    /// O(depth x siblings-per-level) rather than a pass over the whole log - and needs no
+    /// token-to-record map, which at multi-GB scale would cost as much as the diff itself.
+    /// </summary>
+    private int FindRecordCovering(bool leftSide, int token)
+    {
+        var diff = session.Diff;
+        if (diff.RecordCount == 0 || !RecordCovers(diff.GetRecord(0), leftSide, token))
+            return -1;
+
+        int current = 0;
+        while (true)
+        {
+            var record = diff.GetRecord(current);
+            int end = record.SubtreeEnd < 0 ? diff.RecordCount : record.SubtreeEnd;
+            int next = -1;
+
+            int j = current + 1;
+            while (j < end && j < diff.RecordCount)
+            {
+                var child = diff.GetRecord(j);
+                if (child.ParentRecord != current)
+                    break;
+
+                if (RecordCovers(child, leftSide, token))
+                {
+                    next = j;
+                    break;
+                }
+
+                j = child.SubtreeEnd < 0 ? diff.RecordCount : child.SubtreeEnd;
+            }
+
+            if (next < 0)
+                return current;
+
+            current = next;
+        }
+    }
+
+    /// <summary>Whether <paramref name="token"/> lies within this record's subtree on the given
+    /// side. A container still streaming (EndIndex &lt; 0) is treated as covering everything
+    /// after it, which is what keeps a reveal working against a partially-indexed file.</summary>
+    private bool RecordCovers(JsonDiffRecord record, bool leftSide, int token)
+    {
+        int start = leftSide ? record.LeftToken : record.RightToken;
+        if (start < 0 || token < start)
+            return false;
+
+        var info = SideIndex(leftSide).GetToken(start);
+        if (!IsContainer(info.Kind))
+            return token == start;
+
+        return info.EndIndex < 0 || token <= info.EndIndex;
     }
 
     // ── Row materialization ────────────────────────────────────────────────────────────

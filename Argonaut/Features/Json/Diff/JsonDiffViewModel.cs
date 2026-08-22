@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
@@ -15,10 +16,11 @@ namespace Argonaut.Features.Json.Diff;
 /// never via FileTypeDetector, so it claims no FileKind and the view switcher doesn't
 /// offer it; switching away disposes it via the normal outgoing-document path.
 ///
-/// Find is unavailable in v1 (<see cref="CreateSearchNavigator"/> returns null and the
-/// find bar hides, exactly like IncompatibleViewModel). A side's indexing failure is
-/// surfaced through <see cref="IndexFailure"/> with the side named in the message - the
-/// shell's existing zero-progress/partial-progress handling then applies unchanged.
+/// Find runs over BOTH documents from the shell's one find bar - see
+/// <see cref="JsonDiffSearchNavigator"/> for how the two scans interleave into a single
+/// next/previous sequence. A side's indexing failure is surfaced through
+/// <see cref="IndexFailure"/> with the side named in the message - the shell's existing
+/// zero-progress/partial-progress handling then applies unchanged.
 /// </summary>
 public sealed class JsonDiffViewModel : ObservableObject, IDocumentViewModel
 {
@@ -39,6 +41,7 @@ public sealed class JsonDiffViewModel : ObservableObject, IDocumentViewModel
     private string targetSuffix = string.Empty;
     private string? sourcePlaceholder;
     private string? targetPlaceholder;
+    private string? highlightTerm;
 
     public string FilePath { get; private set; } = string.Empty;
 
@@ -64,7 +67,54 @@ public sealed class JsonDiffViewModel : ObservableObject, IDocumentViewModel
 
     public Task IndexingTask => session?.Diff.IndexingTask ?? Task.CompletedTask;
 
-    public ISearchNavigator? CreateSearchNavigator() => null;
+    /// <summary>
+    /// The active find term, highlighted in both panes' rows (see SearchHighlight, threaded
+    /// through JsonRowPresenter). Null when no find is active.
+    /// </summary>
+    public string? HighlightTerm
+    {
+        get => highlightTerm;
+        set => SetField(ref highlightTerm, value);
+    }
+
+    /// <summary>One navigator over both documents - see <see cref="JsonDiffSearchNavigator"/>.
+    /// Null before <see cref="LoadAsync"/> has produced a session, which is also the state an
+    /// unusable diff is left in.</summary>
+    public ISearchNavigator? CreateSearchNavigator()
+        => session is { } s && rows is not null ? new JsonDiffSearchNavigator(this, s.Left.File, s.Right.File) : null;
+
+    /// <summary>
+    /// Reveals a find match: resolves its byte offset to a token in the document it was found
+    /// in, then selects the merged row showing that token - expanding whatever stands in the
+    /// way (see <see cref="JsonDiffRowCollection.EnsureVisible"/>). Because a diff row carries
+    /// both sides, landing on it brings the other document's counterpart into view too.
+    /// </summary>
+    public async Task RevealMatchAsync(bool leftSide, SearchMatch match, CancellationToken ct)
+    {
+        if (session is not { } s || rows is null)
+            return;
+
+        var index = leftSide ? s.Left.Index : s.Right.Index;
+        var token = await JsonOffsetTokenResolver.ResolveWhenCoveredAsync(index, match.Offset, ct);
+        ct.ThrowIfCancellationRequested();
+
+        if (token is int t && rows.EnsureVisible(leftSide, t) is { } position)
+            SelectedPosition = position;
+    }
+
+    /// <summary>Where a match sits in the merged order find steps through - see
+    /// <see cref="JsonDiffRowCollection.RowOrderKey"/>. Synchronous and best-effort: a match in
+    /// a region not yet indexed sorts last rather than blocking the step.</summary>
+    public long MatchOrderKey(bool leftSide, SearchMatch match)
+    {
+        if (session is not { } s || rows is null)
+            return match.Offset;
+
+        var index = leftSide ? s.Left.Index : s.Right.Index;
+        return JsonOffsetTokenResolver.ResolveTokenForOffset(index, match.Offset) is int t
+            ? rows.RowOrderKey(leftSide, t)
+            : long.MaxValue;
+    }
 
     // ── Selection and the source/target context bar ────────────────────────────────────
 

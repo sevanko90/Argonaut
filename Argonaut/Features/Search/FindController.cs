@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Infrastructure;
@@ -6,10 +7,16 @@ using Argonaut.Infrastructure;
 namespace Argonaut.Features.Search;
 
 /// <summary>
-/// UI-side orchestration of find / find next for the currently open file. Owns the search
-/// session lifecycle (one at a time; a changed term or a stop cancels the previous scan),
-/// the result cursor and wrap semantics, and hands each chosen match to the attached
+/// UI-side orchestration of find / find next for the currently open document. Owns the search
+/// session lifecycle (one per searched file; a changed term or a stop cancels the previous
+/// scans), the result cursor and wrap semantics, and hands each chosen match to the attached
 /// <see cref="ISearchNavigator"/> to reveal.
+///
+/// A document may expose more than one file (the diff's two sides). Each gets its own session
+/// and its own cursor, and stepping picks whichever side's next match comes first in
+/// <see cref="ISearchNavigator.OrderKey"/> order - so one find bar walks both documents as a
+/// single sequence, in display order, rather than draining one before starting the other.
+/// The single-file case is that machinery with one entry, and behaves exactly as before.
 ///
 /// All public members run on the UI thread; awaits resume there, and a monotonic request id
 /// (the codebase's staleness idiom) guards every post-await continuation against a newer
@@ -21,9 +28,25 @@ public sealed class FindController
     private readonly Func<IProgressReporter?> progressReporterFactory;
 
     private ISearchNavigator? navigator;
-    private FileSearchSession? session;
+    private FileSearchSession[] sessions = Array.Empty<FileSearchSession>();
     private string? sessionTerm;
-    private int cursor = -1;
+
+    /// <summary>
+    /// Per-file cursor, holding this invariant: <c>cursors[i]</c> is the index of the last
+    /// match in file <c>i</c> whose key is at or before the current selection's key (-1 when
+    /// that file has nothing at or before it yet). So the next candidate going forward is
+    /// always <c>cursors[i] + 1</c>, and going back it is <c>cursors[i]</c> - except in the
+    /// file the selection itself came from, where it is one earlier.
+    /// </summary>
+    private int[] cursors = Array.Empty<int>();
+
+    private int currentFile = -1;
+    private long currentKey;
+
+    /// <summary>Position of the selection in the merged sequence, or -1 before the first step.
+    /// Tracked incrementally rather than recomputed: the merged sequence is never materialized.</summary>
+    private int mergedOrdinal = -1;
+
     private long requestId;
     private CancellationTokenSource? revealCts;
 
@@ -34,7 +57,7 @@ public sealed class FindController
     }
 
     /// <summary>
-    /// Attaches the navigator for a newly opened file, or null for a document with nothing
+    /// Attaches the navigator for a newly opened document, or null for one with nothing
     /// searchable. Call after <see cref="StopAsync"/>.
     /// </summary>
     public void Attach(ISearchNavigator? navigator)
@@ -44,7 +67,7 @@ public sealed class FindController
 
     /// <summary>
     /// Finds the next (<paramref name="direction"/> &gt;= 0) or previous match of
-    /// <paramref name="term"/>, starting a fresh background scan when the term changed.
+    /// <paramref name="term"/>, starting fresh background scans when the term changed.
     /// </summary>
     public async Task FindAsync(string term, int direction)
     {
@@ -54,82 +77,63 @@ public sealed class FindController
         long request = ++requestId;
         CancelReveal();
 
-        if (session is null || !string.Equals(term, sessionTerm, StringComparison.Ordinal))
+        if (sessions.Length == 0 || !string.Equals(term, sessionTerm, StringComparison.Ordinal))
         {
-            await DisposeSessionAsync();
+            await DisposeSessionsAsync();
             if (request != requestId)
                 return;
 
+            var files = navigator.Files;
             sessionTerm = term;
-            cursor = -1;
-            session = FileSearchSession.Start(navigator.File, new LiteralSearchMatcher(term), progressReporterFactory());
+            sessions = new FileSearchSession[files.Count];
+            cursors = new int[files.Count];
+            for (int i = 0; i < files.Count; i++)
+            {
+                sessions[i] = FileSearchSession.Start(files[i], new LiteralSearchMatcher(term), progressReporterFactory());
+                cursors[i] = -1;
+            }
+
+            currentFile = -1;
+            mergedOrdinal = -1;
             navigator.SetHighlightTerm(term);
-            _ = RefreshStatusOnCompletionAsync(session, request);
+            _ = RefreshStatusOnCompletionAsync(sessions, request);
         }
 
-        var activeSession = session;
-        bool wrapped = false;
+        var active = sessions;
+        bool wrapped;
 
         if (direction >= 0)
         {
-            // Wait for the next match to stream in; never wrap while the scan is still
+            // Wait for each side's next match to stream in; never wrap while any scan is still
             // running, so "n of m" stays monotone.
-            while (activeSession.MatchCount <= cursor + 1 && !activeSession.IsComplete)
+            for (int i = 0; i < active.Length; i++)
             {
-                statusChanged("Searching…");
-                await activeSession.WaitForMatchCountAsync(cursor + 2);
-                if (request != requestId)
+                if (!await EnsureForwardCandidateAsync(i, request))
                     return;
             }
 
-            if (activeSession.MatchCount == 0)
+            if (!TryStepForward(active, out wrapped))
             {
-                UpdateStatus(activeSession, wrapped: false);
+                UpdateStatus(active, wrapped: false);
                 return;
-            }
-
-            if (cursor + 1 < activeSession.MatchCount)
-            {
-                cursor += 1;
-            }
-            else
-            {
-                cursor = 0;
-                wrapped = true;
             }
         }
         else
         {
-            if (activeSession.MatchCount == 0)
+            if (!TryStepBackward(active, out wrapped))
             {
-                UpdateStatus(activeSession, wrapped: false);
-                return;
-            }
-
-            if (cursor > 0)
-            {
-                cursor -= 1;
-            }
-            else if (activeSession.IsComplete)
-            {
-                // Wrapping backward needs the full match list, so it too waits for completion.
-                cursor = activeSession.MatchCount - 1;
-                wrapped = true;
-            }
-            else
-            {
-                UpdateStatus(activeSession, wrapped: false);
+                UpdateStatus(active, wrapped: false);
                 return;
             }
         }
 
-        UpdateStatus(activeSession, wrapped);
+        UpdateStatus(active, wrapped);
 
         var cts = new CancellationTokenSource();
         revealCts = cts;
         try
         {
-            await navigator.RevealAsync(activeSession.GetMatch(cursor), cts.Token);
+            await navigator.RevealAsync(currentFile, active[currentFile].GetMatch(cursors[currentFile]), cts.Token);
         }
         catch (OperationCanceledException)
         {
@@ -137,9 +141,184 @@ public sealed class FindController
         }
     }
 
+    /// <summary>Waits until file <paramref name="i"/> either has a next match to offer or has
+    /// finished scanning. False when a newer request took over mid-wait.</summary>
+    private async Task<bool> EnsureForwardCandidateAsync(int i, long request)
+    {
+        var session = sessions[i];
+        while (cursors[i] + 1 >= session.MatchCount && !session.IsComplete)
+        {
+            statusChanged("Searching…");
+            await session.WaitForMatchCountAsync(cursors[i] + 2);
+            if (request != requestId)
+                return false;
+        }
+
+        return true;
+    }
+
     /// <summary>
-    /// Stops the active search: cancels any in-flight reveal, cancels the background scan
-    /// and waits for it to let go of the file, and clears row highlighting. MUST complete
+    /// Advances to the earliest next match across all files, wrapping to the very first match
+    /// when every file is exhausted. False when there is nothing to select at all.
+    /// </summary>
+    private bool TryStepForward(FileSearchSession[] active, out bool wrapped)
+    {
+        wrapped = false;
+
+        if (!TryPickForward(active, out int file))
+        {
+            // Nothing further ahead. Wrapping needs every scan finished, or a match found
+            // after the wrap could turn out to belong before the one we jumped to.
+            if (!AllComplete(active) || TotalMatches(active) == 0)
+                return false;
+
+            for (int i = 0; i < cursors.Length; i++)
+                cursors[i] = -1;
+
+            if (!TryPickForward(active, out file))
+                return false;
+
+            wrapped = true;
+        }
+
+        cursors[file]++;
+        currentFile = file;
+        currentKey = KeyAt(active, file, cursors[file]);
+        mergedOrdinal = wrapped ? 0 : mergedOrdinal + 1;
+        return true;
+    }
+
+    /// <summary>Lowest-keyed candidate among each file's next unconsumed match.</summary>
+    private bool TryPickForward(FileSearchSession[] active, out int file)
+    {
+        file = -1;
+        long best = 0;
+
+        for (int i = 0; i < active.Length; i++)
+        {
+            int candidate = cursors[i] + 1;
+            if (candidate >= active[i].MatchCount)
+                continue;
+
+            long key = KeyAt(active, i, candidate);
+            if (file < 0 || key < best)
+            {
+                file = i;
+                best = key;
+            }
+        }
+
+        return file >= 0;
+    }
+
+    /// <summary>
+    /// Steps back to the latest match before the current selection, wrapping to the very last
+    /// match when there is nothing before it. False when there is nothing to select.
+    /// </summary>
+    private bool TryStepBackward(FileSearchSession[] active, out bool wrapped)
+    {
+        wrapped = false;
+
+        int total = TotalMatches(active);
+        if (total == 0)
+            return false;
+
+        int file = -1;
+        int chosen = -1;
+        long best = 0;
+
+        for (int i = 0; i < active.Length; i++)
+        {
+            // Every file's cursor sits at or before the selection; only the file the selection
+            // came from sits exactly ON it, so that one has to step an extra place back.
+            int candidate = i == currentFile ? cursors[i] - 1 : cursors[i];
+            if (candidate < 0 || candidate >= active[i].MatchCount)
+                continue;
+
+            long key = KeyAt(active, i, candidate);
+            if (file < 0 || key > best)
+            {
+                file = i;
+                chosen = candidate;
+                best = key;
+            }
+        }
+
+        if (file < 0)
+        {
+            // Wrapping backward lands on the last match overall, so it needs the full lists.
+            if (!AllComplete(active))
+                return false;
+
+            for (int i = 0; i < active.Length; i++)
+            {
+                int candidate = active[i].MatchCount - 1;
+                if (candidate < 0)
+                    continue;
+
+                long key = KeyAt(active, i, candidate);
+                if (file < 0 || key > best)
+                {
+                    file = i;
+                    chosen = candidate;
+                    best = key;
+                }
+            }
+
+            if (file < 0)
+                return false;
+
+            wrapped = true;
+        }
+
+        currentFile = file;
+        currentKey = best;
+        cursors[file] = chosen;
+
+        // Restore the cursor invariant everywhere else: no other file may still point past the
+        // new selection. One step back normally moves each by at most one; a wrap resets them
+        // from the end, which this same walk brings down to the right place.
+        for (int i = 0; i < active.Length; i++)
+        {
+            if (i == file)
+                continue;
+
+            if (wrapped)
+                cursors[i] = active[i].MatchCount - 1;
+
+            while (cursors[i] >= 0 && KeyAt(active, i, cursors[i]) > currentKey)
+                cursors[i]--;
+        }
+
+        mergedOrdinal = wrapped ? total - 1 : mergedOrdinal - 1;
+        return true;
+    }
+
+    private long KeyAt(FileSearchSession[] active, int file, int index)
+        => navigator!.OrderKey(file, active[file].GetMatch(index));
+
+    private static int TotalMatches(FileSearchSession[] active)
+    {
+        int total = 0;
+        foreach (var session in active)
+            total += session.MatchCount;
+        return total;
+    }
+
+    private static bool AllComplete(FileSearchSession[] active)
+    {
+        foreach (var session in active)
+        {
+            if (!session.IsComplete)
+                return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Stops the active search: cancels any in-flight reveal, cancels the background scans
+    /// and waits for them to let go of the files, and clears row highlighting. MUST complete
     /// before the current view's MMapFile is disposed - a scan thread touching a disposed
     /// mapping is an access violation.
     /// </summary>
@@ -149,10 +328,10 @@ public sealed class FindController
         CancelReveal();
         navigator?.SetHighlightTerm(null);
         statusChanged(null);
-        await DisposeSessionAsync();
+        await DisposeSessionsAsync();
     }
 
-    /// <summary>Stops the active search and forgets the current file's navigator.</summary>
+    /// <summary>Stops the active search and forgets the current document's navigator.</summary>
     public async Task DetachAsync()
     {
         await StopAsync();
@@ -165,66 +344,91 @@ public sealed class FindController
         revealCts = null;
     }
 
-    private async Task DisposeSessionAsync()
+    private async Task DisposeSessionsAsync()
     {
-        var old = session;
-        session = null;
+        var old = sessions;
+        sessions = Array.Empty<FileSearchSession>();
+        cursors = Array.Empty<int>();
         sessionTerm = null;
-        cursor = -1;
+        currentFile = -1;
+        mergedOrdinal = -1;
 
-        if (old is null)
-            return;
+        foreach (var session in old)
+            session.Cancel();
 
-        old.Cancel();
-        try
+        foreach (var session in old)
         {
-            await old.ScanTask;
-        }
-        catch
-        {
-            // A failed scan has nothing further to release; surfacing it here would only
-            // break the stop path.
+            try
+            {
+                await session.ScanTask;
+            }
+            catch
+            {
+                // A failed scan has nothing further to release; surfacing it here would only
+                // break the stop path.
+            }
         }
     }
 
     /// <summary>
-    /// Refreshes the "n of m (searching…)" status once the scan finishes, so the count
+    /// Refreshes the "n of m (searching…)" status once every scan finishes, so the count
     /// stops advertising an in-progress search that already ended.
     /// </summary>
-    private async Task RefreshStatusOnCompletionAsync(FileSearchSession trackedSession, long request)
+    private async Task RefreshStatusOnCompletionAsync(FileSearchSession[] tracked, long request)
     {
-        try
+        foreach (var session in tracked)
         {
-            await trackedSession.ScanTask;
-        }
-        catch
-        {
-            return;
+            try
+            {
+                await session.ScanTask;
+            }
+            catch
+            {
+                return;
+            }
         }
 
-        if (request != requestId || trackedSession.WasCancelled)
+        if (request != requestId)
             return;
 
-        UpdateStatus(trackedSession, wrapped: false);
+        foreach (var session in tracked)
+        {
+            if (session.WasCancelled)
+                return;
+        }
+
+        UpdateStatus(tracked, wrapped: false);
     }
 
-    private void UpdateStatus(FileSearchSession activeSession, bool wrapped)
+    private void UpdateStatus(FileSearchSession[] active, bool wrapped)
     {
+        int total = TotalMatches(active);
+        bool complete = AllComplete(active);
+
         string text;
-        if (activeSession.MatchCount == 0)
+        if (total == 0)
         {
-            text = activeSession.IsComplete ? "No matches" : "Searching…";
+            text = complete ? "No matches" : "Searching…";
         }
         else
         {
-            text = cursor >= 0
-                ? $"{cursor + 1:N0} of {activeSession.MatchCount:N0}"
-                : $"{activeSession.MatchCount:N0} matches";
+            text = mergedOrdinal >= 0
+                ? $"{mergedOrdinal + 1:N0} of {total:N0}"
+                : $"{total:N0} matches";
 
-            if (!activeSession.IsComplete)
+            if (!complete)
+            {
                 text += " (searching…)";
-            else if (activeSession.HitMatchCap)
-                text += $" (first {activeSession.MatchCount:N0} only)";
+            }
+            else
+            {
+                bool capped = false;
+                foreach (var session in active)
+                    capped |= session.HitMatchCap;
+
+                if (capped)
+                    text += $" (first {total:N0} only)";
+            }
 
             if (wrapped)
                 text += " — wrapped";

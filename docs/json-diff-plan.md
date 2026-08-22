@@ -399,8 +399,11 @@ Consequences to handle:
 - The diff is entered explicitly (a "Compare with…" command), **not** via `FileTypeDetector`, so it
   gets no `FileKind` and no entry in `DocumentViewCatalog.DisplayOrder`. The view switcher must not
   offer it; switching *away* from it disposes it via the normal outgoing-document path.
-- `CreateSearchNavigator()` returns **null** in v1 (the find bar hides itself, exactly as
-  `IncompatibleViewModel` already does). Two-file find is a follow-up, not a v1 blocker.
+- `CreateSearchNavigator()` returned **null** in v1 (the find bar hid itself, exactly as
+  `IncompatibleViewModel` does). Now shipped: `JsonDiffSearchNavigator` exposes BOTH files via
+  `ISearchNavigator.Files`, `FindController` runs one scan per file with a cursor each, and
+  `ISearchNavigator.OrderKey` interleaves their matches into one merged next/previous sequence.
+  Revealing selects the merged row holding the match, which keeps the panes in step for free.
 - `IndexFailure` on either side must name *which* side failed. Extend the diff view model's status,
   not `IndexFailure` itself.
 - Recent files: record both paths, but don't offer the diff as a reopen target in v1.
@@ -527,7 +530,6 @@ Suggested order: 0.1 → 0.2 → 1 → 2 → 3 → 0.3 → 4 → 5.
 - **Similarity pairing for moved-and-edited containers** — designed in Stage 2, sequenced after v1.
   The highest-value item on this list: without it, a relocated-and-edited block loses its interior
   diff entirely.
-- Find across both panes.
 - Two independent schema gutters.
 - Diff as a reopenable recent-files entry.
 - 128-bit container hashes.

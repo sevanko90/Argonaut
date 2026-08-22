@@ -15,28 +15,26 @@
         <StyleInclude Source="/Features/Json/JsonRowStyles.axaml" />
 
         <!-- Status tints: low-alpha overlays chosen to read on light and dark themes alike,
-             painted per pane so an Added row tints only where the content actually is.
-             Modified is split in two: a faint tint marks containers on the PATH to a change
-             (open these), while the change itself gets the strong highlight painted on the
-             value text alone (see .valueChanged below) - so the eye lands on the data that
-             differs, not on a whole uniformly-amber line. -->
+             painted per pane so an Added row tints only where the content actually is. A
+             Modified LEAF gets exactly one signal - the whole row tinted (diffLeaf) - not
+             also a highlight on the value text, which read as two overlapping signals for
+             one change. A Modified container on the PATH to a change carries no tint at all
+             (a whole-row wash on every ancestor up to the root was noisy); instead it shows
+             a small dot before the expander - see the row template below. -->
         <Style Selector="Border.diffAdded">
             <Setter Property="Background" Value="#2E4CAF50" />
         </Style>
         <Style Selector="Border.diffRemoved">
             <Setter Property="Background" Value="#2EF44336" />
         </Style>
-        <Style Selector="Border.diffPath">
-            <Setter Property="Background" Value="#12FFC107" />
-        </Style>
         <Style Selector="Border.diffLeaf">
-            <Setter Property="Background" Value="#1FFFC107" />
+            <Setter Property="Background" Value="#2EFFC107" />
         </Style>
         <Style Selector="Border.diffMoved">
             <Setter Property="Background" Value="#2E2196F3" />
         </Style>
-        <Style Selector="json|JsonRowPresenter.valueChanged TextBlock.rowValue">
-            <Setter Property="Background" Value="#59FFC107" />
+        <Style Selector="Ellipse.changedPathDot">
+            <Setter Property="Fill" Value="#FFC107" />
         </Style>
     </UserControl.Styles>
 
@@ -82,6 +80,13 @@
                          MERGED depth. -->
                     <Grid ColumnDefinitions="Auto,*,*" Background="Transparent"
                           DoubleTapped="OnRowDoubleTapped">
+                        <!-- Double-width expander gutter: the right half is the usual
+                             expand/collapse triangle, the left half is reserved (blank on
+                             most rows) for the changed-path dot on a container that's on the
+                             way to a change - so "there's a diff below, open me" reads at a
+                             glance without tinting every ancestor row. Fixed width on every
+                             row (not just where the dot shows) keeps rows at the same depth
+                             aligned regardless of which ones carry it. -->
                         <StackPanel Grid.Column="0" Orientation="Horizontal"
                                     Margin="{Binding Depth, Converter={StaticResource DepthToMargin}}">
                             <Button Click="OnToggleExpandClick"
@@ -89,17 +94,29 @@
                                     Background="Transparent"
                                     BorderThickness="0"
                                     Padding="0"
-                                    Width="20"
+                                    Width="40"
                                     Height="22"
-                                    HorizontalContentAlignment="Center"
+                                    HorizontalContentAlignment="Stretch"
                                     VerticalContentAlignment="Center">
-                                <Path Data="{Binding IsExpanded, Converter={x:Static json:ExpandGlyphConverter.Instance}}"
-                                      Fill="{Binding $parent[Button].Foreground}"
-                                      Stretch="Uniform"
-                                      Width="7"
-                                      Height="7" />
+                                <Grid ColumnDefinitions="20,20">
+                                    <Ellipse Grid.Column="0"
+                                             Classes="changedPathDot"
+                                             IsVisible="{Binding IsChangedPath}"
+                                             Width="6" Height="6"
+                                             HorizontalAlignment="Center"
+                                             VerticalAlignment="Center"
+                                             ToolTip.Tip="Contains a change" />
+                                    <Path Grid.Column="1"
+                                          Data="{Binding IsExpanded, Converter={x:Static json:ExpandGlyphConverter.Instance}}"
+                                          Fill="{Binding $parent[Button].Foreground}"
+                                          Stretch="Uniform"
+                                          HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"
+                                          Width="7"
+                                          Height="7" />
+                                </Grid>
                             </Button>
-                            <TextBlock IsVisible="{Binding !HasChildren}" Width="20" />
+                            <TextBlock IsVisible="{Binding !HasChildren}" Width="40" />
                         </StackPanel>
 
                         <!-- The display-cap placeholder spans the content area. -->
@@ -112,20 +129,17 @@
 
                         <Border Grid.Column="1"
                                 Classes.diffRemoved="{Binding IsRemoved}"
-                                Classes.diffPath="{Binding IsChangedPath}"
                                 Classes.diffLeaf="{Binding IsValueChanged}"
                                 Classes.diffMoved="{Binding IsMoved}"
                                 IsVisible="{Binding !IsPlaceholder}"
                                 CornerRadius="4"
                                 Padding="4,0"
                                 Margin="0,0,8,0">
-                            <json:JsonRowPresenter DataContext="{Binding Left}"
-                                                   Classes.valueChanged="{Binding $parent[ListBoxItem].((diff:JsonDiffRow)DataContext).IsValueChanged}" />
+                            <json:JsonRowPresenter DataContext="{Binding Left}" />
                         </Border>
 
                         <Border Grid.Column="2"
                                 Classes.diffAdded="{Binding IsAdded}"
-                                Classes.diffPath="{Binding IsChangedPath}"
                                 Classes.diffLeaf="{Binding IsValueChanged}"
                                 Classes.diffMoved="{Binding IsMoved}"
                                 IsVisible="{Binding !IsPlaceholder}"
@@ -133,12 +147,21 @@
                                 Padding="4,0">
                             <!-- Grid, not StackPanel, for the same infinite-measure reason
                                  as the presenter's own layout: the value must trim, and the
-                                 badges must never be pushed out of view by it. -->
-                            <Grid ColumnDefinitions="*,Auto,Auto">
-                                <json:JsonRowPresenter Grid.Column="0"
-                                                       DataContext="{Binding Right}"
-                                                       Classes.valueChanged="{Binding $parent[ListBoxItem].((diff:JsonDiffRow)DataContext).IsValueChanged}" />
-                                <TextBlock Grid.Column="1"
+                                 badges must never be pushed out of view by it. The leading
+                                 fixed-width column mirrors the source pane's changed-path
+                                 dot (see the expander gutter above) - the target line gets
+                                 the same "diff below" cue without needing its own expander. -->
+                            <Grid ColumnDefinitions="16,*,Auto,Auto">
+                                <Ellipse Grid.Column="0"
+                                         Classes="changedPathDot"
+                                         IsVisible="{Binding IsChangedPath}"
+                                         Width="6" Height="6"
+                                         HorizontalAlignment="Center"
+                                         VerticalAlignment="Center"
+                                         ToolTip.Tip="Contains a change" />
+                                <json:JsonRowPresenter Grid.Column="1"
+                                                       DataContext="{Binding Right}" />
+                                <TextBlock Grid.Column="2"
                                            Text="{Binding MoveBadge}"
                                            IsVisible="{Binding HasMoveBadge}"
                                            Foreground="{DynamicResource AppMutedTextBrush}"
@@ -148,7 +171,7 @@
                                            MaxWidth="320"
                                            Margin="8,0,0,0"
                                            VerticalAlignment="Center" />
-                                <TextBlock Grid.Column="2"
+                                <TextBlock Grid.Column="3"
                                            Text="{Binding Note}"
                                            IsVisible="{Binding HasNote}"
                                            Foreground="{DynamicResource AppMutedTextBrush}"

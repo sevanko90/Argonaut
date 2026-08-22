@@ -198,7 +198,8 @@ public sealed class NdJsonViewModel : ObservableObject, IDocumentViewModel
     {
         FilePath = path;
         DefaultExpandDepth = ExpandDepthPreference.Load();
-        Toolbar = new JsonToolbarViewModel(HintSettings, SchemaSettings, DefaultExpandDepth, SetDefaultExpandDepth);
+        Toolbar = new JsonToolbarViewModel(HintSettings, SchemaSettings, DefaultExpandDepth, SetDefaultExpandDepth,
+            refreshSchemaEntries: () => RefreshSchemaEntriesAsync(path));
 
         // Alongside indexing, not blocking it - see JsonViewModel.ApplyInitialSchemaAsync.
         _ = ApplyInitialSchemaAsync(path);
@@ -233,6 +234,15 @@ public sealed class NdJsonViewModel : ObservableObject, IDocumentViewModel
 
         if (preselected is { } entry)
             await SchemaSettings.SelectAsync(entry, rootName);
+    }
+
+    /// <summary>Re-lists the schema catalog without touching the current selection - see
+    /// <see cref="JsonViewModel.RefreshSchemaEntriesAsync"/>.</summary>
+    private async Task RefreshSchemaEntriesAsync(string documentPath)
+    {
+        var (entries, _, _) = await Task.Run(() => JsonSchemaCatalog.GatherForDocument(documentPath));
+        if (!disposed)
+            SchemaSettings.SetEntries(entries);
     }
 
     public ISearchNavigator CreateSearchNavigator() => new NdJsonSearchNavigator(this);

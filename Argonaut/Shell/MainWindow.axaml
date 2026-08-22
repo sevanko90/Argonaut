@@ -8,6 +8,7 @@
         xmlns:shell="clr-namespace:Argonaut.Shell"
         xmlns:search="clr-namespace:Argonaut.Features.Search"
         xmlns:json="clr-namespace:Argonaut.Features.Json"
+        xmlns:diff="clr-namespace:Argonaut.Features.Json.Diff"
         xmlns:ndjson="clr-namespace:Argonaut.Features.NdJson"
         xmlns:csv="clr-namespace:Argonaut.Features.Csv"
         xmlns:raw="clr-namespace:Argonaut.Features.Raw"
@@ -28,8 +29,14 @@
         <DataTemplate DataType="raw:RawViewModel">
             <raw:RawView />
         </DataTemplate>
+        <DataTemplate DataType="diff:JsonDiffViewModel">
+            <diff:JsonDiffView />
+        </DataTemplate>
         <DataTemplate DataType="json:JsonToolbarViewModel">
             <json:JsonToolbarView />
+        </DataTemplate>
+        <DataTemplate DataType="diff:JsonDiffToolbarViewModel">
+            <diff:JsonDiffToolbarView />
         </DataTemplate>
         <DataTemplate DataType="raw:RawToolbarViewModel">
             <raw:RawToolbarView />
@@ -58,7 +65,7 @@
                  children, so it used to squeeze the star spacer to zero and push the close
                  button off the right edge - losing the escape hatch first, which is backwards.
                  Constrained here instead, the toolbar wraps internally and close stays put. -->
-            <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto">
                 <search:FindBar Grid.Column="0"
                                 x:Name="FindBarControl"
                                 IsVisible="{Binding IsFindAvailable}"
@@ -73,6 +80,20 @@
                         Margin="12,2,12,2"
                         Background="{DynamicResource AppBorderBrush}" />
                 <Button Grid.Column="3"
+                        x:Name="CompareFileButton"
+                        VerticalAlignment="Center"
+                        IsVisible="{Binding CanCompare}"
+                        Click="OnCompareFile"
+                        Classes="iconbutton"
+                        Margin="0,0,8,0"
+                        ToolTip.Tip="Compare with another JSON file…">
+                    <Viewbox Width="14" Height="14">
+                        <!-- Material "compare_arrows" -->
+                        <Path Fill="{DynamicResource AppMutedTextBrush}"
+                              Data="M9.01 14H2v2h7.01v3L13 15l-3.99-4v3zm5.98-1v-3H22V8h-7.01V5L11 9l3.99 4z" />
+                    </Viewbox>
+                </Button>
+                <Button Grid.Column="4"
                         x:Name="CloseFileButton"
                         VerticalAlignment="Center"
                         Click="OnCloseFile"

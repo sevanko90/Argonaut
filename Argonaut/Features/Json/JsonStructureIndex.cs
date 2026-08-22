@@ -143,6 +143,15 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
     // overflowSync; that's fine because the overflow path is pathological-whitespace-only cold.
     private readonly Dictionary<int, long> nameOffsetOverflow = new();
 
+    // Content hashes (see JsonIndexOptions.ComputeContentHashes / JsonContentHasher):
+    // allocated only when the option is set - 8 bytes/token when on, zero when off - and
+    // indexed identically to the token log (hashes[i] is token i's hash). A container's
+    // Start-token slot holds the sentinel 0 until the container closes, then receives its
+    // final Merkle hash via Volatile.Write - the same publish-then-mutate pattern as
+    // PackedToken.EndIndex, with the same Volatile.Read requirement on the consuming side
+    // (see GetContentHash). End tokens' slots stay 0; they are not values.
+    private SegmentedAppendLog<long>? hashes;
+
     private JsonStructureIndex()
     {
     }
@@ -180,11 +189,38 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
     // measurable against the per-token budget.
     private const int CancellationCheckMask = 0xFFFF;
 
+    // The no-options overload keeps the exact (MMapFile, IProgressReporter?, CancellationToken)
+    // shape IndexedFileSession.Start's factory delegate expects, so existing call sites keep
+    // passing the bare method group - optional parameters don't participate in method-group
+    // conversion, which is why this is an overload and not a defaulted parameter.
     public static JsonStructureIndex StartIndexing(MMapFile file, IProgressReporter? progressReporter = null, CancellationToken cancellationToken = default)
+        => StartIndexing(file, default, progressReporter, cancellationToken);
+
+    public static JsonStructureIndex StartIndexing(MMapFile file, JsonIndexOptions options, IProgressReporter? progressReporter = null, CancellationToken cancellationToken = default)
     {
         var index = new JsonStructureIndex();
+        if (options.ComputeContentHashes)
+            index.hashes = new SegmentedAppendLog<long>();
         index.IndexingTask = Task.Run(() => index.RunIndexing(() => index.Build(file, progressReporter, cancellationToken)), cancellationToken);
         return index;
+    }
+
+    /// <summary>True when this index was started with <see cref="JsonIndexOptions.ComputeContentHashes"/>.</summary>
+    public bool HasContentHashes => this.hashes is not null;
+
+    /// <summary>
+    /// The content hash of the token at <paramref name="tokenIndex"/> (see
+    /// <see cref="JsonContentHasher"/> for what it covers). Only meaningful once indexing
+    /// is complete: a container's Start-token slot holds the sentinel 0 until the container
+    /// closes (the write is volatile-published on close, hence the Volatile.Read here - the
+    /// same pairing as <see cref="PackedToken.EndIndex"/>). End tokens always read 0.
+    /// </summary>
+    public long GetContentHash(int tokenIndex)
+    {
+        if (this.hashes is not { } log)
+            throw new InvalidOperationException("This index was built without content hashes (see JsonIndexOptions.ComputeContentHashes).");
+
+        return Volatile.Read(ref log.ItemRef(tokenIndex));
     }
 
     /// <summary>
@@ -208,6 +244,34 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
             this.ItemCount);
     }
 
+    /// <summary>One open container's hash accumulation state, kept in lockstep with the
+    /// <c>openContainers</c> stack in <see cref="Build"/>. See <see cref="JsonContentHasher"/>
+    /// for the combining rules; OwnNameHash is the container's *own* property-name hash,
+    /// held here so it can be folded into the parent on close (a child's own hash never
+    /// contains its key).</summary>
+    private struct HashFrame
+    {
+        public ulong State;
+        public bool IsObject;
+        public ulong OwnNameHash;
+        public bool HasOwnName;
+    }
+
+    /// <summary>Folds a finished child value (scalar or closed container) into the current
+    /// innermost open container's accumulator, per <see cref="JsonContentHasher"/>'s rules.
+    /// No-op at the document root.</summary>
+    private static void FoldIntoParent(HashFrame[] frames, int frameCount, ulong valueHash, ulong nameHash, bool hasName)
+    {
+        if (frameCount == 0)
+            return;
+
+        ref var parent = ref frames[frameCount - 1];
+        if (parent.IsObject && hasName)
+            parent.State += JsonContentHasher.MixPair(nameHash, valueHash);
+        else
+            parent.State = JsonContentHasher.MixOrdered(parent.State, valueHash);
+    }
+
     private void Build(MMapFile file, IProgressReporter? progressReporter, CancellationToken cancellationToken)
     {
         long offset = 0;
@@ -222,6 +286,12 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
         var openContainers = new Stack<int>();
         long pendingNameOffset = -1;
         int pendingNameLength = -1;
+
+        // Hash state - untouched (single null-check per token) when hashing is off.
+        var hashLog = this.hashes;
+        var hashFrames = hashLog is null ? Array.Empty<HashFrame>() : new HashFrame[64];
+        int hashFrameCount = 0;
+        ulong pendingNameHash = 0;
 
         // Progress is reported from inside the token loop in ~5% steps: parsing runs over a
         // handful of giant windows (usually exactly one), so the outer loop no longer
@@ -256,6 +326,8 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
                 {
                     pendingNameOffset = rawTokenOffset;
                     pendingNameLength = rawTokenLength;
+                    if (hashLog is not null)
+                        pendingNameHash = JsonContentHasher.HashStringToken(ref reader, file.GetSpan(rawTokenOffset, rawTokenLength));
                     continue;
                 }
 
@@ -285,6 +357,61 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
 
                 // Single writer, so the pre-Add Count is exactly this token's index.
                 int tokenIndex = this.items.Count;
+
+                if (hashLog is not null)
+                {
+                    // Exactly one hashLog.Add per token keeps the two logs index-aligned.
+                    // The scalar/close adds land before the token itself is published, so a
+                    // reader that can see token i can always see hashes[i].
+                    switch (tokenType)
+                    {
+                        case JsonTokenType.StartObject:
+                        case JsonTokenType.StartArray:
+                            hashLog.Add(0); // sentinel until the container closes
+                            if (hashFrameCount == hashFrames.Length)
+                                Array.Resize(ref hashFrames, hashFrames.Length * 2);
+                            hashFrames[hashFrameCount++] = new HashFrame
+                            {
+                                State = 0,
+                                IsObject = tokenType == JsonTokenType.StartObject,
+                                OwnNameHash = pendingNameHash,
+                                HasOwnName = pendingNameLength >= 0
+                            };
+                            break;
+
+                        case JsonTokenType.EndObject:
+                        case JsonTokenType.EndArray:
+                        {
+                            var frame = hashFrames[--hashFrameCount];
+                            ulong finalHash = frame.IsObject
+                                ? JsonContentHasher.FinalizeObject(frame.State)
+                                : JsonContentHasher.FinalizeArray(frame.State);
+                            // Publish-then-mutate, same as EndIndex below: the Start token's
+                            // slot was published as 0 and is finalized here, so the write must
+                            // be volatile (paired with the Volatile.Read in GetContentHash).
+                            Volatile.Write(ref hashLog.ItemRef(startIndex), (long)finalHash);
+                            hashLog.Add(0); // the End token itself is not a value
+                            FoldIntoParent(hashFrames, hashFrameCount, finalHash, frame.OwnNameHash, frame.HasOwnName);
+                            break;
+                        }
+
+                        default:
+                        {
+                            ulong scalarHash = tokenType switch
+                            {
+                                JsonTokenType.String => JsonContentHasher.HashStringToken(ref reader, file.GetSpan(rawTokenOffset, rawTokenLength)),
+                                JsonTokenType.Number => JsonContentHasher.HashNumber(file.GetSpan(rawTokenOffset, rawTokenLength)),
+                                JsonTokenType.True => JsonContentHasher.TrueHash,
+                                JsonTokenType.False => JsonContentHasher.FalseHash,
+                                _ => JsonContentHasher.NullHash
+                            };
+                            hashLog.Add((long)scalarHash);
+                            FoldIntoParent(hashFrames, hashFrameCount, scalarHash, pendingNameHash, pendingNameLength >= 0);
+                            break;
+                        }
+                    }
+                }
+
                 this.items.Add(Pack(kind, depth, rawTokenOffset, rawTokenLength,
                     parentIndex, pendingNameOffset, pendingNameLength, tokenIndex));
 

@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Argonaut.Features.Json.Diff;
 using Argonaut.Features.Raw;
 using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
@@ -37,7 +38,7 @@ public sealed class MainWindowViewModel : ObservableObject
     public delegate Task<IDocumentViewModel> DocumentLoader(
         FileTypeDetector.FileKind fileType, string path, IProgressReporter reporter);
 
-    private const string DefaultTitle = "Argonaut";
+    private const string DefaultTitle = AppInfo.Name;
 
     private readonly Func<string, Task<bool>> confirmReplace;
     private readonly DocumentLoader documentLoader;
@@ -195,6 +196,124 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         get => recentFiles;
         private set => SetField(ref recentFiles, value);
+    }
+
+    /// <summary>True when "Compare with…" applies: the current document is being viewed as
+    /// JSON. The semantic diff is a JSON-tree feature; other kinds have no tree to align.</summary>
+    public bool CanCompare => currentKind == FileTypeDetector.FileKind.Json;
+
+    /// <summary>
+    /// Diffs the currently open file (left) against <paramref name="rightPath"/> (right) via
+    /// <see cref="OpenDiffAsync"/>. Entered explicitly through the "Compare with…" menu, so
+    /// unlike <see cref="OpenPathsAsync"/> it trusts the user's pick instead of running
+    /// <see cref="FileTypeDetector"/> on it - requires a document already open to serve as
+    /// the left side.
+    /// </summary>
+    public async Task CompareWithAsync(string rightPath)
+    {
+        if (currentFilePath is null || string.IsNullOrWhiteSpace(rightPath))
+            return;
+
+        var normalizedRight = Path.GetFullPath(rightPath);
+        if (!File.Exists(normalizedRight))
+            return;
+
+        await OpenDiffAsync(currentFilePath, normalizedRight);
+    }
+
+    /// <summary>
+    /// Diffs <paramref name="leftPath"/> against <paramref name="rightPath"/>, replacing the
+    /// current document (if any) with a <see cref="JsonDiffViewModel"/>. Entered explicitly -
+    /// never via <see cref="FileTypeDetector"/> - so the published document carries
+    /// <see cref="FileTypeDetector.FileKind.Unknown"/>: the view switcher shows no selection
+    /// for it, and picking any view there re-indexes the left file as that kind through the
+    /// normal switch path, disposing the diff on the way out. Not added to recent files in v1
+    /// (a diff is not a reopenable path). Shared core behind <see cref="CompareWithAsync"/>
+    /// (which requires a document already open) and <see cref="OpenPathsAsync"/> (the
+    /// command-line startup path, which has none yet).
+    /// </summary>
+    public async Task OpenDiffAsync(string leftPath, string rightPath)
+    {
+        var requestId = ++openRequestId;
+
+        // Same pre-swap discipline as every open/switch: a live find scan holds spans over
+        // the outgoing MMapFile, and the outgoing load's reporter must go quiet first.
+        await DetachFindAsync();
+        FindBarResetRequested?.Invoke();
+        indexProgressReporter?.Stop();
+        StatusText = $"Comparing {leftPath} with {rightPath}…";
+
+        var document = new JsonDiffViewModel();
+        try
+        {
+            await document.LoadAsync(leftPath, rightPath);
+        }
+        catch (Exception ex)
+        {
+            OpenDebugLog.Write($"OpenDiff: load threw: {ex}");
+            document.Dispose();
+            if (requestId == openRequestId)
+                StatusText = $"{leftPath} — failed to open comparison";
+            return;
+        }
+
+        if (requestId != openRequestId)
+        {
+            document.Dispose();
+            return;
+        }
+
+        PublishDocument(document, leftPath, FileTypeDetector.FileKind.Unknown, addToRecents: false);
+    }
+
+    /// <summary>
+    /// Command-line startup entry point (see <see cref="App"/>): opens <paramref name="first"/>
+    /// normally, unless <paramref name="second"/> is also given and both paths detect as
+    /// <see cref="FileTypeDetector.FileKind.Json"/> - in which case they're diffed directly via
+    /// <see cref="OpenDiffAsync"/> instead of either being opened singly. Detection here is what
+    /// lets two JSON paths enter diff mode with no explicit user action; contrast
+    /// <see cref="CompareWithAsync"/>, which trusts an already-open document plus an explicit
+    /// "Compare with…" pick rather than detecting. When the pair doesn't both classify as JSON
+    /// (or <paramref name="second"/> doesn't exist), <paramref name="second"/> is dropped and
+    /// <paramref name="first"/> opens alone, with a toast explaining why. Only this command-line
+    /// path detects a second file automatically - drag-drop, "Compare with…", and macOS's
+    /// Open-With activation are untouched and keep their existing single-file/explicit-diff
+    /// behaviour.
+    /// </summary>
+    public async Task OpenPathsAsync(string? first, string? second)
+    {
+        if (string.IsNullOrWhiteSpace(second))
+        {
+            await OpenPathAsync(first);
+            return;
+        }
+
+        var normalizedFirst = string.IsNullOrWhiteSpace(first) ? null : Path.GetFullPath(first);
+        var normalizedSecond = Path.GetFullPath(second);
+
+        bool bothJson = false;
+        if (normalizedFirst is not null && File.Exists(normalizedFirst) && File.Exists(normalizedSecond))
+        {
+            try
+            {
+                bothJson = FileTypeDetector.DetectFileType(normalizedFirst) == FileTypeDetector.FileKind.Json
+                    && FileTypeDetector.DetectFileType(normalizedSecond) == FileTypeDetector.FileKind.Json;
+            }
+            catch (Exception ex)
+            {
+                OpenDebugLog.Write($"OpenPaths: DetectFileType threw: {ex}");
+            }
+        }
+
+        if (bothJson)
+        {
+            await OpenDiffAsync(normalizedFirst!, normalizedSecond);
+            return;
+        }
+
+        await OpenPathAsync(first);
+        if (currentFilePath is not null)
+            ToastService.Show("Second file ignored — both files must be JSON to open as a diff.");
     }
 
     public ThemeMode ThemeMode
@@ -491,7 +610,7 @@ public sealed class MainWindowViewModel : ObservableObject
             document.PropertyChanged += OnDocumentPropertyChanged;
             StatusText = document.StatusText;
             FileName = Path.GetFileName(path!);
-            Title = $"{DefaultTitle} — {FileName}";
+            Title = document.WindowTitle ?? $"{DefaultTitle} — {FileName}";
             SelectedView = DocumentViewCatalog.Options.FirstOrDefault(o => o.Kind == kind);
         }
         else
@@ -504,6 +623,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
         OnPropertyChanged(nameof(IsFileOpen));
         OnPropertyChanged(nameof(FilePath));
+        OnPropertyChanged(nameof(CanCompare));
         NotifyFailurePropertiesChanged();
     }
 

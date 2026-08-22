@@ -481,6 +481,64 @@ public sealed class MainWindowViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task OpenPaths_BothJson_EntersDiffMode()
+    {
+        string left = WriteJsonFile("left.json");
+        string right = WriteJsonFile("right.json");
+        var vm = CreateViewModel((_, _, _) => throw new Exception("documentLoader must not be called for a diff"));
+
+        await vm.OpenPathsAsync(left, right);
+
+        Assert.IsType<Argonaut.Features.Json.Diff.JsonDiffViewModel>(vm.CurrentDocument);
+        Assert.Equal(left, vm.FilePath);
+        Assert.Null(vm.SelectedView); // Unknown kind - the view switcher shows no selection
+    }
+
+    [Fact]
+    public async Task OpenPaths_SecondNotJson_OpensFirstAlone()
+    {
+        string left = WriteJsonFile("left.json");
+        string right = Path.Combine(tempDir, "right.txt");
+        File.WriteAllText(right, "not json at all\nplain text\n");
+
+        var document = new FakeDocument { FilePath = left };
+        var vm = CreateViewModel((_, path, _) => Task.FromResult<IDocumentViewModel>(document));
+
+        await vm.OpenPathsAsync(left, right);
+
+        Assert.Same(document, vm.CurrentDocument);
+        Assert.Equal(left, vm.FilePath);
+    }
+
+    [Fact]
+    public async Task OpenPaths_SecondMissing_OpensFirstAlone()
+    {
+        string left = WriteJsonFile("left.json");
+        string right = Path.Combine(tempDir, "does-not-exist.json");
+
+        var document = new FakeDocument { FilePath = left };
+        var vm = CreateViewModel((_, _, _) => Task.FromResult<IDocumentViewModel>(document));
+
+        await vm.OpenPathsAsync(left, right);
+
+        Assert.Same(document, vm.CurrentDocument);
+        Assert.Equal(left, vm.FilePath);
+    }
+
+    [Fact]
+    public async Task OpenPaths_NoSecond_BehavesLikeOpenPath()
+    {
+        string left = WriteJsonFile("left.json");
+        var document = new FakeDocument { FilePath = left };
+        var vm = CreateViewModel((_, _, _) => Task.FromResult<IDocumentViewModel>(document));
+
+        await vm.OpenPathsAsync(left, null);
+
+        Assert.Same(document, vm.CurrentDocument);
+        Assert.True(vm.IsFileOpen);
+    }
+
+    [Fact]
     public async Task SwitchView_SameKind_IsNoOp()
     {
         string path = WriteJsonFile();

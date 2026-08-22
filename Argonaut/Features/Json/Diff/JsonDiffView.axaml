@@ -1,0 +1,303 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:json="clr-namespace:Argonaut.Features.Json"
+             xmlns:diff="clr-namespace:Argonaut.Features.Json.Diff"
+             x:Class="Argonaut.Features.Json.Diff.JsonDiffView"
+             x:DataType="diff:JsonDiffViewModel">
+    <UserControl.Resources>
+        <!-- Capped, unlike the JSON view's: the diff has no horizontal scrolling (both
+             panes must stay visible), so past this depth rows stop stepping right and
+             just stay aligned with each other. -->
+        <json:DepthToMarginConverter x:Key="DepthToMargin" MaxIndent="240" />
+    </UserControl.Resources>
+
+    <UserControl.Styles>
+        <StyleInclude Source="/Features/Json/JsonRowStyles.axaml" />
+
+        <!-- Status tints: low-alpha overlays chosen to read on light and dark themes alike,
+             painted per pane so an Added row tints only where the content actually is. A
+             Modified LEAF gets exactly one signal - the whole row tinted (diffLeaf) - not
+             also a highlight on the value text, which read as two overlapping signals for
+             one change. A Modified container on the PATH to a change carries no tint at all
+             (a whole-row wash on every ancestor up to the root was noisy); instead it shows
+             a small dot before the expander - see the row template below. -->
+        <Style Selector="Border.diffAdded">
+            <Setter Property="Background" Value="#2E4CAF50" />
+        </Style>
+        <Style Selector="Border.diffRemoved">
+            <Setter Property="Background" Value="#2EF44336" />
+        </Style>
+        <Style Selector="Border.diffLeaf">
+            <Setter Property="Background" Value="#2EFFC107" />
+        </Style>
+        <Style Selector="Border.diffMoved">
+            <Setter Property="Background" Value="#2E2196F3" />
+        </Style>
+        <Style Selector="Ellipse.changedPathDot">
+            <Setter Property="Fill" Value="#FFC107" />
+        </Style>
+    </UserControl.Styles>
+
+    <Border BorderBrush="{DynamicResource AppBorderBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Background="{DynamicResource AppWindowBackgroundBrush}"
+            ClipToBounds="True">
+        <Grid RowDefinitions="*,Auto">
+        <!-- Horizontal scrolling deliberately OFF, unlike the JSON view: a long value would
+             otherwise widen the row and push the whole right pane past the window edge.
+             Rows are bounded to the viewport, the two panes split it structurally, and
+             overlong values trim with an ellipsis - the context bar carries the detail. -->
+        <ListBox Grid.Row="0"
+                 x:Name="RowsListBox"
+                 ItemsSource="{Binding Rows}"
+                 SelectionMode="Single"
+                 Padding="8,8"
+                 ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+            <ListBox.Styles>
+                <!-- Same fixed row metrics as the JSON view, for the same virtualization
+                     reasons. -->
+                <Style Selector="ListBoxItem">
+                    <Setter Property="Padding" Value="0" />
+                    <Setter Property="MinHeight" Value="22" />
+                    <Setter Property="Height" Value="22" />
+                    <Setter Property="Margin" Value="0,1" />
+                    <Setter Property="CornerRadius" Value="6" />
+                </Style>
+            </ListBox.Styles>
+
+            <ListBox.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <VirtualizingStackPanel />
+                </ItemsPanelTemplate>
+            </ListBox.ItemsPanel>
+
+            <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="diff:JsonDiffRow">
+                    <!-- One row, both panes: alignment is structural (a two-column grid per
+                         row), so scroll sync is free and virtualization never skews the
+                         sides. Indent + expander live once, on the left edge, driven by the
+                         MERGED depth. -->
+                    <Grid ColumnDefinitions="Auto,*,*" Background="Transparent"
+                          DoubleTapped="OnRowDoubleTapped">
+                        <!-- Double-width expander gutter: the right half is the usual
+                             expand/collapse triangle, the left half is reserved (blank on
+                             most rows) for the changed-path dot on a container that's on the
+                             way to a change - so "there's a diff below, open me" reads at a
+                             glance without tinting every ancestor row. Fixed width on every
+                             row (not just where the dot shows) keeps rows at the same depth
+                             aligned regardless of which ones carry it. -->
+                        <StackPanel Grid.Column="0" Orientation="Horizontal"
+                                    Margin="{Binding Depth, Converter={StaticResource DepthToMargin}}">
+                            <Button Click="OnToggleExpandClick"
+                                    IsVisible="{Binding HasChildren}"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    Padding="0"
+                                    Width="40"
+                                    Height="22"
+                                    HorizontalContentAlignment="Stretch"
+                                    VerticalContentAlignment="Center">
+                                <Grid ColumnDefinitions="20,20">
+                                    <Ellipse Grid.Column="0"
+                                             Classes="changedPathDot"
+                                             IsVisible="{Binding IsChangedPath}"
+                                             Width="6" Height="6"
+                                             HorizontalAlignment="Center"
+                                             VerticalAlignment="Center"
+                                             ToolTip.Tip="Contains a change" />
+                                    <Path Grid.Column="1"
+                                          Data="{Binding IsExpanded, Converter={x:Static json:ExpandGlyphConverter.Instance}}"
+                                          Fill="{Binding $parent[Button].Foreground}"
+                                          Stretch="Uniform"
+                                          HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"
+                                          Width="7"
+                                          Height="7" />
+                                </Grid>
+                            </Button>
+                            <TextBlock IsVisible="{Binding !HasChildren}" Width="40" />
+                        </StackPanel>
+
+                        <!-- The display-cap placeholder spans the content area. -->
+                        <TextBlock Grid.Column="1" Grid.ColumnSpan="2"
+                                   Text="{Binding PlaceholderText}"
+                                   IsVisible="{Binding IsPlaceholder}"
+                                   Foreground="{DynamicResource AppMutedTextBrush}"
+                                   FontFamily="{DynamicResource AppContentFontFamily}"
+                                   VerticalAlignment="Center" />
+
+                        <Border Grid.Column="1"
+                                Classes.diffRemoved="{Binding IsRemoved}"
+                                Classes.diffLeaf="{Binding IsValueChanged}"
+                                Classes.diffMoved="{Binding IsMoved}"
+                                IsVisible="{Binding !IsPlaceholder}"
+                                CornerRadius="4"
+                                Padding="4,0"
+                                Margin="0,0,8,0">
+                            <json:JsonRowPresenter DataContext="{Binding Left}"
+                                                   HighlightTerm="{Binding $parent[diff:JsonDiffView].((diff:JsonDiffViewModel)DataContext).HighlightTerm}" />
+                        </Border>
+
+                        <Border Grid.Column="2"
+                                Classes.diffAdded="{Binding IsAdded}"
+                                Classes.diffLeaf="{Binding IsValueChanged}"
+                                Classes.diffMoved="{Binding IsMoved}"
+                                IsVisible="{Binding !IsPlaceholder}"
+                                CornerRadius="4"
+                                Padding="4,0">
+                            <!-- Grid, not StackPanel, for the same infinite-measure reason
+                                 as the presenter's own layout: the value must trim, and the
+                                 badges must never be pushed out of view by it. The leading
+                                 fixed-width column mirrors the source pane's changed-path
+                                 dot (see the expander gutter above) - the target line gets
+                                 the same "diff below" cue without needing its own expander. -->
+                            <Grid ColumnDefinitions="16,*,Auto,Auto">
+                                <Ellipse Grid.Column="0"
+                                         Classes="changedPathDot"
+                                         IsVisible="{Binding IsChangedPath}"
+                                         Width="6" Height="6"
+                                         HorizontalAlignment="Center"
+                                         VerticalAlignment="Center"
+                                         ToolTip.Tip="Contains a change" />
+                                <json:JsonRowPresenter Grid.Column="1"
+                                                       DataContext="{Binding Right}"
+                                                       HighlightTerm="{Binding $parent[diff:JsonDiffView].((diff:JsonDiffViewModel)DataContext).HighlightTerm}" />
+                                <TextBlock Grid.Column="2"
+                                           Text="{Binding MoveBadge}"
+                                           IsVisible="{Binding HasMoveBadge}"
+                                           Foreground="{DynamicResource AppMutedTextBrush}"
+                                           FontFamily="{DynamicResource AppContentFontFamily}"
+                                           TextWrapping="NoWrap"
+                                           TextTrimming="CharacterEllipsis"
+                                           MaxWidth="320"
+                                           Margin="8,0,0,0"
+                                           VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="3"
+                                           Text="{Binding Note}"
+                                           IsVisible="{Binding HasNote}"
+                                           Foreground="{DynamicResource AppMutedTextBrush}"
+                                           FontStyle="Italic"
+                                           FontFamily="{DynamicResource AppContentFontFamily}"
+                                           Margin="8,0,0,0"
+                                           VerticalAlignment="Center" />
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+
+        <!-- Context bar: two fixed lines showing the selected row's source (left document)
+             and target (right document) side - the value by default, its JSONPath via the
+             per-line swap link. Values never wrap (they trim with an ellipsis), and the
+             Run split paints exactly the characters that differ between the two sides. -->
+        <Border Grid.Row="1"
+                BorderBrush="{DynamicResource AppBorderBrush}"
+                BorderThickness="0,1,0,0"
+                Background="{DynamicResource AppPanelBackgroundBrush}"
+                Padding="8,4">
+            <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="Auto,Auto,*,Auto">
+                <TextBlock Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="4"
+                           Text="No selection"
+                           FontSize="11"
+                           IsVisible="{Binding !HasSelection}"
+                           Foreground="{DynamicResource AppMutedTextBrush}"
+                           FontFamily="{DynamicResource AppContentFontFamily}" />
+
+                <TextBlock Grid.Row="0" Grid.Column="0"
+                           Text="source"
+                           Width="44"
+                           FontSize="11"
+                           IsVisible="{Binding HasSelection}"
+                           Foreground="{DynamicResource AppMutedTextBrush}"
+                           VerticalAlignment="Center" />
+                <Button Grid.Row="0" Grid.Column="1"
+                        Classes="hintlink"
+                        FontSize="11"
+                        Content="{Binding SourceModeLabel}"
+                        IsVisible="{Binding HasSelection}"
+                        Click="OnToggleSourceMode"
+                        Margin="0,0,12,0"
+                        VerticalAlignment="Center"
+                        ToolTip.Tip="Swap between the selected value and its JSONPath" />
+                <TextBlock Grid.Row="0" Grid.Column="2"
+                           FontSize="11"
+                           IsVisible="{Binding ShowSourceValue}"
+                           TextWrapping="NoWrap"
+                           TextTrimming="CharacterEllipsis"
+                           VerticalAlignment="Center"
+                           FontFamily="{DynamicResource AppContentFontFamily}"><Run Text="{Binding SourcePrefix}" /><Run Text="{Binding SourceChanged}" Background="#59FFC107" /><Run Text="{Binding SourceSuffix}" /></TextBlock>
+                <TextBlock Grid.Row="0" Grid.Column="2"
+                           Text="{Binding SourcePlaceholder}"
+                           FontSize="11"
+                           FontStyle="Italic"
+                           IsVisible="{Binding SourcePlaceholder, Converter={x:Static json:IsNotNullConverter.Instance}}"
+                           TextWrapping="NoWrap"
+                           TextTrimming="CharacterEllipsis"
+                           VerticalAlignment="Center"
+                           Foreground="{DynamicResource AppMutedTextBrush}" />
+                <Button Grid.Row="0" Grid.Column="3"
+                        x:Name="CopySourceButton"
+                        Classes="iconbutton compact"
+                        Click="OnCopySourceClick"
+                        IsVisible="{Binding HasSelection}"
+                        IsEnabled="{Binding ShowSourceValue}"
+                        ToolTip.Tip="Copy"
+                        Margin="8,0,0,0">
+                    <Viewbox Width="12" Height="12">
+                        <Path Fill="{DynamicResource AppMutedTextBrush}"
+                              Data="M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z" />
+                    </Viewbox>
+                </Button>
+
+                <TextBlock Grid.Row="1" Grid.Column="0"
+                           Text="target"
+                           Width="44"
+                           FontSize="11"
+                           IsVisible="{Binding HasSelection}"
+                           Foreground="{DynamicResource AppMutedTextBrush}"
+                           VerticalAlignment="Center" />
+                <Button Grid.Row="1" Grid.Column="1"
+                        Classes="hintlink"
+                        FontSize="11"
+                        Content="{Binding TargetModeLabel}"
+                        IsVisible="{Binding HasSelection}"
+                        Click="OnToggleTargetMode"
+                        Margin="0,0,12,0"
+                        VerticalAlignment="Center"
+                        ToolTip.Tip="Swap between the selected value and its JSONPath" />
+                <TextBlock Grid.Row="1" Grid.Column="2"
+                           FontSize="11"
+                           IsVisible="{Binding ShowTargetValue}"
+                           TextWrapping="NoWrap"
+                           TextTrimming="CharacterEllipsis"
+                           VerticalAlignment="Center"
+                           FontFamily="{DynamicResource AppContentFontFamily}"><Run Text="{Binding TargetPrefix}" /><Run Text="{Binding TargetChanged}" Background="#59FFC107" /><Run Text="{Binding TargetSuffix}" /></TextBlock>
+                <TextBlock Grid.Row="1" Grid.Column="2"
+                           Text="{Binding TargetPlaceholder}"
+                           FontSize="11"
+                           FontStyle="Italic"
+                           IsVisible="{Binding TargetPlaceholder, Converter={x:Static json:IsNotNullConverter.Instance}}"
+                           TextWrapping="NoWrap"
+                           TextTrimming="CharacterEllipsis"
+                           VerticalAlignment="Center"
+                           Foreground="{DynamicResource AppMutedTextBrush}" />
+                <Button Grid.Row="1" Grid.Column="3"
+                        x:Name="CopyTargetButton"
+                        Classes="iconbutton compact"
+                        Click="OnCopyTargetClick"
+                        IsVisible="{Binding HasSelection}"
+                        IsEnabled="{Binding ShowTargetValue}"
+                        ToolTip.Tip="Copy"
+                        Margin="8,0,0,0">
+                    <Viewbox Width="12" Height="12">
+                        <Path Fill="{DynamicResource AppMutedTextBrush}"
+                              Data="M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z" />
+                    </Viewbox>
+                </Button>
+            </Grid>
+        </Border>
+        </Grid>
+    </Border>
+</UserControl>

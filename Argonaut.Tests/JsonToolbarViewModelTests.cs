@@ -285,6 +285,28 @@ public sealed class JsonToolbarViewModelTests : IDisposable
     }
 
     [Fact]
+    public void OpeningTheFlyout_RefreshesTheSchemaCatalog()
+    {
+        // The catalog is gathered once, at document-open time, so a schema dropped into the
+        // user folder mid-session would otherwise only appear after a restart. Opening the
+        // flyout re-lists it instead.
+        int refreshCount = 0;
+        var schemaSettings = new JsonSchemaSettings();
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { },
+            refreshSchemaEntries: () => { refreshCount++; return Task.CompletedTask; });
+
+        toolbar.IsSchemaFlyoutOpen = true;
+        Assert.Equal(1, refreshCount);
+
+        // Closing, and setting the same value again, aren't opens.
+        toolbar.IsSchemaFlyoutOpen = false;
+        Assert.Equal(1, refreshCount);
+
+        toolbar.IsSchemaFlyoutOpen = true;
+        Assert.Equal(2, refreshCount);
+    }
+
+    [Fact]
     public void SchemaButtonText_ReadsNoSchema_WhenNothingIsBound()
     {
         var toolbar = new JsonToolbarViewModel(new DateHintSettings(), new JsonSchemaSettings(), 0, _ => { });

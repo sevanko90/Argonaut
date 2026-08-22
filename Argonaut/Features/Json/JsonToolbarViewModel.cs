@@ -35,6 +35,7 @@ public sealed class JsonToolbarViewModel : ObservableObject
     private readonly JsonSchemaSettings schemaSettings;
     private readonly Action<int> applyExpandDepth;
     private readonly Func<string, Task>? navigateToPath;
+    private readonly Func<Task>? refreshSchemaEntries;
     private int dateHintSchemeIndex;
     private int timeZoneModeIndex;
     private int expandDepthIndex;
@@ -49,12 +50,13 @@ public sealed class JsonToolbarViewModel : ObservableObject
     // has since reopened to browse.
     private bool awaitingSchemaCloseDecision;
 
-    public JsonToolbarViewModel(DateHintSettings settings, JsonSchemaSettings schemaSettings, int initialExpandDepthIndex, Action<int> applyExpandDepth, Func<string, Task>? navigateToPath = null)
+    public JsonToolbarViewModel(DateHintSettings settings, JsonSchemaSettings schemaSettings, int initialExpandDepthIndex, Action<int> applyExpandDepth, Func<string, Task>? navigateToPath = null, Func<Task>? refreshSchemaEntries = null)
     {
         this.settings = settings;
         this.schemaSettings = schemaSettings;
         this.applyExpandDepth = applyExpandDepth;
         this.navigateToPath = navigateToPath;
+        this.refreshSchemaEntries = refreshSchemaEntries;
 
         dateHintSchemeIndex = (int)settings.FileDefaultScheme;
         timeZoneModeIndex = (int)settings.TimeZoneMode;
@@ -81,14 +83,24 @@ public sealed class JsonToolbarViewModel : ObservableObject
     /// itself only when that answer is unambiguous. Everything that could go wrong (a schema that
     /// fails to parse, a document not yet indexed far enough to sample, an NDJSON file with no
     /// line open) simply leaves it open, which is why no timeout is needed anywhere.
+    ///
+    /// Opening it also re-reads the user's schema folder (<see cref="refreshSchemaEntries"/>) -
+    /// otherwise a schema dropped in after the document was opened only appeared on restart,
+    /// since the catalog is gathered once, at open time.
     /// </summary>
     public bool IsSchemaFlyoutOpen
     {
         get => isSchemaFlyoutOpen;
         set
         {
-            if (!SetField(ref isSchemaFlyoutOpen, value) || value)
+            if (!SetField(ref isSchemaFlyoutOpen, value))
                 return;
+
+            if (value)
+            {
+                _ = refreshSchemaEntries?.Invoke();
+                return;
+            }
 
             awaitingSchemaCloseDecision = false;
             SchemaRootPicker.Filter = string.Empty;

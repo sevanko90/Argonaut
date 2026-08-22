@@ -241,7 +241,8 @@ public sealed class JsonViewModel : ObservableObject, IDocumentViewModel
     {
         FilePath = path;
         DefaultExpandDepth = ExpandDepthPreference.Load();
-        Toolbar = new JsonToolbarViewModel(HintSettings, SchemaSettings, DefaultExpandDepth, SetDefaultExpandDepth, NavigateToPathAsync);
+        Toolbar = new JsonToolbarViewModel(HintSettings, SchemaSettings, DefaultExpandDepth, SetDefaultExpandDepth, NavigateToPathAsync,
+            refreshSchemaEntries: () => RefreshSchemaEntriesAsync(path));
 
         var loadTask = LoadCore(new MMapFile(path), progressReporter);
 
@@ -269,6 +270,16 @@ public sealed class JsonViewModel : ObservableObject, IDocumentViewModel
 
         if (preselected is { } entry)
             await SchemaSettings.SelectAsync(entry, rootName);
+    }
+
+    /// <summary>Re-lists the schema catalog without touching the current selection - so a
+    /// schema dropped into the user folder mid-session shows up next time the combo opens,
+    /// rather than requiring a restart. See <see cref="JsonToolbarViewModel.IsSchemaFlyoutOpen"/>.</summary>
+    private async Task RefreshSchemaEntriesAsync(string documentPath)
+    {
+        var (entries, _, _) = await Task.Run(() => JsonSchemaCatalog.GatherForDocument(documentPath));
+        if (!disposed)
+            SchemaSettings.SetEntries(entries);
     }
 
     /// <summary>

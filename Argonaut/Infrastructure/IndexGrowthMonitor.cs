@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Threading;
 
@@ -66,21 +67,29 @@ public sealed class IndexGrowthMonitor : IDisposable
             // here (the final refresh must run either way).
         }
 
-        if (timer is null)
-            return; // disposed, or a regular tick already ran the final refresh and stopped this
-
-        refresh();
-        Stop();
+        // Claim the teardown before refreshing: losing the claim means Dispose (or a tick)
+        // already ran the final refresh, so this continuation has nothing left to do.
+        if (Stop())
+            refresh();
     }
 
-    private void Stop()
+    /// <summary>
+    /// Tears the timer down, returning true for the caller that actually owned the teardown -
+    /// exactly one ever does. The swap is atomic rather than a null check because the two
+    /// callers are not always on the same thread: <see cref="AwaitCompletionAsync"/> resumes on
+    /// the UI thread only when one is installed, so a scan completing under a dispatcher-free
+    /// host (tests) resumes on a pool thread and can interleave with the owner's Dispose. Under
+    /// check-then-use both callers passed the guard and the loser dereferenced a nulled field.
+    /// </summary>
+    private bool Stop()
     {
-        if (timer is null)
-            return;
+        DispatcherTimer? claimed = Interlocked.Exchange(ref timer, null);
+        if (claimed is null)
+            return false;
 
-        timer.Stop();
-        timer.Tick -= OnTick;
-        timer = null;
+        claimed.Stop();
+        claimed.Tick -= OnTick;
+        return true;
     }
 
     public void Dispose() => Stop();

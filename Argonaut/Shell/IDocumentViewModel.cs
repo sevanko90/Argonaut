@@ -33,6 +33,15 @@ public interface IDocumentViewModel : INotifyPropertyChanged, IDisposable
     /// <summary>Full path of the loaded file.</summary>
     string FilePath { get; }
 
+    /// <summary>
+    /// What the window title should read for this document, or null to take the shell's
+    /// default of the app name and the file name. The diff overrides it because a single file
+    /// name cannot describe a document that is about two, and the pair belongs in the title
+    /// rather than repeated across the toolbar and status bar. Read once, when the document
+    /// is published - not observable.
+    /// </summary>
+    string? WindowTitle => null;
+
     /// <summary>The full status-bar line for this document; observable.</summary>
     string StatusText { get; }
 

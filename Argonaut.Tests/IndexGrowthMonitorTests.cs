@@ -13,7 +13,7 @@ namespace Argonaut.Tests;
 public class IndexGrowthMonitorTests
 {
     [Fact]
-    public void CompletionRacingDispose_DoesNotThrow_AndTearsDownOnce()
+    public async Task CompletionRacingDispose_DoesNotThrow_AndTearsDownOnce()
     {
         // Repeated because it is a race: a single pass would usually take one interleaving and
         // miss the window between the guard and the field it guarded.
@@ -37,7 +37,7 @@ public class IndexGrowthMonitorTests
 
             ready.Set();
             monitor.Dispose(); // races the completion continuation
-            completer.Wait();
+            await completer;
 
             // Exactly one caller owns the teardown, so the final refresh happens at most once
             // however the two threads interleave. (At-most, not exactly: Dispose legitimately

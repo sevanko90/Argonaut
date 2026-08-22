@@ -38,7 +38,7 @@ public sealed class MainWindowViewModel : ObservableObject
     public delegate Task<IDocumentViewModel> DocumentLoader(
         FileTypeDetector.FileKind fileType, string path, IProgressReporter reporter);
 
-    private const string DefaultTitle = "Argonaut";
+    private const string DefaultTitle = AppInfo.Name;
 
     private readonly Func<string, Task<bool>> confirmReplace;
     private readonly DocumentLoader documentLoader;
@@ -610,7 +610,7 @@ public sealed class MainWindowViewModel : ObservableObject
             document.PropertyChanged += OnDocumentPropertyChanged;
             StatusText = document.StatusText;
             FileName = Path.GetFileName(path!);
-            Title = $"{DefaultTitle} — {FileName}";
+            Title = document.WindowTitle ?? $"{DefaultTitle} — {FileName}";
             SelectedView = DocumentViewCatalog.Options.FirstOrDefault(o => o.Kind == kind);
         }
         else

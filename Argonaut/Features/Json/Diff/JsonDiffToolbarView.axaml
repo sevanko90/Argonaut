@@ -4,17 +4,6 @@
              x:Class="Argonaut.Features.Json.Diff.JsonDiffToolbarView"
              x:DataType="diff:JsonDiffToolbarViewModel">
     <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
-        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-            <TextBlock Text="{Binding LeftFileName}"
-                       Foreground="{DynamicResource AppMutedTextBrush}"
-                       VerticalAlignment="Center" />
-            <TextBlock Text="↔"
-                       Foreground="{DynamicResource AppMutedTextBrush}"
-                       VerticalAlignment="Center" />
-            <TextBlock Text="{Binding RightFileName}"
-                       Foreground="{DynamicResource AppMutedTextBrush}"
-                       VerticalAlignment="Center" />
-        </StackPanel>
         <CheckBox Content="Changes only"
                   IsChecked="{Binding ChangesOnly}"
                   VerticalAlignment="Center"

@@ -147,4 +147,31 @@ public class JsonDiffViewModelTests
             File.Delete(rightPath);
         }
     }
+
+    [Fact]
+    public async Task WindowTitle_NamesBothFiles_AndTheStatusDoesNotRepeatThem()
+    {
+        string leftPath = WriteTemp("""{"a":1}""");
+        string rightPath = WriteTemp("""{"a":2}""");
+        var vm = new JsonDiffViewModel();
+        try
+        {
+            await vm.LoadAsync(leftPath, rightPath);
+            try { await vm.IndexingTask; } catch { }
+
+            Assert.Equal(
+                $"Argonaut Diff ({Path.GetFileName(leftPath)} \u2194 {Path.GetFileName(rightPath)})",
+                vm.WindowTitle);
+
+            // The pair identifies the document, so it belongs in the title once - the status
+            // bar is left to say what the comparison found.
+            await WaitForAsync(() => vm.StatusText.Contains("modified"));
+            Assert.DoesNotContain(Path.GetFileName(leftPath), vm.StatusText);
+            Assert.DoesNotContain(Path.GetFileName(rightPath), vm.StatusText);
+        }
+        finally
+        {
+            vm.Dispose();
+        }
+    }
 }

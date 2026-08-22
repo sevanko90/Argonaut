@@ -346,6 +346,11 @@ public sealed class JsonDiffViewModel : ObservableObject, IDocumentViewModel
 
     public bool CanHandleFileType(FileTypeDetector.FileKind fileType) => false;
 
+    /// <summary>Both file names, which is the one place in this document they are not a
+    /// repetition: the toolbar and status bar describe what the comparison found.</summary>
+    public string WindowTitle =>
+        $"{AppInfo.Name} Diff ({Path.GetFileName(FilePath)} ↔ {Path.GetFileName(RightFilePath)})";
+
     /// <summary>
     /// Opens both files and starts the pipeline. Returns once the row collection exists
     /// (it renders the left-document preview immediately); indexing and the diff continue
@@ -363,7 +368,6 @@ public sealed class JsonDiffViewModel : ObservableObject, IDocumentViewModel
         this.session = session;
 
         Toolbar = new JsonDiffToolbarViewModel(
-            Path.GetFileName(leftPath), Path.GetFileName(rightPath),
             setChangesOnly: value => { if (rows is { } r) r.ChangesOnly = value; },
             goToPreviousDiff: GoToPreviousDiff,
             goToNextDiff: GoToNextDiff);
@@ -418,7 +422,7 @@ public sealed class JsonDiffViewModel : ObservableObject, IDocumentViewModel
         if (!session.Diff.IsComplete)
             return;
 
-        StatusText = $"{Path.GetFileName(FilePath)} ↔ {Path.GetFileName(RightFilePath)} — {Summarize(session.Diff)}";
+        StatusText = Summarize(session.Diff);
     }
 
     /// <summary>One pass over the finished record log, counting user-meaningful changes:

@@ -38,6 +38,15 @@ public sealed class FindController
 
     private readonly List<Stop> stops = new();
 
+    /// <summary>
+    /// Guards <see cref="stops"/>, <see cref="foldedCounts"/> and <see cref="cursor"/>. Presses
+    /// run on the UI thread, but <see cref="RefreshStatusOnCompletionAsync"/> is fire-and-forget
+    /// and folds the last matches in from wherever its await resumes - the dispatcher thread in
+    /// the app, a pool thread in a dispatcher-free test. Unguarded, both could fold the same
+    /// matches and the stop list doubled. Never held across an await.
+    /// </summary>
+    private readonly object gate = new();
+
     /// <summary>How many of each file's matches have been folded into <see cref="stops"/>, so a
     /// refresh only ever costs the ones that arrived since.</summary>
     private int[] foldedCounts = Array.Empty<int>();
@@ -148,54 +157,60 @@ public sealed class FindController
             RefreshStops();
         }
 
-        if (stops.Count == 0)
-        {
-            UpdateStatus(wrapped: false);
-            return;
-        }
-
+        // Decided in one go under the gate so the completion refresh cannot fold new stops in
+        // between choosing the index and reading it back.
+        Stop stop;
         bool wrapped = false;
-        if (direction >= 0)
+        lock (gate)
         {
-            if (cursor + 1 < stops.Count)
+            if (stops.Count == 0)
             {
-                cursor++;
-            }
-            else if (AllComplete())
-            {
-                cursor = 0;
-                wrapped = true;
-            }
-            else
-            {
-                // Never wrap while a scan is still running, so "n of m" stays monotone.
-                UpdateStatus(wrapped: false);
+                UpdateStatusLocked(wrapped: false);
                 return;
             }
-        }
-        else
-        {
-            if (cursor > 0)
-            {
-                cursor--;
-            }
-            else if (AllComplete())
-            {
-                // Wrapping backward lands on the last stop, so it needs the full list.
-                cursor = stops.Count - 1;
-                wrapped = true;
-            }
-            else
-            {
-                UpdateStatus(wrapped: false);
-                return;
-            }
-        }
 
-        var stop = stops[cursor];
-        currentFileIndex = stop.File;
-        currentMatchIndex = stop.MatchIndex;
-        UpdateStatus(wrapped);
+            if (direction >= 0)
+            {
+                if (cursor + 1 < stops.Count)
+                {
+                    cursor++;
+                }
+                else if (AllComplete())
+                {
+                    cursor = 0;
+                    wrapped = true;
+                }
+                else
+                {
+                    // Never wrap while a scan is still running, so "n of m" stays monotone.
+                    UpdateStatusLocked(wrapped: false);
+                    return;
+                }
+            }
+            else
+            {
+                if (cursor > 0)
+                {
+                    cursor--;
+                }
+                else if (AllComplete())
+                {
+                    // Wrapping backward lands on the last stop, so it needs the full list.
+                    cursor = stops.Count - 1;
+                    wrapped = true;
+                }
+                else
+                {
+                    UpdateStatusLocked(wrapped: false);
+                    return;
+                }
+            }
+
+            stop = stops[cursor];
+            currentFileIndex = stop.File;
+            currentMatchIndex = stop.MatchIndex;
+            UpdateStatusLocked(wrapped);
+        }
 
         var cts = new CancellationTokenSource();
         revealCts = cts;
@@ -216,10 +231,21 @@ public sealed class FindController
     /// </summary>
     private async Task<bool> EnsureStopAfterCursorAsync(long request)
     {
-        RefreshStops();
-
-        while (cursor + 1 >= stops.Count && !AllComplete())
+        while (true)
         {
+            // Always fold before deciding. Scans can finish between the check below and the
+            // waits being built, and an early exit that skipped this reported "No matches"
+            // over results that had in fact just landed.
+            bool haveStop;
+            lock (gate)
+            {
+                RefreshStopsLocked();
+                haveStop = cursor + 1 < stops.Count;
+            }
+
+            if (haveStop || AllComplete())
+                return true;
+
             statusChanged("Searching…");
 
             var waits = new List<Task>(sessions.Length);
@@ -229,17 +255,14 @@ public sealed class FindController
                     waits.Add(session.WaitForMatchCountAsync(session.MatchCount + 1));
             }
 
+            // Everything finished while we were looking; round again to fold and report it.
             if (waits.Count == 0)
-                break;
+                continue;
 
             await Task.WhenAny(waits);
             if (request != requestId)
                 return false;
-
-            RefreshStops();
         }
-
-        return true;
     }
 
     /// <summary>
@@ -252,6 +275,14 @@ public sealed class FindController
     /// identity rather than kept, because a match found late can sort ahead of it.
     /// </summary>
     private void RefreshStops()
+    {
+        lock (gate)
+        {
+            RefreshStopsLocked();
+        }
+    }
+
+    private void RefreshStopsLocked()
     {
         bool grown = false;
 
@@ -341,14 +372,18 @@ public sealed class FindController
 
     private async Task DisposeSessionsAsync()
     {
-        var old = sessions;
-        sessions = Array.Empty<FileSearchSession>();
-        foldedCounts = Array.Empty<int>();
-        sessionTerm = null;
-        stops.Clear();
-        cursor = -1;
-        currentFileIndex = -1;
-        currentMatchIndex = -1;
+        FileSearchSession[] old;
+        lock (gate)
+        {
+            old = sessions;
+            sessions = Array.Empty<FileSearchSession>();
+            foldedCounts = Array.Empty<int>();
+            sessionTerm = null;
+            stops.Clear();
+            cursor = -1;
+            currentFileIndex = -1;
+            currentMatchIndex = -1;
+        }
 
         foreach (var session in old)
             session.Cancel();
@@ -400,6 +435,14 @@ public sealed class FindController
     }
 
     private void UpdateStatus(bool wrapped)
+    {
+        lock (gate)
+        {
+            UpdateStatusLocked(wrapped);
+        }
+    }
+
+    private void UpdateStatusLocked(bool wrapped)
     {
         bool complete = AllComplete();
 

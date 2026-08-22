@@ -1,13 +1,14 @@
 using System.Text;
 using Argonaut.Features.Json.Diff;
+using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
 using Argonaut.Shell;
 
 namespace Argonaut.Tests;
 
 /// <summary>
-/// The diff document's IDocumentViewModel contract: no search navigator (find bar hides),
-/// no claimed file kind (never offered by the switcher), side-attributed failures, a
+/// The diff document's IDocumentViewModel contract: a two-file search navigator (one find
+/// bar over both documents), no claimed file kind (never offered by the switcher), a
 /// change-count summary once the diff completes, and idempotent disposal from both the
 /// shell and the view detach path.
 /// </summary>
@@ -58,7 +59,7 @@ public class JsonDiffViewModelTests
     }
 
     [Fact]
-    public async Task ShellContract_NoFindNoKindOwnToolbar()
+    public async Task ShellContract_FindOverBothFilesNoKindOwnToolbar()
     {
         string leftPath = WriteTemp("[1]");
         string rightPath = WriteTemp("[2]");
@@ -67,7 +68,11 @@ public class JsonDiffViewModelTests
         {
             await vm.LoadAsync(leftPath, rightPath);
 
-            Assert.Null(vm.CreateSearchNavigator());
+            // Find is offered, and scans BOTH documents through the shell's one find bar.
+            var navigator = Assert.IsType<JsonDiffSearchNavigator>(vm.CreateSearchNavigator());
+            Assert.Equal(2, navigator.Files.Count);
+            Assert.Same(navigator.File, navigator.Files[0]);
+
             foreach (FileTypeDetector.FileKind kind in Enum.GetValues<FileTypeDetector.FileKind>())
                 Assert.False(vm.CanHandleFileType(kind));
             Assert.NotNull(vm.Toolbar);

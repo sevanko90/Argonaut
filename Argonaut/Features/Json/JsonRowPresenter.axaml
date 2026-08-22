@@ -1,13 +1,17 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:json="clr-namespace:Argonaut.Features.Json"
+             xmlns:search="clr-namespace:Argonaut.Features.Search"
              x:Class="Argonaut.Features.Json.JsonRowPresenter"
              x:DataType="json:JsonRow">
     <!-- The read-only content of one JSON row (name, value, truncation note), shared by the
          diff view's two panes (diff plan stage 0.3). Interaction wiring - expanders, hint
-         and truncation-jump buttons, search highlighting - stays with the hosting view; the
-         JSON view keeps its richer inline template for exactly that reason. Renders nothing
-         when no row is bound (an absent diff side).
+         and truncation-jump buttons - stays with the hosting view; the JSON view keeps its
+         richer inline template for exactly that reason. Renders nothing when no row is bound
+         (an absent diff side).
+
+         Search highlighting IS here, driven by the HighlightTerm property the host sets
+         (find spans both diff panes, so both need it and neither owns it).
 
          A Grid (not a horizontal StackPanel): a StackPanel measures children at infinite
          width, so a long value would report its full width upward and push the diff's right
@@ -16,7 +20,9 @@
     <Grid ColumnDefinitions="Auto,*"
           IsVisible="{Binding Converter={x:Static json:IsNotNullConverter.Instance}}">
         <TextBlock Grid.Column="0"
-                   Text="{Binding Name, StringFormat='{}{0}: '}"
+                   search:SearchHighlight.Text="{Binding Name}"
+                   search:SearchHighlight.Suffix=": "
+                   search:SearchHighlight.Term="{Binding $parent[json:JsonRowPresenter].HighlightTerm}"
                    IsVisible="{Binding Name, Converter={x:Static json:IsNotNullConverter.Instance}}"
                    Foreground="{DynamicResource AppAccentBrush}"
                    TextWrapping="NoWrap"
@@ -25,7 +31,8 @@
                    VerticalAlignment="Center"
                    FontFamily="{DynamicResource AppContentFontFamily}" />
         <TextBlock Grid.Column="1"
-                   Text="{Binding Value}"
+                   search:SearchHighlight.Text="{Binding Value}"
+                   search:SearchHighlight.Term="{Binding $parent[json:JsonRowPresenter].HighlightTerm}"
                    Classes="rowValue"
                    Classes.jsonString="{Binding IsStringValue}"
                    Classes.jsonNumber="{Binding IsNumberValue}"

@@ -116,7 +116,7 @@ public sealed class JsonRow
 /// </summary>
 public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
 {
-    private const int ChildCap = 10_000;
+    internal const int ChildCap = 10_000;
     // Alias kept for callers/tests; the cap itself lives with the row-text machinery in
     // JsonRowFactory.
     internal const int MaxDisplayTextLength = JsonRowFactory.MaxDisplayTextLength;
@@ -124,7 +124,7 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
     // children into the visible list. Rebuild() re-walks the whole visible tree on every
     // toggle (see class remarks), so without this cap, paging through a container with
     // millions of children one "show more" click at a time degrades to O(n^2).
-    private const int MaxDisplayedChildrenPerContainer = 20_000;
+    internal const int MaxDisplayedChildrenPerContainer = 20_000;
     private const int RowCacheCapacity = 1000;
     // Every tick that actually finds new tokens hands the visible ListBox a CollectionChanged
     // notification, which forces Avalonia's VirtualizingStackPanel to redo virtualization/

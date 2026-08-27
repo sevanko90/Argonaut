@@ -205,8 +205,9 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
         return index;
     }
 
-    /// <summary>True when this index was started with <see cref="JsonIndexOptions.ComputeContentHashes"/>.</summary>
-    public bool HasContentHashes => this.hashes is not null;
+    /// <summary>True while this index retains content hashes. A diff session releases its
+    /// private indexes' hashes after construction because rendering only needs token metadata.</summary>
+    public bool HasContentHashes => Volatile.Read(ref this.hashes) is not null;
 
     /// <summary>
     /// The content hash of the token at <paramref name="tokenIndex"/> (see
@@ -217,11 +218,15 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
     /// </summary>
     public long GetContentHash(int tokenIndex)
     {
-        if (this.hashes is not { } log)
-            throw new InvalidOperationException("This index was built without content hashes (see JsonIndexOptions.ComputeContentHashes).");
+        if (Volatile.Read(ref this.hashes) is not { } log)
+            throw new InvalidOperationException("Content hashes are unavailable: they were not computed or have been released.");
 
         return Volatile.Read(ref log.ItemRef(tokenIndex));
     }
+
+    /// <summary>Drops the optional 8-byte-per-token hash log after its sole consumer has
+    /// stopped. Internal because ordinary index owners cannot know that no reader remains.</summary>
+    internal void ReleaseContentHashes() => Interlocked.Exchange(ref this.hashes, null);
 
     /// <summary>
     /// Enriches a <see cref="JsonException"/> with best-effort line/column/byte-offset info.

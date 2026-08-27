@@ -63,6 +63,30 @@ public class JsonDiffSessionTests
     }
 
     [Fact]
+    public async Task CompletedDiff_ReleasesBothContentHashLogs()
+    {
+        string leftPath = WriteTempJson("""{"a":[1,2,3]}""");
+        string rightPath = WriteTempJson("""{"a":[1,2,4]}""");
+        try
+        {
+            using var session = JsonDiffSession.Start(leftPath, rightPath);
+            await session.HashReleaseTask;
+
+            Assert.True(session.Diff.IsComplete);
+            Assert.False(session.Left.Index.HasContentHashes);
+            Assert.False(session.Right.Index.HasContentHashes);
+            Assert.Throws<InvalidOperationException>(() => session.Left.Index.GetContentHash(0));
+            Assert.Throws<InvalidOperationException>(() => session.Right.Index.GetContentHash(0));
+            Assert.True(session.Diff.RecordCount > 0); // the finished diff remains usable
+        }
+        finally
+        {
+            File.Delete(leftPath);
+            File.Delete(rightPath);
+        }
+    }
+
+    [Fact]
     public void DisposeWhileBothSidesStillIndexing_JoinsEverythingPromptly()
     {
         string leftPath = WriteLargeTempJson();
@@ -79,6 +103,8 @@ public class JsonDiffSessionTests
             Assert.True(diffTask.IsCompleted);
             Assert.True(session.Left.IndexingTask.IsCompleted);
             Assert.True(session.Right.IndexingTask.IsCompleted);
+            Assert.False(session.Left.Index.HasContentHashes);
+            Assert.False(session.Right.Index.HasContentHashes);
             Assert.Throws<ObjectDisposedException>(() => session.Left.File.GetSpan(0, 1));
             Assert.Throws<ObjectDisposedException>(() => session.Right.File.GetSpan(0, 1));
         }
@@ -143,11 +169,14 @@ public class JsonDiffSessionTests
         {
             var session = JsonDiffSession.Start(leftPath, rightPath);
             await session.Diff.IndexingTask; // completes (empty) despite the side failure
+            await session.HashReleaseTask;
 
             Assert.Null(session.Left.Index.Failure);
             Assert.NotNull(session.Right.Index.Failure);
             Assert.Equal(0, session.Diff.RecordCount);
             Assert.True(session.Diff.IsComplete);
+            Assert.False(session.Left.Index.HasContentHashes);
+            Assert.False(session.Right.Index.HasContentHashes);
 
             var leftFile = session.Left.File;
             session.Dispose();

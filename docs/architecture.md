@@ -25,7 +25,8 @@ chain changes.
   document: `FilePath`, observable `StatusText`, `CreateSearchNavigator()` (nullable — null for
   a document with nothing searchable), `CanHandleFileType(FileKind)`, observable
   `IndexFailure`, and `Toolbar`. Implemented by `JsonViewModel`, `NdJsonViewModel`,
-  `CsvViewModel`, `RawViewModel`, and the placeholder `IncompatibleViewModel`.
+  `CsvViewModel`, `RawViewModel`, `JsonDiffViewModel`, `JsonArrayTableViewModel`, and the
+  placeholder `IncompatibleViewModel`.
 - Each document view model owns its whole status line (initial, live indexing %, complete,
   failed, and — NDJSON — selected-line), which the shell mirrors into the status bar.
 - **Per-view toolbars are injected, not type-switched.** `IDocumentViewModel.Toolbar` is
@@ -135,6 +136,19 @@ chain changes.
   Selection/scroll sync lives in code-behind; all behavior is in the view model.
 - `NdJsonViewModel` hosts a nested per-line `JsonViewModel` (`SelectedLineJsonViewModel`) for
   the right-hand JSON pane. That nested VM has its own single-line sub-range mapping.
+- `JsonArrayTableViewModel` renders one JSON array as a CSV-style grid, over its own sub-range
+  session covering exactly the array's `[`…`]` bytes — so it shares nothing with the JSON
+  document it was opened from, which is required rather than tidy, since the shell disposes the
+  outgoing document before publishing this one. Entered explicitly from a JSON array row's
+  "view as table" link (raised through `ArrayTableService`, with `MainWindow` the sole
+  subscriber — the same view-to-shell decoupling as `RawJumpService`) and published like a diff:
+  directly, with `FileKind.Unknown`, never via `DocumentViewCatalog`. It reuses CSV's
+  presentation types (`CsvStructure`, `CsvCell`, `CsvVisibleRow`) plus its own
+  `JsonArrayRowCollection`; `CsvView`'s markup and code-behind are copied rather than shared,
+  because those bindings are compiled against `CsvViewModel`. Back reloads the origin file as
+  JSON and reveals the origin path through `IPathNavigable`. The link is hidden on the per-line
+  documents NDJSON nests, whose token offsets are mapping-relative and therefore not file
+  offsets.
 
 ## Memory-mapped files
 
@@ -153,7 +167,9 @@ chain changes.
   before releasing the mapping. `RawIndexSession` is the wrap-width-restartable variant, with
   two cancellation sources: `mappingCts` for the document's lifetime and `indexCts` (linked from
   it) for the index `RestartIndex` recycles; `JsonDiffSession` composes two
-  `IndexedFileSession<JsonStructureIndex>`s. All three implement `IDocumentSession`, which
+  `IndexedFileSession<JsonStructureIndex>`s; `JsonArrayTableSession` composes one of them with
+  the `JsonArrayElementIndex` derived from its token index. All four implement
+  `IDocumentSession`, which
   `IndexedDocumentViewModel` (below) drives — the teardown pair (`TearingDown` + `RequestStop()`
   + `Dispose()`) plus the two members the status line is driven from, `IndexingTask` and
   `Failure`. `TearingDown` is named for the moment it fires, per CLAUDE.md's naming convention.
@@ -166,12 +182,27 @@ chain changes.
   monitor recognise a retired scan. `JsonDiffSession.Failure` is always null on purpose — a diff
   failure belongs to the left or right file, and only `JsonDiffViewModel` knows the display
   names to attribute it with.
+- **A composed session is how a document waits on the right task.** `IndexedDocumentViewModel.IndexingTask`
+  is non-virtual and reads `Session.IndexingTask`, so a document whose "still growing" signal is
+  not its own file scan's expresses that one layer down. `JsonDiffSession` reports the diff's
+  task rather than either side's; `JsonArrayTableSession` reports the element index's, because
+  the token scan completing is not when the table stops growing — the element index publishes
+  one final stride afterwards. Both also own a teardown ordering their view model would
+  otherwise have to hand-encode: cancel the derived work, join it (after which nothing reads the
+  source index), then dispose the file session and release the mapping.
+- **A scan's completion signal must be unconditional.** Every index starts its scan through
+  `AppendLogIndexBase.StartScan` / `StartStreamingScan`, which deliberately do NOT pass the
+  cancellation token to `Task.Run`: a token already cancelled when the pool dequeues the work
+  item makes `Task.Run` skip the body, so `MarkComplete` would never run, `IsComplete` would
+  stay false forever, and every waiter would hang for the life of the process. The body observes
+  cancellation itself and still reaches the `finally`.
 
 ## Virtualized ItemsSources
 
 - `MemoryMappedCollectionBase` (`Infrastructure/MemoryMappedCollectionBase.cs`) is the shared
-  base for the three list ItemsSources: `JsonVisibleRowCollection`, `MemoryMappedFileLineCollection`,
-  `CsvRowCollection`. It supplies the read-only `IList` + `INotifyCollectionChanged` surface
+  base for the list ItemsSources: `JsonVisibleRowCollection`, `MemoryMappedFileLineCollection`,
+  `CsvRowCollection`, `JsonArrayRowCollection`. It supplies the read-only `IList` +
+  `INotifyCollectionChanged` surface
   Avalonia's `VirtualizingStackPanel` needs.
 - Subclasses implement only `GetCount()`, `GetItem(int)`, `DisposeCore()`. The base owns the
   `disposed` flag: `Count` returns 0 and the indexer returns null once disposed, and it

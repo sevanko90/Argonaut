@@ -86,11 +86,7 @@ public sealed class JsonArrayElementIndex : AppendLogIndexBase<int>
     {
         var index = new JsonArrayElementIndex(source, arrayTokenIndex);
 
-        // Task.Run, not a bare async call: the walk is await-driven, and starting it here (on
-        // the UI thread, where sessions are created) would otherwise capture the dispatcher's
-        // SynchronizationContext and run a whole background scan in dispatcher turns. See
-        // RunIndexingAsync's remarks.
-        index.IndexingTask = Task.Run(() => index.RunIndexingAsync(() => index.WalkAsync(cancellationToken)), cancellationToken);
+        index.IndexingTask = index.StartStreamingScan(() => index.WalkAsync(cancellationToken));
         return index;
     }
 

@@ -146,9 +146,31 @@ public abstract class AppendLogIndexBase<T> where T : struct
     }
 
     /// <summary>
+    /// Starts <paramref name="body"/> on a background thread as this index's scan, and returns
+    /// the task to assign to the derived index's <c>IndexingTask</c>.
+    ///
+    /// <b>The scan's cancellation token is deliberately NOT passed to <see cref="Task.Run(Action)"/>.</b>
+    /// A token already cancelled when the pool picks the work item makes Task.Run skip the body
+    /// outright - which would mean <see cref="MarkComplete"/> never runs, <see cref="IsComplete"/>
+    /// stays false forever, and every waiter registered through <see cref="WaitForCountAsync"/>
+    /// hangs for the life of the process. The body observes cancellation itself and still reaches
+    /// <see cref="RunIndexing"/>'s finally, so the completion signal is unconditional. This is not
+    /// hypothetical: it deadlocked a document that was disposed between starting its scan and the
+    /// pool dequeuing it.
+    /// </summary>
+    protected Task StartScan(Action body) => Task.Run(() => RunIndexing(body));
+
+    /// <summary><see cref="StartScan"/> for an await-driven scan - see
+    /// <see cref="RunIndexingAsync"/>, whose remarks explain why the background hop is required
+    /// rather than merely tidy. The same "no token on Task.Run" rule applies, for the same
+    /// reason.</summary>
+    protected Task StartStreamingScan(Func<Task> body) => Task.Run(() => RunIndexingAsync(body));
+
+    /// <summary>
     /// Runs a scan body on the writer thread, recording any non-cancellation fault as
     /// <see cref="Failure"/> before rethrowing (so <see cref="IFileIndexer.IndexingTask"/>
     /// still faults the same way it always did), and marking the scan complete either way.
+    /// Started through <see cref="StartScan"/>, never by a bare Task.Run.
     /// </summary>
     protected void RunIndexing(Action body)
     {

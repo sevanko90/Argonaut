@@ -204,7 +204,7 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
         var index = new JsonStructureIndex();
         if (options.ComputeContentHashes)
             index.hashes = new SegmentedAppendLog<long>();
-        index.IndexingTask = Task.Run(() => index.RunIndexing(() => index.Build(file, progressReporter, cancellationToken)), cancellationToken);
+        index.IndexingTask = index.StartScan(() => index.Build(file, progressReporter, cancellationToken));
         return index;
     }
 

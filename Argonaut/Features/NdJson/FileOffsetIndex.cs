@@ -63,7 +63,7 @@ public sealed class FileOffsetIndex : AppendLogIndexBase<FileLineSpan>, IFileInd
     public static FileOffsetIndex StartIndexing(MMapFile file, IProgressReporter? progressReporter = null, CancellationToken cancellationToken = default)
     {
         var index = new FileOffsetIndex();
-        index.IndexingTask = Task.Run(() => index.RunIndexing(() => index.ProduceOffsets(file, progressReporter, cancellationToken)), cancellationToken);
+        index.IndexingTask = index.StartScan(() => index.ProduceOffsets(file, progressReporter, cancellationToken));
         return index;
     }
 

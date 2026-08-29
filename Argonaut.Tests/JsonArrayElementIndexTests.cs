@@ -248,6 +248,41 @@ public class JsonArrayElementIndexTests
     }
 
     [Fact]
+    public async Task CancelledBeforeTheScanStarts_StillMarksItselfComplete()
+    {
+        // Task.Run(body, token) SKIPS the body outright when the token is already cancelled as
+        // the pool dequeues the work item. That would leave MarkComplete uncalled, IsComplete
+        // false forever, and every waiter hanging for the life of the process - which is exactly
+        // what a document disposed between starting its scan and the pool picking it up does.
+        // AppendLogIndexBase.StartScan is what makes the completion signal unconditional.
+        string path = System.IO.Path.GetTempFileName();
+        File.WriteAllBytes(path, Encoding.UTF8.GetBytes(ScalarArray(200)));
+        try
+        {
+            using var file = new MMapFile(path);
+            var source = JsonStructureIndex.StartIndexing(file);
+
+            using var cts = new CancellationTokenSource();
+            cts.Cancel();
+            var elements = JsonArrayElementIndex.Start(source, 0, cts.Token);
+
+            await Observed(elements.IndexingTask);
+            Assert.True(elements.IsComplete);
+
+            // The assertion that matters: a waiter is released rather than hanging forever. A
+            // regression here would hang the run, so it is raced against a timeout.
+            var wait = elements.WaitForElementCountAsync(10);
+            Assert.Same(wait, await Task.WhenAny(wait, Task.Delay(5000)));
+
+            await Observed(source.IndexingTask);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public async Task WaitForElementCount_UnreachableTarget_IsReleasedByCompletion()
     {
         using var f = await BuildAsync(ScalarArray(3));

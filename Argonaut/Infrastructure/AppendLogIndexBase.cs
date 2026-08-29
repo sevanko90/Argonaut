@@ -172,6 +172,38 @@ public abstract class AppendLogIndexBase<T> where T : struct
     }
 
     /// <summary>
+    /// <see cref="RunIndexing"/> for a scan whose body is await-driven rather than CPU-bound -
+    /// one that consumes another index as it grows, rather than reading a file itself. Identical
+    /// contract: a non-cancellation fault is recorded as <see cref="Failure"/> and rethrown, and
+    /// the scan is marked complete either way.
+    ///
+    /// MUST be started off the UI thread (wrap it in <c>Task.Run</c>). Its awaits resume on
+    /// whatever SynchronizationContext was captured, and the app bans
+    /// <c>ConfigureAwait(false)</c> (see CLAUDE.md), so a body started on the UI thread would
+    /// run a whole background scan in dispatcher turns.
+    /// </summary>
+    protected async Task RunIndexingAsync(Func<Task> body)
+    {
+        try
+        {
+            await body();
+        }
+        catch (OperationCanceledException)
+        {
+            throw; // cancellation is not a failure
+        }
+        catch (Exception ex)
+        {
+            this.failure = DescribeFailure(ex);
+            throw;
+        }
+        finally
+        {
+            this.MarkComplete();
+        }
+    }
+
+    /// <summary>
     /// Builds the <see cref="IndexFailure"/> recorded for an exception that stopped the
     /// scan. The default reports just the message and how many items were published before
     /// the fault; derived classes override to enrich it (e.g. line/column from a

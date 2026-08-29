@@ -77,7 +77,7 @@ chain changes.
   stopped because of an error, null on success *and* on cancellation. `AppendLogIndexBase.RunIndexing`
   is the one place that catches a scan's exception, records it (via the overridable
   `DescribeFailure`, which `JsonStructureIndex` enriches with line/column/byte-offset from a
-  `JsonException`), and rethrows — so `IndexingTask` still faults exactly as before.
+  `JsonException`), and rethrows — so `IndexingTask` faults as if nothing had caught it.
 - Forcing an incompatible kind onto a file (via the switcher) is classified in two stages:
   1. **Pre-flight** — `FileTypeDetector.IsPlausibleFor(kind, path, out reason)` is a cheap header
      check (no indexing) that rejects an obvious mismatch (e.g. CSV content forced to JSON)
@@ -154,11 +154,10 @@ chain changes.
   + `Dispose()`) plus the two members the status line is driven from, `IndexingTask` and
   `Failure`. `TearingDown` is named for the moment it fires, per CLAUDE.md's naming convention.
 - **`IDocumentSession` is deliberately not an index.** Two implementations own an `IFileIndexer`
-  and the diff owns a `JsonDiffIndex` that isn't one, so a base class reaching for
-  `session.Index` needed a nullable indexer accessor plus virtual escape hatches on
-  `IndexingTask` and `MonitorIndexing` to route around the odd one out. Everything it actually
-  wanted from an index was a task to await and a failure to report, so those are the members —
-  stated at the level all three can answer them. `IndexingTask` is read **live**, never cached:
+  and the diff owns a `JsonDiffIndex` that isn't one, so exposing `session.Index` would force a
+  nullable indexer accessor plus virtual escape hatches on `IndexingTask` and `MonitorIndexing`
+  to route around the odd one out. All a document needs from an index is a task to await and a
+  failure to report, so those are the members — stated at the level all three can answer them. `IndexingTask` is read **live**, never cached:
   `RawIndexSession` swaps it on a wrap-width restart, which is exactly what lets the completion
   monitor recognise a retired scan. `JsonDiffSession.Failure` is always null on purpose — a diff
   failure belongs to the left or right file, and only `JsonDiffViewModel` knows the display
@@ -188,9 +187,9 @@ chain changes.
   touching no unmapped memory — regardless of Avalonia's detach/enumerate ordering.
 - The hosting view's `DetachedFromVisualTree` also disposes its `DataContext`, as an
   idempotent safety net for teardown the shell doesn't drive (e.g. window close). "The shell
-  always stops find first" is therefore an unsafe assumption — and nothing depends on it any
-  more: search reads its own mappings (below), and the one part that does touch document state
-  (the reveal) links `TearingDown`.
+  always stops find first" is therefore an unsafe assumption, and nothing depends on it: search
+  reads its own mappings (below), and the one part that does touch document state (the reveal)
+  links `TearingDown`.
 - `Dispose` is idempotent on every document VM and on `IndexedFileSession` / `RawIndexSession`
   / `JsonDiffSession` / the collections, so the two owners touching the same instance is
   harmless.
@@ -204,11 +203,10 @@ chain changes.
   (`MonitorIndexing()`, started from `LoadAsync` before it returns — the shell's own
   continuation on `IndexingTask`, in `StopProgressWhenIndexedAsync`, depends on that ordering);
   subclasses react to completion/failure via `OnIndexingCompleted()`/`OnIndexingFailed(failure)`,
-  not by hand-rolling their own monitor loop. There are no longer any escape hatches:
-  `IndexingTask` and `MonitorIndexing` are non-virtual, and `JsonDiffViewModel` — the type that
-  used to need them — now expresses its difference through the hooks, pointing both at one
-  method because a side failure completes the diff **normally** over an empty index and so has
-  to be attributed on the success path too.
+  not by hand-rolling their own monitor loop. There are no escape hatches: `IndexingTask` and
+  `MonitorIndexing` are non-virtual, so even `JsonDiffViewModel` expresses its difference
+  through the hooks — pointing both at one method, because a side failure completes the diff
+  **normally** over an empty index and so has to be attributed on the success path too.
 - **The session and the row collection are abstract members** (`Session`, `MappedRows`), not
   registered by the subclass calling an `Attach…` during load. They are the two things the base
   exists to sequence, and an imperative registration can be silently forgotten — a load path
@@ -217,9 +215,8 @@ chain changes.
   that a compiler error. They're properties rather than constructor arguments because both are
   created partway through `LoadAsync`, after an await; reading them live also means
   `RawViewModel`'s wrap-width restart just replaces its field.
-- `OnIndexingCompleted()` takes no argument on purpose. It used to be handed the `IFileIndexer`,
-  which one override out of four read — and that one had a typed count of its own. Every
-  subclass reports from state it already has.
+- `OnIndexingCompleted()` takes no argument on purpose: every subclass reports from state it
+  already has, so handing it the `IFileIndexer` would only widen what a hook can reach into.
 
 ## Search interaction
 
@@ -258,7 +255,7 @@ chain changes.
   coverage, and touches the document's index and rows, so `FindController` links
   `ISearchNavigator.DocumentTearingDown` (the document session's `TearingDown`) and swallows the
   cancellation. `MMapFile.GetSpan`'s `ObjectDisposedException` remains the backstop.
-- The shell still stops find before a content swap — it clears the highlight term and find-bar
+- The shell stops find before a content swap — it clears the highlight term and find-bar
   status. That is UI state, not safety.
 - A range `ScanTarget` reports offsets relative to the range start, so a sub-document (one
   NDJSON line, whose index is zero-based at the line start) is searched in the coordinate system

@@ -15,11 +15,10 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
 
     private IndexedFileSession<FileOffsetIndex>? session;
     private CsvRowCollection? rows;
-    private CsvColumnLayout? columnLayout;
+    private CsvStructure? structure;
     private string[] headerFields = [];
     private byte delimiter;
     private bool isHeaderRow = true;
-    private IReadOnlyList<CsvCell> headerCells = [];
     private string? highlightTerm;
     private int? selectedRowIndex;
     private int? selectedColumnIndex;
@@ -46,18 +45,14 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
     /// <summary>CSV has no header-region toolbar (no date hints, no tree to expand).</summary>
     public override object? Toolbar => null;
 
-    public CsvColumnLayout ColumnLayout => this.columnLayout ?? throw new InvalidOperationException("LoadAsync must complete before ColumnLayout is accessed.");
+    public CsvStructure Structure => this.structure ?? throw new InvalidOperationException("LoadAsync must complete before Structure is accessed.");
 
     /// <summary>
     /// The sticky header row's cells. Row 0's parsed fields when <see cref="IsHeaderRow"/> is
-    /// true; generic "Column N" labels (still widthed from the same <see cref="ColumnLayout"/>)
+    /// true; generic "Column N" labels (still widthed from the same <see cref="Structure"/>)
     /// when false, so the grid always has a consistent frame regardless of the tickbox.
     /// </summary>
-    public IReadOnlyList<CsvCell> HeaderCells
-    {
-        get => this.headerCells;
-        private set => SetField(ref this.headerCells, value);
-    }
+    public IReadOnlyList<CsvCell> HeaderCells => this.structure?.HeaderCells ?? [];
 
     /// <summary>"First row is header" tickbox. Toggling it doesn't re-read the file - it just
     /// shifts which absolute line <see cref="Rows"/> treats as its first data row.</summary>
@@ -71,7 +66,7 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
 
             this.rows?.SetDataStartIndex(value ? 1 : 0);
             OnPropertyChanged(nameof(RowCount));
-            UpdateHeaderCells();
+            ApplyColumnNames();
         }
     }
 
@@ -127,21 +122,19 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
         if (session.Index.Failure is { } failure)
             IndexFailure = failure;
 
+        // Row 0 is the only row decoded at load: it carries the column labels. Every other
+        // sampled row is measured from its field SPANS (see MeasureColumns), which is what lets
+        // the sample be the whole initial batch instead of a token two rows.
         this.headerFields = session.Index.LineCount > 0
             ? CsvFieldReader.ReadFields(session.File, session.Index.GetLineSpan(0), delimiter)
             : [];
 
-        int sampleCount = Math.Min(session.Index.LineCount, InitialIndexedRowTarget);
-        var sampleRows = new List<string[]>(Math.Max(0, sampleCount - 1));
-        for (int i = 1; i < sampleCount; i++)
-            sampleRows.Add(CsvFieldReader.ReadFields(session.File, session.Index.GetLineSpan(i), delimiter));
-
-        this.columnLayout = CsvColumnLayout.Compute(this.headerFields, sampleRows);
-        this.rows = new CsvRowCollection(session.Index, session.File, delimiter, this.columnLayout, this.isHeaderRow ? 1 : 0);
-        UpdateHeaderCells();
+        this.structure = CsvStructure.FromMaxChars(ColumnNames(), MeasureColumns(session));
+        this.rows = new CsvRowCollection(session.Index, session.File, delimiter, this.structure, this.isHeaderRow ? 1 : 0);
 
         OnPropertyChanged(nameof(Rows));
-        OnPropertyChanged(nameof(ColumnLayout));
+        OnPropertyChanged(nameof(Structure));
+        OnPropertyChanged(nameof(HeaderCells));
         OnPropertyChanged(nameof(RowCount));
 
         StatusText = $"{path} — {RowCount:N0} rows indexed so far";
@@ -173,24 +166,62 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
             : $"{FilePath} — indexing failed";
     }
 
-    private void UpdateHeaderCells()
+    /// <summary>
+    /// Per-column maximum field length over the initial indexed batch, measured from field
+    /// spans - no decode, no allocation per field, so the wide sample is nearly free. Seeded
+    /// with each header label's own length so a header always fits its column.
+    ///
+    /// A span's Length is raw bytes, including the field's surrounding quotes and its doubled
+    /// "" escapes, so it over-counts slightly against the decoded text. Harmless: the width
+    /// formula clamps, and saturates well before the difference could matter.
+    /// </summary>
+    private int[] MeasureColumns(IndexedFileSession<FileOffsetIndex> session)
     {
-        if (this.columnLayout is null)
+        var maxChars = new int[this.headerFields.Length];
+        for (int c = 0; c < maxChars.Length; c++)
+            maxChars[c] = this.headerFields[c].Length;
+
+        int sampleCount = Math.Min(session.Index.LineCount, InitialIndexedRowTarget);
+        for (int i = 1; i < sampleCount; i++)
+        {
+            var spans = CsvFieldReader.SplitToSpans(session.File, session.Index.GetLineSpan(i), delimiter, CsvFieldReader.MaxDisplayFields);
+            int columns = Math.Min(spans.Length, maxChars.Length);
+            for (int c = 0; c < columns; c++)
+            {
+                if (spans[c].Length > maxChars[c])
+                    maxChars[c] = spans[c].Length;
+            }
+        }
+
+        return maxChars;
+    }
+
+    /// <summary>Row 0's parsed fields when the tickbox says row 0 is a header, generic
+    /// "Column N" labels when it doesn't.</summary>
+    private string[] ColumnNames()
+    {
+        if (this.isHeaderRow)
+            return this.headerFields;
+
+        var names = new string[this.headerFields.Length];
+        for (int c = 0; c < names.Length; c++)
+            names[c] = $"Column {c + 1}";
+
+        return names;
+    }
+
+    /// <summary>
+    /// Relabels the columns after a tickbox toggle. Only the header changes: the widths were
+    /// measured from the data and the body renders no names, so this needs no
+    /// <see cref="CsvRowCollection.SetStructure"/> call and no rebuild of the realized rows.
+    /// </summary>
+    private void ApplyColumnNames()
+    {
+        if (this.structure is null)
             return;
 
-        if (this.isHeaderRow)
-        {
-            var cells = new CsvCell[this.headerFields.Length];
-            for (int c = 0; c < cells.Length; c++)
-                cells[c] = new CsvCell(this.headerFields[c], this.columnLayout.WidthFor(c));
-            HeaderCells = cells;
-        }
-        else
-        {
-            var cells = new CsvCell[this.columnLayout.ColumnCount];
-            for (int c = 0; c < cells.Length; c++)
-                cells[c] = new CsvCell($"Column {c + 1}", this.columnLayout.WidthFor(c));
-            HeaderCells = cells;
-        }
+        this.structure = this.structure.WithNames(ColumnNames());
+        OnPropertyChanged(nameof(Structure));
+        OnPropertyChanged(nameof(HeaderCells));
     }
 }

@@ -47,7 +47,7 @@ public partial class CsvView : UserControl
 
         bool columnChanged = e.PropertyName is null or nameof(CsvViewModel.SelectedColumnIndex);
         if (columnChanged && vm.SelectedColumnIndex is int columnIndex)
-            ScrollColumnIntoView(columnIndex, vm.ColumnLayout);
+            ScrollColumnIntoView(columnIndex, vm.Structure);
     }
 
     /// <summary>
@@ -57,15 +57,15 @@ public partial class CsvView : UserControl
     /// Setting the offset here also keeps the sticky header aligned for free, via the existing
     /// OnBodyScrollChanged mirroring.
     /// </summary>
-    private void ScrollColumnIntoView(int columnIndex, CsvColumnLayout layout)
+    private void ScrollColumnIntoView(int columnIndex, CsvStructure structure)
     {
         if (bodyScrollViewer is null || columnIndex < 0)
             return;
 
         double left = 0;
-        for (int i = 0; i < columnIndex && i < layout.Widths.Count; i++)
-            left += layout.Widths[i];
-        double width = columnIndex < layout.Widths.Count ? layout.Widths[columnIndex] : 0;
+        for (int i = 0; i < columnIndex && i < structure.ColumnCount; i++)
+            left += structure.Columns[i].Width;
+        double width = columnIndex < structure.ColumnCount ? structure.Columns[columnIndex].Width : 0;
         double right = left + width;
 
         double viewportLeft = bodyScrollViewer.Offset.X;

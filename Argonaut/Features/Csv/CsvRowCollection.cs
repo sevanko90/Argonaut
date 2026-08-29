@@ -35,20 +35,20 @@ public sealed class CsvRowCollection : MemoryMappedCollectionBase
     private readonly FileOffsetIndex index;
     private readonly MMapFile mmap;
     private readonly byte delimiter;
-    private readonly CsvColumnLayout layout;
     private readonly Dictionary<int, LinkedListNode<(int Index, CsvVisibleRow Row)>> cache = new();
     private readonly LinkedList<(int Index, CsvVisibleRow Row)> cacheOrder = new();
 
+    private CsvStructure structure;
     private int dataStartIndex;
     private DispatcherTimer? growthTimer;
     private int notifiedCount;
 
-    public CsvRowCollection(FileOffsetIndex index, MMapFile mmap, byte delimiter, CsvColumnLayout layout, int dataStartIndex)
+    public CsvRowCollection(FileOffsetIndex index, MMapFile mmap, byte delimiter, CsvStructure structure, int dataStartIndex)
     {
         this.index = index;
         this.mmap = mmap;
         this.delimiter = delimiter;
-        this.layout = layout;
+        this.structure = structure;
         this.dataStartIndex = dataStartIndex;
         notifiedCount = GetCount();
 
@@ -77,7 +77,7 @@ public sealed class CsvRowCollection : MemoryMappedCollectionBase
         var fields = CsvFieldReader.ReadFields(mmap, lineSpan, delimiter);
         var cells = new CsvCell[fields.Length];
         for (int c = 0; c < fields.Length; c++)
-            cells[c] = new CsvCell(fields[c], layout.WidthFor(c));
+            cells[c] = new CsvCell(fields[c], structure.WidthFor(c));
 
         var row = new CsvVisibleRow(i + 1, cells);
 
@@ -93,6 +93,29 @@ public sealed class CsvRowCollection : MemoryMappedCollectionBase
         }
 
         return row;
+    }
+
+    /// <summary>
+    /// Replaces the grid's shape. Widths are baked into each <see cref="CsvCell"/> when a row is
+    /// realized, so cached rows carry the old ones and are dropped; a Reset then makes the panel
+    /// re-realize what it is showing. The owner is responsible for republishing the new
+    /// structure's <see cref="CsvStructure.HeaderCells"/> to the sticky header - this collection
+    /// only owns the body.
+    ///
+    /// Only WIDTHS are read from the structure here; column names are a header concern. So a
+    /// relabelling (CsvViewModel's "first row is header" tickbox, via
+    /// <see cref="CsvStructure.WithNames"/>) needs no call to this at all, and the structure this
+    /// collection holds is allowed to carry the pre-rename labels.
+    /// </summary>
+    public void SetStructure(CsvStructure newStructure)
+    {
+        if (ReferenceEquals(structure, newStructure))
+            return;
+
+        structure = newStructure;
+        cache.Clear();
+        cacheOrder.Clear();
+        RaiseCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
     }
 
     /// <summary>

@@ -77,9 +77,15 @@ public sealed class JsonArrayRowCollection : MemoryMappedCollectionBase
         this.structure = structure;
         this.mode = mode;
         this.columnNameBytes = EncodeColumnNames(structure);
+        // Sampled before the count snapshot, for the reason JsonDiffRowCollection's constructor
+        // states: a walk that finishes in the window between the snapshot and a check made
+        // after it would leave this collection with no monitor, permanently reporting the
+        // element count it happened to see here.
+        bool walkWasRunning = !elements.IsComplete;
+
         this.notifiedCount = GetCount();
 
-        if (!elements.IsComplete)
+        if (walkWasRunning)
             StartGrowthMonitor();
     }
 

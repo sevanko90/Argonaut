@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Specialized;
+using System.Threading.Tasks;
 using Argonaut.Infrastructure;
 
 namespace Argonaut.Features.Json.Diff;
@@ -103,15 +104,31 @@ public sealed class JsonDiffRowCollection : MemoryMappedCollectionBase
         this.leftFactory = new JsonRowFactory(session.Left.Index, session.Left.File, hintProviders: null);
         this.rightFactory = new JsonRowFactory(session.Right.Index, session.Right.File, hintProviders: null);
 
+        // Sampled BEFORE the walk, not after: a diff that completes while Rebuild is running
+        // would otherwise be seen as "already complete, no monitor needed" by a check made
+        // afterwards - and this collection would stay on the pre-diff preview of the left
+        // document for the rest of its life, with nothing left to rebuild it. Attaching a
+        // monitor to an already-finished task costs one immediate final refresh, which is
+        // exactly the refresh that window loses.
+        bool diffWasRunning = !session.Diff.IsComplete;
+
         Rebuild();
 
-        if (!session.Diff.IsComplete)
+        if (diffWasRunning)
         {
             growthMonitor = new IndexGrowthMonitor(GrowthPollInterval, session.Diff.IndexingTask,
                 isComplete: () => session.Diff.IsComplete,
                 refresh: RefreshIfGrown);
         }
     }
+
+    /// <summary>
+    /// See <see cref="IndexGrowthMonitor.FinalRefreshTask"/> - completed already when the diff
+    /// was finished before this collection was built, since there is then no monitor and the
+    /// constructor's own Rebuild is the final state. Internal: deterministic tests await this
+    /// rather than racing the completion refresh.
+    /// </summary>
+    internal Task FinalRefreshTask => growthMonitor?.FinalRefreshTask ?? Task.CompletedTask;
 
     /// <summary>"Changes only" filter: Unchanged records (and their sub-rows) drop out of
     /// the walk. Cheap - it is a predicate in the walk, not a second collection.</summary>

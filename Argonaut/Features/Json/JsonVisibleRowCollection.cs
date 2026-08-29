@@ -206,9 +206,15 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
                 provider.HintsChanged += OnHintsChanged;
         }
 
+        // Sampled before the walk: a scan that completes while Rebuild runs would otherwise
+        // leave this collection with no monitor and no final refresh, showing whatever part of
+        // the tree the index had reached. Monitoring an already-finished scan just spends one
+        // immediate final refresh.
+        bool scanWasRunning = !index.IsComplete;
+
         Rebuild();
 
-        if (!index.IsComplete)
+        if (scanWasRunning)
             StartGrowthMonitor();
     }
 

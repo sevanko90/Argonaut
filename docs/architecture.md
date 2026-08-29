@@ -255,6 +255,17 @@ chain changes.
   `RawViewModel`'s wrap-width restart just replaces its field.
 - `OnIndexingCompleted()` takes no argument on purpose: every subclass reports from state it
   already has, so handing it the `IFileIndexer` would only widen what a hook can reach into.
+- **A row collection samples "is the scan still running?" BEFORE its first walk, never after.**
+  Every collection with an `IndexGrowthMonitor` (`JsonVisibleRowCollection`,
+  `JsonArrayRowCollection`, `JsonDiffRowCollection`) attaches one only when the scan was
+  unfinished — and a scan that finishes *during* that first walk would, on a check made
+  afterwards, read as "already complete, nothing to monitor", leaving the collection frozen on
+  what it saw mid-scan with nothing left to rebuild it (for the diff: the pre-diff preview of
+  the left document, permanently). Monitoring an already-finished task costs one immediate
+  final refresh, which is exactly what that window loses. `IndexGrowthMonitor.FinalRefreshTask`
+  completes once that refresh has run: dispatcher-free tests await it, because with no
+  `SynchronizationContext` installed the refresh resumes on a pool thread and would otherwise
+  rebuild the collection while the test reads it.
 
 ## Search interaction
 

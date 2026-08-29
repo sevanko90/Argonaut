@@ -36,8 +36,12 @@ chain changes.
   contract because the shell never calls a member on it; the toolbar region therefore swaps
   with the document itself, and adding a new document view means adding one toolbar view
   model plus one `DataTemplate`, with no shell logic to touch.
-- Consequently the shell reaches into a document view model for **nothing** except
-  `JumpToRawOffsetAsync`'s `RawViewModel` match (see below). Toolbar-driven state is passed
+- Consequently the shell never reaches into a document view model **by concrete type**. Where it
+  needs a behaviour only some documents can honour, it asks for an opt-in capability interface
+  the document declares — `IPathNavigable` (reveal a JSONPath; `JsonViewModel`) and
+  `IByteOffsetNavigable` (reveal a byte offset; `RawViewModel`), both in `Shell/`. These stay
+  *off* `IDocumentViewModel`, whose job is the surface every document genuinely shares, but a
+  new view that can honour one implements it with no shell edit. Toolbar-driven state is passed
   *down* at construction instead: the owning document view model builds its
   `JsonToolbarViewModel` in `LoadAsync`, handing it that document's own `DateHintSettings`
   and `JsonSchemaSettings` instances plus a `SetDefaultExpandDepth` callback (and, JSON only,
@@ -109,10 +113,10 @@ chain changes.
   its "Line N" location is a clickable link — in the banner (`MainWindow.axaml`'s
   `JumpToFailureLineButton`) and in `IncompatibleView`'s location panel alike — that calls
   `MainWindowViewModel.JumpToRawOffsetAsync(byteOffset)`: switches to the raw viewer (if
-  not already showing it) via `SwitchViewAsync`, then concrete-type-matches `CurrentDocument` to
-  `RawViewModel` — the shell's only such match, because "jump to a byte offset" is meaningful
-  for exactly one view and so has no place on `IDocumentViewModel` — and calls
-  `RawViewModel.JumpToByteOffsetAsync`, which resolves the offset to a display row via the
+  not already showing it) via `SwitchViewAsync`, then asks `CurrentDocument` for the
+  `IByteOffsetNavigable` capability — a query, not a type test, because "jump to a byte offset"
+  is meaningful for exactly one view today and so has no place on `IDocumentViewModel` — and calls
+  `JumpToByteOffsetAsync`, which resolves the offset to a display row via the
   existing `RawOffsetRowResolver` (waiting out an in-progress scan if needed - the same machinery
   `RawSearchNavigator` uses for a search reveal) and selects it. A resolve that outlives the
   document (closed/switched away mid-wait) surfaces as a catchable `ObjectDisposedException`

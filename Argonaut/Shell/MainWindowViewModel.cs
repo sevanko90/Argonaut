@@ -5,7 +5,6 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Argonaut.Features.Json.Diff;
-using Argonaut.Features.Raw;
 using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
 using Avalonia.Threading;
@@ -175,21 +174,21 @@ public sealed class MainWindowViewModel : ObservableObject
     /// <paramref name="byteOffset"/> - the shell-mediated action behind every failure
     /// location's "Line N" link (the JSON banner's and the incompatible placeholder's alike)
     /// and behind <see cref="RawJumpService"/> requests (e.g. JsonView's "view in raw" link
-    /// on a truncated value). Concrete-type match on <see cref="RawViewModel"/> because "jump
-    /// to an offset" is meaningful for exactly one view - every other document kind would have
+    /// on a truncated value). Asks the current document for the CAPABILITY
+    /// (<see cref="IByteOffsetNavigable"/>) rather than matching its concrete type: "jump to an
+    /// offset" is meaningful for exactly one view today - every other document kind would have
     /// to implement it as a no-op - so it stays off <see cref="IDocumentViewModel"/>, whose job
-    /// is the surface *every* document genuinely shares. This is the shell's only such match:
-    /// per-view state and behaviour otherwise reach their view through the document's own
-    /// injected <see cref="IDocumentViewModel.Toolbar"/>, never through a shell type-switch
-    /// (see docs/architecture.md).
+    /// is the surface *every* document genuinely shares, but an opt-in interface still lets a
+    /// second view honour it one day without a shell edit. The shell holds no concrete-type
+    /// match on a document at all (see docs/architecture.md).
     /// </summary>
     public async Task JumpToRawOffsetAsync(long byteOffset)
     {
         if (currentKind != FileTypeDetector.FileKind.Unidentified)
             await SwitchViewAsync(FileTypeDetector.FileKind.Unidentified);
 
-        if (CurrentDocument is RawViewModel raw)
-            await raw.JumpToByteOffsetAsync(byteOffset);
+        if (CurrentDocument is IByteOffsetNavigable navigable)
+            await navigable.JumpToByteOffsetAsync(byteOffset);
     }
 
     public IReadOnlyList<RecentFileItem> RecentFiles

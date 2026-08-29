@@ -18,7 +18,7 @@ namespace Argonaut.Features.Raw;
 /// whole new instance rather than reset in place, so the ListBox rebinds cleanly and the
 /// disposed old collection reports empty for Avalonia's trailing ItemsSource walk.
 /// </summary>
-public sealed class RawViewModel : IndexedDocumentViewModel
+public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigable
 {
     private const int InitialIndexedRowTarget = 250;
 

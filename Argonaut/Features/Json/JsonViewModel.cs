@@ -13,7 +13,7 @@ using Avalonia.Threading;
 
 namespace Argonaut.Features.Json;
 
-public sealed class JsonViewModel : IndexedDocumentViewModel
+public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
 {
     private const int InitialTokenTarget = 250;
 

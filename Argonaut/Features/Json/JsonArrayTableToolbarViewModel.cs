@@ -18,6 +18,12 @@ public sealed record JsonArrayColumnModeOption(string DisplayName, JsonArrayColu
 /// <see cref="Argonaut.Shell.IDocumentViewModel.Toolbar"/> seam: where this table came from, the
 /// column-mode picker, and the way back to the JSON tree.
 ///
+/// <b>The picker only exists for an array of scalars.</b> An array of objects already has its
+/// columns named by the data - the property names ARE the header - so re-widthing it into N
+/// generic columns can only make it worse: every cell becomes a container summary and every
+/// column collapses to the minimum width. So an object array is built with
+/// <c>canReshape: false</c>, which offers by-property alone and hides the picker entirely.
+///
 /// <b>The picker is a plain ComboBox, not a self-closing flyout.</b> Its selection setter runs
 /// inside Avalonia's still-open selection commit (see CLAUDE.md), and the Reset it causes is safe
 /// ONLY because that Reset lands on the grid's collection, never on this picker's own
@@ -39,7 +45,7 @@ public sealed class JsonArrayTableToolbarViewModel : ObservableObject
     private readonly Func<Task> back;
     private JsonArrayColumnModeOption selectedColumnMode;
 
-    public JsonArrayTableToolbarViewModel(string originPath, string originFilePath,
+    public JsonArrayTableToolbarViewModel(string originPath, string originFilePath, bool canReshape,
         Action<JsonArrayColumnModeOption> setColumnMode, Func<Task> back)
     {
         this.setColumnMode = setColumnMode;
@@ -48,12 +54,17 @@ public sealed class JsonArrayTableToolbarViewModel : ObservableObject
         OriginPath = originPath;
         OriginFileName = Path.GetFileName(originFilePath);
 
-        var options = new List<JsonArrayColumnModeOption>(MaxReshapeColumns + 1)
+        CanReshape = canReshape;
+
+        var options = new List<JsonArrayColumnModeOption>(canReshape ? MaxReshapeColumns + 1 : 1)
         {
             new("By property", JsonArrayColumnMode.ByProperty, 0)
         };
-        for (int n = 1; n <= MaxReshapeColumns; n++)
-            options.Add(new JsonArrayColumnModeOption(n == 1 ? "1 column" : $"{n} columns", JsonArrayColumnMode.Reshape, n));
+        if (canReshape)
+        {
+            for (int n = 1; n <= MaxReshapeColumns; n++)
+                options.Add(new JsonArrayColumnModeOption(n == 1 ? "1 column" : $"{n} columns", JsonArrayColumnMode.Reshape, n));
+        }
 
         ColumnModes = options;
         selectedColumnMode = options[0];
@@ -68,6 +79,12 @@ public sealed class JsonArrayTableToolbarViewModel : ObservableObject
     /// <summary>Banner text: where this table came from, in one line.</summary>
     public string OriginDescription => $"Table view of {OriginPath} in {OriginFileName}";
 
+    /// <summary>Whether the column-mode picker is shown at all. False for an array of objects,
+    /// whose columns are the property names by definition - the by-property entry is then the
+    /// only mode, and a one-item dropdown is noise.</summary>
+    public bool CanReshape { get; }
+
+    /// <summary>The offered modes. By-property alone unless <see cref="CanReshape"/>.</summary>
     public IReadOnlyList<JsonArrayColumnModeOption> ColumnModes { get; }
 
     public JsonArrayColumnModeOption SelectedColumnMode

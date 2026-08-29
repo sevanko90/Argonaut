@@ -7,8 +7,8 @@ namespace Argonaut.Tests;
 /// <summary>
 /// Verifies the array-table document: column discovery from the sampled elements, widths taken
 /// from the child VALUE tokens rather than the element's own (which for an object is one byte -
-/// the brace), the column-mode picker re-shaping without re-walking, and the status/failure
-/// reporting the base class drives.
+/// the brace), the column-mode picker re-shaping without re-walking (and being offered at all
+/// only for an array of scalars), and the status/failure reporting the base class drives.
 /// </summary>
 public class JsonArrayTableViewModelTests
 {
@@ -105,8 +105,8 @@ public class JsonArrayTableViewModelTests
         });
 
     [Fact]
-    public Task PickingByPropertyAgain_RestoresTheDiscoveredColumns()
-        => WithDocument("""[{"id":1,"name":"a"},{"id":2,"name":"b"}]""", document =>
+    public Task PickingByPropertyAgain_RestoresTheValueColumn()
+        => WithDocument("[1,2,3,4]", document =>
         {
             var toolbar = Assert.IsType<JsonArrayTableToolbarViewModel>(document.Toolbar);
             toolbar.SelectedColumnMode = toolbar.ColumnModes.Single(o => o.Columns == 2);
@@ -114,8 +114,42 @@ public class JsonArrayTableViewModelTests
 
             toolbar.SelectedColumnMode = toolbar.ColumnModes.Single(o => o.Mode == JsonArrayColumnMode.ByProperty);
 
-            Assert.Equal(["id", "name"], ColumnNames(document));
-            Assert.Equal(2, document.RowCount);
+            Assert.Equal(["value"], ColumnNames(document));
+            Assert.Equal(4, document.RowCount);
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task AnArrayOfObjects_OffersNoReshapeAndHidesThePicker()
+        => WithDocument("""[{"id":1,"name":"a"},{"id":2,"name":"b"}]""", document =>
+        {
+            var toolbar = Assert.IsType<JsonArrayTableToolbarViewModel>(document.Toolbar);
+
+            // The property names ARE the columns, so there is nothing to re-width into.
+            Assert.False(toolbar.CanReshape);
+            Assert.Equal([JsonArrayColumnMode.ByProperty], toolbar.ColumnModes.Select(o => o.Mode));
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task AnArrayOfScalars_OffersTheReshapeWidths()
+        => WithDocument("[1,2,3]", document =>
+        {
+            var toolbar = Assert.IsType<JsonArrayTableToolbarViewModel>(document.Toolbar);
+
+            Assert.True(toolbar.CanReshape);
+            Assert.Contains(toolbar.ColumnModes, o => o.Mode == JsonArrayColumnMode.Reshape);
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task AMixedArrayWithAnyObjectIn_KeepsTheByPropertyColumnsAndNoPicker()
+        => WithDocument("""[1,{"id":2},3]""", document =>
+        {
+            var toolbar = Assert.IsType<JsonArrayTableToolbarViewModel>(document.Toolbar);
+
+            Assert.False(toolbar.CanReshape);
+            Assert.Equal(["id"], ColumnNames(document));
             return Task.CompletedTask;
         });
 

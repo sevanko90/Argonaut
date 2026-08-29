@@ -145,7 +145,10 @@ chain changes.
   directly, with `FileKind.Unknown`, never via `DocumentViewCatalog`. It reuses CSV's
   presentation types (`CsvStructure`, `CsvCell`, `CsvVisibleRow`) plus its own
   `JsonArrayRowCollection`; `CsvView`'s markup and code-behind are copied rather than shared,
-  because those bindings are compiled against `CsvViewModel`. Back reloads the origin file as
+  because those bindings are compiled against `CsvViewModel`. Columns come from the sampled
+  elements: property names for an array of objects, a single `value` column otherwise — and the
+  toolbar's reshape-into-N-columns picker is offered *only* in the second case, since an object
+  array is already columned by its own data. Back reloads the origin file as
   JSON and reveals the origin path through `IPathNavigable`. The link is hidden on the per-line
   documents NDJSON nests, whose token offsets are mapping-relative and therefore not file
   offsets.

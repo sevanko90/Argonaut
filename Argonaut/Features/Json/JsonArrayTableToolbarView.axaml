@@ -19,11 +19,15 @@
                 VerticalAlignment="Center"
                 ToolTip.Tip="Reopen the file as JSON and select this array" />
 
-        <!-- A plain ComboBox, deliberately not a flyout that closes on pick: the selection
+        <!-- Hidden for an array of objects: its columns are the property names by definition,
+             so there is nothing to re-width into.
+
+             A plain ComboBox, deliberately not a flyout that closes on pick: the selection
              setter runs inside Avalonia's still-open selection commit, and the collection Reset
              it causes is safe only because that Reset lands on the grid, never on this picker's
              own ItemsSource (see the view model's remarks and CLAUDE.md). -->
-        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center"
+                    IsVisible="{Binding CanReshape}">
             <TextBlock Text="Columns"
                        VerticalAlignment="Center"
                        Foreground="{DynamicResource AppMutedTextBrush}"

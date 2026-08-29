@@ -89,10 +89,6 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
             new ProgressToStatus(this, $"Indexing {Path.GetFileName(filePath)}"));
         this.session = session;
 
-        this.toolbar = new JsonArrayTableToolbarViewModel(originPath, filePath,
-            setColumnMode: ApplyColumnMode,
-            back: () => navigateBack?.Invoke(originPath) ?? Task.CompletedTask);
-
         // A small initial batch so the first paint isn't an empty grid, and so there is a real
         // sample to width the columns from; a short array completes the wait via MarkComplete.
         await session.Elements.WaitForElementCountAsync(InitialElementTarget);
@@ -102,9 +98,18 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
         if (session.Failure is { } failure)
             IndexFailure = failure;
 
-        this.structure = DiscoverByPropertyStructure();
+        this.structure = BuildByPropertyStructure(session, out bool elementsAreObjects);
         this.rows = new JsonArrayRowCollection(session.Elements, session.Inner.Index, session.Inner.File, this.structure, this.mode);
 
+        // Built here rather than before the wait because it takes the answer discovery just
+        // produced: an array of objects is already columned by its property names, so it is
+        // offered no reshape widths and shows no picker.
+        this.toolbar = new JsonArrayTableToolbarViewModel(originPath, filePath,
+            canReshape: !elementsAreObjects,
+            setColumnMode: ApplyColumnMode,
+            back: () => navigateBack?.Invoke(originPath) ?? Task.CompletedTask);
+
+        OnPropertyChanged(nameof(Toolbar));
         OnPropertyChanged(nameof(Rows));
         OnPropertyChanged(nameof(Structure));
         OnPropertyChanged(nameof(HeaderCells));
@@ -140,7 +145,7 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
 
         this.mode = option.Mode;
         this.structure = option.Mode == JsonArrayColumnMode.ByProperty
-            ? BuildByPropertyStructure(current)
+            ? BuildByPropertyStructure(current, out _)
             : BuildReshapeStructure(current, option.Columns);
 
         this.rows.SetShape(this.structure, this.mode);
@@ -149,9 +154,6 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
         OnPropertyChanged(nameof(HeaderCells));
         OnPropertyChanged(nameof(RowCount));
     }
-
-    private CsvStructure DiscoverByPropertyStructure()
-        => BuildByPropertyStructure(this.session!);
 
     /// <summary>
     /// Discovers the columns from the sampled elements: the union of their direct property
@@ -167,8 +169,11 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
     /// Property names are decoded here, once per distinct column plus one per sampled child -
     /// bounded by the initial batch, and nothing is retained but the names themselves. The row
     /// collection never decodes a name at all; it matches raw UTF-8 against these.
+    ///
+    /// <paramref name="sawObject"/> reports which of those two shapes the sample was, which is
+    /// also what decides whether the toolbar offers reshape at all.
     /// </summary>
-    private CsvStructure BuildByPropertyStructure(JsonArrayTableSession current)
+    private CsvStructure BuildByPropertyStructure(JsonArrayTableSession current, out bool sawObject)
     {
         var index = current.Inner.Index;
         var file = current.Inner.File;
@@ -177,7 +182,7 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
         var columns = new Dictionary<string, int>(StringComparer.Ordinal);
         var names = new List<string>();
         var maxChars = new List<int>();
-        bool sawObject = false;
+        sawObject = false;
         int valueChars = 0;
 
         for (int e = 0; e < sample; e++)

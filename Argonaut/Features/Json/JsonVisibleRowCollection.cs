@@ -85,6 +85,16 @@ public sealed class JsonRow
     /// Closing-bracket rows are <c>EndObject</c>/<c>EndArray</c> and so are excluded already.</summary>
     public bool IsContainerRow => !IsPlaceholder && Kind is JsonTokenKind.StartObject or JsonTokenKind.StartArray;
 
+    /// <summary>
+    /// Whether this row offers the "view as table" link: a non-empty array, whatever its
+    /// elements are. An array of objects is the case the feature was built for, but an array of
+    /// scalars tables perfectly well as one column - and reshaping a flat array into N columns
+    /// is the whole point of the second column mode - so the link is not restricted to elements
+    /// of any particular shape. An EMPTY array is excluded: there is nothing to show, and the
+    /// link would be a dead end.
+    /// </summary>
+    public bool CanViewAsTable => IsContainerRow && Kind == JsonTokenKind.StartArray && HasChildren;
+
     /// <summary>Muted note that Name and/or Value was display-capped (with the full length), or null.</summary>
     public string? TruncationHint { get; }
 

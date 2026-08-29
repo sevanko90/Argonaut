@@ -222,6 +222,66 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
     }
 
     /// <summary>
+    /// Whether this document can offer "view as table" on its array rows. False for the
+    /// sub-range documents NDJSON nests per line: <see cref="JsonTokenInfo.Offset"/> is relative
+    /// to the indexed MAPPING, so a token offset from one of those is not a file offset, and the
+    /// table would map the wrong bytes. The base offset is right here in
+    /// <see cref="ScanTarget"/> if that restriction is ever lifted - the link is hidden rather
+    /// than the conversion skipped.
+    /// </summary>
+    public bool SupportsArrayTable => ScanTarget.Offset == 0;
+
+    /// <summary>
+    /// Resolves the array at <paramref name="tokenIndex"/> to a file byte range and raises an
+    /// <see cref="ArrayTableService"/> request for it. Raising rather than acting keeps this
+    /// view model unaware of the shell, the same way the truncated-value link reaches the raw
+    /// viewer through <see cref="RawJumpService"/>.
+    ///
+    /// The wait matters: <see cref="JsonTokenInfo.EndIndex"/> is -1 until the container closes,
+    /// so on a still-indexing file the array's end - and therefore its length - is not yet
+    /// known. "Enabled once the array has an element" is not a sufficient guard. A file that
+    /// ends without closing the array throws out of the wait, and there is simply nothing to
+    /// open.
+    /// </summary>
+    public async Task RequestArrayTableAsync(int tokenIndex)
+    {
+        if (session is not { } current || !SupportsArrayTable)
+            return;
+
+        int endTokenIndex;
+        try
+        {
+            endTokenIndex = await JsonPathResolver.WaitForEndIndexAsync(current.Index, tokenIndex, current.TearingDown);
+        }
+        catch (OperationCanceledException)
+        {
+            return; // the document closed while we waited - nothing to open it into
+        }
+        catch (Exception ex)
+        {
+            if (!IsDisposed)
+                ToastService.Show($"Can't open as a table: {ex.Message}");
+            return;
+        }
+
+        if (IsDisposed)
+            return;
+
+        var start = current.Index.GetToken(tokenIndex);
+        var end = current.Index.GetToken(endTokenIndex);
+
+        // A StartArray/EndArray token records its offset AT the bracket with Length 1, so the
+        // closing term includes that bracket and the range is a whole JSON document. An
+        // off-by-one here surfaces as a JsonReaderException out of the table's own indexer
+        // rather than as anything legible.
+        long offset = start.Offset;
+        long length = end.Offset + end.Length - offset;
+
+        ArrayTableService.Request(new ArrayTableRequest(
+            FilePath, offset, length, JsonPathBuilder.Build(current.Index, current.File, tokenIndex)));
+    }
+
+    /// <summary>
     /// Changes the default-expand depth and applies it immediately if a file is already
     /// loaded, in addition to affecting future loads.
     /// </summary>

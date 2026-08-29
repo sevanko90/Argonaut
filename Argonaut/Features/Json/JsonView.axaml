@@ -4,6 +4,7 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:json="clr-namespace:Argonaut.Features.Json"
              xmlns:search="clr-namespace:Argonaut.Features.Search"
+             xmlns:converters="clr-namespace:Avalonia.Data.Converters;assembly=Avalonia.Base"
              x:Class="Argonaut.Features.Json.JsonView"
              x:DataType="json:JsonViewModel">
     <UserControl.Resources>
@@ -234,6 +235,22 @@
                                         Margin="8,0,0,0"
                                         VerticalAlignment="Center"
                                         ToolTip.Tip="Decoded date (local time) — click to change scheme" />
+                                <!-- Hidden on the per-line JSON documents NDJSON nests, whose
+                                     token offsets are mapping-relative rather than file-relative
+                                     (see JsonViewModel.SupportsArrayTable). -->
+                                <Button Classes="hintlink"
+                                        Content="view as table"
+                                        Click="OnViewAsTableClick"
+                                        Margin="8,0,0,0"
+                                        VerticalAlignment="Center"
+                                        ToolTip.Tip="Show this array's elements as a table">
+                                    <Button.IsVisible>
+                                        <MultiBinding Converter="{x:Static converters:BoolConverters.And}">
+                                            <Binding Path="CanViewAsTable" />
+                                            <Binding Path="$parent[json:JsonView].((json:JsonViewModel)DataContext).SupportsArrayTable" />
+                                        </MultiBinding>
+                                    </Button.IsVisible>
+                                </Button>
                             </StackPanel>
                         </DataTemplate>
                     </ListBox.ItemTemplate>

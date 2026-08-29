@@ -49,6 +49,7 @@ public partial class MainWindow : Window
 
         ToastService.Requested += ShowToast;
         RawJumpService.Requested += offset => _ = viewModel.JumpToRawOffsetAsync(offset);
+        ArrayTableService.Requested += request => _ = viewModel.OpenArrayTableAsync(request);
 
         EmptyState.ChooseFileRequested += async (_, _) => await BrowseForFile();
         EmptyState.OpenRecentFileRequested += (_, path) => viewModel.OpenRecentFile(path);

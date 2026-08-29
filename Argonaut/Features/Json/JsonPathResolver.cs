@@ -128,8 +128,12 @@ public static class JsonPathResolver
     /// (its EndIndex stops being -1), or throws if indexing finished without ever closing it
     /// (a truncated/malformed file). Needed before scanning or skipping past a container's
     /// children, since EndIndex is the only bound available for either.
+    ///
+    /// Internal rather than private because "wait for this container to close" is needed
+    /// outside path resolution too - JsonViewModel resolves an array's byte range for the table
+    /// view the same way - and one implementation of the wait beats two that can drift.
     /// </summary>
-    private static async Task<int> WaitForEndIndexAsync(JsonStructureIndex index, int containerIndex, CancellationToken cancellationToken)
+    internal static async Task<int> WaitForEndIndexAsync(JsonStructureIndex index, int containerIndex, CancellationToken cancellationToken)
     {
         while (true)
         {

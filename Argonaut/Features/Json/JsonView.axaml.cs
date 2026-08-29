@@ -315,6 +315,20 @@ public partial class JsonView : UserControl
         RawJumpService.Request(offset);
     }
 
+    /// <summary>
+    /// The "view as table" link on an array row. Fire-and-forget because resolving the array's
+    /// end can wait on a still-running scan; the view model raises the shell request itself once
+    /// it has a byte range, so this control never learns the shell exists.
+    /// </summary>
+    private void OnViewAsTableClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (sender is not Control { DataContext: JsonRow { CanViewAsTable: true } row })
+            return;
+
+        if (DataContext is JsonViewModel vm)
+            _ = vm.RequestArrayTableAsync(row.TokenIndex);
+    }
+
     private void OnHintClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         if (sender is not Control { DataContext: JsonRow { Hint: not null } row } control)

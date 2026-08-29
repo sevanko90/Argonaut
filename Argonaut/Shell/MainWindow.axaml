@@ -32,6 +32,9 @@
         <DataTemplate DataType="diff:JsonDiffViewModel">
             <diff:JsonDiffView />
         </DataTemplate>
+        <DataTemplate DataType="json:JsonArrayTableViewModel">
+            <json:JsonArrayTableView />
+        </DataTemplate>
         <DataTemplate DataType="json:JsonToolbarViewModel">
             <json:JsonToolbarView />
         </DataTemplate>
@@ -40,6 +43,9 @@
         </DataTemplate>
         <DataTemplate DataType="raw:RawToolbarViewModel">
             <raw:RawToolbarView />
+        </DataTemplate>
+        <DataTemplate DataType="json:JsonArrayTableToolbarViewModel">
+            <json:JsonArrayTableToolbarView />
         </DataTemplate>
         <DataTemplate DataType="shell:IncompatibleViewModel">
             <shell:IncompatibleView />

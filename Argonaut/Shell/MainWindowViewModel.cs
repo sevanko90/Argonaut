@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Argonaut.Features.Json;
 using Argonaut.Features.Json.Diff;
 using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
@@ -265,6 +266,75 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         PublishDocument(document, leftPath, FileTypeDetector.FileKind.Unknown, addToRecents: false);
+    }
+
+    /// <summary>
+    /// Opens the JSON array occupying <paramref name="request"/>'s byte range as a table,
+    /// replacing the current document with a <see cref="JsonArrayTableViewModel"/>. Modelled on
+    /// <see cref="OpenDiffAsync"/>, and entered the same way - explicitly, never via
+    /// <see cref="FileTypeDetector"/> - so the published document carries
+    /// <see cref="FileTypeDetector.FileKind.Unknown"/>: the view switcher shows no selection for
+    /// it, and picking any view there re-indexes the origin file as that kind through the normal
+    /// switch path, which is a second route back for free. Publishing it as
+    /// <see cref="FileTypeDetector.FileKind.Json"/> instead would make
+    /// <see cref="SwitchViewAsync"/> no-op on the unchanged kind and strand the user on the
+    /// banner link. Not added to recent files - a byte range is not a reopenable path.
+    ///
+    /// The table reports its own indexing progress (like a diff), so the shell's part is only to
+    /// silence the outgoing load's reporter.
+    /// </summary>
+    public async Task OpenArrayTableAsync(ArrayTableRequest request)
+    {
+        var requestId = openRequest.Begin();
+
+        // UI hygiene before the swap, exactly as OpenDiffAsync does it - see the remark there
+        // for why this is not what makes the swap safe.
+        DetachFind();
+        FindBarResetRequested?.Invoke();
+        indexProgressReporter?.Stop();
+        StatusText = $"Opening {request.OriginPath} as a table…";
+
+        var document = new JsonArrayTableViewModel();
+        try
+        {
+            await document.LoadAsync(request.Path, request.Offset, request.Length, request.OriginPath,
+                navigateBack: NavigateBackToJsonAsync);
+        }
+        catch (Exception ex)
+        {
+            OpenDebugLog.Write($"OpenArrayTable: load threw: {ex}");
+            document.Dispose();
+            if (openRequest.IsCurrent(requestId))
+                StatusText = $"{request.Path} — failed to open as a table";
+            return;
+        }
+
+        if (!openRequest.IsCurrent(requestId))
+        {
+            document.Dispose();
+            return;
+        }
+
+        PublishDocument(document, request.Path, FileTypeDetector.FileKind.Unknown, addToRecents: false);
+    }
+
+    /// <summary>
+    /// The table's Back: reload the origin file as JSON, then reveal the path the table was
+    /// opened from. The reveal is a capability query (<see cref="IPathNavigable"/>), not a type
+    /// test - see <see cref="JumpToRawOffsetAsync"/>.
+    ///
+    /// <see cref="SwitchViewAsync"/> reaches <see cref="SetCurrentDocument"/>, which disposes the
+    /// outgoing document - the very table whose toolbar raised this - BEFORE the swap. So
+    /// everything after that first await runs with that document already torn down. Nothing here
+    /// touches it: <paramref name="originPath"/> is a string the toolbar captured at
+    /// construction, and the reveal targets whatever document is current afterwards.
+    /// </summary>
+    private async Task NavigateBackToJsonAsync(string originPath)
+    {
+        await SwitchViewAsync(FileTypeDetector.FileKind.Json);
+
+        if (CurrentDocument is IPathNavigable navigable)
+            await navigable.NavigateToPathAsync(originPath);
     }
 
     /// <summary>

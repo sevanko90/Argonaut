@@ -1,0 +1,103 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:json="clr-namespace:Argonaut.Features.Json"
+             xmlns:csv="clr-namespace:Argonaut.Features.Csv"
+             x:Class="Argonaut.Features.Json.JsonArrayTableView"
+             x:DataType="json:JsonArrayTableViewModel">
+    <!-- Structurally CsvView's grid: the same CsvCell shapes, the same sticky-header scroll
+         mirroring in code-behind. Copied rather than shared because CsvView's compiled bindings
+         are typed to CsvViewModel throughout; revisit only if a third table-like view appears.
+         The find highlight is absent here on purpose - the table returns no search navigator in
+         v1, so there is never a term to highlight. -->
+    <UserControl.Resources>
+        <DataTemplate x:Key="TableDataCellTemplate" x:DataType="csv:CsvCell">
+            <Border Width="{Binding Width}"
+                    Padding="6,4"
+                    BorderBrush="{DynamicResource AppBorderBrush}"
+                    BorderThickness="0,0,1,0">
+                <TextBlock Text="{Binding Text}"
+                           TextTrimming="CharacterEllipsis"
+                           TextWrapping="NoWrap"
+                           ToolTip.Tip="{Binding Text}"
+                           FontFamily="{DynamicResource AppContentFontFamily}"
+                           FontSize="12" />
+            </Border>
+        </DataTemplate>
+        <DataTemplate x:Key="TableHeaderCellTemplate" x:DataType="csv:CsvCell">
+            <Border Width="{Binding Width}"
+                    Padding="6,4"
+                    BorderBrush="{DynamicResource AppBorderBrush}"
+                    BorderThickness="0,0,1,0">
+                <TextBlock Text="{Binding Text}"
+                           TextTrimming="CharacterEllipsis"
+                           TextWrapping="NoWrap"
+                           ToolTip.Tip="{Binding Text}"
+                           FontFamily="{DynamicResource AppContentFontFamily}"
+                           FontSize="12"
+                           FontWeight="SemiBold" />
+            </Border>
+        </DataTemplate>
+    </UserControl.Resources>
+
+    <Border BorderBrush="{DynamicResource AppBorderBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Background="{DynamicResource AppWindowBackgroundBrush}"
+            ClipToBounds="True">
+        <Grid RowDefinitions="Auto,*">
+            <!-- Sticky header: not user-scrollable directly (IsHitTestVisible=False) - its
+                 horizontal Offset is mirrored from the body's ScrollViewer in code-behind so it
+                 stays pinned vertically but tracks horizontal scroll, keeping columns aligned
+                 with the virtualized rows below via the shared CsvCell.Width values. -->
+            <ScrollViewer Grid.Row="0"
+                          x:Name="HeaderScrollViewer"
+                          HorizontalScrollBarVisibility="Hidden"
+                          VerticalScrollBarVisibility="Disabled"
+                          IsHitTestVisible="False"
+                          Background="{DynamicResource AppPanelBackgroundBrush}">
+                <ItemsControl ItemsSource="{Binding HeaderCells}"
+                              ItemTemplate="{StaticResource TableHeaderCellTemplate}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Orientation="Horizontal" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                </ItemsControl>
+            </ScrollViewer>
+
+            <ListBox Grid.Row="1"
+                     x:Name="RowsListBox"
+                     ItemsSource="{Binding Rows}"
+                     SelectionMode="Single"
+                     ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                     Padding="0">
+                <ListBox.Styles>
+                    <Style Selector="ListBoxItem">
+                        <Setter Property="Padding" Value="0" />
+                        <Setter Property="HorizontalContentAlignment" Value="Left" />
+                        <Setter Property="MinHeight" Value="24" />
+                    </Style>
+                </ListBox.Styles>
+                <ListBox.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <VirtualizingStackPanel />
+                    </ItemsPanelTemplate>
+                </ListBox.ItemsPanel>
+                <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="csv:CsvVisibleRow">
+                        <ItemsControl ItemsSource="{Binding Cells}"
+                                      ItemTemplate="{StaticResource TableDataCellTemplate}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel Orientation="Horizontal" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                        </ItemsControl>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </Grid>
+    </Border>
+</UserControl>

@@ -40,8 +40,20 @@ public sealed class IndexGrowthMonitor : IDisposable
         timer.Tick += OnTick;
         timer.Start();
 
-        _ = AwaitCompletionAsync(completionTask);
+        FinalRefreshTask = AwaitCompletionAsync(completionTask);
     }
+
+    /// <summary>
+    /// Completes once the scan has stopped AND the final refresh it grants has run. Internal
+    /// for deterministic tests (same seam as <c>JsonDiffSession.HashReleaseTask</c>), and they
+    /// are the reason it exists at all: under a dispatcher the continuation below resumes on
+    /// the UI thread, so a caller already there cannot observe a half-applied refresh; with no
+    /// SynchronizationContext installed it resumes on a POOL thread instead, and a test that
+    /// merely awaited the scan's own task would then read the collection while that refresh
+    /// rebuilds it. Awaiting this instead is the whole fix - the alternative is locking a
+    /// per-row hot path to serialise threads production never has.
+    /// </summary>
+    internal Task FinalRefreshTask { get; }
 
     private void OnTick(object? sender, EventArgs e)
     {

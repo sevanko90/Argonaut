@@ -58,10 +58,10 @@ public class JsonDiffFindTests
         await vm.LoadAsync(leftPath, rightPath);
         try { await vm.IndexingTask; } catch { }
 
-        // Same dispatcher-free rebuild nudge JsonDiffContextTests uses: in the app the growth
-        // monitor does this, here the filter round-trip forces the post-diff rebuild.
-        vm.Rows.ChangesOnly = true;
-        vm.Rows.ChangesOnly = false;
+        // Same wait JsonDiffContextTests uses: the growth monitor's final rebuild resumes on a
+        // pool thread with no dispatcher installed, so the scan's own task is not enough to
+        // know the rows have settled. See IndexGrowthMonitor.FinalRefreshTask.
+        await vm.Rows.FinalRefreshTask;
 
         var statuses = new List<string?>();
         var controller = new FindController(statuses.Add, () => null);

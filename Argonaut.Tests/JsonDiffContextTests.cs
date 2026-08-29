@@ -24,11 +24,11 @@ public class JsonDiffContextTests
         await vm.LoadAsync(leftPath, rightPath);
         try { await vm.IndexingTask; } catch { }
 
-        // The collection's final rebuild is driven by the growth monitor in the app; in
-        // dispatcher-free tests, poll the diff-complete state and rebuild via the filter
-        // round-trip (ChangesOnly toggle forces a rebuild without changing semantics).
-        vm.Rows.ChangesOnly = true;
-        vm.Rows.ChangesOnly = false;
+        // The collection's final rebuild is the growth monitor's, and with no dispatcher
+        // installed it runs on a POOL thread - so awaiting the scan alone would leave this
+        // test reading rows while that rebuild replaces them. Awaiting the refresh itself is
+        // what makes the state below deterministic; see IndexGrowthMonitor.FinalRefreshTask.
+        await vm.Rows.FinalRefreshTask;
         return (vm, leftPath, rightPath);
     }
 

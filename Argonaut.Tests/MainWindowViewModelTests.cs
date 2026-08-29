@@ -52,9 +52,13 @@ public sealed class MainWindowViewModelTests : IDisposable
 
     private sealed class FakeNavigator : ISearchNavigator
     {
-        public MMapFile File => throw new NotSupportedException();
+        public ScanTarget ScanTarget => throw new NotSupportedException();
         public void SetHighlightTerm(string? term) { }
         public Task RevealAsync(SearchMatch match, CancellationToken ct) => Task.CompletedTask;
+
+        /// <summary>No session behind this fake, so nothing ever tears down. Stated explicitly
+        /// because ISearchNavigator deliberately gives this member no default - see its remarks.</summary>
+        public CancellationToken DocumentTearingDown => default;
     }
 
     private sealed class FakeDocument : ObservableObject, IDocumentViewModel

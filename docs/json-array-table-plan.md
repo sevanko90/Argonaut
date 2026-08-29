@@ -172,7 +172,7 @@ knows the data; `CsvStructure` discovers nothing:
   length of that column's *child value* token across the sampled elements, seeded by the property
   name's own length so the header always fits. **Not the element's own token length** - an array
   element is a `StartObject`, whose recorded `Length` is `ValueSpan.Length` = 1, the brace itself
-  ([JsonStructureIndex.cs:316](../Argonaut/Features/Json/JsonStructureIndex.cs)).
+  ([JsonStructureIndex.cs:326](../Argonaut/Features/Json/JsonStructureIndex.cs)).
 - **JSON reshape**: names are `"Column 1".."Column N"`, and here the element's own token `Length`
   *is* the right measure, because each cell is exactly one element. (Reshaping an array of
   objects is the exception - those cells show a container summary like `{ 3 members }` - but that
@@ -218,7 +218,11 @@ holding a megabyte - retention is exactly where it hurts.
 
 **Sample size**: reuse the initial-paint batch the load already awaits, as `CsvViewModel` does
 with `InitialIndexedRowTarget` (250) - those elements are already indexed by the time the first
-frame needs them, so this is not a separate read. This is only correct once measuring is free (see
+frame needs them, so this is not a separate read. On the JSON side the sample is whatever
+`ElementCount` has published by then, which is a multiple of `ElementStride` until the array
+completes - so "250" is a ceiling, not a promise, and the sample loop must read `ElementCount`
+rather than assume it. Widths are a saturating heuristic either way; 192 sampled elements and 250
+give the same answer on any real data. This is only correct once measuring is free (see
 directly below); a wide sample on top of a per-row decode is the one combination to avoid. A
 narrow two-row sample and a cached-text alternative were both considered and rejected - see
 [json-array-table-options.md](json-array-table-options.md) §4.
@@ -227,9 +231,11 @@ narrow two-row sample and a cached-text alternative were both considered and rej
 sample size above): `CsvColumnLayout.Compute` currently takes decoded `string[]` rows,
 which is why `CsvViewModel.LoadAsync` decodes up to 250 rows (bounded by `MaxDisplayFields` = 1000
 fields x `DisplayText.MaxLength` = 1024 chars each) purely to measure them. `CsvFieldReader.SplitToSpans`
-already returns `CsvFieldSpan(Offset, Length)`, so a span-based `Compute` would delete that decode
-outright - and `Compute`'s signature is being changed by this refactor regardless. The JSON table
-never had the decode to begin with: `JsonTokenInfo.Length` is the measurement.
+already returns `CsvFieldSpan(Offset, Length)`, so measuring from those spans deletes that decode
+outright - and `Compute` is being replaced by `FromMaxChars` by this refactor regardless, so the
+signature change is not extra cost. The JSON table never had the decode to begin with:
+`JsonTokenInfo.Length` is the measurement, taken from whichever token the mode makes a cell (see
+"One factory, three measurers").
 
 **Blast radius**: `CsvColumnLayout.cs`, `CsvRowCollection.cs`, `CsvViewModel.cs`,
 `CsvView.axaml.cs` (`ScrollColumnIntoView` takes the layout), plus `CsvColumnLayoutTests.cs` and
@@ -283,7 +289,7 @@ consumes a shape that already exists rather than growing a parallel one.
    Two rules it must not get wrong:
 
    - **Advance only over closed elements.** Skipping a container is `i = t.EndIndex + 1`
-     ([JsonRowFactory.cs:157](../Argonaut/Features/Json/JsonRowFactory.cs)), and `EndIndex` is
+     ([JsonRowFactory.cs:155](../Argonaut/Features/Json/JsonRowFactory.cs)), and `EndIndex` is
      `-1` until that container closes - so on an open element that expression is `i = 0` and the
      walk spins forever. `JsonRowFactory.DescribeChildCount` is safe only because it never runs
      before its container's `EndIndex` is known; here the *root array is open for the entire
@@ -296,14 +302,19 @@ consumes a shape that already exists rather than growing a parallel one.
      `JsonStructureIndex.WaitForTokenCountAsync` (the loop at
      [JsonPathResolver.cs:132](../Argonaut/Features/Json/JsonPathResolver.cs)) and publishes at
      stride boundaries - `RawSegmentIndex`'s invariant, so every published element's bucket anchor
-     is already visible to a lock-free reader.
+     is already visible to a lock-free reader. **And once more at completion**, exactly as
+     `RawSegmentIndex` does ("published at anchor boundaries (and finally at completion)",
+     [RawSegmentIndex.cs:40](../Argonaut/Features/Raw/RawSegmentIndex.cs)): without that final
+     publish an array of fewer than `ElementStride` elements never crosses a boundary and the
+     table stays empty forever. The common small-array case is the one this rule exists for.
 
    **Part B - `JsonArrayRowCollection`** — constructed over the table view's **own** session (see
    stage 2), *never* over the origin document's index or mapping. Given `(JsonArrayElementIndex,
    JsonRowFactory, CsvStructure, mode)`, lazily produce `CsvVisibleRow`s, mirroring
    `CsvRowCollection.GetRow`'s on-demand-plus-LRU-cache shape for realization. It keeps no walk
-   state of its own: `Count` derives from `ElementCount`, and realizing row *i* is
-   `TokenForElement(i)` plus a bounded read of that element's direct children. Growth tracks the
+   state of its own: `Count` derives from `ElementCount`, and realizing a row is a
+   `TokenForElement` lookup per element the row covers - one in by-property mode (plus a bounded
+   read of that element's direct children), `N` in reshape mode - and nothing else. Growth tracks the
    element index through `IndexGrowthMonitor`
    ([IndexGrowthMonitor.cs](../Argonaut/Infrastructure/IndexGrowthMonitor.cs)), as
    `JsonVisibleRowCollection` and `JsonDiffRowCollection` both do, rather than re-deriving CSV's
@@ -326,7 +337,8 @@ consumes a shape that already exists rather than growing a parallel one.
    into N columns**, N chosen 1-5 from a toolbar dropdown. Element `i` of the flat array goes to
    `Rows[i / N]`, `Column[i % N]` — row-major, same walk order as the array itself, so it's a pure
    re-chunking of `JsonArrayRowCollection`'s existing per-element decode, no new value-reading
-   path. `Count` becomes `ceil(arrayLength / N)`; header cells are the generic `Column 1..N` names
+   path. `Count` becomes `ceil(ElementCount / N)` - still growing while the element index does; header
+   cells are the generic `Column 1..N` names
    carried by the `CsvStructure` (the same labels `CsvViewModel.UpdateHeaderCells` synthesizes for
    a headerless CSV today).
 
@@ -347,20 +359,25 @@ consumes a shape that already exists rather than growing a parallel one.
 2. **`JsonArrayTableViewModel`** — implements `IDocumentViewModel`. Constructed with
    `(string filePath, long arrayOffset, long arrayLength, string originPath)`; its `LoadAsync`
    starts `IndexedFileSession<JsonStructureIndex>.Start(new MMapFile(filePath, arrayOffset,
-   arrayLength), JsonStructureIndex.StartIndexing, reporter)`, awaits a small initial token batch
-   the way `JsonViewModel.LoadCore` does, samples the first N elements to build the initial
+   arrayLength), JsonStructureIndex.StartIndexing, reporter)`, then starts a
+   `JsonArrayElementIndex` over that session's index at root token 0 (the table's mapping *is*
+   the array, so the root token always is it), awaits its first published batch the way
+   `JsonViewModel.LoadCore` awaits an initial token batch, samples the first N elements to build
+   the initial
    `CsvStructure` (widths from token lengths - the per-column *child value* tokens in by-property
    mode, the element tokens in reshape mode; no decode, nothing retained; see "One factory, three
    measurers"), and creates the row collection. Interface members to fill in, none of which the
    earlier draft assigned:
 
    - `FilePath` — the origin file's path (the banner shows the range, not a synthetic name).
-   - `IndexingTask` — the session's; the shell awaits it to know when to stop overwriting the
-     status line with scan progress. This only means anything if the entry point starts a
+   - `IndexingTask` — the **element index's**, not the session's. The two differ by the final
+     stride publish: the source index completing is not the moment the table stops growing, so
+     handing the shell the session's task makes it stop reporting progress one stride early. The
+     shell awaits this to know when to stop overwriting the status line with scan progress. This only means anything if the entry point starts a
      reporter, and the template does not: `OpenDiffAsync` passes none and never calls
      `StopProgressWhenIndexedAsync`. Fine for a diff; it leaves a multi-GB array indexing behind a
      stale status line. So either create a `StatusProgressReporter` the way `LoadAndPublishAsync`
-     does ([MainWindowViewModel.cs:477](../Argonaut/Shell/MainWindowViewModel.cs)) and fire
+     does ([MainWindowViewModel.cs:479](../Argonaut/Shell/MainWindowViewModel.cs)) and fire
      `_ = StopProgressWhenIndexedAsync(document, reporter)`, or drop this sentence.
    - `IndexFailure` + `StatusText` — same `MonitorIndexingAsync` shape as `JsonViewModel`/
      `CsvViewModel`. A malformed range surfaces as a normal partial/failed index, and a failure

@@ -54,3 +54,29 @@ turn later. Real bug: picking "Open schema folder…" in the schema flyout close
 the app on the next commit (`JsonToolbarViewModel.SelectedSchemaIndex`,
 `SchemaRootPickerViewModel.SelectedPick`). Tests drive the deferral through `UiDeferral.PostOverride` via
 `DeferredUiScope`, which keeps view-model tests dispatcher-free.
+
+## Naming: say what it means, not what it is
+
+Names carry intent. A member named for its *type* or its *mechanism* forces every reader to go
+find out what it is for; a member named for what it represents answers that at the call site.
+
+- **Banned as a whole name**: `Token`, `Cancel`, `Handle`, `Data`, `Info`, `Item`, `Value`,
+  `Manager`, `Helper`, `Process`, `Update`. Each names a category, not a role.
+- **Cancellation tokens are named for the event that fires them**, in the present participle,
+  the way `IHostApplicationLifetime` does it (`ApplicationStopping`, not `StoppingToken`). So
+  `IDocumentSession.TearingDown`, not `IDocumentSession.Token` — `CreateLinkedTokenSource(
+  session.TearingDown)` then reads as a sentence, and a reader who has never seen the type knows
+  when it fires.
+- **Methods say what stops, not that something is cancelled.** `FileSearchSession.RequestStop()`,
+  not `Cancel()` — and it matches `IDocumentSession.RequestStop`, so the same verb means the same
+  thing (cooperative, returns immediately, joins nothing) everywhere in the codebase.
+- **Two things of the same type in one class must be distinguished by name.**
+  `RawIndexSession`'s `mappingCts`/`indexCts`, never `mappingCts`/`cts`: the bare one always
+  reads as "the" one, and the whole point is that there are two with different lifetimes.
+- **Type-suffixed private fields are fine** where the type genuinely is the meaning and only one
+  exists (`revealCts`, `diffCts`). The rule bites hardest on public and internal members, and on
+  anything crossing a type boundary — that is where a reader has no surrounding context to
+  recover the intent from.
+
+Applies to new code and to any name being touched anyway. Not a licence for sweeping renames of
+settled internals.

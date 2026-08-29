@@ -1,25 +1,29 @@
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using Argonaut.Infrastructure;
 
 namespace Argonaut.Features.Search;
 
 /// <summary>
 /// Display-side strategy for one open document: hands the search engine its scan target(s) and
 /// turns an engine result (a byte offset) into a visible, highlighted selection. This is
-/// the seam that keeps FileSearchSession fully decoupled from the viewers.
+/// the seam that keeps FileSearchSession fully decoupled from the viewers - targets in,
+/// reveals out. Note it hands over a <see cref="ScanTarget"/> (path, and range for a
+/// sub-document), never a mapping: the engine opens what it reads, so nothing here couples
+/// the document's mapping lifetime to a scan's.
 ///
 /// Most viewers show one file and implement only the single-file members. The diff shows two,
-/// and overrides <see cref="Files"/>, the indexed <see cref="RevealAsync(int, SearchMatch,
+/// and overrides <see cref="ScanTargets"/>, the indexed <see cref="RevealAsync(int, SearchMatch,
 /// CancellationToken)"/>, and <see cref="OrderKey"/> so one find bar steps through both
 /// documents as a single merged sequence.
 /// </summary>
 public interface ISearchNavigator
 {
-    /// <summary>The memory-mapped file the search engine should scan. For a multi-file
-    /// navigator this is the first of <see cref="Files"/>.</summary>
-    MMapFile File { get; }
+    /// <summary>What to scan - a file, or one byte range of one. NOT what is being searched
+    /// for: the term reaches the engine as an <see cref="ISearchMatcher"/>, and this interface
+    /// sees it only via <see cref="SetHighlightTerm"/>. For a multi-target navigator this is the
+    /// first of <see cref="ScanTargets"/>.</summary>
+    ScanTarget ScanTarget { get; }
 
     /// <summary>Pushes the active find term into the view model(s) for row highlighting (null clears it).</summary>
     void SetHighlightTerm(string? term);
@@ -32,14 +36,34 @@ public interface ISearchNavigator
     Task RevealAsync(SearchMatch match, CancellationToken ct);
 
     /// <summary>
-    /// Every file this navigator searches, in no particular order - <see cref="OrderKey"/>,
+    /// Every target this navigator searches, in no particular order - <see cref="OrderKey"/>,
     /// not this list's order, decides how find steps through them. One session is started per
     /// entry. Single-file viewers inherit the default.
     /// </summary>
-    IReadOnlyList<MMapFile> Files => new[] { File };
+    IReadOnlyList<ScanTarget> ScanTargets => new[] { ScanTarget };
 
-    /// <summary>Reveals a match found in <c>Files[<paramref name="fileIndex"/>]</c>.</summary>
+    /// <summary>Reveals a match found in <c>ScanTargets[<paramref name="fileIndex"/>]</c>.</summary>
     Task RevealAsync(int fileIndex, SearchMatch match, CancellationToken ct) => RevealAsync(match, ct);
+
+    /// <summary>
+    /// Fires when the owning document begins tearing down, so a REVEAL in flight is cancelled
+    /// instead of reaching into a released mapping. Reveal is the only part of find that
+    /// touches document-owned state: the scans read their own mappings and are indifferent to
+    /// the document's lifetime.
+    ///
+    /// DELIBERATELY HAS NO DEFAULT IMPLEMENTATION, unlike every other optional member on this
+    /// interface - do not add one. The others (<see cref="ScanTargets"/>, the indexed
+    /// <see cref="RevealAsync(int, SearchMatch, CancellationToken)"/>, <see cref="OrderKey"/>,
+    /// <see cref="StopUnit"/>) default to the CORRECT single-file behaviour, so a navigator that
+    /// ignores them is right. The only available default here would be <c>default</c> - a token
+    /// that never fires - which is not a weaker version of the right answer but the bug this
+    /// member exists to prevent: a reveal awaiting index coverage would carry on into a released
+    /// mapping, and it would fail as a hard crash at window-close time, in the one path the
+    /// shell does not drive. A silent wrong default is worse than a compiler error, so
+    /// implementers are made to say what fires it. A navigator with no session writes
+    /// <c>=&gt; default</c> explicitly, which is greppable; an omission is not.
+    /// </summary>
+    CancellationToken DocumentTearingDown { get; }
 
     /// <summary>
     /// Sort key placing a match in the single merged order find steps through, or null for a

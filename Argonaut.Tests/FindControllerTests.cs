@@ -7,26 +7,73 @@ namespace Argonaut.Tests;
 /// <summary>
 /// Exercises the find orchestration against real temp files and scans: cursor stepping and
 /// wrap-around, backward stepping, no-match status, term changes superseding the previous
-/// session, stop cancelling the scan before the file could be disposed, and the reveal
-/// hand-off to the navigator. FindController itself is UI-framework-free (delegates +
+/// session, stop retiring the scans, and the reveal hand-off to the navigator - including its
+/// cancellation when the owning document starts tearing down. FindController itself is UI-framework-free (delegates +
 /// ISearchNavigator), so these run as plain unit tests; per the app convention its awaits
 /// just resume on the caller's context.
 /// </summary>
 public class FindControllerTests
 {
-    private sealed class StubNavigator(MMapFile file) : ISearchNavigator
+    private sealed class StubNavigator(string path) : ISearchNavigator
     {
-        public MMapFile File { get; } = file;
+        private readonly CancellationTokenSource tearingDown = new();
+
+        public ScanTarget ScanTarget { get; } = new ScanTarget(path);
         public List<string?> HighlightTerms { get; } = new();
         public List<SearchMatch> Revealed { get; } = new();
 
+        public CancellationToken DocumentTearingDown => tearingDown.Token;
+
+        /// <summary>Stands in for the document's own Dispose starting teardown - the path that
+        /// never goes through the controller (a view's detach handler on window close).</summary>
+        public void StartTearingDown() => tearingDown.Cancel();
+
+        /// <summary>Set to block inside the reveal, so a teardown can land while one is in
+        /// flight rather than only between them.</summary>
+        public TaskCompletionSource? RevealGate { get; set; }
+
         public void SetHighlightTerm(string? term) => HighlightTerms.Add(term);
 
-        public Task RevealAsync(SearchMatch match, CancellationToken ct)
+        public async Task RevealAsync(SearchMatch match, CancellationToken ct)
         {
             ct.ThrowIfCancellationRequested();
+            if (RevealGate is { } gate)
+                await gate.Task.WaitAsync(ct);
+
+            ct.ThrowIfCancellationRequested();
             Revealed.Add(match);
-            return Task.CompletedTask;
+        }
+    }
+
+    /// <summary>
+    /// The half of the old scope wiring that survives: scans are nobody's dependents any more,
+    /// but a REVEAL still touches document-owned state, so it must stop when the document
+    /// starts tearing down - including the paths that never reach the controller at all.
+    /// </summary>
+    [Fact]
+    public async Task Reveal_IsCancelled_WhenDocumentStartsTearingDown()
+    {
+        string path = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllBytes(path, Encoding.UTF8.GetBytes("abc needle abc needle abc"));
+            var navigator = new StubNavigator(path) { RevealGate = new TaskCompletionSource() };
+            var controller = new FindController(_ => { }, () => null);
+            controller.Attach(navigator);
+
+            var find = controller.FindAsync("needle", direction: 1);
+            navigator.StartTearingDown();
+
+            // Completes without throwing: the reveal observes the linked token and the
+            // controller swallows the cancellation.
+            await find.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Empty(navigator.Revealed);
+
+            controller.Detach();
+        }
+        finally
+        {
+            File.Delete(path);
         }
     }
 
@@ -37,16 +84,14 @@ public class FindControllerTests
         try
         {
             File.WriteAllBytes(path, Encoding.UTF8.GetBytes(content));
-            using var file = new MMapFile(path);
-            var navigator = new StubNavigator(file);
+            var navigator = new StubNavigator(path);
             var statuses = new List<string?>();
             var controller = new FindController(statuses.Add, () => null);
             controller.Attach(navigator);
 
             await test(controller, navigator, statuses);
 
-            // Tests must leave no scan running over the file we're about to dispose.
-            await controller.DetachAsync();
+            controller.Detach();
         }
         finally
         {
@@ -118,12 +163,12 @@ public class FindControllerTests
     }
 
     [Fact]
-    public async Task StopAsync_ClearsHighlightAndStatus()
+    public async Task StopSearch_ClearsHighlightAndStatus()
     {
         await WithController("abc needle abc", async (controller, navigator, statuses) =>
         {
             await controller.FindAsync("needle", direction: 1);
-            await controller.StopAsync();
+            controller.StopSearch();
 
             Assert.Null(navigator.HighlightTerms[^1]);
             Assert.Null(statuses[^1]);
@@ -139,7 +184,7 @@ public class FindControllerTests
     {
         await WithController("needle", async (controller, navigator, statuses) =>
         {
-            await controller.DetachAsync();
+            controller.Detach();
             await controller.FindAsync("needle", direction: 1);
             Assert.Empty(navigator.Revealed);
         });

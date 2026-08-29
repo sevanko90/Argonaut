@@ -18,9 +18,9 @@ public readonly record struct FileLineSpan(long Offset, int Length);
 /// </summary>
 public sealed class FileOffsetIndex : AppendLogIndexBase<FileLineSpan>, IFileIndexer
 {
-    // Size of the window scanned per outer-loop pass. Scanning is zero-copy (spans over the
+    // Size of the chunk scanned per outer-loop pass. Scanning is zero-copy (spans over the
     // mapped file), so this only bounds progress-reporting granularity and span length —
-    // nothing is allocated per window.
+    // nothing is allocated per chunk.
     private const int ScanChunkSize = 4 * 1024 * 1024;
 
     /// <summary>
@@ -31,9 +31,6 @@ public sealed class FileOffsetIndex : AppendLogIndexBase<FileLineSpan>, IFileInd
     }
 
     public Task IndexingTask { get; private set; } = Task.CompletedTask;
-
-    /// <inheritdoc />
-    public string ItemNoun => "lines";
 
     /// <summary>
     /// Returns the number of lines in the index (may be less than the actual number of lines until <see cref="AppendLogIndexBase{T}.IsComplete"/> is true).

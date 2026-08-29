@@ -13,7 +13,7 @@ using Avalonia.Threading;
 
 namespace Argonaut.Features.Json;
 
-public sealed class JsonViewModel : ObservableObject, IDocumentViewModel
+public sealed class JsonViewModel : IndexedDocumentViewModel
 {
     private const int InitialTokenTarget = 250;
 
@@ -22,38 +22,32 @@ public sealed class JsonViewModel : ObservableObject, IDocumentViewModel
     private int? selectedTokenIndex;
     private string? selectedPath;
     private string? highlightTerm;
-    private string statusText = string.Empty;
     private IReadOnlyList<JsonPathSegment> selectedPathSegments = Array.Empty<JsonPathSegment>();
-    private IndexFailure? indexFailure;
-    private volatile bool disposed;
 
-    public string FilePath { get; private set; } = string.Empty;
+    protected override IDocumentSession? Session => session;
+
+    protected override IDisposable? MappedRows => rows;
 
     internal MMapFile? Mmap => session?.File;
 
     internal JsonStructureIndex? Index => session?.Index;
 
+    /// <summary>
+    /// What a find should scan for this document: the whole file for a top-level load, or just
+    /// this line's byte range for the nested per-line view model NdJsonViewModel hosts. Carrying
+    /// the range matters - the nested document's index is zero-based at the line start, so a
+    /// whole-file scan would report offsets it cannot resolve (see ScanTarget).
+    /// </summary>
+    internal ScanTarget ScanTarget { get; private set; }
+
+    /// <summary>Fires when this document begins tearing down, for
+    /// <see cref="ISearchNavigator.DocumentTearingDown"/> - a find reveal links it so it stops
+    /// rather than touching a released mapping.</summary>
+    internal CancellationToken TearingDown => session?.TearingDown ?? default;
+
     public int TokenCount => session?.Index.TokenCount ?? 0;
 
-    public Task IndexingTask => session?.IndexingTask ?? Task.CompletedTask;
-
-    /// <summary>Status-bar line for this document (see <see cref="IDocumentViewModel"/>).
-    /// Meaningless (and unread) for the nested per-NDJSON-line instances, which load via
-    /// the <see cref="MMapFile"/> overload and are never a shell document.</summary>
-    public string StatusText
-    {
-        get => statusText;
-        private set => SetField(ref statusText, value);
-    }
-
     public JsonVisibleRowCollection Rows => rows ?? throw new InvalidOperationException("LoadAsync must complete before Rows is accessed.");
-
-    /// <summary>See <see cref="IDocumentViewModel.IndexFailure"/>.</summary>
-    public IndexFailure? IndexFailure
-    {
-        get => indexFailure;
-        private set => SetField(ref indexFailure, value);
-    }
 
     /// <summary>Session state for date hints: the file-level default scheme (inferred or
     /// user-picked) and any per-token overrides. Created eagerly so MainWindow/NdJson can
@@ -73,13 +67,13 @@ public sealed class JsonViewModel : ObservableObject, IDocumentViewModel
     /// </summary>
     public int DefaultExpandDepth { get; set; } = 2;
 
+    private JsonToolbarViewModel? toolbar;
+
     /// <summary>This document's header toolbar (see <see cref="IDocumentViewModel.Toolbar"/>).
     /// Null until <see cref="LoadAsync(string,IProgressReporter?)"/> creates it; always null for
     /// the nested per-NDJSON-line instances loaded via the offset/length overload, since those
     /// are never a shell document.</summary>
-    public JsonToolbarViewModel? Toolbar { get; private set; }
-
-    object? IDocumentViewModel.Toolbar => Toolbar;
+    public override JsonToolbarViewModel? Toolbar => toolbar;
 
     public int? SelectedTokenIndex
     {
@@ -120,7 +114,7 @@ public sealed class JsonViewModel : ObservableObject, IDocumentViewModel
     /// existing; LoadCore applies whatever is current once it creates the rows.</summary>
     private void OnSchemaChanged(object? sender, EventArgs e)
     {
-        if (disposed)
+        if (IsDisposed)
             return;
 
         rows?.SetSchema(SchemaSettings.Document);
@@ -135,7 +129,7 @@ public sealed class JsonViewModel : ObservableObject, IDocumentViewModel
     /// Cheap enough to run inline on the UI thread - a bounded key sample the document walk
     /// already has the machinery for, then a linear merge per candidate - and it is only ever
     /// reached for a schema offering a choice at all. Silent when the sample is empty: indexing
-    /// may not have reached the root's members yet, and <see cref="MonitorIndexingAsync"/> calls
+    /// may not have reached the root's members yet, and <see cref="OnIndexingCompleted"/> calls
     /// back once it has.
     /// </summary>
     private void UpdateSchemaRootMatches()
@@ -203,7 +197,7 @@ public sealed class JsonViewModel : ObservableObject, IDocumentViewModel
             return;
         }
 
-        var resolveTask = JsonPathResolver.ResolveAsync(session.Index, session.File, path, session.Token);
+        var resolveTask = JsonPathResolver.ResolveAsync(session.Index, session.File, path, session.TearingDown);
         session.RegisterDependentTask(resolveTask);
 
         JsonPathResolveResult result;
@@ -213,12 +207,12 @@ public sealed class JsonViewModel : ObservableObject, IDocumentViewModel
         }
         catch (Exception ex)
         {
-            if (!disposed)
+            if (!IsDisposed)
                 ToastService.Show($"Navigation failed: {ex.Message}");
             return;
         }
 
-        if (disposed)
+        if (IsDisposed)
             return;
 
         if (result.TokenIndex is { } tokenIndex)
@@ -240,8 +234,9 @@ public sealed class JsonViewModel : ObservableObject, IDocumentViewModel
     public Task LoadAsync(string path, IProgressReporter? progressReporter = null)
     {
         FilePath = path;
+        ScanTarget = new ScanTarget(path);
         DefaultExpandDepth = ExpandDepthPreference.Load();
-        Toolbar = new JsonToolbarViewModel(HintSettings, SchemaSettings, DefaultExpandDepth, SetDefaultExpandDepth, NavigateToPathAsync,
+        toolbar = new JsonToolbarViewModel(HintSettings, SchemaSettings, DefaultExpandDepth, SetDefaultExpandDepth, NavigateToPathAsync,
             refreshSchemaEntries: () => RefreshSchemaEntriesAsync(path));
 
         var loadTask = LoadCore(new MMapFile(path), progressReporter);
@@ -263,7 +258,7 @@ public sealed class JsonViewModel : ObservableObject, IDocumentViewModel
     private async Task ApplyInitialSchemaAsync(string documentPath)
     {
         var (entries, preselected, rootName) = await Task.Run(() => JsonSchemaCatalog.GatherForDocument(documentPath));
-        if (disposed)
+        if (IsDisposed)
             return;
 
         SchemaSettings.SetEntries(entries);
@@ -278,7 +273,7 @@ public sealed class JsonViewModel : ObservableObject, IDocumentViewModel
     private async Task RefreshSchemaEntriesAsync(string documentPath)
     {
         var (entries, _, _) = await Task.Run(() => JsonSchemaCatalog.GatherForDocument(documentPath));
-        if (!disposed)
+        if (!IsDisposed)
             SchemaSettings.SetEntries(entries);
     }
 
@@ -291,6 +286,7 @@ public sealed class JsonViewModel : ObservableObject, IDocumentViewModel
     public Task LoadAsync(string path, long offset, long length, IProgressReporter? progressReporter = null)
     {
         FilePath = path;
+        ScanTarget = new ScanTarget(path, offset, length);
         return LoadCore(new MMapFile(path, offset, length), progressReporter);
     }
 
@@ -317,58 +313,40 @@ public sealed class JsonViewModel : ObservableObject, IDocumentViewModel
         UpdateSchemaRootMatches();
 
         // Inference dereferences the mapping, so the session must join it before unmapping.
-        session.RegisterDependentTask(InferDefaultDateSchemeAsync(session.Index, session.File, session.Token));
+        session.RegisterDependentTask(InferDefaultDateSchemeAsync(session.Index, session.File, session.TearingDown));
 
         StatusText = $"{FilePath} — {TokenCount:N0} tokens indexed so far";
-        _ = MonitorIndexingAsync(session);
+        MonitorIndexing();
     }
 
-    public ISearchNavigator CreateSearchNavigator() => new JsonSearchNavigator(this);
+    public override ISearchNavigator CreateSearchNavigator() => new JsonSearchNavigator(this);
 
     /// <summary>
     /// Returns true if the VM can process the specified file type
     /// </summary>
     /// <param name="fileType">Type of file to query</param>
     /// <returns>True if the view model can process the specified file type</returns>
-    public bool CanHandleFileType(FileTypeDetector.FileKind fileType)
+    public override bool CanHandleFileType(FileTypeDetector.FileKind fileType)
     {
         return fileType == FileTypeDetector.FileKind.Json;
     }
 
-    /// <summary>
-    /// Refreshes <see cref="StatusText"/> when background indexing finishes or fails.
-    /// Fire-and-forget from LoadCore (UI thread); per the app's threading convention the
-    /// await resumes on the UI thread. The disposed check covers cancellation-by-dispose:
-    /// a superseded or closed document must not repaint its status as a failure.
-    /// </summary>
-    private async Task MonitorIndexingAsync(IndexedFileSession<JsonStructureIndex> session)
+    /// <summary>Indexing finished: reports the final token count, then re-scores schema roots
+    /// against the complete key set now that every token is indexed - the sample taken at open
+    /// may have seen only the first few (five keys, each a huge array).</summary>
+    protected override void OnIndexingCompleted()
     {
-        try
-        {
-            await session.IndexingTask;
-        }
-        catch
-        {
-            if (!disposed)
-            {
-                IndexFailure = session.Index.Failure;
-                StatusText = session.Index.Failure is { } failure
-                    ? $"{FilePath} — indexing stopped at line {failure.Line?.ToString("N0") ?? "?"}, column {failure.Column?.ToString("N0") ?? "?"} — {failure.ItemsIndexed:N0} tokens shown"
-                    : $"{FilePath} — indexing failed";
-            }
-            return;
-        }
-
-        if (disposed)
-            return;
-
-        StatusText = $"{FilePath} — {session.Index.ItemCount:N0} {session.Index.ItemNoun}";
-
-        // The root's own members can be spread across the whole file (five keys, each a huge
-        // array), so the sample taken at open may have seen only the first few. Now that every
-        // token is indexed, re-score against the complete key set. Ranking only, so an earlier
-        // partial answer was never wrong to show - just less informed.
+        StatusText = $"{FilePath} — {TokenCount:N0} tokens";
         UpdateSchemaRootMatches();
+    }
+
+    /// <summary>Indexing stopped early (failure, or cancellation on <paramref name="failure"/> null).</summary>
+    protected override void OnIndexingFailed(IndexFailure? failure)
+    {
+        IndexFailure = failure;
+        StatusText = failure is { } f
+            ? $"{FilePath} — indexing stopped at line {f.Line?.ToString("N0") ?? "?"}, column {f.Column?.ToString("N0") ?? "?"} — {f.ItemsIndexed:N0} tokens shown"
+            : $"{FilePath} — indexing failed";
     }
 
     /// <summary>
@@ -381,34 +359,17 @@ public sealed class JsonViewModel : ObservableObject, IDocumentViewModel
         try
         {
             await index.WaitForTokenCountAsync(DateHintInference.MaxTokensToScan);
-            if (disposed)
+            if (IsDisposed)
                 return;
 
-            var scheme = await Task.Run(() => disposed ? null : DateHintInference.FindFirstScheme(index, mmap, DateHintInference.MaxTokensToScan), cancellationToken);
+            var scheme = await Task.Run(() => IsDisposed ? null : DateHintInference.FindFirstScheme(index, mmap, DateHintInference.MaxTokensToScan), cancellationToken);
             if (scheme is { } s)
-                Dispatcher.UIThread.Post(() => { if (!disposed) HintSettings.TrySetInferredDefault(s); });
+                Dispatcher.UIThread.Post(() => { if (!IsDisposed) HintSettings.TrySetInferredDefault(s); });
         }
         catch
         {
-            // Indexing failures are surfaced elsewhere (MonitorIndexingAsync); inference
-            // simply leaves the default scheme at Off.
+            // Indexing failures are surfaced elsewhere (OnIndexingFailed); inference simply
+            // leaves the default scheme at Off.
         }
-    }
-
-    public void Dispose()
-    {
-        // Idempotent: a nested per-line instance is disposed both by its owning
-        // NdJsonViewModel and by its JsonView's detach handler, and shell documents may
-        // see both owners in teardown edge cases (see IDocumentViewModel).
-        if (disposed)
-            return;
-        disposed = true;
-
-        // Cancel first so the background scans stop promptly; rows must be disposed
-        // (stopping its growth timer, which polls the index and reads the mapping) before
-        // session.Dispose joins the indexing/inference tasks and releases the mapping.
-        session?.Cancel();
-        rows?.Dispose();
-        session?.Dispose();
     }
 }

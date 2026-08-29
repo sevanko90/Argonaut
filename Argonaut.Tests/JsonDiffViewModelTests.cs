@@ -70,8 +70,10 @@ public class JsonDiffViewModelTests
 
             // Find is offered, and scans BOTH documents through the shell's one find bar.
             var navigator = Assert.IsType<JsonDiffSearchNavigator>(vm.CreateSearchNavigator());
-            Assert.Equal(2, navigator.Files.Count);
-            Assert.Same(navigator.File, navigator.Files[0]);
+            Assert.Equal(2, navigator.ScanTargets.Count);
+            Assert.Equal(navigator.ScanTarget, navigator.ScanTargets[0]);
+            Assert.Equal(leftPath, navigator.ScanTargets[0].Path);
+            Assert.Equal(rightPath, navigator.ScanTargets[1].Path);
 
             foreach (FileTypeDetector.FileKind kind in Enum.GetValues<FileTypeDetector.FileKind>())
                 Assert.False(vm.CanHandleFileType(kind));

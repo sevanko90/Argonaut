@@ -20,9 +20,11 @@ public sealed class JsonSearchNavigator : ISearchNavigator
         this.viewModel = viewModel;
     }
 
-    public MMapFile File => viewModel.Mmap!;
+    public ScanTarget ScanTarget => viewModel.ScanTarget;
 
     public void SetHighlightTerm(string? term) => viewModel.HighlightTerm = term;
+
+    public CancellationToken DocumentTearingDown => viewModel.TearingDown;
 
     public async Task RevealAsync(SearchMatch match, CancellationToken ct)
     {

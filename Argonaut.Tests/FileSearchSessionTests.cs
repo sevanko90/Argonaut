@@ -19,8 +19,7 @@ public class FileSearchSessionTests
         try
         {
             File.WriteAllBytes(path, Encoding.UTF8.GetBytes(content));
-            using var file = new MMapFile(path);
-            var session = FileSearchSession.Start(file, new LiteralSearchMatcher(term),
+            var session = FileSearchSession.Start(new ScanTarget(path), new LiteralSearchMatcher(term),
                 chunkSize: chunkSize, maxMatches: maxMatches);
             session.ScanTask.GetAwaiter().GetResult();
             assert(session);
@@ -125,8 +124,7 @@ public class FileSearchSessionTests
         try
         {
             File.WriteAllBytes(path, Encoding.UTF8.GetBytes("no hits here"));
-            using var file = new MMapFile(path);
-            var session = FileSearchSession.Start(file, new LiteralSearchMatcher("absent"));
+            var session = FileSearchSession.Start(new ScanTarget(path), new LiteralSearchMatcher("absent"));
 
             await session.WaitForMatchCountAsync(5);
 
@@ -140,7 +138,7 @@ public class FileSearchSessionTests
     }
 
     /// <summary>
-    /// Blocks the scan inside its first window until released, making the cancellation
+    /// Blocks the scan inside its first chunk until released, making the cancellation
     /// race deterministic: Cancel() lands while the scan is provably still running.
     /// </summary>
     private sealed class BlockingMatcher : ISearchMatcher
@@ -148,9 +146,9 @@ public class FileSearchSessionTests
         public ManualResetEventSlim Entered { get; } = new(false);
         public ManualResetEventSlim Release { get; } = new(false);
 
-        public int WindowOverlap => 0;
+        public int ChunkOverlap => 0;
 
-        public bool TryFindNext(ReadOnlySpan<byte> window, int from, out int matchIndex, out int matchLength)
+        public bool TryFindNext(ReadOnlySpan<byte> chunk, int from, out int matchIndex, out int matchLength)
         {
             Entered.Set();
             Release.Wait();
@@ -167,12 +165,11 @@ public class FileSearchSessionTests
         try
         {
             File.WriteAllBytes(path, new byte[256]);
-            using var file = new MMapFile(path);
             var matcher = new BlockingMatcher();
-            var session = FileSearchSession.Start(file, matcher, chunkSize: 64);
+            var session = FileSearchSession.Start(new ScanTarget(path), matcher, chunkSize: 64);
 
             matcher.Entered.Wait();
-            session.Cancel();
+            session.RequestStop();
             matcher.Release.Set();
 
             await session.ScanTask; // must not throw
@@ -181,6 +178,105 @@ public class FileSearchSessionTests
 
             // A waiter registered against a cancelled scan must still be released.
             await session.WaitForMatchCountAsync(1);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// The scan opens its own mapping per chunk, so it must let go of the file when it stops -
+    /// deleting the file afterwards is the observable proof. On Windows a still-mapped file
+    /// cannot be deleted at all; elsewhere the unlink would succeed regardless, so the
+    /// assertion only bites on Windows and is harmless on the other platforms CI runs.
+    /// </summary>
+    [Fact]
+    public async Task Scan_ReleasesItsMapping_FileDeletableAfterCompletion()
+    {
+        string path = Path.GetTempFileName();
+        File.WriteAllBytes(path, Encoding.UTF8.GetBytes("abc needle abc"));
+
+        var session = FileSearchSession.Start(new ScanTarget(path), new LiteralSearchMatcher("needle"));
+        await session.ScanTask;
+
+        Assert.Equal(1, session.MatchCount);
+        File.Delete(path); // throws if the scan is still holding a mapping
+        Assert.False(File.Exists(path));
+    }
+
+    /// <summary>
+    /// The scan - not the caller - opens the file, so an unreadable target is a scan OUTCOME
+    /// rather than a throw out of Start: ScanTask must complete unfaulted (nothing joins it any
+    /// more, so a fault would surface later as an UnobservedTaskException) and say why.
+    /// </summary>
+    [Fact]
+    public async Task Scan_MissingPath_CompletesWithOpenFailureAndDoesNotFault()
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"argonaut-missing-{Guid.NewGuid():N}.json");
+
+        var session = FileSearchSession.Start(new ScanTarget(path), new LiteralSearchMatcher("needle"));
+        await session.ScanTask; // must not throw
+
+        Assert.True(session.ScanTask.IsCompletedSuccessfully);
+        Assert.True(session.IsComplete);
+        Assert.Equal(0, session.MatchCount);
+        Assert.NotNull(session.OpenFailure);
+    }
+
+    /// <summary>
+    /// A range target reports offsets relative to the range start, not absolute in the file -
+    /// the property that lets a sub-document (one NDJSON line, whose index is zero-based at the
+    /// line start) be searched in the coordinate system its own index speaks.
+    /// </summary>
+    [Fact]
+    public async Task RangeTarget_ReportsOffsetsRelativeToTheRange()
+    {
+        string path = Path.GetTempFileName();
+        try
+        {
+            // "needle" at absolute 4 (outside the range) and at absolute 24 (inside it).
+            byte[] bytes = Encoding.UTF8.GetBytes("abc needle abc\nxyz needle xyz\n");
+            File.WriteAllBytes(path, bytes);
+
+            int lineStart = Encoding.UTF8.GetByteCount("abc needle abc\n");
+            int lineLength = Encoding.UTF8.GetByteCount("xyz needle xyz");
+
+            var session = FileSearchSession.Start(new ScanTarget(path, lineStart, lineLength),
+                new LiteralSearchMatcher("needle"));
+            await session.ScanTask;
+
+            Assert.Equal(1, session.MatchCount);            // the one outside the range is unseen
+            Assert.Equal(4, session.GetMatch(0).Offset);    // relative to the line, not absolute
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// Many sequential searches over one path must stay flat: each session's mappings are its
+    /// own and are released as it goes, so nothing accumulates between runs.
+    /// </summary>
+    [Fact]
+    public async Task ManySequentialSearches_CompletePromptly()
+    {
+        string path = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllBytes(path, Encoding.UTF8.GetBytes("no hits in here at all"));
+
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            for (int i = 0; i < 200; i++)
+            {
+                var session = FileSearchSession.Start(new ScanTarget(path), new LiteralSearchMatcher("absent"));
+                await session.ScanTask;
+            }
+            sw.Stop();
+
+            Assert.True(sw.ElapsedMilliseconds < 5000,
+                $"200 sequential searches took {sw.ElapsedMilliseconds}ms.");
         }
         finally
         {

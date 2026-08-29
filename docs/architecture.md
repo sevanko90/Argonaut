@@ -144,7 +144,25 @@ chain changes.
 - `IndexedFileSession<TIndex>` (`Infrastructure/IndexedFileSession.cs`) owns the trio
   {mapping, background index, CancellationTokenSource} and encodes teardown ordering:
   cancel → join indexing task → join dependent tasks → release mapping. It owns the `MMapFile`
-  once `Start` is called (disposes it even if the index factory throws).
+  once `Start` is called (disposes it even if the index factory throws). `RegisterDependentTask`
+  joins background readers it didn't itself start (date-hint inference, JSON path resolution)
+  before releasing the mapping. `RawIndexSession` is the wrap-width-restartable variant, with
+  two cancellation sources: `mappingCts` for the document's lifetime and `indexCts` (linked from
+  it) for the index `RestartIndex` recycles; `JsonDiffSession` composes two
+  `IndexedFileSession<JsonStructureIndex>`s. All three implement `IDocumentSession`, which
+  `IndexedDocumentViewModel` (below) drives — the teardown pair (`TearingDown` + `RequestStop()`
+  + `Dispose()`) plus the two members the status line is driven from, `IndexingTask` and
+  `Failure`. `TearingDown` is named for the moment it fires, per CLAUDE.md's naming convention.
+- **`IDocumentSession` is deliberately not an index.** Two implementations own an `IFileIndexer`
+  and the diff owns a `JsonDiffIndex` that isn't one, so a base class reaching for
+  `session.Index` needed a nullable indexer accessor plus virtual escape hatches on
+  `IndexingTask` and `MonitorIndexing` to route around the odd one out. Everything it actually
+  wanted from an index was a task to await and a failure to report, so those are the members —
+  stated at the level all three can answer them. `IndexingTask` is read **live**, never cached:
+  `RawIndexSession` swaps it on a wrap-width restart, which is exactly what lets the completion
+  monitor recognise a retired scan. `JsonDiffSession.Failure` is always null on purpose — a diff
+  failure belongs to the left or right file, and only `JsonDiffViewModel` knows the display
+  names to attribute it with.
 
 ## Virtualized ItemsSources
 
@@ -162,24 +180,99 @@ chain changes.
 ## Disposal ownership chain (the load-bearing part)
 
 - **The shell (`MainWindowViewModel`) owns document disposal.** It disposes:
-  - stale open losers (a newer open bumped `openRequestId` mid-load) and failed loads —
-    before they ever become `CurrentDocument`;
+  - stale open losers (a newer open bumped `openRequest`, a `RequestTicket` — see "Staleness
+    primitive" below — mid-load) and failed loads — before they ever become `CurrentDocument`;
   - the outgoing `CurrentDocument`, **before** the swap, in `SetCurrentDocument`.
 - Disposing before the swap is critical: once disposed, the document's collections report
   empty, so Avalonia's trailing walk of the outgoing ItemsSource is a no-op — instant, and
   touching no unmapped memory — regardless of Avalonia's detach/enumerate ordering.
 - The hosting view's `DetachedFromVisualTree` also disposes its `DataContext`, as an
-  idempotent safety net for teardown the shell doesn't drive (e.g. window close).
-- `Dispose` is idempotent on every document VM and on `IndexedFileSession` / the collections,
-  so the two owners touching the same instance is harmless.
+  idempotent safety net for teardown the shell doesn't drive (e.g. window close). "The shell
+  always stops find first" is therefore an unsafe assumption — and nothing depends on it any
+  more: search reads its own mappings (below), and the one part that does touch document state
+  (the reveal) links `TearingDown`.
+- `Dispose` is idempotent on every document VM and on `IndexedFileSession` / `RawIndexSession`
+  / `JsonDiffSession` / the collections, so the two owners touching the same instance is
+  harmless.
 - Nested per-line `JsonViewModel` (inside NDJSON) is owned by `NdJsonViewModel`: disposed on
-  each new line selection (`LoadSelectedLine` disposes the previous) and in its `Dispose`.
+  each new line selection (`LoadSelectedLine` disposes the previous) and in its `DisposeCore`.
+- `IndexedDocumentViewModel` (`Infrastructure/IndexedDocumentViewModel.cs`) is the base class
+  behind `JsonViewModel`/`CsvViewModel`/`NdJsonViewModel`/`RawViewModel`/`JsonDiffViewModel`.
+  Its `Dispose()` is the one place the ordering above is encoded for a document:
+  `session.RequestStop()` → `rows.Dispose()` → subclass `DisposeCore()` → `session.Dispose()`.
+  It also owns `FilePath`/`StatusText`/`IndexFailure` and the indexing-completion monitor
+  (`MonitorIndexing()`, started from `LoadAsync` before it returns — the shell's own
+  continuation on `IndexingTask`, in `StopProgressWhenIndexedAsync`, depends on that ordering);
+  subclasses react to completion/failure via `OnIndexingCompleted()`/`OnIndexingFailed(failure)`,
+  not by hand-rolling their own monitor loop. There are no longer any escape hatches:
+  `IndexingTask` and `MonitorIndexing` are non-virtual, and `JsonDiffViewModel` — the type that
+  used to need them — now expresses its difference through the hooks, pointing both at one
+  method because a side failure completes the diff **normally** over an empty index and so has
+  to be attributed on the success path too.
+- **The session and the row collection are abstract members** (`Session`, `MappedRows`), not
+  registered by the subclass calling an `Attach…` during load. They are the two things the base
+  exists to sequence, and an imperative registration can be silently forgotten — a load path
+  that built its rows but never announced them would leave a growth monitor reading a mapping
+  the session had already released, with nothing failing to point at it. Abstract members make
+  that a compiler error. They're properties rather than constructor arguments because both are
+  created partway through `LoadAsync`, after an await; reading them live also means
+  `RawViewModel`'s wrap-width restart just replaces its field.
+- `OnIndexingCompleted()` takes no argument on purpose. It used to be handed the `IFileIndexer`,
+  which one override out of four read — and that one had a typed count of its own. Every
+  subclass reports from state it already has.
 
 ## Search interaction
 
-- `FindController` owns one `FileSearchSession` at a time; its background scan holds spans over
-  the current `MMapFile`. It MUST be stopped before that mapping is disposed — callers
-  `await FindController.DetachAsync()` before any content swap / document disposal.
+- The vocabulary splits in two: **search** is bytes (`ScanTarget`, `ISearchMatcher`,
+  `FileSearchSession` — no display knowledge), **find** is what the user steps through
+  (`FindCursor`, `FindStatusText`, `FindController`). `ISearchNavigator` is the seam: targets
+  down, order keys and reveals up.
+- `FindController` owns one `FileSearchSession` per searched target. A navigator hands over
+  `ScanTarget`s (path, plus offset/length for a sub-document), never mappings —
+  `ISearchNavigator.ScanTarget`/`ScanTargets`. A scan target is what is searched *in*; the term
+  being searched *for* reaches the engine as an `ISearchMatcher`, never through the navigator.
+- `FindCursor` owns the ordered stop list and the position in it: incremental folding, sorting
+  by the navigator's opaque `OrderKey`, dropping matches the viewer cannot show, collapsing
+  equal keys to one stop per row, and re-finding the selection by KEY after each fold (a match
+  found late can sort ahead of it, so an index would not survive). It knows nothing about files,
+  scans or view models — matches arrive through `IMatchSource` — so its subtleties are tested
+  directly against plain lists. `FindStatusText` composes the status line as a pure function.
+  What remains in `FindController` is orchestration: scan lifetime, waiting for more results,
+  the reveal, and the press queue.
+- **Each scan opens its own mapping, one 4MB chunk at a time, and releases it before taking the
+  next.** So a search's lifetime is fully independent of the document's: a document can be torn
+  down while a scan over the same path runs, and stopping a scan is never a precondition for
+  releasing anything. `FindController.StopSearch()`/`Detach()` are synchronous — they ask the
+  scans to stop and return; nothing joins them.
+- **Why per-chunk and not one whole-file mapping** (do not "simplify" this back): a second
+  whole-file mapping would double-count every touched page in RSS — a full search of a 4.5GB
+  file would report ~9GB — and its eventual multi-GB unmap would contend for the process-wide
+  address-space lock with the document's own unmap on the UI thread at close. One chunk caps
+  both.
+- `ISearchNavigator.DocumentTearingDown` deliberately has **no default implementation**, unlike
+  every other optional member on that interface. The others default to correct single-file
+  behaviour; the only possible default here is a token that never fires, which is not a weaker
+  right answer but precisely the bug the member prevents. A navigator with no session writes
+  `=> default` explicitly — greppable; an omission would not be. Do not add a default.
+- **The reveal is the one document-scoped part of find.** It runs on the UI thread, awaits index
+  coverage, and touches the document's index and rows, so `FindController` links
+  `ISearchNavigator.DocumentTearingDown` (the document session's `TearingDown`) and swallows the
+  cancellation. `MMapFile.GetSpan`'s `ObjectDisposedException` remains the backstop.
+- The shell still stops find before a content swap — it clears the highlight term and find-bar
+  status. That is UI state, not safety.
+- A range `ScanTarget` reports offsets relative to the range start, so a sub-document (one
+  NDJSON line, whose index is zero-based at the line start) is searched in the coordinate system
+  its own index speaks. Nothing creates a navigator over a nested view model today; the range
+  exists so that it would be correct if something did.
+
+## Staleness primitive
+
+- `RequestTicket` (`Infrastructure/RequestTicket.cs`) formalizes the codebase's "monotonic
+  counter + comparison" idiom used to detect a newer request superseding an in-flight one:
+  `Begin()` issues a ticket, `IsCurrent(ticket)` reads it back, `Current` reads the active
+  ticket without issuing one. Backs `MainWindowViewModel.openRequest`,
+  `NdJsonViewModel.selectionRequest`, and `FindController.findRequest`. Sealed class, not a
+  struct — `Begin()` mutates, so a struct copy would silently start its own counter.
 
 ## Threading convention (see CLAUDE.md)
 

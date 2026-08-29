@@ -7,17 +7,15 @@ using Argonaut.Infrastructure;
 namespace Argonaut.Features.Search;
 
 /// <summary>
-/// UI-side orchestration of find / find next for the currently open document. Owns the search
-/// session lifecycle (one per searched file; a changed term or a stop cancels the previous
-/// scans), the result cursor and wrap semantics, and hands each chosen match to the attached
-/// <see cref="ISearchNavigator"/> to reveal.
+/// UI-side orchestration of find / find next for the currently open document: the scans'
+/// lifetime (one <see cref="FileSearchSession"/> per target), waiting for more results, the
+/// reveal, and the press queue. Where the stops are ordered and stepped is
+/// <see cref="FindCursor"/>; the status line is <see cref="FindStatusText"/>.
 ///
-/// A document may expose more than one file (the diff's two sides). Rather than step several
-/// cursors in lockstep, every match that <see cref="ISearchNavigator.OrderKey"/> accepts is
-/// folded into ONE list of stops ordered by that key. Find then walks a single list by index -
-/// which is both the original single-file logic unchanged and the only way the "n of m" count
-/// can be honest: m counts the places find will actually stop, not the times the bytes occur.
-/// Those differ whenever the viewer cannot show a match; see OrderKey for when that happens.
+/// Stopping a scan is a request, never a join: each scan owns its mappings, so a retired one
+/// winding down holds nothing the document needs back. The only part of find tied to the
+/// document's lifetime is the REVEAL, which links
+/// <see cref="ISearchNavigator.DocumentTearingDown"/>.
 ///
 /// All public members run on the UI thread; awaits resume there, and a monotonic request id
 /// (the codebase's staleness idiom) guards every post-await continuation against a newer
@@ -25,10 +23,6 @@ namespace Argonaut.Features.Search;
 /// </summary>
 public sealed class FindController
 {
-    /// <summary>One place find will stop: which file's scan produced it, which match it is in
-    /// that scan, and where it sorts in the merged order.</summary>
-    private readonly record struct Stop(int File, int MatchIndex, long Key);
-
     private readonly Action<string?> statusChanged;
     private readonly Func<IProgressReporter?> progressReporterFactory;
 
@@ -36,30 +30,9 @@ public sealed class FindController
     private FileSearchSession[] sessions = Array.Empty<FileSearchSession>();
     private string? sessionTerm;
 
-    private readonly List<Stop> stops = new();
+    private readonly FindCursor cursor = new();
 
-    /// <summary>
-    /// Guards <see cref="stops"/>, <see cref="foldedCounts"/> and <see cref="cursor"/>. Presses
-    /// run on the UI thread, but <see cref="RefreshStatusOnCompletionAsync"/> is fire-and-forget
-    /// and folds the last matches in from wherever its await resumes - the dispatcher thread in
-    /// the app, a pool thread in a dispatcher-free test. Unguarded, both could fold the same
-    /// matches and the stop list doubled. Never held across an await.
-    /// </summary>
-    private readonly object gate = new();
-
-    /// <summary>How many of each file's matches have been folded into <see cref="stops"/>, so a
-    /// refresh only ever costs the ones that arrived since.</summary>
-    private int[] foldedCounts = Array.Empty<int>();
-
-    private int cursor = -1;
-
-    // The selected stop's ROW key, which survives both a re-sort and the dedupe; the cursor
-    // index survives neither, since a match arriving late can sort ahead of it and the entry
-    // the cursor pointed at can be the one collapsed away.
-    private long currentKey;
-    private bool hasCurrent;
-
-    private long requestId;
+    private readonly RequestTicket findRequest = new();
     private CancellationTokenSource? revealCts;
 
     /// <summary>Depth of the press queue behind an in-flight find - see <see cref="FindAsync"/>.</summary>
@@ -76,7 +49,7 @@ public sealed class FindController
 
     /// <summary>
     /// Attaches the navigator for a newly opened document, or null for one with nothing
-    /// searchable. Call after <see cref="StopAsync"/>.
+    /// searchable. Call after <see cref="StopSearch"/>.
     /// </summary>
     public void Attach(ISearchNavigator? navigator)
     {
@@ -126,125 +99,78 @@ public sealed class FindController
         if (navigator is null || string.IsNullOrEmpty(term))
             return;
 
-        long request = ++requestId;
+        long request = findRequest.Begin();
         CancelReveal();
 
         if (sessions.Length == 0 || !string.Equals(term, sessionTerm, StringComparison.Ordinal))
         {
-            await DisposeSessionsAsync();
-            if (request != requestId)
-                return;
+            // Synchronous - the retired scans own their mappings, so nothing needs joining.
+            StopSessions();
 
-            var files = navigator.Files;
+            var scanTargets = navigator.ScanTargets;
             sessionTerm = term;
-            sessions = new FileSearchSession[files.Count];
-            foldedCounts = new int[files.Count];
-            for (int i = 0; i < files.Count; i++)
-                sessions[i] = FileSearchSession.Start(files[i], new LiteralSearchMatcher(term), progressReporterFactory());
+            sessions = new FileSearchSession[scanTargets.Count];
+            cursor.Reset(scanTargets.Count);
+            for (int i = 0; i < scanTargets.Count; i++)
+            {
+                sessions[i] = FileSearchSession.Start(scanTargets[i], new LiteralSearchMatcher(term),
+                    progressReporterFactory());
+            }
 
             navigator.SetHighlightTerm(term);
             _ = RefreshStatusOnCompletionAsync(sessions, request);
         }
 
-        // Going forward, wait for a stop past the cursor to turn up. Going back, whatever has
-        // been found already is all there is to step onto.
         if (direction >= 0)
         {
-            if (!await EnsureStopAfterCursorAsync(request))
+            if (!await EnsureStopAfterPositionAsync(request))
                 return;
         }
         else
         {
-            RefreshStops();
+            // Going back, whatever has been found already is all there is to step onto.
+            cursor.Fold(sessions, navigator.OrderKey);
         }
 
-        // Decided in one go under the gate so the completion refresh cannot fold new stops in
-        // between choosing the index and reading it back.
-        Stop stop;
-        bool wrapped = false;
-        lock (gate)
-        {
-            if (stops.Count == 0)
-            {
-                UpdateStatusLocked(wrapped: false);
-                return;
-            }
+        // The move reports the position and count it settled on, so the status cannot disagree
+        // with the stop chosen even if the completion refresh folds more in between.
+        var move = cursor.Move(direction, AllComplete());
+        ReportStatus(move.Position, move.Count, move.Wrapped);
+        if (!move.Moved)
+            return;
 
-            if (direction >= 0)
-            {
-                if (cursor + 1 < stops.Count)
-                {
-                    cursor++;
-                }
-                else if (AllComplete())
-                {
-                    cursor = 0;
-                    wrapped = true;
-                }
-                else
-                {
-                    // Never wrap while a scan is still running, so "n of m" stays monotone.
-                    UpdateStatusLocked(wrapped: false);
-                    return;
-                }
-            }
-            else
-            {
-                if (cursor > 0)
-                {
-                    cursor--;
-                }
-                else if (AllComplete())
-                {
-                    // Wrapping backward lands on the last stop, so it needs the full list.
-                    cursor = stops.Count - 1;
-                    wrapped = true;
-                }
-                else
-                {
-                    UpdateStatusLocked(wrapped: false);
-                    return;
-                }
-            }
-
-            stop = stops[cursor];
-            currentKey = stop.Key;
-            hasCurrent = true;
-            UpdateStatusLocked(wrapped);
-        }
-
-        var cts = new CancellationTokenSource();
+        // Linked to the document's teardown so a reveal in flight when it is torn down WITHOUT
+        // going through Stop/Detach (the view's own detach handler on window close) is cancelled
+        // rather than reaching into a released mapping. findRequest covers only a newer find
+        // superseding this one - it says nothing about the document going away.
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(navigator.DocumentTearingDown);
         revealCts = cts;
         try
         {
-            await navigator.RevealAsync(stop.File, sessions[stop.File].GetMatch(stop.MatchIndex), cts.Token);
+            var stop = move.Stop;
+            await navigator.RevealAsync(stop.Source, sessions[stop.Source].GetMatch(stop.MatchIndex), cts.Token);
         }
         catch (OperationCanceledException)
         {
-            // A newer request or a stop superseded this reveal.
+            // A newer request, a stop, or the document tearing down superseded this reveal.
         }
+        // cts is deliberately not disposed: a concurrent CancelReveal() may still hold it, and
+        // an un-disposed CTS without timers costs nothing beyond GC.
     }
 
     /// <summary>
-    /// Waits until there is a stop past the cursor, or every scan has finished. False when a
-    /// newer request took over mid-wait. Matches the viewer cannot show are folded away by
-    /// <see cref="RefreshStops"/>, so a long run of them costs one pass, not one wait each.
+    /// Waits until there is a stop past the current position, or every scan has finished. False
+    /// when a newer request took over mid-wait. Matches the viewer cannot show are folded away
+    /// by the cursor, so a long run of them costs one pass, not one wait each.
     /// </summary>
-    private async Task<bool> EnsureStopAfterCursorAsync(long request)
+    private async Task<bool> EnsureStopAfterPositionAsync(long request)
     {
         while (true)
         {
             // Always fold before deciding. Scans can finish between the check below and the
             // waits being built, and an early exit that skipped this reported "No matches"
             // over results that had in fact just landed.
-            bool haveStop;
-            lock (gate)
-            {
-                RefreshStopsLocked();
-                haveStop = cursor + 1 < stops.Count;
-            }
-
-            if (haveStop || AllComplete())
+            if (cursor.Fold(sessions, navigator!.OrderKey).HasStopAhead || AllComplete())
                 return true;
 
             statusChanged("Searching…");
@@ -261,90 +187,26 @@ public sealed class FindController
                 continue;
 
             await Task.WhenAny(waits);
-            if (request != requestId)
+            if (!findRequest.IsCurrent(request))
                 return false;
         }
     }
 
-    /// <summary>
-    /// Folds every match found since the last call into <see cref="stops"/>, dropping the ones
-    /// the viewer cannot show, and restores the ordering. Only newly arrived matches are keyed,
-    /// so across a whole search this costs one <c>OrderKey</c> per match.
-    ///
-    /// The re-sort only happens while scans are still streaming; once they finish the list is
-    /// final and stepping is pure indexing. The cursor is re-derived from the selected stop's
-    /// identity rather than kept, because a match found late can sort ahead of it.
-    /// </summary>
-    private void RefreshStops()
+    /// <summary>True when every scan stopped because it could not read its target at all -
+    /// the file was deleted, locked or replaced between opening the document and searching it.
+    /// Reported as "Search failed" rather than "No matches", which would be a lie.</summary>
+    private bool AllFailedToOpen()
     {
-        lock (gate)
+        if (sessions.Length == 0)
+            return false;
+
+        foreach (var session in sessions)
         {
-            RefreshStopsLocked();
-        }
-    }
-
-    private void RefreshStopsLocked()
-    {
-        bool grown = false;
-
-        for (int i = 0; i < sessions.Length; i++)
-        {
-            int count = sessions[i].MatchCount;
-            for (int m = foldedCounts[i]; m < count; m++)
-            {
-                if (navigator!.OrderKey(i, sessions[i].GetMatch(m)) is { } key)
-                    stops.Add(new Stop(i, m, key));
-            }
-
-            if (count != foldedCounts[i])
-            {
-                foldedCounts[i] = count;
-                grown = true;
-            }
+            if (session.OpenFailure is null)
+                return false;
         }
 
-        if (!grown)
-            return;
-
-        // Tie-broken so equal keys (several unresolvable matches share one) keep a stable order
-        // instead of shuffling on every refresh.
-        stops.Sort(static (a, b) =>
-        {
-            int byKey = a.Key.CompareTo(b.Key);
-            if (byKey != 0)
-                return byKey;
-
-            int byFile = a.File.CompareTo(b.File);
-            return byFile != 0 ? byFile : a.MatchIndex.CompareTo(b.MatchIndex);
-        });
-
-        // Collapse to one stop per ROW. Several occurrences can share a row - a property name
-        // and its own value, or the row's source and target panes - and find stops there once.
-        // Equal keys mean the same row by construction: RowOrderKey keys a record's row without
-        // regard to which pane matched, and everything below it by token, one token per row.
-        int write = 0;
-        for (int read = 0; read < stops.Count; read++)
-        {
-            if (write > 0 && stops[write - 1].Key == stops[read].Key)
-                continue;
-
-            stops[write++] = stops[read];
-        }
-
-        stops.RemoveRange(write, stops.Count - write);
-
-        cursor = -1;
-        if (!hasCurrent)
-            return;
-
-        for (int i = 0; i < stops.Count; i++)
-        {
-            if (stops[i].Key == currentKey)
-            {
-                cursor = i;
-                return;
-            }
-        }
+        return true;
     }
 
     private bool AllComplete()
@@ -359,24 +221,25 @@ public sealed class FindController
     }
 
     /// <summary>
-    /// Stops the active search: cancels any in-flight reveal, cancels the background scans
-    /// and waits for them to let go of the files, and clears row highlighting. MUST complete
-    /// before the current view's MMapFile is disposed - a scan thread touching a disposed
-    /// mapping is an access violation.
+    /// Stops the active search: cancels any in-flight reveal, asks the background scans to
+    /// stop, and clears row highlighting. Returns immediately - the scans may still be winding
+    /// down, which is harmless now each owns its own mapping. Callers stop find before a
+    /// content swap for UI reasons (clearing the highlight and the find-bar status), not to
+    /// make the swap safe.
     /// </summary>
-    public async Task StopAsync()
+    public void StopSearch()
     {
-        ++requestId;
+        findRequest.Begin();
         CancelReveal();
         navigator?.SetHighlightTerm(null);
         statusChanged(null);
-        await DisposeSessionsAsync();
+        StopSessions();
     }
 
     /// <summary>Stops the active search and forgets the current document's navigator.</summary>
-    public async Task DetachAsync()
+    public void Detach()
     {
-        await StopAsync();
+        StopSearch();
         navigator = null;
     }
 
@@ -386,36 +249,23 @@ public sealed class FindController
         revealCts = null;
     }
 
-    private async Task DisposeSessionsAsync()
+    /// <summary>
+    /// Retires the current scans: clears the result state and asks each scan to stop. Nothing
+    /// is joined - a retired scan holds only its own 4MB chunk mapping and lets go of it within
+    /// one chunk's work, and FileSearchSession.ScanTask never faults, so there is no exception
+    /// to observe either.
+    /// </summary>
+    private void StopSessions()
     {
-        FileSearchSession[] old;
-        lock (gate)
-        {
-            old = sessions;
-            sessions = Array.Empty<FileSearchSession>();
-            foldedCounts = Array.Empty<int>();
-            sessionTerm = null;
-            stops.Clear();
-            cursor = -1;
-            currentKey = 0;
-            hasCurrent = false;
-        }
+        // UI thread only, like every other mutation of `sessions` - the one background toucher
+        // (RefreshStatusOnCompletionAsync) reads the array it captured at start, never this field.
+        var old = sessions;
+        sessions = Array.Empty<FileSearchSession>();
+        sessionTerm = null;
+        cursor.Reset(0);
 
         foreach (var session in old)
-            session.Cancel();
-
-        foreach (var session in old)
-        {
-            try
-            {
-                await session.ScanTask;
-            }
-            catch
-            {
-                // A failed scan has nothing further to release; surfacing it here would only
-                // break the stop path.
-            }
-        }
+            session.RequestStop();
     }
 
     /// <summary>
@@ -437,7 +287,7 @@ public sealed class FindController
             }
         }
 
-        if (request != requestId)
+        if (!findRequest.IsCurrent(request))
             return;
 
         foreach (var session in tracked)
@@ -446,56 +296,31 @@ public sealed class FindController
                 return;
         }
 
-        RefreshStops();
-        UpdateStatus(wrapped: false);
+        if (navigator is not { } current)
+            return;
+
+        var state = cursor.Fold(tracked, current.OrderKey);
+        ReportStatus(state.Position, state.Count, wrapped: false);
     }
 
-    /// <summary>Trims the plural off a count of one, so a lone result is not "1 rows".</summary>
-    private static string Pluralize(string plural, int count)
-        => count == 1 && plural.EndsWith('s') ? plural[..^1] : plural;
+    private void ReportStatus(int position, int count, bool wrapped)
+        => statusChanged(FindStatusText.Compose(
+            stopCount: count,
+            position: position,
+            stopUnit: navigator?.StopUnit,
+            scansComplete: AllComplete(),
+            hitCap: AnyHitMatchCap(),
+            allFailedToOpen: AllFailedToOpen(),
+            wrapped: wrapped));
 
-    private void UpdateStatus(bool wrapped)
+    private bool AnyHitMatchCap()
     {
-        lock (gate)
+        foreach (var session in sessions)
         {
-            UpdateStatusLocked(wrapped);
-        }
-    }
-
-    private void UpdateStatusLocked(bool wrapped)
-    {
-        bool complete = AllComplete();
-
-        string text;
-        if (stops.Count == 0)
-        {
-            text = complete ? "No matches" : "Searching…";
-        }
-        else
-        {
-            string? unit = navigator?.StopUnit;
-            text = cursor >= 0
-                ? $"{cursor + 1:N0} of {stops.Count:N0}{(unit is null ? "" : " " + unit)}"
-                : $"{stops.Count:N0} {Pluralize(unit ?? "matches", stops.Count)}";
-
-            if (!complete)
-            {
-                text += " (searching…)";
-            }
-            else
-            {
-                bool capped = false;
-                foreach (var session in sessions)
-                    capped |= session.HitMatchCap;
-
-                if (capped)
-                    text += $" (first {stops.Count:N0} only)";
-            }
-
-            if (wrapped)
-                text += " — wrapped";
+            if (session.HitMatchCap)
+                return true;
         }
 
-        statusChanged(text);
+        return false;
     }
 }

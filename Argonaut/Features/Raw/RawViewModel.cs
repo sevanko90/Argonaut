@@ -18,7 +18,7 @@ namespace Argonaut.Features.Raw;
 /// whole new instance rather than reset in place, so the ListBox rebinds cleanly and the
 /// disposed old collection reports empty for Avalonia's trailing ItemsSource walk.
 /// </summary>
-public sealed class RawViewModel : ObservableObject, IDocumentViewModel
+public sealed class RawViewModel : IndexedDocumentViewModel
 {
     private const int InitialIndexedRowTarget = 250;
 
@@ -26,19 +26,22 @@ public sealed class RawViewModel : ObservableObject, IDocumentViewModel
     private RawRowCollection? rows;
     private RawToolbarViewModel? toolbar;
     private string? highlightTerm;
-    private string statusText = string.Empty;
     private int? selectedRowIndex;
     private int wrapWidth = RawWrapWidthPreference.Default;
-    private IndexFailure? indexFailure;
-    private bool disposed;
 
-    public string FilePath { get; private set; } = string.Empty;
+    protected override IDocumentSession? Session => this.session;
+
+    protected override IDisposable? MappedRows => this.rows;
 
     internal RawSegmentIndex? Index => this.session?.Index;
 
     internal MMapFile? Mmap => this.session?.File;
 
-    public Task IndexingTask => this.session?.IndexingTask ?? Task.CompletedTask;
+    /// <summary>Fires when this document begins tearing down, for
+    /// <see cref="ISearchNavigator.DocumentTearingDown"/>. Deliberately the mapping-lifetime
+    /// source, not the (recycled, per-restart) index one - see
+    /// <see cref="RawIndexSession.TearingDown"/>.</summary>
+    internal CancellationToken TearingDown => this.session?.TearingDown ?? default;
 
     public int RowCount => this.session?.Index.RowCount ?? 0;
 
@@ -55,23 +58,9 @@ public sealed class RawViewModel : ObservableObject, IDocumentViewModel
     /// </summary>
     public int IndexGeneration { get; private set; }
 
-    /// <summary>Status-bar line for this document (see <see cref="IDocumentViewModel"/>).</summary>
-    public string StatusText
-    {
-        get => this.statusText;
-        private set => SetField(ref this.statusText, value);
-    }
-
     public RawRowCollection Rows => this.rows ?? throw new InvalidOperationException("LoadAsync must complete before Rows is accessed.");
 
-    /// <summary>See <see cref="IDocumentViewModel.IndexFailure"/>.</summary>
-    public IndexFailure? IndexFailure
-    {
-        get => this.indexFailure;
-        private set => SetField(ref this.indexFailure, value);
-    }
-
-    public object? Toolbar => this.toolbar;
+    public override object? Toolbar => this.toolbar;
 
     /// <summary>The active find term, highlighted in every visible row via RawView's
     /// SearchHighlight bindings.</summary>
@@ -112,13 +101,13 @@ public sealed class RawViewModel : ObservableObject, IDocumentViewModel
         {
             int generation = IndexGeneration;
             var row = await RawOffsetRowResolver.ResolveWhenCoveredAsync(this.session.Index, byteOffset, CancellationToken.None);
-            if (this.disposed)
+            if (this.IsDisposed)
                 return;
 
             if (generation != IndexGeneration)
             {
                 row = await RawOffsetRowResolver.ResolveWhenCoveredAsync(this.session!.Index, byteOffset, CancellationToken.None);
-                if (this.disposed)
+                if (this.IsDisposed)
                     return;
             }
 
@@ -153,7 +142,7 @@ public sealed class RawViewModel : ObservableObject, IDocumentViewModel
         OnPropertyChanged(nameof(RowCount));
 
         StatusText = $"{path} — {RowCount:N0} rows indexed so far";
-        _ = MonitorIndexingAsync(session.Index);
+        MonitorIndexing();
     }
 
     /// <summary>
@@ -163,7 +152,7 @@ public sealed class RawViewModel : ObservableObject, IDocumentViewModel
     /// </summary>
     public void SetWrapWidth(int bytes)
     {
-        if (this.disposed || this.session is null || bytes == this.wrapWidth)
+        if (this.IsDisposed || this.session is null || bytes == this.wrapWidth)
             return;
 
         // Raised BEFORE the Rows swap below - the view reacts by resetting its scroll and
@@ -176,8 +165,8 @@ public sealed class RawViewModel : ObservableObject, IDocumentViewModel
         // Clear selection before the swap - stale indexes must never be applied to the new list.
         SelectedRowIndex = null;
 
-        // Stale relative to the new scan about to start; MonitorIndexingAsync repopulates it
-        // if the new scan fails.
+        // Stale relative to the new scan about to start; MonitorIndexing repopulates it if the
+        // new scan fails.
         IndexFailure = null;
 
         this.session.RestartIndex(bytes);
@@ -190,60 +179,34 @@ public sealed class RawViewModel : ObservableObject, IDocumentViewModel
         OnPropertyChanged(nameof(RowCount));
 
         StatusText = $"{FilePath} — {RowCount:N0} rows indexed so far";
-        _ = MonitorIndexingAsync(this.session.Index);
+        MonitorIndexing();
     }
 
-    public ISearchNavigator CreateSearchNavigator() => new RawSearchNavigator(this);
+    public override ISearchNavigator? CreateSearchNavigator() => new RawSearchNavigator(this);
 
     /// <summary>
     /// Returns true if the VM can process the specified file type
     /// </summary>
     /// <param name="fileType">Type of file to query</param>
     /// <returns>True if the view model can process the specified file type</returns>
-    public bool CanHandleFileType(FileTypeDetector.FileKind fileType)
+    public override bool CanHandleFileType(FileTypeDetector.FileKind fileType)
     {
         return fileType == FileTypeDetector.FileKind.Unidentified;
     }
 
-    /// <summary>
-    /// Refreshes <see cref="StatusText"/> when background indexing finishes or fails. The
-    /// generation guard (index still current) covers both dispose-cancellation and a wrap
-    /// change retiring this index mid-monitor - a retired scan's cancellation fault must not
-    /// repaint the status as a failure.
-    /// </summary>
-    private async Task MonitorIndexingAsync(RawSegmentIndex index)
+    /// <summary>Indexing finished: reports <see cref="RowCount"/> under its real total. The
+    /// base's ReferenceEquals(indexer, accessor()) guard is what
+    /// <see cref="Argonaut.Features.Raw.RawViewModel.IndexGeneration"/>'s remarks call out as
+    /// covering a wrap-width restart retiring this index mid-monitor.</summary>
+    protected override void OnIndexingCompleted()
+        => StatusText = $"{FilePath} — {RowCount:N0} rows";
+
+    /// <summary>Indexing stopped early (failure, or cancellation on <paramref name="failure"/> null).</summary>
+    protected override void OnIndexingFailed(IndexFailure? failure)
     {
-        try
-        {
-            await index.IndexingTask;
-        }
-        catch
-        {
-            if (!this.disposed && ReferenceEquals(index, this.session?.Index))
-            {
-                IndexFailure = index.Failure;
-                StatusText = index.Failure is { } failure
-                    ? $"{FilePath} — indexing stopped — {failure.ItemsIndexed:N0} rows shown"
-                    : $"{FilePath} — indexing failed";
-            }
-            return;
-        }
-
-        if (!this.disposed && ReferenceEquals(index, this.session?.Index))
-            StatusText = $"{FilePath} — {RowCount:N0} rows";
-    }
-
-    public void Dispose()
-    {
-        // Idempotent - see IDocumentViewModel's lifetime contract.
-        if (this.disposed)
-            return;
-        this.disposed = true;
-
-        // Cancel first so the background scan stops promptly; the row collection must be
-        // disposed before session.Dispose joins the scans and releases the mapping.
-        this.session?.Cancel();
-        this.rows?.Dispose();
-        this.session?.Dispose();
+        IndexFailure = failure;
+        StatusText = failure is { } f
+            ? $"{FilePath} — indexing stopped — {f.ItemsIndexed:N0} rows shown"
+            : $"{FilePath} — indexing failed";
     }
 }

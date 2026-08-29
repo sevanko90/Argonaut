@@ -26,20 +26,20 @@ public sealed class LiteralSearchMatcher : ISearchMatcher
         firstUpper = ToUpperAscii(needle[0]);
     }
 
-    public int WindowOverlap => needle.Length - 1;
+    public int ChunkOverlap => needle.Length - 1;
 
-    public bool TryFindNext(ReadOnlySpan<byte> window, int from, out int matchIndex, out int matchLength)
+    public bool TryFindNext(ReadOnlySpan<byte> chunk, int from, out int matchIndex, out int matchLength)
     {
         matchIndex = -1;
         matchLength = needle.Length;
-        int lastStart = window.Length - needle.Length;
+        int lastStart = chunk.Length - needle.Length;
 
         while (from >= 0 && from <= lastStart)
         {
             // Vectorized candidate scan on the first byte (both cases when folding), then a
             // cheap ASCII-folded verify of the remainder - same "SIMD for the hot part"
             // shape as FileOffsetIndex's newline scan.
-            var slice = window.Slice(from);
+            var slice = chunk.Slice(from);
             int candidate = ignoreCase && firstLower != firstUpper
                 ? slice.IndexOfAny(firstLower, firstUpper)
                 : slice.IndexOf(needle[0]);
@@ -50,7 +50,7 @@ public sealed class LiteralSearchMatcher : ISearchMatcher
             if (start > lastStart)
                 return false;
 
-            if (Matches(window.Slice(start, needle.Length)))
+            if (Matches(chunk.Slice(start, needle.Length)))
             {
                 matchIndex = start;
                 return true;

@@ -1,4 +1,3 @@
-using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Infrastructure;
@@ -21,7 +20,7 @@ namespace Argonaut.Features.Json.Diff;
 /// Idempotent, same as IndexedFileSession - the diff view model and the view's detach
 /// handler both call it. Not thread-safe: create and dispose from the UI thread.
 /// </summary>
-public sealed class JsonDiffSession : IDisposable
+public sealed class JsonDiffSession : IDocumentSession
 {
     private readonly CancellationTokenSource diffCts;
     private readonly Task hashReleaseTask;
@@ -36,6 +35,33 @@ public sealed class JsonDiffSession : IDisposable
     public string LeftPath { get; }
 
     public string RightPath { get; }
+
+    /// <summary>
+    /// See <see cref="IDocumentSession.TearingDown"/>. The diff's own source, which is linked
+    /// over both sides' - so it fires whether teardown starts here or at either side, and a
+    /// find reveal linking it stops before either mapping goes.
+    /// </summary>
+    public CancellationToken TearingDown => this.diffCts.Token;
+
+    /// <summary>
+    /// See <see cref="IDocumentSession.IndexingTask"/>. The diff worker's task, not either
+    /// side's: it internally waits for both indexes before comparing, so it is the last thing
+    /// to finish and the only completion the document reacts to. Never replaced - there is no
+    /// diff equivalent of RawIndexSession's restart.
+    /// </summary>
+    public Task IndexingTask => this.Diff.IndexingTask;
+
+    /// <summary>
+    /// See <see cref="IDocumentSession.Failure"/>. Always null HERE, deliberately: a failure in
+    /// this session belongs to the left or the right document, and flattening it to one
+    /// unattributed <see cref="IndexFailure"/> would drop the only part the user needs - which
+    /// file failed. <see cref="Argonaut.Features.Json.Diff.JsonDiffViewModel"/> reads
+    /// <see cref="Left"/>/<see cref="Right"/> directly and prefixes the message with the side,
+    /// which it can do and this cannot, because only it knows the display names. Note a side
+    /// failure does NOT fault <see cref="IndexingTask"/>: the diff completes normally over an
+    /// empty index, so the view model does its attribution on the completion path too.
+    /// </summary>
+    public IndexFailure? Failure => null;
 
     private JsonDiffSession(string leftPath, string rightPath,
         IndexedFileSession<JsonStructureIndex> left, IndexedFileSession<JsonStructureIndex> right,
@@ -83,7 +109,7 @@ public sealed class JsonDiffSession : IDisposable
             throw;
         }
 
-        var diffCts = CancellationTokenSource.CreateLinkedTokenSource(left.Token, right.Token);
+        var diffCts = CancellationTokenSource.CreateLinkedTokenSource(left.TearingDown, right.TearingDown);
         try
         {
             var diff = JsonDiffIndex.Start(left.Index, left.File, right.Index, right.File, diffProgress, diffCts.Token);
@@ -118,6 +144,30 @@ public sealed class JsonDiffSession : IDisposable
         }
     }
 
+    /// <summary>
+    /// Requests both sides' scans stop early, along with the diff itself, and fires
+    /// <see cref="TearingDown"/>. Idempotent, including after
+    /// <see cref="Dispose"/> - same contract as <see cref="IndexedFileSession{TIndex}.RequestStop"/>
+    /// and <see cref="Argonaut.Features.Raw.RawIndexSession.RequestStop"/>. Harmless to call
+    /// before Dispose: <see cref="diffCts"/> is already a linked source over both sides'
+    /// tokens, so cancelling them was always going to cancel the diff too - but calling this
+    /// explicitly starts everything winding down at once rather than side by side.
+    /// </summary>
+    public void RequestStop()
+    {
+        if (this.disposed)
+            return;
+
+        RequestStopCore();
+    }
+
+    private void RequestStopCore()
+    {
+        this.diffCts.Cancel();
+        this.Left.RequestStop();
+        this.Right.RequestStop();
+    }
+
     public void Dispose()
     {
         if (this.disposed)
@@ -125,7 +175,7 @@ public sealed class JsonDiffSession : IDisposable
         this.disposed = true;
 
         // The ordering here is not negotiable - see the class remarks.
-        this.diffCts.Cancel();
+        RequestStopCore();
         try { this.Diff.IndexingTask.Wait(); } catch { /* cancellation/failure observed only to unblock disposal */ }
 
         this.Left.Dispose();

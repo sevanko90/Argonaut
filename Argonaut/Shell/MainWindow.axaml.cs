@@ -133,7 +133,7 @@ public partial class MainWindow : Window
 
     private void CloseFindBar()
     {
-        _ = viewModel.StopFindAsync();
+        viewModel.StopFind();
         FindBarControl.Reset();
         ContentArea.Focus();
     }

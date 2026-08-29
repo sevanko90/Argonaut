@@ -43,7 +43,7 @@ public class JsonDiffFindTests
         public void Dispose()
         {
             // The scans hold spans over the mappings the view model is about to dispose.
-            Controller.DetachAsync().GetAwaiter().GetResult();
+            Controller.Detach();
             Vm.Dispose();
             File.Delete(LeftPath);
             File.Delete(RightPath);
@@ -117,7 +117,7 @@ public class JsonDiffFindTests
         await h.Controller.FindAsync("needle", 1);
         Assert.Equal("needle", h.Vm.HighlightTerm);
 
-        await h.Controller.StopAsync();
+        h.Controller.StopSearch();
         Assert.Null(h.Vm.HighlightTerm);
     }
 

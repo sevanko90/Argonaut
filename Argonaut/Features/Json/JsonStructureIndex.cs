@@ -158,9 +158,6 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
 
     public Task IndexingTask { get; private set; } = Task.CompletedTask;
 
-    /// <inheritdoc />
-    public string ItemNoun => "tokens";
-
     /// <summary>
     /// Number of tokens indexed so far (may grow until <see cref="AppendLogIndexBase{T}.IsComplete"/> is true).
     /// </summary>

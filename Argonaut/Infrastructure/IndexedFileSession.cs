@@ -19,15 +19,16 @@ namespace Argonaut.Infrastructure;
 /// check cancellation every ~65536 tokens / 4MB chunk, so the joins resolve in low
 /// single-digit milliseconds even on multi-GB files.
 ///
-/// What the session CANNOT know about: readers it didn't start, such as FileSearchSession
-/// scans holding spans over <see cref="File"/>. Callers must stop those before disposing
-/// the session - MainWindow does this by awaiting FindController.Detach/Stop before any
-/// content swap that leads to a view-model (and therefore session) dispose.
+/// What the session CANNOT know about: readers it didn't start. There is one class of those
+/// left - UI-thread work registered via <see cref="RegisterDependentTask"/> - and search is
+/// deliberately no longer among them: a <see cref="Argonaut.Features.Search.FileSearchSession"/>
+/// opens its own mapping of the path, so nothing about a search constrains when this session
+/// may release its own.
 ///
 /// Not thread-safe: create, register and dispose from one thread (the UI thread in this
 /// app). The indexing/dependent tasks themselves of course run in the background.
 /// </summary>
-public sealed class IndexedFileSession<TIndex> : IDisposable where TIndex : class, IFileIndexer
+public sealed class IndexedFileSession<TIndex> : IDocumentSession where TIndex : class, IFileIndexer
 {
     private readonly CancellationTokenSource cts;
     private readonly List<Task> dependentTasks = new();
@@ -39,11 +40,11 @@ public sealed class IndexedFileSession<TIndex> : IDisposable where TIndex : clas
 
     public Task IndexingTask => this.Index.IndexingTask;
 
-    /// <summary>
-    /// Cancelled when the session is cancelled/disposed. Hand this to any background work
-    /// that reads <see cref="File"/> so it stops before the mapping is released.
-    /// </summary>
-    public CancellationToken Token => this.cts.Token;
+    /// <summary>See <see cref="IDocumentSession.Failure"/>.</summary>
+    public IndexFailure? Failure => this.Index.Failure;
+
+    /// <summary>See <see cref="IDocumentSession.TearingDown"/>.</summary>
+    public CancellationToken TearingDown => this.cts.Token;
 
     private IndexedFileSession(MMapFile file, TIndex index, CancellationTokenSource cts)
     {
@@ -83,15 +84,32 @@ public sealed class IndexedFileSession<TIndex> : IDisposable where TIndex : clas
     }
 
     /// <summary>
-    /// Registers a background task that dereferences <see cref="File"/> (e.g. date-hint
-    /// inference) so <see cref="Dispose"/> joins it before releasing the mapping. No-op if
-    /// the session is already disposed - <see cref="Token"/> is cancelled by then, so such
-    /// a task dies immediately without touching the file.
+    /// Registers a background task that dereferences <see cref="File"/> (date-hint inference,
+    /// JSON path resolution) so <see cref="Dispose"/> joins it before releasing the mapping.
+    /// No-op if the session is already disposed - <see cref="TearingDown"/> is cancelled by
+    /// then, so such a task dies immediately without touching the file.
+    ///
+    /// Prunes already-completed entries first (O(n) with n in single digits, on the UI
+    /// thread) so a long session with many search-term changes doesn't accumulate one Task
+    /// reference per search forever. A completed entry's exception is observed before it is
+    /// dropped - a registered task racing an <see cref="ObjectDisposedException"/> out of
+    /// <see cref="MMapFile.GetSpan"/> faults; dropping that unobserved would raise
+    /// <see cref="System.Threading.Tasks.TaskScheduler.UnobservedTaskException"/> at
+    /// finalization instead.
     /// </summary>
     public void RegisterDependentTask(Task task)
     {
         if (this.disposed)
             return;
+
+        for (int i = this.dependentTasks.Count - 1; i >= 0; i--)
+        {
+            if (!this.dependentTasks[i].IsCompleted)
+                continue;
+
+            _ = this.dependentTasks[i].Exception;
+            this.dependentTasks.RemoveAt(i);
+        }
 
         this.dependentTasks.Add(task);
     }
@@ -100,9 +118,9 @@ public sealed class IndexedFileSession<TIndex> : IDisposable where TIndex : clas
     /// Requests the scan stop early. Idempotent, including after <see cref="Dispose"/> - the
     /// nested per-line JsonViewModel is disposed from two independent paths (its owning
     /// NdJsonViewModel, and its JsonView's own detach handler when the visual tree tears
-    /// down), so a second Cancel/Dispose pair on the same session is expected, not a bug.
+    /// down), so a second RequestStop/Dispose pair on the same session is expected, not a bug.
     /// </summary>
-    public void Cancel()
+    public void RequestStop()
     {
         if (this.disposed)
             return;

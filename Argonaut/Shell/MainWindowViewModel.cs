@@ -55,7 +55,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private ContentFontMode contentFontMode;
     private DocumentViewOption? selectedView;
     private bool isFindAvailable;
-    private int openRequestId;
+    private readonly RequestTicket openRequest = new();
 
     // The reporter feeding scan progress into the status line for the current load. Held so
     // every path that puts final text on that line can silence it first - see
@@ -86,7 +86,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
         findController = new FindController(
             status => FindStatusChanged?.Invoke(status),
-            () => currentFilePath is null ? null : new StatusProgressReporter(this, currentFilePath, openRequestId));
+            () => currentFilePath is null ? null : new StatusProgressReporter(this, currentFilePath, openRequest.Current));
 
         ReloadRecentFiles();
     }
@@ -234,11 +234,13 @@ public sealed class MainWindowViewModel : ObservableObject
     /// </summary>
     public async Task OpenDiffAsync(string leftPath, string rightPath)
     {
-        var requestId = ++openRequestId;
+        var requestId = openRequest.Begin();
 
-        // Same pre-swap discipline as every open/switch: a live find scan holds spans over
-        // the outgoing MMapFile, and the outgoing load's reporter must go quiet first.
-        await DetachFindAsync();
+        // UI hygiene: clears the highlight term and the find-bar status before the swap. NOT
+        // crash safety - that comes from each search scan owning its own chunk mappings, so a
+        // scan still running over the outgoing document holds nothing that document needs back.
+        // The outgoing load's reporter must go quiet first either way.
+        DetachFind();
         FindBarResetRequested?.Invoke();
         indexProgressReporter?.Stop();
         StatusText = $"Comparing {leftPath} with {rightPath}…";
@@ -252,12 +254,12 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             OpenDebugLog.Write($"OpenDiff: load threw: {ex}");
             document.Dispose();
-            if (requestId == openRequestId)
+            if (openRequest.IsCurrent(requestId))
                 StatusText = $"{leftPath} — failed to open comparison";
             return;
         }
 
-        if (requestId != openRequestId)
+        if (!openRequest.IsCurrent(requestId))
         {
             document.Dispose();
             return;
@@ -367,9 +369,9 @@ public sealed class MainWindowViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Opens <paramref name="path"/>, replacing any current document. A monotonic
-    /// <see cref="openRequestId"/> guards against a newer open superseding this one mid-load;
-    /// the loser is disposed here (never published), so its mapping is released.
+    /// Opens <paramref name="path"/>, replacing any current document. <see cref="openRequest"/>
+    /// guards against a newer open superseding this one mid-load; the loser is disposed here
+    /// (never published), so its mapping is released.
     /// </summary>
     public async Task OpenPathAsync(string? path)
     {
@@ -394,7 +396,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 return;
         }
 
-        var requestId = ++openRequestId;
+        var requestId = openRequest.Begin();
 
         FileTypeDetector.FileKind fileType;
         try
@@ -409,9 +411,10 @@ public sealed class MainWindowViewModel : ObservableObject
 
         OpenDebugLog.Write($"OpenPath: normalizedPath='{normalizedPath}', fileType={fileType}");
 
-        // Stop any search over the outgoing file before its view (and MMapFile) is torn down
-        // by the content swap below.
-        await DetachFindAsync();
+        // UI hygiene and defence in depth (see the remark in OpenDiffAsync) - the outgoing
+        // document's own mapping scope is what actually stops a live search before the
+        // content swap tears its MMapFile down.
+        DetachFind();
         FindBarResetRequested?.Invoke();
         StatusText = $"Indexing {normalizedPath}… 0%";
 
@@ -430,10 +433,11 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
 
         string path = currentFilePath;
-        var requestId = ++openRequestId;
+        var requestId = openRequest.Begin();
 
-        // MUST precede the swap - a live find scan holds spans over the outgoing MMapFile.
-        await DetachFindAsync();
+        // UI hygiene and defence in depth (see the remark in OpenDiffAsync) - the outgoing
+        // document's own mapping scope is what actually stops a live search before the swap.
+        DetachFind();
         FindBarResetRequested?.Invoke();
         StatusText = $"Indexing {path}… 0%";
 
@@ -448,7 +452,7 @@ public sealed class MainWindowViewModel : ObservableObject
     /// <see cref="IncompatibleViewModel"/>; a failure with some items indexed publishes the
     /// partial document with the warning banner.
     /// </summary>
-    private async Task LoadAndPublishAsync(FileTypeDetector.FileKind kind, string path, int requestId, bool addToRecents)
+    private async Task LoadAndPublishAsync(FileTypeDetector.FileKind kind, string path, long requestId, bool addToRecents)
     {
         string attemptedViewName = DisplayNameFor(kind);
 
@@ -461,14 +465,14 @@ public sealed class MainWindowViewModel : ObservableObject
         catch (Exception ex)
         {
             OpenDebugLog.Write($"LoadAndPublish: IsPlausibleFor threw: {ex}");
-            if (requestId == openRequestId)
+            if (openRequest.IsCurrent(requestId))
                 StatusText = $"{path} — failed to open";
             return;
         }
 
         if (!isPlausible)
         {
-            if (requestId == openRequestId)
+            if (openRequest.IsCurrent(requestId))
                 ShowIncompatible(path, kind, attemptedViewName, new IndexFailure(reason, null, null, null, 0));
             return;
         }
@@ -487,14 +491,14 @@ public sealed class MainWindowViewModel : ObservableObject
         catch (Exception ex)
         {
             OpenDebugLog.Write($"LoadAndPublish: load threw: {ex}");
-            if (requestId == openRequestId)
+            if (openRequest.IsCurrent(requestId))
                 StatusText = $"{path} — failed to open";
             return;
         }
 
         // A newer open/switch won the race while we were loading: discard this document (it
         // was never published, so nobody else will dispose it) and leave the newer one in place.
-        if (requestId != openRequestId)
+        if (!openRequest.IsCurrent(requestId))
         {
             document.Dispose();
             return;
@@ -583,7 +587,8 @@ public sealed class MainWindowViewModel : ObservableObject
     /// (whole-file, mmap-backed) ItemsSource once. Disposing first means the collection reports
     /// empty for that walk - instant instead of a multi-second, whole-file materialization, and
     /// reading no unmapped memory - independently of Avalonia's detach/enumerate ordering. Search
-    /// is already stopped (callers await FindController.DetachAsync first), and the view's own
+    /// is already stopped (callers call FindController.Detach first, for UI state - the swap's
+    /// safety no longer depends on it), and the view's own
     /// DetachedFromVisualTree dispose stays as an idempotent safety net (e.g. window close).
     /// </summary>
     private void SetCurrentDocument(IDocumentViewModel? document, string? path, FileTypeDetector.FileKind kind = FileTypeDetector.FileKind.Unknown)
@@ -659,12 +664,13 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public async Task CloseFileAsync()
     {
-        ++openRequestId;
+        openRequest.Begin();
         indexProgressReporter?.Stop();
 
-        // The search scan holds spans over the current view's MMapFile - it must be fully
-        // stopped before the content swap detaches (and thereby disposes) that view.
-        await DetachFindAsync();
+        // UI hygiene and defence in depth (see the remark in OpenDiffAsync) - the outgoing
+        // document's own mapping scope is what actually stops a live search before the swap,
+        // including via the view's own detach handler, which this await does not drive.
+        DetachFind();
         FindBarResetRequested?.Invoke();
 
         SetCurrentDocument(null, null);
@@ -675,9 +681,9 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public Task FindAsync(string term, int direction) => findController.FindAsync(term, direction);
 
-    public Task StopFindAsync() => findController.StopAsync();
+    public void StopFind() => findController.StopSearch();
 
-    private Task DetachFindAsync() => findController.DetachAsync();
+    private void DetachFind() => findController.Detach();
 
     /// <summary>
     /// Writes indexing/search scan progress into <see cref="StatusText"/>. Report is called
@@ -697,14 +703,14 @@ public sealed class MainWindowViewModel : ObservableObject
 
         private readonly MainWindowViewModel owner;
         private readonly string path;
-        private readonly int requestId;
+        private readonly long requestId;
         private int lastBucket = -1;
 
         // Set on the UI thread once indexing stops; read on the UI thread inside the posted
         // update. Volatile because Report itself runs on the scan thread.
         private volatile bool stopped;
 
-        public StatusProgressReporter(MainWindowViewModel owner, string path, int requestId)
+        public StatusProgressReporter(MainWindowViewModel owner, string path, long requestId)
         {
             this.owner = owner;
             this.path = path;
@@ -724,7 +730,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
         public void Report(string message, long? current = null, long? max = null)
         {
-            if (stopped || requestId != owner.openRequestId)
+            if (stopped || !owner.openRequest.IsCurrent(requestId))
                 return;
 
             string text = $"{message} {path}…";
@@ -745,7 +751,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
             Dispatcher.UIThread.Post(() =>
             {
-                if (!stopped && requestId == owner.openRequestId)
+                if (!stopped && owner.openRequest.IsCurrent(requestId))
                     owner.StatusText = text;
             });
         }

@@ -1,5 +1,6 @@
 using System.Text;
 using Argonaut.Features.Raw;
+using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
 
 namespace Argonaut.Tests;
@@ -125,6 +126,62 @@ public sealed class RawViewModelTests : IDisposable
         }
         finally
         {
+            vm.Dispose();
+        }
+    }
+
+    /// <summary>Blocks a search scan mid-window until released - see FileSearchSessionTests'
+    /// identical BlockingMatcher for why this makes the interleaving deterministic.</summary>
+    private sealed class BlockingMatcher : ISearchMatcher
+    {
+        public ManualResetEventSlim Entered { get; } = new(false);
+        public ManualResetEventSlim Release { get; } = new(false);
+
+        public int ChunkOverlap => 0;
+
+        public bool TryFindNext(ReadOnlySpan<byte> chunk, int from, out int matchIndex, out int matchLength)
+        {
+            Entered.Set();
+            Release.Wait();
+            matchIndex = -1;
+            matchLength = 0;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// SetWrapWidth's promise: "a running search is unaffected - matches are byte offsets over
+    /// the unchanged file". Now structural rather than a matter of which token the scan took -
+    /// the scan reads its own mappings of the path and shares nothing with the index being
+    /// restarted - so this asserts the guarantee end to end, without any lifetime plumbing.
+    /// </summary>
+    [Fact]
+    public async Task SetWrapWidth_DoesNotAffectARunningSearch()
+    {
+        var vm = new RawViewModel();
+        var matcher = new BlockingMatcher();
+        try
+        {
+            await vm.LoadAsync(WriteNewlinelessFile());
+            await vm.IndexingTask;
+
+            var session = FileSearchSession.Start(new ScanTarget(vm.FilePath), matcher);
+
+            matcher.Entered.Wait(); // the scan is now provably mid-chunk
+
+            vm.SetWrapWidth(80); // must re-index without cancelling the search above
+            await vm.IndexingTask;
+
+            Assert.False(session.ScanTask.IsCompleted); // still blocked - RestartIndex left it alone
+            Assert.Equal(5, vm.RowCount); // the re-index itself completed normally
+
+            matcher.Release.Set();
+            await session.ScanTask;
+            Assert.False(session.WasCancelled); // ran to natural completion, never cancelled by the wrap change
+        }
+        finally
+        {
+            matcher.Release.Set(); // idempotent - unblocks the scan even if an assertion above failed
             vm.Dispose();
         }
     }

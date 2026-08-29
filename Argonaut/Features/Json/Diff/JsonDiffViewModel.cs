@@ -4,7 +4,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
-using Argonaut.Shell;
 using Avalonia.Threading;
 
 namespace Argonaut.Features.Json.Diff;
@@ -22,13 +21,10 @@ namespace Argonaut.Features.Json.Diff;
 /// <see cref="IndexFailure"/> with the side named in the message - the shell's existing
 /// zero-progress/partial-progress handling then applies unchanged.
 /// </summary>
-public sealed class JsonDiffViewModel : ObservableObject, IDocumentViewModel
+public sealed class JsonDiffViewModel : IndexedDocumentViewModel
 {
     private JsonDiffSession? session;
     private JsonDiffRowCollection? rows;
-    private string statusText = string.Empty;
-    private IndexFailure? indexFailure;
-    private volatile bool disposed;
 
     private int? selectedPosition;
     private bool sourceShowsPath;
@@ -43,29 +39,17 @@ public sealed class JsonDiffViewModel : ObservableObject, IDocumentViewModel
     private string? targetPlaceholder;
     private string? highlightTerm;
 
-    public string FilePath { get; private set; } = string.Empty;
+    protected override IDocumentSession? Session => session;
+
+    protected override IDisposable? MappedRows => rows;
 
     public string RightFilePath { get; private set; } = string.Empty;
 
-    public string StatusText
-    {
-        get => statusText;
-        private set => SetField(ref statusText, value);
-    }
-
-    public IndexFailure? IndexFailure
-    {
-        get => indexFailure;
-        private set => SetField(ref indexFailure, value);
-    }
-
     public JsonDiffRowCollection Rows => rows ?? throw new InvalidOperationException("LoadAsync must complete before Rows is accessed.");
 
-    public JsonDiffToolbarViewModel? Toolbar { get; private set; }
+    private JsonDiffToolbarViewModel? toolbar;
 
-    object? IDocumentViewModel.Toolbar => Toolbar;
-
-    public Task IndexingTask => session?.Diff.IndexingTask ?? Task.CompletedTask;
+    public override JsonDiffToolbarViewModel? Toolbar => toolbar;
 
     /// <summary>
     /// The active find term, highlighted in both panes' rows (see SearchHighlight, threaded
@@ -80,8 +64,8 @@ public sealed class JsonDiffViewModel : ObservableObject, IDocumentViewModel
     /// <summary>One navigator over both documents - see <see cref="JsonDiffSearchNavigator"/>.
     /// Null before <see cref="LoadAsync"/> has produced a session, which is also the state an
     /// unusable diff is left in.</summary>
-    public ISearchNavigator? CreateSearchNavigator()
-        => session is { } s && rows is not null ? new JsonDiffSearchNavigator(this, s.Left.File, s.Right.File) : null;
+    public override ISearchNavigator? CreateSearchNavigator()
+        => session is { } s && rows is not null ? new JsonDiffSearchNavigator(this, s) : null;
 
     /// <summary>
     /// Reveals a find match: resolves its byte offset to a token in the document it was found
@@ -344,7 +328,7 @@ public sealed class JsonDiffViewModel : ObservableObject, IDocumentViewModel
         return (value[..prefix], value[prefix..(value.Length - suffix)], value[^suffix..]);
     }
 
-    public bool CanHandleFileType(FileTypeDetector.FileKind fileType) => false;
+    public override bool CanHandleFileType(FileTypeDetector.FileKind fileType) => false;
 
     /// <summary>Both file names, which is the one place in this document they are not a
     /// repetition: the toolbar and status bar describe what the comparison found.</summary>
@@ -367,7 +351,7 @@ public sealed class JsonDiffViewModel : ObservableObject, IDocumentViewModel
             diffProgress: new ProgressToStatus(this, "Comparing"));
         this.session = session;
 
-        Toolbar = new JsonDiffToolbarViewModel(
+        toolbar = new JsonDiffToolbarViewModel(
             setChangesOnly: value => { if (rows is { } r) r.ChangesOnly = value; },
             goToPreviousDiff: GoToPreviousDiff,
             goToNextDiff: GoToNextDiff);
@@ -375,54 +359,54 @@ public sealed class JsonDiffViewModel : ObservableObject, IDocumentViewModel
         // A small initial batch so the preview's first paint isn't empty (mirrors
         // JsonViewModel.LoadCore); a tiny file completes the wait via MarkComplete instead.
         await session.Left.Index.WaitForTokenCountAsync(250);
-        if (disposed)
+        if (IsDisposed)
             return;
 
         rows = new JsonDiffRowCollection(session);
         StatusText = $"Comparing {FilePath} with {RightFilePath}";
 
-        _ = MonitorAsync(session);
+        MonitorIndexing();
     }
 
     /// <summary>
-    /// Watches both sides and the diff to keep the status line and failure state current.
-    /// Runs on the UI thread (fire-and-forget from LoadAsync; awaits resume there per the
-    /// app's threading convention).
+    /// Both completion hooks run the SAME reaction, which is what makes the diff different from
+    /// every other document here. A failure on either side does not fault the diff's own task -
+    /// the comparison completes normally over an empty index - so the side attribution below has
+    /// to happen on the success path as well as the failure one. The base's
+    /// <paramref name="failure"/> is ignored for the same reason
+    /// <see cref="JsonDiffSession.Failure"/> is always null: an unattributed failure would lose
+    /// which file failed, and only this class knows the display names to attribute it with.
     /// </summary>
-    private async Task MonitorAsync(JsonDiffSession session)
-    {
-        try
-        {
-            await session.Diff.IndexingTask;
-        }
-        catch
-        {
-            // Cancellation (document closed) or a worker fault; failure state below.
-        }
+    protected override void OnIndexingCompleted() => ReportComparisonOutcome();
 
-        if (disposed)
+    /// <inheritdoc cref="OnIndexingCompleted"/>
+    protected override void OnIndexingFailed(IndexFailure? failure) => ReportComparisonOutcome();
+
+    private void ReportComparisonOutcome()
+    {
+        if (session is not { } current)
             return;
 
         // Attribute a side failure - the diff completes empty in that case, and the shell's
         // existing IndexFailure handling (banner or incompatible placeholder) takes over.
-        if (session.Left.Index.Failure is { } leftFailure)
+        if (current.Left.Index.Failure is { } leftFailure)
         {
             IndexFailure = new IndexFailure($"Left file: {leftFailure.Message}", leftFailure.ByteOffset, leftFailure.Line, leftFailure.Column, leftFailure.ItemsIndexed);
             StatusText = $"{FilePath} — left file failed to index";
             return;
         }
 
-        if (session.Right.Index.Failure is { } rightFailure)
+        if (current.Right.Index.Failure is { } rightFailure)
         {
             IndexFailure = new IndexFailure($"Right file: {rightFailure.Message}", rightFailure.ByteOffset, rightFailure.Line, rightFailure.Column, rightFailure.ItemsIndexed);
             StatusText = $"{RightFilePath} — right file failed to index";
             return;
         }
 
-        if (!session.Diff.IsComplete)
+        if (!current.Diff.IsComplete)
             return;
 
-        StatusText = Summarize(session.Diff);
+        StatusText = Summarize(current.Diff);
     }
 
     /// <summary>One pass over the finished record log, counting user-meaningful changes:
@@ -449,18 +433,6 @@ public sealed class JsonDiffViewModel : ObservableObject, IDocumentViewModel
             return "documents are identical";
 
         return $"{added:N0} added, {removed:N0} removed, {modified:N0} modified, {moved:N0} moved";
-    }
-
-    public void Dispose()
-    {
-        if (disposed)
-            return;
-        disposed = true;
-
-        // rows first (stops its growth monitor, which reads the record log and both
-        // mappings), then the session (cancel -> join diff -> release both mappings).
-        rows?.Dispose();
-        session?.Dispose();
     }
 
     /// <summary>Marshals background progress reports onto the status line - same shape as
@@ -493,7 +465,7 @@ public sealed class JsonDiffViewModel : ObservableObject, IDocumentViewModel
 
             Dispatcher.UIThread.Post(() =>
             {
-                if (!owner.disposed)
+                if (!owner.IsDisposed)
                     owner.StatusText = text;
             });
         }

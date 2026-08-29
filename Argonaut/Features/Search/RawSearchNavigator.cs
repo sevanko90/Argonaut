@@ -24,9 +24,11 @@ public sealed class RawSearchNavigator : ISearchNavigator
         this.viewModel = viewModel;
     }
 
-    public MMapFile File => viewModel.Mmap!;
+    public ScanTarget ScanTarget => new ScanTarget(viewModel.FilePath);
 
     public void SetHighlightTerm(string? term) => viewModel.HighlightTerm = term;
+
+    public CancellationToken DocumentTearingDown => viewModel.TearingDown;
 
     public async Task RevealAsync(SearchMatch match, CancellationToken ct)
     {

@@ -10,37 +10,57 @@ namespace Argonaut.Features.Raw;
 /// mapping, the background <see cref="RawSegmentIndex"/> scanning it, and the CancellationTokenSource
 /// that stops that scan - with one deliberate difference. The mapping lives for the whole
 /// document lifetime while the index can be replaced (<see cref="RestartIndex"/>, the wrap-width
-/// change). That difference is the whole reason this class exists: a wrap-width change must not
-/// release the mapping, because a live FileSearchSession scan may hold spans over it and the
-/// document view model has no way to stop that scan first (the shell owns the FindController).
-/// Keeping the file fixed makes a re-index completely invisible to a running search.
+/// change). That difference is the whole reason this class exists: keeping the mapping fixed
+/// across a wrap-width change avoids the cost of a multi-GB unmap/remap and lets a running
+/// search continue uninterrupted (its match offsets are unaffected by re-wrapping).
 ///
-/// Teardown ordering is IndexedFileSession's:
+/// Because of that, this session tracks TWO lifetimes rather than IndexedFileSession's one -
+/// see <see cref="TearingDown"/>. Teardown ordering is otherwise IndexedFileSession's:
 ///
 ///   cancel -> join the indexing task -> release the mapping
 ///
 /// with <see cref="RestartIndex"/> performing the same cancel-and-join for the outgoing scan
-/// before starting its replacement. The scans check cancellation once per 4MB chunk, so the
-/// joins resolve in low single-digit milliseconds.
+/// before starting its replacement, deliberately keeping the mapping alive across it.
+/// The scans check cancellation once per 4MB chunk, so the joins resolve in low single-digit
+/// milliseconds.
 ///
 /// Not thread-safe: create, restart and dispose from one thread (the UI thread in this app).
 /// </summary>
-public sealed class RawIndexSession : IDisposable
+public sealed class RawIndexSession : IDocumentSession
 {
-    private CancellationTokenSource cts;
+    private readonly CancellationTokenSource mappingCts;
+    private CancellationTokenSource indexCts;
     private bool disposed;
 
     public MMapFile File { get; }
 
     public RawSegmentIndex Index { get; private set; }
 
+    /// <summary>See <see cref="IDocumentSession.IndexingTask"/>. Live by construction:
+    /// <see cref="RestartIndex"/> replaces <see cref="Index"/>, so this starts returning the new
+    /// scan's task the moment the wrap width changes - which is what lets the completion monitor
+    /// recognise the retired one.</summary>
     public Task IndexingTask => this.Index.IndexingTask;
 
-    private RawIndexSession(MMapFile file, RawSegmentIndex index, CancellationTokenSource cts)
+    /// <summary>See <see cref="IDocumentSession.Failure"/>.</summary>
+    public IndexFailure? Failure => this.Index.Failure;
+
+    /// <summary>
+    /// See <see cref="IDocumentSession.TearingDown"/>. Fires only when this session is torn
+    /// down - unlike <see cref="indexCts"/> it survives a <see cref="RestartIndex"/>, which is
+    /// the whole reason the two are separate. A find reveal links this one: it deliberately
+    /// re-resolves across a wrap-width change (see <see cref="RawViewModel.IndexGeneration"/>),
+    /// so linking the per-index source would cancel a reveal the user can still see the point
+    /// of.
+    /// </summary>
+    public CancellationToken TearingDown => this.mappingCts.Token;
+
+    private RawIndexSession(MMapFile file, RawSegmentIndex index, CancellationTokenSource mappingCts, CancellationTokenSource indexCts)
     {
         this.File = file;
         this.Index = index;
-        this.cts = cts;
+        this.mappingCts = mappingCts;
+        this.indexCts = indexCts;
     }
 
     /// <summary>
@@ -50,15 +70,17 @@ public sealed class RawIndexSession : IDisposable
     /// </summary>
     public static RawIndexSession Start(MMapFile file, int wrapWidth, IProgressReporter? progressReporter = null)
     {
-        var cts = new CancellationTokenSource();
+        var mappingCts = new CancellationTokenSource();
+        var indexCts = CancellationTokenSource.CreateLinkedTokenSource(mappingCts.Token);
         try
         {
-            var index = RawSegmentIndex.StartIndexing(file, wrapWidth, progressReporter, cts.Token);
-            return new RawIndexSession(file, index, cts);
+            var index = RawSegmentIndex.StartIndexing(file, wrapWidth, progressReporter, indexCts.Token);
+            return new RawIndexSession(file, index, mappingCts, indexCts);
         }
         catch
         {
-            cts.Dispose();
+            indexCts.Dispose();
+            mappingCts.Dispose();
             file.Dispose();
             throw;
         }
@@ -71,27 +93,34 @@ public sealed class RawIndexSession : IDisposable
     /// memory: the task's closure references the outgoing index, whose segment log runs to
     /// hundreds of MB on a multi-GB file, and dropping the last reference now lets the GC
     /// reclaim it during the re-index instead of holding both generations until the document
-    /// closes.
+    /// closes. The mapping is deliberately not moving, so a find scan over the same path (which
+    /// owns its own mapping anyway) and a linked reveal both ride through untouched.
     /// </summary>
     public void RestartIndex(int wrapWidth, IProgressReporter? progressReporter = null)
     {
         ObjectDisposedException.ThrowIf(this.disposed, this);
 
-        this.cts.Cancel();
+        this.indexCts.Cancel();
         try { this.Index.IndexingTask.Wait(); } catch { /* cancellation observed here only to unblock the restart */ }
-        this.cts.Dispose();
+        this.indexCts.Dispose();
 
-        this.cts = new CancellationTokenSource();
-        this.Index = RawSegmentIndex.StartIndexing(this.File, wrapWidth, progressReporter, this.cts.Token);
+        this.indexCts = CancellationTokenSource.CreateLinkedTokenSource(this.mappingCts.Token);
+        this.Index = RawSegmentIndex.StartIndexing(this.File, wrapWidth, progressReporter, this.indexCts.Token);
     }
 
-    /// <summary>Requests the current scan stop early. Idempotent, including after <see cref="Dispose"/>.</summary>
-    public void Cancel()
+    /// <summary>
+    /// Requests the current scan stop early, by cancelling the mapping source - the per-index
+    /// source is linked from it, so this cascades. Idempotent, including after
+    /// <see cref="Dispose"/>. Cancelling the mapping source rather than just the index one is
+    /// what makes <see cref="TearingDown"/> fire here, so a linked reveal stops at the same
+    /// moment the scan does.
+    /// </summary>
+    public void RequestStop()
     {
         if (this.disposed)
             return;
 
-        this.cts.Cancel();
+        this.mappingCts.Cancel();
     }
 
     public void Dispose()
@@ -100,10 +129,11 @@ public sealed class RawIndexSession : IDisposable
             return;
         this.disposed = true;
 
-        this.cts.Cancel();
+        this.mappingCts.Cancel();
         try { this.Index.IndexingTask.Wait(); } catch { /* cancellation/failure observed here only to unblock disposal */ }
 
         this.File.Dispose();
-        this.cts.Dispose();
+        this.indexCts.Dispose();
+        this.mappingCts.Dispose();
     }
 }

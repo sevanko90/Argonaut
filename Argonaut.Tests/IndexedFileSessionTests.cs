@@ -21,7 +21,6 @@ public class IndexedFileSessionTests
         public Task IndexingTask { get; init; } = Task.CompletedTask;
         public bool IsComplete => IndexingTask.IsCompleted;
         public int ItemCount => 0;
-        public string ItemNoun => "items";
         public IndexFailure? Failure => null;
     }
 
@@ -65,7 +64,7 @@ public class IndexedFileSessionTests
 
             bool dependentRan = false;
             var tokenCancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            session.Token.Register(() => tokenCancelled.SetResult());
+            session.TearingDown.Register(() => tokenCancelled.SetResult());
 
             // Completes only after the session cancels its token, then flips the flag -
             // Dispose must have waited for that flip before returning.
@@ -117,7 +116,7 @@ public class IndexedFileSessionTests
             var session = IndexedFileSession<FileOffsetIndex>.Start(
                 new MMapFile(path), FileOffsetIndex.StartIndexing);
             session.Dispose();
-            session.Cancel();
+            session.RequestStop();
         }
         finally
         {
@@ -157,10 +156,10 @@ public class IndexedFileSessionTests
             using var session = IndexedFileSession<FileOffsetIndex>.Start(
                 new MMapFile(path), FileOffsetIndex.StartIndexing);
 
-            Assert.False(session.Token.IsCancellationRequested);
-            session.Cancel();
-            session.Cancel();
-            Assert.True(session.Token.IsCancellationRequested);
+            Assert.False(session.TearingDown.IsCancellationRequested);
+            session.RequestStop();
+            session.RequestStop();
+            Assert.True(session.TearingDown.IsCancellationRequested);
         }
         finally
         {
@@ -181,6 +180,153 @@ public class IndexedFileSessionTests
             // Must neither throw nor block a later (idempotent) Dispose.
             session.RegisterDependentTask(Task.Delay(Timeout.Infinite));
             session.Dispose();
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>Reads the private dependentTasks list's Count via reflection - same technique
+    /// this file already uses for MMapFile.disposed - to observe RegisterDependentTask's
+    /// pruning, which has no other externally observable signal.</summary>
+    private static int DependentTaskCount(IndexedFileSession<FileOffsetIndex> session)
+    {
+        var field = typeof(IndexedFileSession<FileOffsetIndex>).GetField("dependentTasks", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var list = (System.Collections.IList)field.GetValue(session)!;
+        return list.Count;
+    }
+
+    /// <summary>
+    /// A long session with many term changes (each registering a search scan) must not
+    /// accumulate completed Task references forever.
+    /// Registering a new (live) task prunes every already-completed entry first.
+    /// </summary>
+    [Fact]
+    public void RegisterDependentTask_PrunesCompletedEntriesOnEachRegister()
+    {
+        string path = WriteTempFile("line\n");
+        try
+        {
+            var session = IndexedFileSession<FileOffsetIndex>.Start(
+                new MMapFile(path), FileOffsetIndex.StartIndexing);
+
+            for (int i = 0; i < 10; i++)
+                session.RegisterDependentTask(Task.CompletedTask);
+
+            Assert.Equal(1, DependentTaskCount(session)); // each register prunes before adding itself
+
+            var stillRunning = new TaskCompletionSource();
+            session.RegisterDependentTask(stillRunning.Task);
+            Assert.Equal(1, DependentTaskCount(session)); // the prior completed entry was pruned first
+
+            for (int i = 0; i < 10; i++)
+                session.RegisterDependentTask(Task.CompletedTask);
+
+            // Only the still-live entry plus the newest completed one remain - the ten
+            // interleaved completed entries above were all pruned away.
+            Assert.Equal(2, DependentTaskCount(session));
+
+            stillRunning.SetResult();
+            session.Dispose();
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// Pruning must observe a completed-but-faulted task's
+    /// Exception before dropping it, or the fault surfaces as an unhandled
+    /// TaskScheduler.UnobservedTaskException at finalization instead - exactly what
+    /// FileSearchSession.Scan racing ObjectDisposedException out of MMapFile.GetSpan would
+    /// produce if pruning didn't observe it.
+    /// </summary>
+    [Fact]
+    public async Task RegisterDependentTask_PruningObservesFaultedEntry_NoUnobservedException()
+    {
+        string path = WriteTempFile("line\n");
+        try
+        {
+            var session = IndexedFileSession<FileOffsetIndex>.Start(
+                new MMapFile(path), FileOffsetIndex.StartIndexing);
+
+            var faulting = Task.Run(() => throw new InvalidOperationException("simulated scan fault"));
+            try { await faulting; } catch { /* observed here only to know it has completed before registering */ }
+
+            bool unobserved = false;
+            void OnUnobserved(object? sender, UnobservedTaskExceptionEventArgs e)
+            {
+                unobserved = true;
+                e.SetObserved();
+            }
+
+            TaskScheduler.UnobservedTaskException += OnUnobserved;
+            try
+            {
+                session.RegisterDependentTask(faulting);
+                session.RegisterDependentTask(Task.CompletedTask); // triggers the prune that drops `faulting`
+
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
+            }
+            finally
+            {
+                TaskScheduler.UnobservedTaskException -= OnUnobserved;
+            }
+
+            Assert.False(unobserved, "pruning dropped a faulted task without observing its exception");
+            session.Dispose();
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// A dependent task that reads the mapping in a loop until it observes the session's
+    /// token must never see the mapping released out from under it: Dispose's join happens
+    /// strictly after the task exits its loop, never concurrently with it.
+    /// </summary>
+    [Fact]
+    public void Dispose_WaitsForDependentTask_MappingStaysValidUntilTaskObservesToken()
+    {
+        string path = WriteTempFile("line\n");
+        try
+        {
+            var file = new MMapFile(path);
+            var session = IndexedFileSession<FileOffsetIndex>.Start(file, FileOffsetIndex.StartIndexing);
+
+            bool sawUseAfterFree = false;
+            var task = Task.Run(() =>
+            {
+                var ct = session.TearingDown;
+                while (!ct.IsCancellationRequested)
+                {
+                    try
+                    {
+                        _ = file.GetSpan(0, 1);
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        // Only acceptable if the token was already cancelled when this ran -
+                        // i.e. Dispose released the mapping strictly after cancelling, never
+                        // concurrently with this loop still believing itself uncancelled.
+                        if (!ct.IsCancellationRequested)
+                            sawUseAfterFree = true;
+                        break;
+                    }
+                }
+            });
+            session.RegisterDependentTask(task);
+
+            session.Dispose(); // must not return before `task` has exited its loop
+
+            Assert.True(task.IsCompleted);
+            Assert.False(sawUseAfterFree);
         }
         finally
         {

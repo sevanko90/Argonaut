@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Argonaut.Features.Json;
 using Argonaut.Features.Json.Diff;
 using Argonaut.Infrastructure;
 
@@ -19,22 +20,32 @@ namespace Argonaut.Features.Search;
 public sealed class JsonDiffSearchNavigator : ISearchNavigator
 {
     private readonly JsonDiffViewModel viewModel;
-    private readonly MMapFile[] files;
+    private readonly JsonDiffSession session;
+    private readonly ScanTarget[] scanTargets;
 
-    public JsonDiffSearchNavigator(JsonDiffViewModel viewModel, MMapFile left, MMapFile right)
+    /// <summary>
+    /// Takes the diff's session rather than the two paths, so the scan targets and
+    /// <see cref="DocumentTearingDown"/> come from one source and cannot drift apart.
+    /// </summary>
+    public JsonDiffSearchNavigator(JsonDiffViewModel viewModel, JsonDiffSession session)
     {
         this.viewModel = viewModel;
-        this.files = new[] { left, right };
+        this.session = session;
+        this.scanTargets = new[] { new ScanTarget(session.LeftPath), new ScanTarget(session.RightPath) };
     }
 
-    /// <summary>Index into <see cref="Files"/> of the left (source) document.</summary>
+    /// <summary>Index into <see cref="ScanTargets"/> of the left (source) document.</summary>
     private const int LeftFile = 0;
 
-    public MMapFile File => files[LeftFile];
+    public ScanTarget ScanTarget => scanTargets[LeftFile];
 
-    public IReadOnlyList<MMapFile> Files => files;
+    public IReadOnlyList<ScanTarget> ScanTargets => scanTargets;
 
     public void SetHighlightTerm(string? term) => viewModel.HighlightTerm = term;
+
+    /// <summary>Both sides at once: the diff is torn down as a whole, and its own source is
+    /// linked over both sides' - see <see cref="JsonDiffSession.TearingDown"/>.</summary>
+    public CancellationToken DocumentTearingDown => session.TearingDown;
 
     public Task RevealAsync(SearchMatch match, CancellationToken ct) => RevealAsync(LeftFile, match, ct);
 

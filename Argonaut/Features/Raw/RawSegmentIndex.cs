@@ -73,9 +73,6 @@ public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IFileInd
 
     public Task IndexingTask { get; private set; } = Task.CompletedTask;
 
-    /// <inheritdoc />
-    public string ItemNoun => "anchors";
-
     /// <summary>
     /// Number of display rows available so far (may grow, in anchor-stride steps, until
     /// <see cref="AppendLogIndexBase{T}.IsComplete"/> is true).

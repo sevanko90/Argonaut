@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel;
+using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Features.Json;
 using Argonaut.Features.Json.Hints;
@@ -12,7 +13,7 @@ namespace Argonaut.Features.NdJson;
 
 public sealed record NdJsonSelectedLine(int LineNumber, string Text);
 
-public sealed class NdJsonViewModel : ObservableObject, IDocumentViewModel
+public sealed class NdJsonViewModel : IndexedDocumentViewModel
 {
     private const int InitialIndexedLineTarget = 250;
 
@@ -21,38 +22,24 @@ public sealed class NdJsonViewModel : ObservableObject, IDocumentViewModel
     private NdJsonSelectedLine? selectedLine;
     private JsonViewModel? selectedLineJsonViewModel;
     private string? highlightTerm;
-    private string statusText = string.Empty;
-    private IndexFailure? indexFailure;
-    private long selectionRequestId;
-    private bool disposed;
+    private readonly RequestTicket selectionRequest = new();
 
-    public string FilePath { get; private set; } = string.Empty;
+    protected override IDocumentSession? Session => this.session;
+
+    protected override IDisposable? MappedRows => this.lines;
 
     internal MMapFile? Mmap => this.session?.File;
 
     internal FileOffsetIndex? Index => this.session?.Index;
 
+    /// <summary>Fires when this document begins tearing down, for
+    /// <see cref="ISearchNavigator.DocumentTearingDown"/> - a find reveal links it so it stops
+    /// rather than touching a released mapping.</summary>
+    internal CancellationToken TearingDown => this.session?.TearingDown ?? default;
+
     public int LineCount => this.session?.Index.LineCount ?? 0;
 
-    public Task IndexingTask => this.session?.IndexingTask ?? Task.CompletedTask;
-
     public MemoryMappedFileLineCollection Lines => lines ?? throw new InvalidOperationException("LoadAsync must complete before Lines is accessed.");
-
-    /// <summary>See <see cref="IDocumentViewModel.IndexFailure"/>.</summary>
-    public IndexFailure? IndexFailure
-    {
-        get => indexFailure;
-        private set => SetField(ref indexFailure, value);
-    }
-
-    /// <summary>Status-bar line for this document (see <see cref="IDocumentViewModel"/>):
-    /// line count plus the selected line, refreshed on selection changes and when
-    /// indexing finishes.</summary>
-    public string StatusText
-    {
-        get => statusText;
-        private set => SetField(ref statusText, value);
-    }
 
     public NdJsonSelectedLine? SelectedLine
     {
@@ -97,11 +84,11 @@ public sealed class NdJsonViewModel : ObservableObject, IDocumentViewModel
     /// <summary>Default-expand depth applied to each selected line's nested JsonViewModel.</summary>
     public int DefaultExpandDepth { get; set; } = 2;
 
+    private JsonToolbarViewModel? toolbar;
+
     /// <summary>This document's header toolbar (see <see cref="IDocumentViewModel.Toolbar"/>).
     /// Null until <see cref="LoadAsync"/> creates it.</summary>
-    public JsonToolbarViewModel? Toolbar { get; private set; }
-
-    object? IDocumentViewModel.Toolbar => Toolbar;
+    public override JsonToolbarViewModel? Toolbar => toolbar;
 
     /// <summary>
     /// The active find term, highlighted in the line list and propagated into every nested
@@ -198,7 +185,7 @@ public sealed class NdJsonViewModel : ObservableObject, IDocumentViewModel
     {
         FilePath = path;
         DefaultExpandDepth = ExpandDepthPreference.Load();
-        Toolbar = new JsonToolbarViewModel(HintSettings, SchemaSettings, DefaultExpandDepth, SetDefaultExpandDepth,
+        toolbar = new JsonToolbarViewModel(HintSettings, SchemaSettings, DefaultExpandDepth, SetDefaultExpandDepth,
             refreshSchemaEntries: () => RefreshSchemaEntriesAsync(path));
 
         // Alongside indexing, not blocking it - see JsonViewModel.ApplyInitialSchemaAsync.
@@ -219,7 +206,7 @@ public sealed class NdJsonViewModel : ObservableObject, IDocumentViewModel
         OnPropertyChanged(nameof(Lines));
 
         UpdateStatusText();
-        _ = MonitorIndexingAsync(session);
+        MonitorIndexing();
     }
 
     /// <summary>Populates the schema catalog and applies any sidecar/remembered binding for the
@@ -227,7 +214,7 @@ public sealed class NdJsonViewModel : ObservableObject, IDocumentViewModel
     private async Task ApplyInitialSchemaAsync(string documentPath)
     {
         var (entries, preselected, rootName) = await Task.Run(() => JsonSchemaCatalog.GatherForDocument(documentPath));
-        if (disposed)
+        if (IsDisposed)
             return;
 
         SchemaSettings.SetEntries(entries);
@@ -241,18 +228,18 @@ public sealed class NdJsonViewModel : ObservableObject, IDocumentViewModel
     private async Task RefreshSchemaEntriesAsync(string documentPath)
     {
         var (entries, _, _) = await Task.Run(() => JsonSchemaCatalog.GatherForDocument(documentPath));
-        if (!disposed)
+        if (!IsDisposed)
             SchemaSettings.SetEntries(entries);
     }
 
-    public ISearchNavigator CreateSearchNavigator() => new NdJsonSearchNavigator(this);
+    public override ISearchNavigator CreateSearchNavigator() => new NdJsonSearchNavigator(this);
 
     /// <summary>
     /// Returns true if the VM can process the specified file type
     /// </summary>
     /// <param name="fileType">Type of file to query</param>
     /// <returns>True if the view model can process the specified file type</returns>
-    public bool CanHandleFileType(FileTypeDetector.FileKind fileType)
+    public override bool CanHandleFileType(FileTypeDetector.FileKind fileType)
     {
         return (fileType == FileTypeDetector.FileKind.Ndjson);
     }
@@ -264,33 +251,16 @@ public sealed class NdJsonViewModel : ObservableObject, IDocumentViewModel
             : $"{FilePath} — {LineCount:N0} lines";
     }
 
-    /// <summary>
-    /// Refreshes <see cref="StatusText"/> when background indexing finishes (keeping the
-    /// "Selected line" suffix if one is selected by then) or fails. Fire-and-forget from
-    /// LoadAsync (UI thread); the await resumes there per the app's threading convention.
-    /// The disposed check covers cancellation-by-dispose: a superseded or closed document
-    /// must not repaint its status as a failure.
-    /// </summary>
-    private async Task MonitorIndexingAsync(IndexedFileSession<FileOffsetIndex> session)
-    {
-        try
-        {
-            await session.IndexingTask;
-        }
-        catch
-        {
-            if (!disposed)
-            {
-                IndexFailure = session.Index.Failure;
-                StatusText = session.Index.Failure is { } failure
-                    ? $"{FilePath} — indexing stopped — {failure.ItemsIndexed:N0} lines shown"
-                    : $"{FilePath} — indexing failed";
-            }
-            return;
-        }
+    /// <summary>Indexing finished: keeps the "Selected line" suffix if one is selected by then.</summary>
+    protected override void OnIndexingCompleted() => UpdateStatusText();
 
-        if (!disposed)
-            UpdateStatusText();
+    /// <summary>Indexing stopped early (failure, or cancellation on <paramref name="failure"/> null).</summary>
+    protected override void OnIndexingFailed(IndexFailure? failure)
+    {
+        IndexFailure = failure;
+        StatusText = failure is { } f
+            ? $"{FilePath} — indexing stopped — {f.ItemsIndexed:N0} lines shown"
+            : $"{FilePath} — indexing failed";
     }
 
     public string GetLineText(int lineIndex)
@@ -304,7 +274,7 @@ public sealed class NdJsonViewModel : ObservableObject, IDocumentViewModel
         // Display text only - the JSON tree below is parsed from lineSpan itself, uncapped.
         SelectedLine = new NdJsonSelectedLine(lineIndex + 1, NdJsonLineReader.ReadDisplayLine(this.Mmap!, lineSpan));
 
-        var requestId = ++selectionRequestId;
+        var requestId = selectionRequest.Begin();
         var previous = SelectedLineJsonViewModel;
         SelectedLineJsonViewModel = null;
         if (previous is not null)
@@ -332,7 +302,7 @@ public sealed class NdJsonViewModel : ObservableObject, IDocumentViewModel
             return;
         }
 
-        if (requestId != selectionRequestId)
+        if (!selectionRequest.IsCurrent(requestId))
         {
             jsonViewModel.Dispose();
             return;
@@ -362,25 +332,16 @@ public sealed class NdJsonViewModel : ObservableObject, IDocumentViewModel
         SelectedLineJsonViewModel = jsonViewModel;
     }
 
-    public void Dispose()
+    /// <summary>The nested per-line JsonViewModel and its settings-handler subscriptions - run
+    /// between rows disposal and the session join, same slot MemoryMappedCollectionBase's
+    /// subclasses use for their own teardown.</summary>
+    protected override void DisposeCore()
     {
-        // Idempotent - see IDocumentViewModel's lifetime contract.
-        if (disposed)
-            return;
-        disposed = true;
-
-        // Cancel first so the background line-offset scan stops promptly; the collections
-        // and the nested per-line view model must be disposed before session.Dispose joins
-        // the scan and releases the mapping.
-        this.session?.Cancel();
-
-        lines?.Dispose();
         if (selectedLineJsonViewModel is not null)
         {
             selectedLineJsonViewModel.HintSettings.PropertyChanged -= OnChildHintSettingsPropertyChanged;
             selectedLineJsonViewModel.SchemaSettings.PropertyChanged -= OnChildSchemaSettingsPropertyChanged;
         }
         selectedLineJsonViewModel?.Dispose();
-        this.session?.Dispose();
     }
 }

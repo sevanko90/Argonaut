@@ -18,7 +18,7 @@ public partial class App : Application
     // macOS re-signals each CLI-launched path as its own IActivatableLifetime.Activated /
     // FileActivatedEventArgs on top of argv - one event per path, fired moments after this
     // process starts. Left unfiltered, those duplicate events race the argv-driven open in
-    // MainWindowViewModel (both sides bump openRequestId / currentFilePath concurrently) and
+    // MainWindowViewModel (both sides bump openRequest / currentFilePath concurrently) and
     // the window never finishes coming up. Paths handled from desktop.Args are recorded here
     // and each is consumed (removed) the first time a matching Activated event arrives, so
     // only genuine later "Open With" activations reach OpenInitialFileAsync.

@@ -32,7 +32,4 @@ public interface IFileIndexer
 
     /// <summary>Records published so far (may grow until <see cref="IsComplete"/> is true).</summary>
     int ItemCount { get; }
-
-    /// <summary>Display noun for the indexed records ("lines", "tokens") for status text.</summary>
-    string ItemNoun { get; }
 }

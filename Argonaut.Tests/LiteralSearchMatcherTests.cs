@@ -85,9 +85,9 @@ public class LiteralSearchMatcherTests
     }
 
     [Fact]
-    public void WindowOverlap_IsNeedleLengthMinusOne()
+    public void ChunkOverlap_IsNeedleLengthMinusOne()
     {
-        Assert.Equal(4, new LiteralSearchMatcher("hello").WindowOverlap);
-        Assert.Equal(0, new LiteralSearchMatcher("h").WindowOverlap);
+        Assert.Equal(4, new LiteralSearchMatcher("hello").ChunkOverlap);
+        Assert.Equal(0, new LiteralSearchMatcher("h").ChunkOverlap);
     }
 }

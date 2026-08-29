@@ -40,7 +40,6 @@ public class FileIndexerInterfaceTests
             Assert.True(indexer.IsComplete);
             Assert.Equal(index.LineCount, indexer.ItemCount);
             Assert.Equal(3, indexer.ItemCount);
-            Assert.Equal("lines", indexer.ItemNoun);
             Assert.Same(index.IndexingTask, indexer.IndexingTask);
         });
     }
@@ -56,7 +55,6 @@ public class FileIndexerInterfaceTests
 
             Assert.True(indexer.IsComplete);
             Assert.Equal(index.TokenCount, indexer.ItemCount);
-            Assert.Equal("tokens", indexer.ItemNoun);
             Assert.Same(index.IndexingTask, indexer.IndexingTask);
         });
     }
@@ -73,7 +71,6 @@ public class FileIndexerInterfaceTests
             Assert.True(indexer.IsComplete);
             Assert.Equal(3, index.RowCount);
             Assert.Equal(1, indexer.ItemCount); // sparse: one anchor covers the first 64 rows
-            Assert.Equal("anchors", indexer.ItemNoun);
             Assert.Same(index.IndexingTask, indexer.IndexingTask);
         });
     }

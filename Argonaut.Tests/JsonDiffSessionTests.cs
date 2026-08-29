@@ -189,6 +189,36 @@ public class JsonDiffSessionTests
         }
     }
 
+    /// <summary>
+    /// RequestStop() cancels both sides (and the diff), is idempotent, and is a no-op once
+    /// Dispose has already run - the same contract
+    /// IndexedFileSession.RequestStop and RawIndexSession.RequestStop already state.
+    /// </summary>
+    [Fact]
+    public void RequestStop_StopsBothSides_IsIdempotent_AndNoOpAfterDispose()
+    {
+        string leftPath = WriteLargeTempJson();
+        string rightPath = WriteLargeTempJson();
+        try
+        {
+            var session = JsonDiffSession.Start(leftPath, rightPath);
+
+            session.RequestStop();
+            session.RequestStop(); // idempotent before Dispose
+
+            Assert.True(session.Left.TearingDown.IsCancellationRequested);
+            Assert.True(session.Right.TearingDown.IsCancellationRequested);
+
+            session.Dispose();
+            session.RequestStop(); // no-op after Dispose - must not throw
+        }
+        finally
+        {
+            File.Delete(leftPath);
+            File.Delete(rightPath);
+        }
+    }
+
     [Fact]
     public void DoubleDispose_IsANoOp()
     {

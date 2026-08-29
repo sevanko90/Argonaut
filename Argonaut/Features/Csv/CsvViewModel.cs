@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Features.NdJson;
 using Argonaut.Features.Search;
@@ -8,7 +9,7 @@ using Argonaut.Shell;
 
 namespace Argonaut.Features.Csv;
 
-public sealed class CsvViewModel : ObservableObject, IDocumentViewModel
+public sealed class CsvViewModel : IndexedDocumentViewModel
 {
     private const int InitialIndexedRowTarget = 250;
 
@@ -20,42 +21,30 @@ public sealed class CsvViewModel : ObservableObject, IDocumentViewModel
     private bool isHeaderRow = true;
     private IReadOnlyList<CsvCell> headerCells = [];
     private string? highlightTerm;
-    private string statusText = string.Empty;
     private int? selectedRowIndex;
     private int? selectedColumnIndex;
-    private IndexFailure? indexFailure;
-    private bool disposed;
 
-    public string FilePath { get; private set; } = string.Empty;
+    protected override IDocumentSession? Session => this.session;
+
+    protected override IDisposable? MappedRows => this.rows;
 
     internal FileOffsetIndex? Index => this.session?.Index;
 
     internal MMapFile? Mmap => this.session?.File;
 
-    internal byte Delimiter => this.delimiter;
+    /// <summary>Fires when this document begins tearing down, for
+    /// <see cref="ISearchNavigator.DocumentTearingDown"/> - a find reveal links it so it stops
+    /// rather than touching a released mapping.</summary>
+    internal CancellationToken TearingDown => this.session?.TearingDown ?? default;
 
-    public Task IndexingTask => this.session?.IndexingTask ?? Task.CompletedTask;
+    internal byte Delimiter => this.delimiter;
 
     public int RowCount => this.rows?.Count ?? 0;
 
-    /// <summary>Status-bar line for this document (see <see cref="IDocumentViewModel"/>).</summary>
-    public string StatusText
-    {
-        get => this.statusText;
-        private set => SetField(ref this.statusText, value);
-    }
-
     public CsvRowCollection Rows => this.rows ?? throw new InvalidOperationException("LoadAsync must complete before Rows is accessed.");
 
-    /// <summary>See <see cref="IDocumentViewModel.IndexFailure"/>.</summary>
-    public IndexFailure? IndexFailure
-    {
-        get => this.indexFailure;
-        private set => SetField(ref this.indexFailure, value);
-    }
-
     /// <summary>CSV has no header-region toolbar (no date hints, no tree to expand).</summary>
-    public object? Toolbar => null;
+    public override object? Toolbar => null;
 
     public CsvColumnLayout ColumnLayout => this.columnLayout ?? throw new InvalidOperationException("LoadAsync must complete before ColumnLayout is accessed.");
 
@@ -156,47 +145,32 @@ public sealed class CsvViewModel : ObservableObject, IDocumentViewModel
         OnPropertyChanged(nameof(RowCount));
 
         StatusText = $"{path} — {RowCount:N0} rows indexed so far";
-        _ = MonitorIndexingAsync(session);
+        MonitorIndexing();
     }
 
-    public ISearchNavigator CreateSearchNavigator() => new CsvSearchNavigator(this);
+    public override ISearchNavigator? CreateSearchNavigator() => new CsvSearchNavigator(this);
 
     /// <summary>
     /// Returns true if the VM can process the specified file type
     /// </summary>
     /// <param name="fileType">Type of file to query</param>
     /// <returns>True if the view model can process the specified file type</returns>
-    public bool CanHandleFileType(FileTypeDetector.FileKind fileType)
+    public override bool CanHandleFileType(FileTypeDetector.FileKind fileType)
     {
         return fileType == FileTypeDetector.FileKind.Csv || fileType == FileTypeDetector.FileKind.Tsv;
     }
 
-    /// <summary>
-    /// Refreshes <see cref="StatusText"/> when background indexing finishes or fails.
-    /// Fire-and-forget from LoadAsync (UI thread); the await resumes there per the app's
-    /// threading convention. The disposed check covers cancellation-by-dispose: a
-    /// superseded or closed document must not repaint its status as a failure.
-    /// </summary>
-    private async Task MonitorIndexingAsync(IndexedFileSession<FileOffsetIndex> session)
-    {
-        try
-        {
-            await session.IndexingTask;
-        }
-        catch
-        {
-            if (!this.disposed)
-            {
-                IndexFailure = session.Index.Failure;
-                StatusText = session.Index.Failure is { } failure
-                    ? $"{FilePath} — indexing stopped — {failure.ItemsIndexed:N0} rows shown"
-                    : $"{FilePath} — indexing failed";
-            }
-            return;
-        }
+    /// <summary>Indexing finished: reports <see cref="RowCount"/> under its real total.</summary>
+    protected override void OnIndexingCompleted()
+        => StatusText = $"{FilePath} — {RowCount:N0} rows";
 
-        if (!this.disposed)
-            StatusText = $"{FilePath} — {RowCount:N0} rows";
+    /// <summary>Indexing stopped early (failure, or cancellation on <paramref name="failure"/> null).</summary>
+    protected override void OnIndexingFailed(IndexFailure? failure)
+    {
+        IndexFailure = failure;
+        StatusText = failure is { } f
+            ? $"{FilePath} — indexing stopped — {f.ItemsIndexed:N0} rows shown"
+            : $"{FilePath} — indexing failed";
     }
 
     private void UpdateHeaderCells()
@@ -218,19 +192,5 @@ public sealed class CsvViewModel : ObservableObject, IDocumentViewModel
                 cells[c] = new CsvCell($"Column {c + 1}", this.columnLayout.WidthFor(c));
             HeaderCells = cells;
         }
-    }
-
-    public void Dispose()
-    {
-        // Idempotent - see IDocumentViewModel's lifetime contract.
-        if (this.disposed)
-            return;
-        this.disposed = true;
-
-        // Cancel first so the background line-offset scan stops promptly; the row collection
-        // must be disposed before session.Dispose joins the scan and releases the mapping.
-        this.session?.Cancel();
-        this.rows?.Dispose();
-        this.session?.Dispose();
     }
 }

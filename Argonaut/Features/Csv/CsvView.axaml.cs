@@ -62,11 +62,29 @@ public partial class CsvView : UserControl
             RebuildColumns(vm);
 
         if (e.PropertyName is null or nameof(CsvViewModel.SelectedRowIndex))
-            Table.SelectedIndex = vm.SelectedRowIndex ?? -1;
+            RevealRow(vm.SelectedRowIndex ?? -1);
 
         bool columnChanged = e.PropertyName is null or nameof(CsvViewModel.SelectedColumnIndex);
         if (columnChanged && vm.SelectedColumnIndex is int columnIndex)
             ScrollColumnIntoView(columnIndex);
+    }
+
+    /// <summary>
+    /// Selects the revealed row and scrolls it into view.
+    ///
+    /// The scroll is explicit because AutoScrollToSelectedItem only reacts to the selection
+    /// LANDING somewhere new: a file with a single match sends every next/prev press to the same
+    /// index, and re-assigning it moves nothing - nor does clearing to -1 first, with or without
+    /// a dispatcher turn in between (all three measured). JsonDiffView deliberately does not
+    /// call ScrollIntoView, but that is about its own expanded merged list; over a TableView this
+    /// costs nothing measurable - 13 realized rows and 41ms to reveal index 4,000,000 of five
+    /// million, because the panel estimates its way there instead of walking.
+    /// </summary>
+    private void RevealRow(int index)
+    {
+        Table.SelectedIndex = index;
+        if (index >= 0)
+            Table.ScrollIntoView(index);
     }
 
     private void RebuildColumns(CsvViewModel vm)

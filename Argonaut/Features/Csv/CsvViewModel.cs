@@ -79,28 +79,30 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
     /// <summary>Virtual row index within <see cref="Rows"/> that a search reveal wants
     /// scrolled/selected into view; null if the current reveal target has no data row (e.g. a
     /// match landed on the header line while <see cref="IsHeaderRow"/> is true).</summary>
-    public int? SelectedRowIndex
-    {
-        get => this.selectedRowIndex;
-        private set => SetField(ref this.selectedRowIndex, value);
-    }
+    public int? SelectedRowIndex => this.selectedRowIndex;
 
     /// <summary>Column index a search reveal wants scrolled into view horizontally - set even
-    /// when <see cref="SelectedRowIndex"/> is null, since the sticky header can still be
-    /// scrolled out of view sideways.</summary>
-    public int? SelectedColumnIndex
-    {
-        get => this.selectedColumnIndex;
-        private set => SetField(ref this.selectedColumnIndex, value);
-    }
+    /// when <see cref="SelectedRowIndex"/> is null, since the header can still be scrolled out
+    /// of view sideways.</summary>
+    public int? SelectedColumnIndex => this.selectedColumnIndex;
 
-    /// <summary>Used by CsvSearchNavigator to reveal a search match - the view reacts to the
-    /// resulting property changes by selecting/scrolling, mirroring JsonViewModel.SelectToken's
-    /// verb-method shape for selection state.</summary>
+    /// <summary>
+    /// Used by CsvSearchNavigator to reveal a search match - the view reacts to the resulting
+    /// property changes by selecting/scrolling, mirroring JsonViewModel.SelectToken's verb-method
+    /// shape for selection state.
+    ///
+    /// Notifies unconditionally rather than through SetField, because a reveal is an ACTION and
+    /// not a state change: with a single match in the file (or one line holding all of them),
+    /// next/prev asks for the row that is already selected, and after the user has scrolled away
+    /// that still has to scroll back. Gating on inequality made those presses do nothing at all.
+    /// </summary>
     public void SelectRow(int? rowIndex, int? columnIndex)
     {
-        SelectedRowIndex = rowIndex;
-        SelectedColumnIndex = columnIndex;
+        this.selectedRowIndex = rowIndex;
+        this.selectedColumnIndex = columnIndex;
+
+        OnPropertyChanged(nameof(SelectedRowIndex));
+        OnPropertyChanged(nameof(SelectedColumnIndex));
     }
 
     public async Task LoadAsync(string path, byte delimiter, IProgressReporter? progressReporter = null)

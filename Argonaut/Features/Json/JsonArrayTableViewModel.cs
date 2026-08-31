@@ -37,6 +37,7 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
     private const int InitialElementTarget = 250;
 
     private JsonArrayTableSession? session;
+    private JsonRowFactory? cellText;
     private JsonArrayRowCollection? rows;
     private JsonArrayTableToolbarViewModel? toolbar;
     private CsvStructure? structure;
@@ -97,6 +98,10 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
 
         if (session.Failure is { } failure)
             IndexFailure = failure;
+
+        // The same builder the row collection renders cells with, so column widths are measured
+        // from the text that will actually be shown.
+        this.cellText = new JsonRowFactory(session.Inner.Index, session.Inner.File, hintProviders: null);
 
         this.structure = BuildByPropertyStructure(session, out bool elementsAreObjects);
         this.rows = new JsonArrayRowCollection(session.Elements, session.Inner.Index, session.Inner.File, this.structure, this.mode);
@@ -192,7 +197,7 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
 
             if (element.Kind != JsonTokenKind.StartObject)
             {
-                valueChars = Math.Max(valueChars, element.Length);
+                valueChars = Math.Max(valueChars, RenderedLength(token, element));
                 continue;
             }
 
@@ -211,7 +216,7 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
                         maxChars.Add(name.Length);
                     }
 
-                    maxChars[column] = Math.Max(maxChars[column], info.Length);
+                    maxChars[column] = Math.Max(maxChars[column], RenderedLength(child, info));
                 }
 
                 child = IsContainer(info.Kind) ? info.EndIndex + 1 : child + 1;
@@ -253,11 +258,24 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
         {
             int token = current.Elements.TokenForElement(e);
             int column = e % columns;
-            maxChars[column] = Math.Max(maxChars[column], index.GetToken(token).Length);
+            maxChars[column] = Math.Max(maxChars[column], RenderedLength(token, index.GetToken(token)));
         }
 
         return CsvStructure.FromMaxChars(names, maxChars);
     }
+
+    /// <summary>
+    /// Characters the cell for this token will actually render. A scalar's raw token length is
+    /// that already (quotes included, which the cell shows), but a container's is the brace
+    /// alone - one character - while the cell shows a summary like <c>{ 6 members }</c>. Widthing
+    /// a column of nested objects from the brace is what left every container column at the
+    /// minimum width, trimmed to "{ 6 mem...", so containers are measured from the summary
+    /// itself. It is built here, for a bounded sample, and thrown away.
+    /// </summary>
+    private int RenderedLength(int tokenIndex, JsonTokenInfo token)
+        => IsContainer(token.Kind) && this.cellText is { } factory
+            ? factory.BuildContainerSummary(tokenIndex, token, expanded: false).Length
+            : token.Length;
 
     private static bool IsContainer(JsonTokenKind kind) => kind is JsonTokenKind.StartObject or JsonTokenKind.StartArray;
 

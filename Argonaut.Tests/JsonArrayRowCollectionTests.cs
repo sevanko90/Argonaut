@@ -143,8 +143,8 @@ public class JsonArrayRowCollectionTests
         => WithRows("[1,2]", CsvStructure.FromMaxChars(["Column 1", "Column 2"], [40, 8]), JsonArrayColumnMode.Reshape, rows =>
         {
             var cells = ((CsvVisibleRow)rows[0]!).Cells;
-            Assert.Equal(296, cells[0].Width); // 40*7 + 16
-            Assert.Equal(72, cells[1].Width);  // 8*7 + 16
+            Assert.Equal(CsvStructure.WidthForChars(40), cells[0].Width);
+            Assert.Equal(CsvStructure.WidthForChars(8), cells[1].Width);
         });
 
     [Fact]

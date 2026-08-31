@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Argonaut.Infrastructure;
 
 namespace Argonaut.Features.Csv;
 
@@ -22,9 +23,11 @@ public readonly record struct CsvColumn(string Name, double Width);
 /// currency is cheapest for its own data (a CsvFieldSpan's byte length; a JsonTokenInfo's) and
 /// nothing in here ever sees text.
 ///
-/// Widths are a character-count heuristic, not a text measurement, per CLAUDE.md's
-/// low-allocation guidance: content that doesn't fit is handled by the view with ellipsis + a
-/// tooltip, not by resizing. They come from a sample of the rows available at first paint and
+/// Widths are a character COUNT rather than a text measurement, per CLAUDE.md's low-allocation
+/// guidance - laying out every value of a multi-gigabyte file to size a column is exactly what
+/// this app cannot do. The count becomes pixels through <see cref="CellTextMetrics"/>, whose two
+/// terms are themselves measured; content that still doesn't fit is handled by the view with
+/// ellipsis + a tooltip, not by resizing. They come from a sample of the rows available at first paint and
 /// are then fixed for this structure's lifetime - a *new* structure replaces it when the grid's
 /// shape changes (see CsvRowCollection.SetStructure).
 ///
@@ -34,10 +37,15 @@ public readonly record struct CsvColumn(string Name, double Width);
 /// </summary>
 public sealed class CsvStructure
 {
-    private const double CharWidthPx = 7.0;
-    private const double CellPadding = 16.0;
-    private const double MinColumnWidth = 60.0;
-    private const double MaxColumnWidth = 320.0;
+    /// <summary>Narrowest a discovered column opens, in characters - enough that a column of
+    /// short values still reads as a column. A width the user chose - by dragging, or by
+    /// double-clicking a resizer to fit the column to its content - is theirs, and is not
+    /// second-guessed against this.</summary>
+    private const int MinColumnChars = 6;
+
+    /// <summary>Widest a column opens from discovery, in characters. Past this the value is
+    /// long enough that the tooltip, not the column, is how it gets read.</summary>
+    private const int MaxDiscoveredChars = 40;
 
     private readonly CsvColumn[] columns;
 
@@ -59,6 +67,16 @@ public sealed class CsvStructure
     /// about a column's width.</summary>
     public IReadOnlyList<CsvCell> HeaderCells { get; }
 
+    /// <summary>The narrowest a discovered column opens, in pixels.</summary>
+    public static double MinColumnWidth => WidthForChars(MinColumnChars);
+
+    /// <summary>
+    /// Pixel width for a character count, with no discovery ceiling applied - what discovery and
+    /// a fit-to-content double-click both go through, so the two can never disagree. Both terms
+    /// of the conversion are measured; see <see cref="CellTextMetrics"/>.
+    /// </summary>
+    public static double WidthForChars(int chars) => CellTextMetrics.Current.WidthForChars(chars);
+
     /// <summary>Width for a column index, including ones beyond <see cref="ColumnCount"/> (a
     /// row with more fields than the header) - those fall back to the minimum column
     /// width.</summary>
@@ -72,9 +90,10 @@ public sealed class CsvStructure
     /// Callers are expected to seed each count with the name's own length where the header
     /// must always fit.
     ///
-    /// The formula saturates - the clamp hits its maximum at or past ~44 characters and its
-    /// minimum at or below ~6 - which is why an over-counting measure (UTF-8 bytes rather than
-    /// characters, a CSV field's length including its quotes) is harmless here.
+    /// The count saturates - it is clamped into
+    /// <see cref="MinColumnChars"/>..<see cref="MaxDiscoveredChars"/> - which is why an
+    /// over-counting measure (UTF-8 bytes rather than characters, a CSV field's length including
+    /// its quotes) is harmless here.
     /// </summary>
     public static CsvStructure FromMaxChars(IReadOnlyList<string> names, ReadOnlySpan<int> maxChars)
     {
@@ -85,7 +104,7 @@ public sealed class CsvStructure
         for (int c = 0; c < columns.Length; c++)
         {
             int chars = c < maxChars.Length ? maxChars[c] : names[c].Length;
-            double width = Math.Clamp(chars * CharWidthPx + CellPadding, MinColumnWidth, MaxColumnWidth);
+            double width = WidthForChars(Math.Clamp(chars, MinColumnChars, MaxDiscoveredChars));
 
             columns[c] = new CsvColumn(names[c], width);
             headerCells[c] = new CsvCell(names[c], width);

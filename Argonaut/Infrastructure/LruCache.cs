@@ -24,6 +24,20 @@ public sealed class LruCache<TKey, TValue> where TKey : notnull
 
     public int Count => map.Count;
 
+    /// <summary>
+    /// The values currently held, most-recently-used first. Iterating does NOT touch the
+    /// entries' recency - this is for asking what has already been realized (the widest text a
+    /// column has shown, say), not for reading values back out.
+    /// </summary>
+    public IEnumerable<TValue> Values
+    {
+        get
+        {
+            foreach (var entry in order)
+                yield return entry.Value;
+        }
+    }
+
     public bool TryGetValue(TKey key, out TValue value)
     {
         if (!map.TryGetValue(key, out var node))

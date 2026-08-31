@@ -1,4 +1,5 @@
 using System.Text;
+using Argonaut.Features.Csv;
 using Argonaut.Features.Json;
 using Argonaut.Infrastructure;
 
@@ -6,9 +7,10 @@ namespace Argonaut.Tests;
 
 /// <summary>
 /// Verifies the array-table document: column discovery from the sampled elements, widths taken
-/// from the child VALUE tokens rather than the element's own (which for an object is one byte -
-/// the brace), the column-mode picker re-shaping without re-walking (and being offered at all
-/// only for an array of scalars), and the status/failure reporting the base class drives.
+/// from the text a cell will render - the child VALUE tokens rather than the element's own
+/// (which for an object is one byte, the brace), and a container's summary rather than its
+/// brace - the column-mode picker re-shaping without re-walking (and being offered at all only
+/// for an array of scalars), and the status/failure reporting the base class drives.
 /// </summary>
 public class JsonArrayTableViewModelTests
 {
@@ -70,8 +72,22 @@ public class JsonArrayTableViewModelTests
             double idWidth = document.Structure.Columns[0].Width;
             double descriptionWidth = document.Structure.Columns[1].Width;
 
-            Assert.Equal(60, idWidth); // "id" (2) and the value (1) both clamp to the minimum
+            Assert.Equal(CsvStructure.MinColumnWidth, idWidth); // "id" (2) and the value (1) both clamp to the minimum
             Assert.True(descriptionWidth > idWidth);
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task ColumnsOfNestedContainers_AreWidthedFromTheSummaryTheCellShows()
+        => WithDocument("""[{"geometry":{"type":"Point","coordinates":[1,2]}}]""", document =>
+        {
+            // A StartObject token's own Length is 1, but the cell renders "{ 2 members }" - the
+            // geojson case, where every container column came out at the minimum width and was
+            // trimmed to "{ 2 me...". The width must fit the summary text instead.
+            double width = document.Structure.Columns[0].Width;
+
+            Assert.Equal(CsvStructure.WidthForChars("{ 2 members }".Length), width);
+            Assert.True(width > CsvStructure.MinColumnWidth);
             return Task.CompletedTask;
         });
 
@@ -79,7 +95,7 @@ public class JsonArrayTableViewModelTests
     public Task ColumnWidthIsSeededByItsOwnHeaderSoTheLabelAlwaysFits()
         => WithDocument("""[{"a-long-column-header":1}]""", document =>
         {
-            Assert.Equal(156, document.Structure.Columns[0].Width); // 20*7 + 16
+            Assert.Equal(CsvStructure.WidthForChars("a-long-column-header".Length), document.Structure.Columns[0].Width);
             return Task.CompletedTask;
         });
 

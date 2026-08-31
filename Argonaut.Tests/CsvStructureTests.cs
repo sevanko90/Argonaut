@@ -4,8 +4,12 @@ namespace Argonaut.Tests;
 
 /// <summary>
 /// Verifies the CsvStructure width heuristic: driven by the per-column maximum character count
-/// its caller measured, clamped to [60, 320], with the WidthFor fallback for out-of-range
+/// its caller measured, clamped to 6..40 characters, with the WidthFor fallback for out-of-range
 /// columns - plus the header cells and the relabelling that carries widths over untouched.
+///
+/// Expectations are written in CHARACTERS, through CsvStructure.WidthForChars, because the
+/// characters-to-pixels conversion is measured from the running font (CellTextMetrics) and is
+/// deliberately not a number this test gets to know.
 /// </summary>
 public class CsvStructureTests
 {
@@ -17,7 +21,7 @@ public class CsvStructureTests
     {
         var structure = Build(["abc"], 3);
 
-        Assert.Equal(60, structure.Columns[0].Width);
+        Assert.Equal(CsvStructure.WidthForChars(6), structure.Columns[0].Width);
     }
 
     [Fact]
@@ -25,16 +29,16 @@ public class CsvStructureTests
     {
         var structure = Build([new string('x', 100)], 100);
 
-        Assert.Equal(320, structure.Columns[0].Width);
+        Assert.Equal(CsvStructure.WidthForChars(40), structure.Columns[0].Width);
     }
 
     [Fact]
     public void CountBetweenTheClampsDrivesWidth()
     {
-        // 19 chars: 19*7 + 16 = 149, within [60, 320].
+        // 19 characters, inside the 6..40 clamp, so the count is used as measured.
         var structure = Build(["id"], 19);
 
-        Assert.Equal(149, structure.Columns[0].Width);
+        Assert.Equal(CsvStructure.WidthForChars(19), structure.Columns[0].Width);
     }
 
     [Fact]
@@ -42,7 +46,7 @@ public class CsvStructureTests
     {
         var structure = Build(["a", "much-longer-header"], 1, 18);
 
-        Assert.Equal(60, structure.Columns[0].Width);
+        Assert.Equal(CsvStructure.WidthForChars(6), structure.Columns[0].Width);
         Assert.True(structure.Columns[1].Width > structure.Columns[0].Width);
     }
 
@@ -52,7 +56,7 @@ public class CsvStructureTests
         // The counts span is shorter than the names list - column 1 was never measured.
         var structure = Build(["a", "a-long-column-header"], 1);
 
-        Assert.Equal(156, structure.Columns[1].Width); // 20*7 + 16
+        Assert.Equal(CsvStructure.WidthForChars("a-long-column-header".Length), structure.Columns[1].Width);
     }
 
     [Fact]
@@ -86,7 +90,7 @@ public class CsvStructureTests
     {
         var structure = Build(["a"], 1);
 
-        Assert.Equal(60, structure.WidthFor(5));
+        Assert.Equal(CsvStructure.MinColumnWidth, structure.WidthFor(5));
     }
 
     [Fact]
@@ -94,7 +98,7 @@ public class CsvStructureTests
     {
         var structure = Build(["a"], 1);
 
-        Assert.Equal(60, structure.WidthFor(-1));
+        Assert.Equal(CsvStructure.MinColumnWidth, structure.WidthFor(-1));
     }
 
     [Fact]

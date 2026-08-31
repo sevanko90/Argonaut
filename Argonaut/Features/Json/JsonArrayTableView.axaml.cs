@@ -1,60 +1,85 @@
 using System;
-using System.Linq;
-using Avalonia;
+using System.ComponentModel;
+using Argonaut.Features.Csv;
 using Avalonia.Controls;
-using Avalonia.VisualTree;
 
 namespace Argonaut.Features.Json;
 
 /// <summary>
-/// The array-table grid. Same two jobs CsvView's code-behind has: find the ListBox's own
-/// internal ScrollViewer once the visual tree exists and mirror its horizontal offset onto the
-/// sticky header, and dispose the document on detach as the idempotent safety net the shell
-/// doesn't drive (window close).
+/// The array-table grid. Two jobs: keep the TableView's columns in step with the view model's
+/// <see cref="JsonArrayTableViewModel.Structure"/> (which a re-shape from the toolbar replaces),
+/// and dispose the document on detach as the idempotent safety net the shell doesn't drive
+/// (window close).
+///
+/// The sticky header, its horizontal-scroll tracking and the column resizer all belong to
+/// TableView now; what used to be mirrored by hand here is gone.
 ///
 /// No column scroll-into-view counterpart, because that exists for search reveals and this
 /// document has no search navigator in v1.
 /// </summary>
 public partial class JsonArrayTableView : UserControl
 {
-    private ScrollViewer? bodyScrollViewer;
+    private readonly TableGridColumns columns;
+    private JsonArrayTableViewModel? subscribedViewModel;
 
     public JsonArrayTableView()
     {
         InitializeComponent();
 
-        Loaded += OnLoaded;
+        this.columns = new TableGridColumns(Table);
+        DataContextChanged += OnDataContextChanged;
         DetachedFromVisualTree += OnDetachedFromVisualTree;
     }
 
-    private void OnLoaded(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    private void OnDataContextChanged(object? sender, EventArgs e)
     {
-        if (bodyScrollViewer is not null)
+        if (this.subscribedViewModel is not null)
+            this.subscribedViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+
+        this.subscribedViewModel = DataContext as JsonArrayTableViewModel;
+        if (this.subscribedViewModel is null)
             return;
 
-        bodyScrollViewer = RowsListBox.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
-        if (bodyScrollViewer is not null)
-            bodyScrollViewer.ScrollChanged += OnBodyScrollChanged;
+        this.subscribedViewModel.PropertyChanged += OnViewModelPropertyChanged;
+        RebuildColumns(this.subscribedViewModel);
     }
 
-    private void OnBodyScrollChanged(object? sender, ScrollChangedEventArgs e)
+    /// <summary>
+    /// The view model publishes a whole new <see cref="CsvStructure"/> on load and on every
+    /// re-shape, so the columns are rebuilt from it rather than patched - the same "a new
+    /// structure replaces the old one" contract the row collection follows.
+    /// </summary>
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (bodyScrollViewer is null)
+        if (sender is JsonArrayTableViewModel vm && e.PropertyName is null or nameof(JsonArrayTableViewModel.Structure))
+            RebuildColumns(vm);
+    }
+
+    private void RebuildColumns(JsonArrayTableViewModel vm)
+    {
+        // Structure throws until LoadAsync has published one; the first PropertyChanged for it
+        // is what says the grid has a shape at all.
+        if (vm.HeaderCells.Count == 0)
             return;
 
-        HeaderScrollViewer.Offset = new Vector(bodyScrollViewer.Offset.X, 0);
+        // The row collection is the fit source: a double-click on a resizer measures the rows it
+        // has already realized.
+        this.columns.Rebuild(vm.Structure, vm.Rows);
     }
 
-    private void OnDetachedFromVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
+    private void OnDetachedFromVisualTree(object? sender, Avalonia.VisualTreeAttachmentEventArgs e)
     {
-        Loaded -= OnLoaded;
+        DataContextChanged -= OnDataContextChanged;
         DetachedFromVisualTree -= OnDetachedFromVisualTree;
 
-        if (bodyScrollViewer is not null)
+        if (this.subscribedViewModel is not null)
         {
-            bodyScrollViewer.ScrollChanged -= OnBodyScrollChanged;
-            bodyScrollViewer = null;
+            this.subscribedViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+            this.subscribedViewModel = null;
         }
+
+        // Columns first: their cell bindings are the last things reading the row collection.
+        this.columns.Dispose();
 
         // Disposed synchronously here (before the content swap's trailing ItemsSource walk):
         // JsonArrayRowCollection reports empty once disposed, so that walk reads nothing.

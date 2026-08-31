@@ -144,8 +144,38 @@ chain changes.
   subscriber — the same view-to-shell decoupling as `RawJumpService`) and published like a diff:
   directly, with `FileKind.Unknown`, never via `DocumentViewCatalog`. It reuses CSV's
   presentation types (`CsvStructure`, `CsvCell`, `CsvVisibleRow`) plus its own
-  `JsonArrayRowCollection`; `CsvView`'s markup and code-behind are copied rather than shared,
-  because those bindings are compiled against `CsvViewModel`. Columns come from the sampled
+  `JsonArrayRowCollection`, but is rendered by Avalonia 12.1's `TableView` rather than by a copy
+  of `CsvView`'s hand-rolled grid: `TableView` derives from `ListBox`, so the lazily-realized row
+  collection virtualizes exactly as before (`TableGridVirtualizationTests`), and it brings the
+  sticky header, its horizontal-scroll tracking and a column resizer that were hand-built in
+  `CsvView`. Columns are data, not markup, so `TableGridColumns` builds them in code-behind from
+  the view model's `CsvStructure` — one `TableViewColumn` per column, each binding its cells by
+  index (`Cells[i].Text`) — and rebuilds them whenever a re-shape publishes a new structure.
+  Drag widths are left un-policed: `TableView` has no min/max of its own and its `ActualWidth` is
+  read-only, so any bound could only be applied after the fact — the column springs back out from
+  under the pointer, which reads worse than the width it was preventing. What `TableGridColumns`
+  does add is fit-to-content: double-clicking a resizer widths the column to the longest text its
+  already-realized rows hold (`IColumnFitSource`, implemented by `JsonArrayRowCollection` over its
+  LRU cache — never a file scan, since the true widest value in a multi-GB array is a full walk
+  away). That width write must be deferred through `UiDeferral`: writing `TableViewColumn.Width`
+  inline, from inside the pointer event the resizer is still handling, throws `Cannot call Measure
+  using a size with NaN values` out of the layout pass.
+  Seed widths come from the text a cell will actually render, not the raw token: a container's own
+  token is one byte (the brace) while its cell shows `{ 6 members }`, which is why every nested
+  column used to open at the minimum width. Turning that count into pixels is
+  `CellTextMetrics`, and both its terms are measured rather than chosen: the per-character advance
+  from the resolved content typeface at the resolved size (`FormattedText` over a sample — it is a
+  property of whichever face the platform picked out of `AppContentFontFamily`, not a number this
+  code gets to pick), and the cell inset from the first realized cell's padding, which is the only
+  place it is knowable (the cell theme's padding is a dynamic resource, and an unattached cell
+  never applies its theme). `TableGridColumns` reports that inset after the first layout following
+  a rebuild and re-applies the widths it seeded without it. Hard-coding either term caused the same
+  trimmed-text bug twice, so a cell template must not spend width the metrics do not know about — a
+  horizontal margin on the cell's TextBlock trims text the column was widthed to fit.
+  `CellTextMetrics.Current` is a settable seam (like `AppDataPaths.RootOverride`) for tests with no
+  Avalonia platform, where the fallback is one em per character: no face exceeds its em, so the
+  estimate errs wide rather than trimming. `CsvView` has not moved yet, and still uses the hand-rolled grid with its bindings
+  compiled against `CsvViewModel`. Columns come from the sampled
   elements: property names for an array of objects, a single `value` column otherwise — and the
   toolbar's reshape-into-N-columns picker is offered *only* in the second case, since an object
   array is already columned by its own data. Back reloads the origin file as

@@ -40,7 +40,7 @@ public enum JsonArrayColumnMode
 /// It invents no columns: <see cref="CsvStructure"/> arrives finished, from whoever discovered
 /// the property names or chose the reshape width.
 /// </summary>
-public sealed class JsonArrayRowCollection : MemoryMappedCollectionBase
+public sealed class JsonArrayRowCollection : MemoryMappedCollectionBase, IColumnFitSource
 {
     private const int CacheCapacity = 1000;
 
@@ -123,6 +123,27 @@ public sealed class JsonArrayRowCollection : MemoryMappedCollectionBase
         cache.Clear();
         notifiedCount = GetCount();
         RaiseCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
+    }
+
+    /// <summary>
+    /// The widest text this column has in the realized-row cache - what a fit-to-content
+    /// double-click on its resizer measures. Deliberately bounded to what has already been
+    /// decoded: the true widest value in a multi-gigabyte array is a full scan away, and the
+    /// cache is a free sample of exactly the rows the user has been looking at.
+    /// </summary>
+    public int LongestRealizedText(int columnIndex)
+    {
+        if (columnIndex < 0)
+            return 0;
+
+        int longest = 0;
+        foreach (var row in cache.Values)
+        {
+            if (columnIndex < row.Cells.Count)
+                longest = Math.Max(longest, row.Cells[columnIndex].Text.Length);
+        }
+
+        return longest;
     }
 
     private CsvVisibleRow GetRow(int i)

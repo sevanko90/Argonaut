@@ -77,7 +77,7 @@ public class CsvRowCollectionTests
         WithRows(Content, dataStartIndex: 1, rows =>
         {
             var row = (CsvVisibleRow)rows[0]!;
-            Assert.Equal(60, row.Cells[0].Width); // clamps to the minimum for these short values
+            Assert.Equal(CsvStructure.MinColumnWidth, row.Cells[0].Width); // clamps to the minimum for these short values
         });
     }
 
@@ -150,12 +150,12 @@ public class CsvRowCollectionTests
         WithRows(Content, dataStartIndex: 1, rows =>
         {
             var before = (CsvVisibleRow)rows[0]!;
-            Assert.Equal(60, before.Cells[0].Width);
+            Assert.Equal(CsvStructure.MinColumnWidth, before.Cells[0].Width);
 
             rows.SetStructure(CsvStructure.FromMaxChars(["id", "name"], [40, 40]));
 
             var after = (CsvVisibleRow)rows[0]!;
-            Assert.Equal(296, after.Cells[0].Width); // 40*7 + 16
+            Assert.Equal(CsvStructure.WidthForChars(40), after.Cells[0].Width);
         });
     }
 

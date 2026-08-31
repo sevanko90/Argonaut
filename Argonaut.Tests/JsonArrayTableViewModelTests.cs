@@ -100,11 +100,11 @@ public class JsonArrayTableViewModelTests
         });
 
     [Fact]
-    public Task HeaderCellsMirrorTheStructure()
+    public Task ColumnCountTracksTheStructure()
         => WithDocument("""[{"id":1,"name":"a"}]""", document =>
         {
-            Assert.Equal(["id", "name"], document.HeaderCells.Select(c => c.Text));
-            Assert.Equal(document.Structure.Columns[1].Width, document.HeaderCells[1].Width);
+            Assert.Equal(2, document.ColumnCount);
+            Assert.Equal(document.Structure.ColumnCount, document.ColumnCount);
             return Task.CompletedTask;
         });
 

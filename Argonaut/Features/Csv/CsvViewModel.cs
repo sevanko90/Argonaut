@@ -47,12 +47,9 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
 
     public CsvStructure Structure => this.structure ?? throw new InvalidOperationException("LoadAsync must complete before Structure is accessed.");
 
-    /// <summary>
-    /// The sticky header row's cells. Row 0's parsed fields when <see cref="IsHeaderRow"/> is
-    /// true; generic "Column N" labels (still widthed from the same <see cref="Structure"/>)
-    /// when false, so the grid always has a consistent frame regardless of the tickbox.
-    /// </summary>
-    public IReadOnlyList<CsvCell> HeaderCells => this.structure?.HeaderCells ?? [];
+    /// <summary>Columns discovered so far - 0 until <see cref="LoadAsync"/> has published a
+    /// <see cref="Structure"/>, which is what the view waits for before building columns.</summary>
+    public int ColumnCount => this.structure?.ColumnCount ?? 0;
 
     /// <summary>"First row is header" tickbox. Toggling it doesn't re-read the file - it just
     /// shifts which absolute line <see cref="Rows"/> treats as its first data row.</summary>
@@ -130,11 +127,11 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
             : [];
 
         this.structure = CsvStructure.FromMaxChars(ColumnNames(), MeasureColumns(session));
-        this.rows = new CsvRowCollection(session.Index, session.File, delimiter, this.structure, this.isHeaderRow ? 1 : 0);
+        this.rows = new CsvRowCollection(session.Index, session.File, delimiter, this.isHeaderRow ? 1 : 0);
 
         OnPropertyChanged(nameof(Rows));
         OnPropertyChanged(nameof(Structure));
-        OnPropertyChanged(nameof(HeaderCells));
+        OnPropertyChanged(nameof(ColumnCount));
         OnPropertyChanged(nameof(RowCount));
 
         StatusText = $"{path} — {RowCount:N0} rows indexed so far";
@@ -211,9 +208,9 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
     }
 
     /// <summary>
-    /// Relabels the columns after a tickbox toggle. Only the header changes: the widths were
-    /// measured from the data and the body renders no names, so this needs no
-    /// <see cref="CsvRowCollection.SetStructure"/> call and no rebuild of the realized rows.
+    /// Relabels the columns after a tickbox toggle. Only the labels change - the widths were
+    /// measured from the data, and the rows carry no names - so the realized rows are untouched
+    /// and the view just rebuilds its columns from the new structure.
     /// </summary>
     private void ApplyColumnNames()
     {
@@ -222,6 +219,5 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
 
         this.structure = this.structure.WithNames(ColumnNames());
         OnPropertyChanged(nameof(Structure));
-        OnPropertyChanged(nameof(HeaderCells));
     }
 }

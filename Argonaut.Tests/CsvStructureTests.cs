@@ -4,8 +4,7 @@ namespace Argonaut.Tests;
 
 /// <summary>
 /// Verifies the CsvStructure width heuristic: driven by the per-column maximum character count
-/// its caller measured, clamped to 6..40 characters, with the WidthFor fallback for out-of-range
-/// columns - plus the header cells and the relabelling that carries widths over untouched.
+/// its caller measured, clamped to 6..40 characters - plus the relabelling that carries the character counts over untouched.
 ///
 /// Expectations are written in CHARACTERS, through CsvStructure.WidthForChars, because the
 /// characters-to-pixels conversion is measured from the running font (CellTextMetrics) and is
@@ -76,32 +75,6 @@ public class CsvStructureTests
     }
 
     [Fact]
-    public void HeaderCells_CarryTheNamesAndTheirColumnWidths()
-    {
-        var structure = Build(["id", "description"], 2, 30);
-
-        Assert.Equal(2, structure.HeaderCells.Count);
-        Assert.Equal("id", structure.HeaderCells[0].Text);
-        Assert.Equal(structure.Columns[1].Width, structure.HeaderCells[1].Width);
-    }
-
-    [Fact]
-    public void WidthFor_OutOfRangeColumn_FallsBackToMinWidth()
-    {
-        var structure = Build(["a"], 1);
-
-        Assert.Equal(CsvStructure.MinColumnWidth, structure.WidthFor(5));
-    }
-
-    [Fact]
-    public void WidthFor_NegativeColumn_FallsBackToMinWidth()
-    {
-        var structure = Build(["a"], 1);
-
-        Assert.Equal(CsvStructure.MinColumnWidth, structure.WidthFor(-1));
-    }
-
-    [Fact]
     public void WithNames_KeepsWidthsAndReplacesLabels()
     {
         var structure = Build(["id", "description"], 2, 30);
@@ -109,7 +82,7 @@ public class CsvStructureTests
         var renamed = structure.WithNames(["Column 1", "Column 2"]);
 
         Assert.Equal("Column 1", renamed.Columns[0].Name);
-        Assert.Equal("Column 2", renamed.HeaderCells[1].Text);
+        Assert.Equal("Column 2", renamed.Columns[1].Name);
         Assert.Equal(structure.Columns[1].Width, renamed.Columns[1].Width);
         Assert.Equal(structure.TotalWidth, renamed.TotalWidth);
     }

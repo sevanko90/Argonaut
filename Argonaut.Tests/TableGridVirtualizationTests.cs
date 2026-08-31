@@ -5,6 +5,7 @@ using Argonaut.Infrastructure;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
+using Avalonia.Data;
 using Avalonia.Headless;
 using Avalonia.Input;
 using Avalonia.Threading;
@@ -59,7 +60,7 @@ public sealed class TableGridVirtualizationTests
                 IndexerHits++;
                 var cells = new CsvCell[this.columnCount];
                 for (int c = 0; c < cells.Length; c++)
-                    cells[c] = new CsvCell(TextAt(index, c), 120);
+                    cells[c] = new CsvCell(TextAt(index, c));
                 return new CsvVisibleRow(index + 1, cells);
             }
             set => throw new NotSupportedException();
@@ -422,6 +423,152 @@ public sealed class TableGridVirtualizationTests
                 // And the columns account for it: a column seeded for N characters gives those
                 // characters the whole width the metrics measured for them.
                 Assert.Equal(CsvStructure.WidthForChars(20), table.Columns[0].ActualWidth, 1);
+                return true;
+            }
+            finally
+            {
+                columns.Dispose();
+                window.Close();
+            }
+        }, CancellationToken.None);
+    }
+
+    [Fact]
+    public Task ContentFontChange_ReseedsUntouchedColumnsAndLeavesResizedOnesAlone()
+    {
+        var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(TableGridVirtualizationTests).Assembly);
+        return session.Dispatch(async () =>
+        {
+            // The status bar can repoint the content font while a grid is showing. Widths were
+            // measured for the outgoing face, so they have to follow it - except where the user
+            // has said what a column's width should be.
+            var rows = new CountingRows(1_000);
+            var (table, columns) = BuildTable(rows, StructureOf(3));
+            var window = new Window { Width = 1_400, Height = 600, Content = table };
+            object? originalFontSize = Application.Current!.Resources["AppContentFontSize"];
+            try
+            {
+                window.Show();
+                await PumpAsync();
+                window.UpdateLayout();
+
+                await DragResizerAsync(window, table.Columns[0], +150);
+                double resized = table.Columns[0].Width.Value;
+                double untouched = table.Columns[1].Width.Value;
+
+                Application.Current.Resources["AppContentFontSize"] = 24.0;
+                await PumpAsync();
+                window.UpdateLayout();
+
+                Assert.True(table.Columns[1].Width.Value > untouched,
+                    $"a column at its discovered width should follow the font: {untouched} -> {table.Columns[1].Width.Value}");
+                Assert.Equal(resized, table.Columns[0].Width.Value, 1);
+                return true;
+            }
+            finally
+            {
+                Application.Current.Resources["AppContentFontSize"] = originalFontSize;
+                columns.Dispose();
+                window.Close();
+            }
+        }, CancellationToken.None);
+    }
+
+    [Fact]
+    public Task HighlightTerm_LightsUpMatchesInCellsAndHeaders()
+    {
+        var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(TableGridVirtualizationTests).Assembly);
+        return session.Dispatch(async () =>
+        {
+            // The CSV grid highlights the find term wherever it shows, header included. The
+            // highlight path builds Inlines instead of plain Text, which is what this checks -
+            // the term is in "Column 1" and in every first-column cell below.
+            var rows = new CountingRows(100) { FirstColumnLength = 8 };
+            var table = new TableView { ItemsSource = rows, SelectionMode = SelectionMode.Single };
+            var columns = new TableGridColumns(table);
+            var term = new HighlightSource { Term = "w" };
+            columns.Rebuild(StructureOf(3), rows, new Binding(nameof(HighlightSource.Term)) { Source = term });
+
+            var window = new Window { Width = 900, Height = 400, Content = table };
+            try
+            {
+                window.Show();
+                await PumpAsync();
+                window.UpdateLayout();
+
+                var highlighted = window.GetVisualDescendants().OfType<TextBlock>()
+                    .Where(t => t.Inlines is { Count: > 1 })
+                    .ToList();
+
+                Assert.NotEmpty(highlighted);
+
+                term.Term = null;
+                await PumpAsync();
+                window.UpdateLayout();
+
+                Assert.Empty(window.GetVisualDescendants().OfType<TextBlock>().Where(t => t.Inlines is { Count: > 1 }));
+                return true;
+            }
+            finally
+            {
+                columns.Dispose();
+                window.Close();
+            }
+        }, CancellationToken.None);
+    }
+
+    /// <summary>Stands in for the view model a CSV grid binds its find term from.</summary>
+    private sealed class HighlightSource : System.ComponentModel.INotifyPropertyChanged
+    {
+        private string? term;
+
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+
+        public string? Term
+        {
+            get => this.term;
+            set
+            {
+                this.term = value;
+                PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(Term)));
+            }
+        }
+    }
+
+    [Fact]
+    public Task RelabellingColumns_KeepsTheWidthsTheUserSet()
+    {
+        var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(TableGridVirtualizationTests).Assembly);
+        return session.Dispatch(async () =>
+        {
+            // CSV's "first row is header" tickbox republishes the same columns under different
+            // names. That is a relabelling, not a re-shape, so a width the user dragged survives.
+            var rows = new CountingRows(1_000);
+            var (table, columns) = BuildTable(rows, StructureOf(3));
+            var window = new Window { Width = 1_400, Height = 600, Content = table };
+            try
+            {
+                window.Show();
+                await PumpAsync();
+                window.UpdateLayout();
+
+                await DragResizerAsync(window, table.Columns[0], +150);
+                double resized = table.Columns[0].Width.Value;
+
+                columns.Rebuild(StructureOf(3).WithNames(["First", "Second", "Third"]), rows);
+                await PumpAsync();
+                window.UpdateLayout();
+
+                Assert.Equal("First", table.Columns[0].Header);
+                Assert.Equal(resized, table.Columns[0].Width.Value, 1);
+
+                // A real re-shape (different column count) does start over.
+                columns.Rebuild(StructureOf(4), rows);
+                await PumpAsync();
+                window.UpdateLayout();
+
+                Assert.Equal(4, table.Columns.Count);
+                Assert.Equal(CsvStructure.WidthForChars(20), table.Columns[0].Width.Value, 1);
                 return true;
             }
             finally

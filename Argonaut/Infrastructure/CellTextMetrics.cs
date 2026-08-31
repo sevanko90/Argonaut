@@ -68,6 +68,17 @@ public sealed class CellTextMetrics
     public double WidthForChars(int chars) => chars * CharAdvance + CellInset;
 
     /// <summary>
+    /// Drops the measured advance so the next request re-measures - what the status bar's
+    /// content-font toggle needs, since a different face means a different advance. The learned
+    /// cell inset is kept: it is the theme's chrome, and the font has nothing to do with it.
+    /// </summary>
+    public static void InvalidateFont()
+    {
+        double inset = Current.CellInset;
+        current = new CellTextMetrics(MeasureFont().CharAdvance, inset);
+    }
+
+    /// <summary>
     /// Records the chrome a realized cell was measured to add. Returns true when this is news -
     /// the caller then re-applies the widths it seeded from the previous, un-measured value.
     /// </summary>

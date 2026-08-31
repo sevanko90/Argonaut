@@ -139,15 +139,6 @@ public class JsonArrayRowCollectionTests
         });
 
     [Fact]
-    public Task CellWidthsComeFromTheStructure()
-        => WithRows("[1,2]", CsvStructure.FromMaxChars(["Column 1", "Column 2"], [40, 8]), JsonArrayColumnMode.Reshape, rows =>
-        {
-            var cells = ((CsvVisibleRow)rows[0]!).Cells;
-            Assert.Equal(CsvStructure.WidthForChars(40), cells[0].Width);
-            Assert.Equal(CsvStructure.WidthForChars(8), cells[1].Width);
-        });
-
-    [Fact]
     public Task SetShape_ReChunksWithoutReWalking()
         => WithRows("[1,2,3,4,5,6]", Columns("value"), JsonArrayColumnMode.ByProperty, rows =>
         {

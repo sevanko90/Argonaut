@@ -59,7 +59,7 @@ public partial class JsonArrayTableView : UserControl
     {
         // Structure throws until LoadAsync has published one; the first PropertyChanged for it
         // is what says the grid has a shape at all.
-        if (vm.HeaderCells.Count == 0)
+        if (vm.ColumnCount == 0)
             return;
 
         // The row collection is the fit source: a double-click on a resizer measures the rows it

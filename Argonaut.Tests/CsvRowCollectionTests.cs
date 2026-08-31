@@ -16,9 +16,6 @@ public class CsvRowCollectionTests
     private const string Content = "id,name\n1,alpha\n2,beta\n3,gamma\n";
 
     private static void WithRows(string content, int dataStartIndex, Action<CsvRowCollection> assert)
-        => WithRows(content, dataStartIndex, (rows, _) => assert(rows));
-
-    private static void WithRows(string content, int dataStartIndex, Action<CsvRowCollection, CsvStructure> assert)
     {
         string path = Path.GetTempFileName();
         try
@@ -28,11 +25,8 @@ public class CsvRowCollectionTests
             var index = FileOffsetIndex.StartIndexing(file);
             index.IndexingTask.GetAwaiter().GetResult();
 
-            var header = CsvFieldReader.ReadFields(file, index.GetLineSpan(0), (byte)',');
-            var structure = CsvStructure.FromMaxChars(header, header.Select(h => h.Length).ToArray());
-
-            using var rows = new CsvRowCollection(index, file, (byte)',', structure, dataStartIndex);
-            assert(rows, structure);
+            using var rows = new CsvRowCollection(index, file, (byte)',', dataStartIndex);
+            assert(rows);
         }
         finally
         {
@@ -68,16 +62,6 @@ public class CsvRowCollectionTests
             var row = (CsvVisibleRow)rows[0]!;
             Assert.Equal("id", row.Cells[0].Text);
             Assert.Equal("name", row.Cells[1].Text);
-        });
-    }
-
-    [Fact]
-    public void CellWidths_ComeFromTheStructure()
-    {
-        WithRows(Content, dataStartIndex: 1, rows =>
-        {
-            var row = (CsvVisibleRow)rows[0]!;
-            Assert.Equal(CsvStructure.MinColumnWidth, row.Cells[0].Width); // clamps to the minimum for these short values
         });
     }
 
@@ -144,47 +128,4 @@ public class CsvRowCollectionTests
         });
     }
 
-    [Fact]
-    public void SetStructure_RewidthsAlreadyRealizedRows()
-    {
-        WithRows(Content, dataStartIndex: 1, rows =>
-        {
-            var before = (CsvVisibleRow)rows[0]!;
-            Assert.Equal(CsvStructure.MinColumnWidth, before.Cells[0].Width);
-
-            rows.SetStructure(CsvStructure.FromMaxChars(["id", "name"], [40, 40]));
-
-            var after = (CsvVisibleRow)rows[0]!;
-            Assert.Equal(CsvStructure.WidthForChars(40), after.Cells[0].Width);
-        });
-    }
-
-    [Fact]
-    public void SetStructure_RaisesResetNotification()
-    {
-        WithRows(Content, dataStartIndex: 1, rows =>
-        {
-            System.Collections.Specialized.NotifyCollectionChangedEventArgs? captured = null;
-            rows.CollectionChanged += (_, e) => captured = e;
-
-            rows.SetStructure(CsvStructure.FromMaxChars(["id", "name"], [40, 40]));
-
-            Assert.NotNull(captured);
-            Assert.Equal(System.Collections.Specialized.NotifyCollectionChangedAction.Reset, captured!.Action);
-        });
-    }
-
-    [Fact]
-    public void SetStructure_SameInstance_DoesNotRaiseNotification()
-    {
-        WithRows(Content, dataStartIndex: 1, (rows, structure) =>
-        {
-            bool raised = false;
-            rows.CollectionChanged += (_, _) => raised = true;
-
-            rows.SetStructure(structure);
-
-            Assert.False(raised);
-        });
-    }
 }

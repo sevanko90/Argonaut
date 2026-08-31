@@ -7,7 +7,9 @@ using Argonaut.Infrastructure;
 
 namespace Argonaut.Features.Csv;
 
-/// <summary>One displayed data row: 1-based row number plus its already-widthed cells.</summary>
+/// <summary>One displayed data row: 1-based row number plus its cells' text. Carries no
+/// geometry - the grid owns column widths, so a realized row never goes stale when one is
+/// resized or the content font changes.</summary>
 public sealed class CsvVisibleRow
 {
     public CsvVisibleRow(int rowNumber, IReadOnlyList<CsvCell> cells)
@@ -27,7 +29,7 @@ public sealed class CsvVisibleRow
 // FileOffsetIndex keeps indexing in the background. The one addition is dataStartIndex, which
 // lets the "first row is header" tickbox shift which absolute line each virtual row index maps
 // to without re-indexing the file.
-public sealed class CsvRowCollection : MemoryMappedCollectionBase
+public sealed class CsvRowCollection : MemoryMappedCollectionBase, IColumnFitSource
 {
     private const int CacheCapacity = 1000;
     private static readonly TimeSpan GrowthPollInterval = TimeSpan.FromMilliseconds(120);
@@ -38,17 +40,15 @@ public sealed class CsvRowCollection : MemoryMappedCollectionBase
     private readonly Dictionary<int, LinkedListNode<(int Index, CsvVisibleRow Row)>> cache = new();
     private readonly LinkedList<(int Index, CsvVisibleRow Row)> cacheOrder = new();
 
-    private CsvStructure structure;
     private int dataStartIndex;
     private DispatcherTimer? growthTimer;
     private int notifiedCount;
 
-    public CsvRowCollection(FileOffsetIndex index, MMapFile mmap, byte delimiter, CsvStructure structure, int dataStartIndex)
+    public CsvRowCollection(FileOffsetIndex index, MMapFile mmap, byte delimiter, int dataStartIndex)
     {
         this.index = index;
         this.mmap = mmap;
         this.delimiter = delimiter;
-        this.structure = structure;
         this.dataStartIndex = dataStartIndex;
         notifiedCount = GetCount();
 
@@ -77,7 +77,7 @@ public sealed class CsvRowCollection : MemoryMappedCollectionBase
         var fields = CsvFieldReader.ReadFields(mmap, lineSpan, delimiter);
         var cells = new CsvCell[fields.Length];
         for (int c = 0; c < fields.Length; c++)
-            cells[c] = new CsvCell(fields[c], structure.WidthFor(c));
+            cells[c] = new CsvCell(fields[c]);
 
         var row = new CsvVisibleRow(i + 1, cells);
 
@@ -96,26 +96,25 @@ public sealed class CsvRowCollection : MemoryMappedCollectionBase
     }
 
     /// <summary>
-    /// Replaces the grid's shape. Widths are baked into each <see cref="CsvCell"/> when a row is
-    /// realized, so cached rows carry the old ones and are dropped; a Reset then makes the panel
-    /// re-realize what it is showing. The owner is responsible for republishing the new
-    /// structure's <see cref="CsvStructure.HeaderCells"/> to the sticky header - this collection
-    /// only owns the body.
-    ///
-    /// Only WIDTHS are read from the structure here; column names are a header concern. So a
-    /// relabelling (CsvViewModel's "first row is header" tickbox, via
-    /// <see cref="CsvStructure.WithNames"/>) needs no call to this at all, and the structure this
-    /// collection holds is allowed to carry the pre-rename labels.
+    /// The widest text this column has among the realized rows - what a fit-to-content
+    /// double-click on its resizer measures. Bounded to what has already been decoded on
+    /// purpose: the true widest field in a multi-gigabyte file is a full scan away, while the
+    /// cache is a free sample of exactly the rows the user has been looking at.
     /// </summary>
-    public void SetStructure(CsvStructure newStructure)
+    public int LongestRealizedText(int columnIndex)
     {
-        if (ReferenceEquals(structure, newStructure))
-            return;
+        if (columnIndex < 0)
+            return 0;
 
-        structure = newStructure;
-        cache.Clear();
-        cacheOrder.Clear();
-        RaiseCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
+        int longest = 0;
+        foreach (var node in cacheOrder)
+        {
+            var cells = node.Row.Cells;
+            if (columnIndex < cells.Count)
+                longest = Math.Max(longest, cells[columnIndex].Text.Length);
+        }
+
+        return longest;
     }
 
     /// <summary>

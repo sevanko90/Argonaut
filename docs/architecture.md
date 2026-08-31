@@ -144,13 +144,16 @@ chain changes.
   subscriber — the same view-to-shell decoupling as `RawJumpService`) and published like a diff:
   directly, with `FileKind.Unknown`, never via `DocumentViewCatalog`. It reuses CSV's
   presentation types (`CsvStructure`, `CsvCell`, `CsvVisibleRow`) plus its own
-  `JsonArrayRowCollection`, but is rendered by Avalonia 12.1's `TableView` rather than by a copy
-  of `CsvView`'s hand-rolled grid: `TableView` derives from `ListBox`, so the lazily-realized row
-  collection virtualizes exactly as before (`TableGridVirtualizationTests`), and it brings the
-  sticky header, its horizontal-scroll tracking and a column resizer that were hand-built in
-  `CsvView`. Columns are data, not markup, so `TableGridColumns` builds them in code-behind from
-  the view model's `CsvStructure` — one `TableViewColumn` per column, each binding its cells by
-  index (`Cells[i].Text`) — and rebuilds them whenever a re-shape publishes a new structure.
+  `JsonArrayRowCollection`, and renders through the same grid `CsvView` does: Avalonia 12.1's
+  `TableView`. It derives from `ListBox`, so the lazily-realized row collections virtualize
+  exactly as the hand-rolled grid did (`TableGridVirtualizationTests`), and it owns the sticky
+  header, its horizontal-scroll tracking and the column resizer that both views used to build by
+  hand. Columns are data, not markup, so `TableGridColumns` — shared by both grids — builds them
+  in code-behind from the view model's `CsvStructure`: one `TableViewColumn` per column, each
+  binding its cells by index (`Cells[i].Text`), plus the find-term binding `CsvView` needs to
+  highlight matches in cells and headers. A re-shape (a different column count or different
+  discovered widths) rebuilds them; a pure relabelling — CSV's "first row is header" tickbox —
+  only swaps the headers, so widths the user set survive it.
   Drag widths are left un-policed: `TableView` has no min/max of its own and its `ActualWidth` is
   read-only, so any bound could only be applied after the fact — the column springs back out from
   under the pointer, which reads worse than the width it was preventing. What `TableGridColumns`
@@ -174,8 +177,12 @@ chain changes.
   horizontal margin on the cell's TextBlock trims text the column was widthed to fit.
   `CellTextMetrics.Current` is a settable seam (like `AppDataPaths.RootOverride`) for tests with no
   Avalonia platform, where the fallback is one em per character: no face exceeds its em, so the
-  estimate errs wide rather than trimming. `CsvView` has not moved yet, and still uses the hand-rolled grid with its bindings
-  compiled against `CsvViewModel`. Columns come from the sampled
+  estimate errs wide rather than trimming. Because widths are derived rather than stored,
+  `CsvColumn` keeps the character count and `CsvCell` carries only text — a realized row holds no
+  geometry, so nothing goes stale when a column is resized or the content font is swapped. The
+  status bar's font toggle is wired through: `TableGridColumns` watches the two font resources,
+  re-measures the metrics and re-applies the discovered width to every column the user has not
+  sized themselves. Columns come from the sampled
   elements: property names for an array of objects, a single `value` column otherwise — and the
   toolbar's reshape-into-N-columns picker is offered *only* in the second case, since an object
   array is already columned by its own data. Back reloads the origin file as

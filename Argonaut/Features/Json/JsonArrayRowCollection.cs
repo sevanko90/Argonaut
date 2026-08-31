@@ -107,10 +107,10 @@ public sealed class JsonArrayRowCollection : MemoryMappedCollectionBase, IColumn
     protected override object GetItem(int index) => GetRow(index);
 
     /// <summary>
-    /// Re-shapes the grid: new columns, and possibly a new mode. Widths are baked into each cell
-    /// at realization, and in reshape mode the column count also changes which elements land on
-    /// which row, so the cache is dropped and a Reset re-realizes what is visible. This never
-    /// re-walks the array - element addressing is independent of how the columns are drawn.
+    /// Re-shapes the grid: new columns, and possibly a new mode. Which cell a value lands in
+    /// changes - in reshape mode so does which row - so the cache is dropped and a Reset
+    /// re-realizes what is visible. This never re-walks the array: element addressing is
+    /// independent of how the columns are drawn.
     /// </summary>
     public void SetShape(CsvStructure newStructure, JsonArrayColumnMode newMode)
     {
@@ -172,11 +172,11 @@ public sealed class JsonArrayRowCollection : MemoryMappedCollectionBase, IColumn
         var element = index.GetToken(token);
 
         if (element.Kind != JsonTokenKind.StartObject)
-            return [new CsvCell(TextFor(token, element), structure.WidthFor(0))];
+            return [new CsvCell(TextFor(token, element))];
 
         var cells = new CsvCell[structure.ColumnCount];
         for (int c = 0; c < cells.Length; c++)
-            cells[c] = new CsvCell(string.Empty, structure.WidthFor(c));
+            cells[c] = new CsvCell(string.Empty);
 
         // Direct children only, skipping each nested container whole - the same bounded walk
         // JsonRowFactory.DescribeChildCount does. Safe to read EndIndex here without a wait:
@@ -187,7 +187,7 @@ public sealed class JsonArrayRowCollection : MemoryMappedCollectionBase, IColumn
 
             int column = ColumnFor(info);
             if (column >= 0)
-                cells[column] = new CsvCell(TextFor(child, info), structure.WidthFor(column));
+                cells[column] = new CsvCell(TextFor(child, info));
 
             child = IsContainer(info.Kind) ? info.EndIndex + 1 : child + 1;
         }
@@ -212,7 +212,7 @@ public sealed class JsonArrayRowCollection : MemoryMappedCollectionBase, IColumn
         for (int c = 0; c < available; c++)
         {
             int token = elements.TokenForElement(first + c);
-            cells[c] = new CsvCell(TextFor(token, index.GetToken(token)), structure.WidthFor(c));
+            cells[c] = new CsvCell(TextFor(token, index.GetToken(token)));
         }
 
         return cells;

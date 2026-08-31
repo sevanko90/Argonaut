@@ -4,12 +4,21 @@ using Argonaut.Infrastructure;
 
 namespace Argonaut.Features.Csv;
 
-/// <summary>A cell's display text plus its column's fixed width, so header and data cells can
-/// bind directly without a per-item lookup into a shared array.</summary>
-public readonly record struct CsvCell(string Text, double Width);
+/// <summary>A cell's display text. Width is the column's business, not the cell's - the grid
+/// sizes columns, so a realized row carries no geometry and never goes stale when one is
+/// resized or the content font changes.</summary>
+public readonly record struct CsvCell(string Text);
 
-/// <summary>One column: display name plus the fixed pixel width its cells render at.</summary>
-public readonly record struct CsvColumn(string Name, double Width);
+/// <summary>
+/// One column: its display name and the character count its width is derived from. Pixels are
+/// deliberately not stored - <see cref="Width"/> asks <see cref="CellTextMetrics"/> every time,
+/// so the answer follows the font the app is actually rendering with (the status bar can swap
+/// the content font at runtime) rather than the one that was current at discovery.
+/// </summary>
+public readonly record struct CsvColumn(string Name, int MaxChars)
+{
+    public double Width => CellTextMetrics.Current.WidthForChars(MaxChars);
+}
 
 /// <summary>
 /// The shape of a CSV-style grid as one immutable object: the column names, their fixed pixel
@@ -27,9 +36,9 @@ public readonly record struct CsvColumn(string Name, double Width);
 /// guidance - laying out every value of a multi-gigabyte file to size a column is exactly what
 /// this app cannot do. The count becomes pixels through <see cref="CellTextMetrics"/>, whose two
 /// terms are themselves measured; content that still doesn't fit is handled by the view with
-/// ellipsis + a tooltip, not by resizing. They come from a sample of the rows available at first paint and
-/// are then fixed for this structure's lifetime - a *new* structure replaces it when the grid's
-/// shape changes (see CsvRowCollection.SetStructure).
+/// ellipsis + a tooltip, not by resizing. The counts come from a sample of the rows available at
+/// first paint and are fixed for this structure's lifetime - a *new* structure replaces it when
+/// the grid's shape changes.
 ///
 /// A sealed class rather than a struct: it holds arrays either way, it is allocated once per
 /// shape change rather than per row, and an immutable class avoids the defensive-copy traps a
@@ -49,23 +58,23 @@ public sealed class CsvStructure
 
     private readonly CsvColumn[] columns;
 
-    private CsvStructure(CsvColumn[] columns, CsvCell[] headerCells, double totalWidth)
-    {
-        this.columns = columns;
-        HeaderCells = headerCells;
-        TotalWidth = totalWidth;
-    }
+    private CsvStructure(CsvColumn[] columns) => this.columns = columns;
 
     public IReadOnlyList<CsvColumn> Columns => this.columns;
 
     public int ColumnCount => this.columns.Length;
 
-    public double TotalWidth { get; }
+    public double TotalWidth
+    {
+        get
+        {
+            double total = 0;
+            foreach (var column in this.columns)
+                total += column.Width;
 
-    /// <summary>The header row, prebuilt in the same <see cref="CsvCell"/> shape the data rows
-    /// use - so the sticky header and the body bind to identical items and cannot disagree
-    /// about a column's width.</summary>
-    public IReadOnlyList<CsvCell> HeaderCells { get; }
+            return total;
+        }
+    }
 
     /// <summary>The narrowest a discovered column opens, in pixels.</summary>
     public static double MinColumnWidth => WidthForChars(MinColumnChars);
@@ -76,12 +85,6 @@ public sealed class CsvStructure
     /// of the conversion are measured; see <see cref="CellTextMetrics"/>.
     /// </summary>
     public static double WidthForChars(int chars) => CellTextMetrics.Current.WidthForChars(chars);
-
-    /// <summary>Width for a column index, including ones beyond <see cref="ColumnCount"/> (a
-    /// row with more fields than the header) - those fall back to the minimum column
-    /// width.</summary>
-    public double WidthFor(int columnIndex)
-        => columnIndex >= 0 && columnIndex < this.columns.Length ? this.columns[columnIndex].Width : MinColumnWidth;
 
     /// <summary>
     /// The one factory: per-column pixel widths from a per-column maximum character count.
@@ -98,20 +101,14 @@ public sealed class CsvStructure
     public static CsvStructure FromMaxChars(IReadOnlyList<string> names, ReadOnlySpan<int> maxChars)
     {
         var columns = new CsvColumn[names.Count];
-        var headerCells = new CsvCell[names.Count];
-        double total = 0;
 
         for (int c = 0; c < columns.Length; c++)
         {
             int chars = c < maxChars.Length ? maxChars[c] : names[c].Length;
-            double width = WidthForChars(Math.Clamp(chars, MinColumnChars, MaxDiscoveredChars));
-
-            columns[c] = new CsvColumn(names[c], width);
-            headerCells[c] = new CsvCell(names[c], width);
-            total += width;
+            columns[c] = new CsvColumn(names[c], Math.Clamp(chars, MinColumnChars, MaxDiscoveredChars));
         }
 
-        return new CsvStructure(columns, headerCells, total);
+        return new CsvStructure(columns);
     }
 
     /// <summary>
@@ -123,15 +120,13 @@ public sealed class CsvStructure
     public CsvStructure WithNames(IReadOnlyList<string> names)
     {
         var renamed = new CsvColumn[this.columns.Length];
-        var headerCells = new CsvCell[this.columns.Length];
 
         for (int c = 0; c < renamed.Length; c++)
         {
             string name = c < names.Count ? names[c] : string.Empty;
-            renamed[c] = new CsvColumn(name, this.columns[c].Width);
-            headerCells[c] = new CsvCell(name, this.columns[c].Width);
+            renamed[c] = new CsvColumn(name, this.columns[c].MaxChars);
         }
 
-        return new CsvStructure(renamed, headerCells, TotalWidth);
+        return new CsvStructure(renamed);
     }
 }

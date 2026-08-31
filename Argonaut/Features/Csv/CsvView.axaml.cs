@@ -3,125 +3,126 @@ using System.ComponentModel;
 using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Data;
 using Avalonia.VisualTree;
 
 namespace Argonaut.Features.Csv;
 
+/// <summary>
+/// The CSV grid's code-behind. Three jobs: keep the TableView's columns in step with the view
+/// model's <see cref="CsvViewModel.Structure"/> (the "first row is header" tickbox relabels
+/// them), reveal what a search match selected, and dispose the document on detach as the
+/// idempotent safety net the shell doesn't drive (window close).
+///
+/// The sticky header, its horizontal-scroll tracking and the column resizer all belong to
+/// TableView now; what used to be mirrored by hand here is gone.
+/// </summary>
 public partial class CsvView : UserControl
 {
-    private ScrollViewer? bodyScrollViewer;
+    private readonly TableGridColumns columns;
     private CsvViewModel? subscribedViewModel;
 
     public CsvView()
     {
         InitializeComponent();
 
-        Loaded += OnLoaded;
+        this.columns = new TableGridColumns(Table);
         DataContextChanged += OnDataContextChanged;
         DetachedFromVisualTree += OnDetachedFromVisualTree;
     }
 
     private void OnDataContextChanged(object? sender, EventArgs e)
     {
-        if (subscribedViewModel is not null)
-            subscribedViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+        if (this.subscribedViewModel is not null)
+            this.subscribedViewModel.PropertyChanged -= OnViewModelPropertyChanged;
 
-        subscribedViewModel = DataContext as CsvViewModel;
-        if (subscribedViewModel is not null)
-            subscribedViewModel.PropertyChanged += OnViewModelPropertyChanged;
+        this.subscribedViewModel = DataContext as CsvViewModel;
+        if (this.subscribedViewModel is null)
+            return;
+
+        this.subscribedViewModel.PropertyChanged += OnViewModelPropertyChanged;
+        RebuildColumns(this.subscribedViewModel);
     }
 
     /// <summary>
     /// Reveals a search match (CsvSearchNavigator.SelectRow): the row vertically via
-    /// ListBox.SelectedIndex (Avalonia auto-scrolls the selected item into view, no explicit
+    /// TableView.SelectedIndex (Avalonia auto-scrolls the selected item into view, no explicit
     /// ScrollIntoView needed - same as NdJsonView), the column horizontally via the grid's own
     /// ScrollViewer, which the navigator/view model never touch directly.
+    ///
+    /// A new structure means new column labels (the tickbox) - the widths are unchanged, but the
+    /// columns carry the names, so they are rebuilt from it.
     /// </summary>
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (sender is not CsvViewModel vm)
             return;
 
+        if (e.PropertyName is null or nameof(CsvViewModel.Structure))
+            RebuildColumns(vm);
+
         if (e.PropertyName is null or nameof(CsvViewModel.SelectedRowIndex))
-            RowsListBox.SelectedIndex = vm.SelectedRowIndex ?? -1;
+            Table.SelectedIndex = vm.SelectedRowIndex ?? -1;
 
         bool columnChanged = e.PropertyName is null or nameof(CsvViewModel.SelectedColumnIndex);
         if (columnChanged && vm.SelectedColumnIndex is int columnIndex)
-            ScrollColumnIntoView(columnIndex, vm.Structure);
+            ScrollColumnIntoView(columnIndex);
+    }
+
+    private void RebuildColumns(CsvViewModel vm)
+    {
+        // Structure throws until LoadAsync has published one.
+        if (vm.ColumnCount == 0)
+            return;
+
+        this.columns.Rebuild(vm.Structure, vm.Rows, new Binding(nameof(CsvViewModel.HighlightTerm)) { Source = vm });
     }
 
     /// <summary>
-    /// Scrolls the body ScrollViewer horizontally just enough to bring
-    /// [left, left + width) for <paramref name="columnIndex"/> fully into the viewport -
-    /// standard scroll-into-view clamp, only moving when the target isn't already visible.
-    /// Setting the offset here also keeps the sticky header aligned for free, via the existing
-    /// OnBodyScrollChanged mirroring.
+    /// Scrolls the grid horizontally just enough to bring [left, left + width) for
+    /// <paramref name="columnIndex"/> fully into the viewport - standard scroll-into-view clamp,
+    /// only moving when the target isn't already visible. Widths come from the columns' own
+    /// ActualWidth, so a column the user resized is measured as it currently is.
     /// </summary>
-    private void ScrollColumnIntoView(int columnIndex, CsvStructure structure)
+    private void ScrollColumnIntoView(int columnIndex)
     {
-        if (bodyScrollViewer is null || columnIndex < 0)
+        if (columnIndex < 0 || columnIndex >= Table.Columns.Count)
+            return;
+
+        if (Table.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault() is not { } scroll)
             return;
 
         double left = 0;
-        for (int i = 0; i < columnIndex && i < structure.ColumnCount; i++)
-            left += structure.Columns[i].Width;
-        double width = columnIndex < structure.ColumnCount ? structure.Columns[columnIndex].Width : 0;
-        double right = left + width;
+        for (int i = 0; i < columnIndex; i++)
+            left += Table.Columns[i].ActualWidth;
+        double right = left + Table.Columns[columnIndex].ActualWidth;
 
-        double viewportLeft = bodyScrollViewer.Offset.X;
-        double viewportWidth = bodyScrollViewer.Viewport.Width;
-        double viewportRight = viewportLeft + viewportWidth;
+        double viewportLeft = scroll.Offset.X;
+        double viewportRight = viewportLeft + scroll.Viewport.Width;
 
         double newLeft = viewportLeft;
         if (left < viewportLeft)
             newLeft = left;
         else if (right > viewportRight)
-            newLeft = Math.Max(0, right - viewportWidth);
+            newLeft = Math.Max(0, right - scroll.Viewport.Width);
 
         if (newLeft != viewportLeft)
-            bodyScrollViewer.Offset = new Vector(newLeft, bodyScrollViewer.Offset.Y);
+            scroll.Offset = new Vector(newLeft, scroll.Offset.Y);
     }
 
-    /// <summary>
-    /// Finds the ListBox's own internal ScrollViewer (created by its control theme, so it
-    /// isn't available until the visual tree is built) and mirrors its horizontal offset onto
-    /// the sticky header's ScrollViewer, keeping columns aligned as the body scrolls sideways.
-    /// </summary>
-    private void OnLoaded(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    private void OnDetachedFromVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
     {
-        if (bodyScrollViewer is not null)
-            return;
-
-        bodyScrollViewer = RowsListBox.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
-        if (bodyScrollViewer is not null)
-            bodyScrollViewer.ScrollChanged += OnBodyScrollChanged;
-    }
-
-    private void OnBodyScrollChanged(object? sender, ScrollChangedEventArgs e)
-    {
-        if (bodyScrollViewer is null)
-            return;
-
-        HeaderScrollViewer.Offset = new Vector(bodyScrollViewer.Offset.X, 0);
-    }
-
-    private void OnDetachedFromVisualTree(object? sender, Avalonia.VisualTreeAttachmentEventArgs e)
-    {
-        Loaded -= OnLoaded;
         DataContextChanged -= OnDataContextChanged;
         DetachedFromVisualTree -= OnDetachedFromVisualTree;
 
-        if (subscribedViewModel is not null)
+        if (this.subscribedViewModel is not null)
         {
-            subscribedViewModel.PropertyChanged -= OnViewModelPropertyChanged;
-            subscribedViewModel = null;
+            this.subscribedViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+            this.subscribedViewModel = null;
         }
 
-        if (bodyScrollViewer is not null)
-        {
-            bodyScrollViewer.ScrollChanged -= OnBodyScrollChanged;
-            bodyScrollViewer = null;
-        }
+        // Columns first: their cell bindings are the last things reading the row collection.
+        this.columns.Dispose();
 
         // Disposed synchronously here (before the content swap's trailing ItemsSource walk):
         // CsvRowCollection reports empty once disposed, so that walk reads nothing.

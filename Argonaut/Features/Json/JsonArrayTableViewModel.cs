@@ -51,8 +51,9 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
 
     public CsvStructure Structure => this.structure ?? throw new InvalidOperationException("LoadAsync must complete before Structure is accessed.");
 
-    /// <summary>The sticky header's cells, in the same shape the data rows use.</summary>
-    public IReadOnlyList<CsvCell> HeaderCells => this.structure?.HeaderCells ?? [];
+    /// <summary>Columns discovered so far - 0 until <see cref="LoadAsync"/> has published a
+    /// <see cref="Structure"/>, which is what the view waits for before building columns.</summary>
+    public int ColumnCount => this.structure?.ColumnCount ?? 0;
 
     public int RowCount => this.rows?.Count ?? 0;
 
@@ -117,7 +118,7 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
         OnPropertyChanged(nameof(Toolbar));
         OnPropertyChanged(nameof(Rows));
         OnPropertyChanged(nameof(Structure));
-        OnPropertyChanged(nameof(HeaderCells));
+        OnPropertyChanged(nameof(ColumnCount));
         OnPropertyChanged(nameof(RowCount));
 
         StatusText = $"{FilePath} — {RowCount:N0} rows indexed so far";
@@ -156,7 +157,7 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
         this.rows.SetShape(this.structure, this.mode);
 
         OnPropertyChanged(nameof(Structure));
-        OnPropertyChanged(nameof(HeaderCells));
+        OnPropertyChanged(nameof(ColumnCount));
         OnPropertyChanged(nameof(RowCount));
     }
 

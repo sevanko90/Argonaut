@@ -55,7 +55,8 @@ public partial class JsonView : UserControl
 
     /// <summary>
     /// Both ListBoxes' ScrollViewers come from their control themes, so they don't exist until
-    /// the visual tree is built - same lazy resolution CsvView uses for its sticky header.
+    /// the visual tree is built, which is why they are resolved here rather than in the
+    /// constructor.
     /// </summary>
     private void OnLoaded(object? sender, RoutedEventArgs e)
     {

@@ -542,4 +542,48 @@ public class JsonArrayTableViewModelTests
             Assert.All(document.Headers, header => Assert.Null(header.Segments[^1].Key));
             return Task.CompletedTask;
         });
+
+    [Fact]
+    public Task ExpandedChildrenStayTogether_EvenWhenALaterElementIntroducesOne()
+        => WithDocument("""
+            [{"type":"Feature","geometry":{"type":"Point"},"properties":{"a":1}},
+             {"type":"Feature","geometry":{"type":"Collection","geometries":[]},"properties":{"a":2}}]
+            """, document =>
+        {
+            document.ToggleColumn(KeyOf(document, 1));
+
+            // geometry.geometries is first seen in element 2, long after properties was
+            // registered from element 1 - it still belongs beside its siblings.
+            Assert.Equal(
+                ["type", "geometry.type", "geometry.geometries", "properties"],
+                ColumnNames(document));
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task ExpandedChildrenStayTogether_WithTheirCellsStillInTheRightColumns()
+        => WithDocument("""
+            [{"a":{"x":1},"z":9},
+             {"a":{"x":2,"y":3},"z":8}]
+            """, document =>
+        {
+            document.ToggleColumn(KeyOf(document, 0));
+
+            Assert.Equal(["a.x", "a.y", "z"], ColumnNames(document));
+            // The re-order has to carry the routes with it, or the cells land in the columns the
+            // registration order would have put them in.
+            Assert.Equal(["1", "", "9"], CellsOf(document, 0));
+            Assert.Equal(["2", "3", "8"], CellsOf(document, 1));
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task ExpandedArrayRemainder_StaysWithItsPositions()
+        => WithDocument("""[{"bbox":[1,2,3,4,5,6],"z":9}]""", document =>
+        {
+            document.ToggleColumn(KeyOf(document, 0));
+
+            Assert.Equal(["bbox[0]", "bbox[1]", "bbox[2]", "bbox[3]", "bbox[…]", "z"], ColumnNames(document));
+            return Task.CompletedTask;
+        });
 }

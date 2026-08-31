@@ -157,6 +157,12 @@ public static class JsonArrayColumnDiscovery
         private readonly int arrayColumns;
 
         private readonly Dictionary<string, int> columns = new(StringComparer.Ordinal);
+
+        // Which keys sit directly inside which, in the order they were first seen there - the
+        // one thing global registration order cannot tell you, and what Finish orders the
+        // columns by. Holds the expanded containers too, which are not columns themselves but
+        // are where their children belong.
+        private readonly Dictionary<string, List<string>> childKeys = new(StringComparer.Ordinal);
         private readonly List<string> displays = [];
         private readonly List<int> maxChars = [];
         private readonly List<ColumnNesting> nesting = [];
@@ -194,7 +200,7 @@ public static class JsonArrayColumnDiscovery
                 if (info.NameLength >= 0)
                 {
                     string name = DisplayText.Read(this.file, info.NameOffset, info.NameLength, out _);
-                    Draw(child, info,
+                    Draw(child, info, parent: keyPrefix,
                         key: keyPrefix + NameMarker + name,
                         display: displayPrefix.Length == 0 ? name : displayPrefix + "." + name,
                         segment: displayPrefix.Length == 0 ? name : "." + name,
@@ -218,7 +224,7 @@ public static class JsonArrayColumnDiscovery
             for (; child < container.EndIndex && position < this.arrayColumns; position++)
             {
                 var info = this.index.GetToken(child);
-                Draw(child, info,
+                Draw(child, info, parent: key,
                     key: key + IndexMarker + position,
                     display: display + "[" + position + "]",
                     segment: "[" + position + "]",
@@ -233,7 +239,7 @@ public static class JsonArrayColumnDiscovery
             // More positions than were drawn. Registered against the ARRAY - same route, so the
             // cell is the summary the collapsed column showed - under a key of its own, which is
             // never parsed back into steps because they are handed over here.
-            int column = Register(key + NameMarker, display + "[…]", "[…]", ancestors, StepsFromKey(key));
+            int column = Register(key, key + NameMarker, display + "[…]", "[…]", ancestors, StepsFromKey(key));
             if (column < 0)
                 return;
 
@@ -243,12 +249,16 @@ public static class JsonArrayColumnDiscovery
 
         /// <summary>One child: walked into when it is an open container, drawn as a column
         /// otherwise.</summary>
-        private void Draw(int token, JsonTokenInfo info, string key, string display, string segment,
+        private void Draw(int token, JsonTokenInfo info, string parent, string key, string display, string segment,
             IReadOnlyList<JsonArrayColumnHeaderSegment> ancestors)
         {
             bool isContainer = IsContainer(info.Kind) && info.EndIndex >= 0;
             if (isContainer && this.open.IsOpen(key))
             {
+                // An open container draws no column of its own, but it still holds a place among
+                // its siblings - that place is where all of its children are drawn.
+                Place(parent, key);
+
                 var inside = Append(ancestors, new JsonArrayColumnHeaderSegment(segment, key));
                 if (info.Kind == JsonTokenKind.StartObject)
                     Object(token, info, key, display, inside);
@@ -260,7 +270,7 @@ public static class JsonArrayColumnDiscovery
 
             // Only a container offers to open: the last piece of a scalar column's header is
             // plain text, which is what tells the two apart on screen.
-            int column = Register(key, display, segment, ancestors, steps: null, opensTo: isContainer ? key : null);
+            int column = Register(parent, key, display, segment, ancestors, steps: null, opensTo: isContainer ? key : null);
             if (column < 0)
                 return;
 
@@ -268,7 +278,7 @@ public static class JsonArrayColumnDiscovery
             this.nesting[column] = Nested(this.nesting[column], token, info);
         }
 
-        private int Register(string key, string display, string segment,
+        private int Register(string parent, string key, string display, string segment,
             IReadOnlyList<JsonArrayColumnHeaderSegment> ancestors, RouteStep[]? steps, string? opensTo = null)
         {
             if (this.columns.TryGetValue(key, out int existing))
@@ -282,6 +292,7 @@ public static class JsonArrayColumnDiscovery
 
             int column = this.displays.Count;
             this.columns[key] = column;
+            Place(parent, key);
             this.displays.Add(display);
             this.maxChars.Add(display.Length);
             this.nesting.Add(ColumnNesting.Scalar);
@@ -290,6 +301,83 @@ public static class JsonArrayColumnDiscovery
                 Append(ancestors, new JsonArrayColumnHeaderSegment(segment, opensTo)), display));
 
             return column;
+        }
+
+        /// <summary>Records where a key sits among the things directly inside
+        /// <paramref name="parent"/>, first-seen order, once.</summary>
+        private void Place(string parent, string key)
+        {
+            if (!this.childKeys.TryGetValue(parent, out var siblings))
+            {
+                siblings = [];
+                this.childKeys[parent] = siblings;
+            }
+
+            if (!siblings.Contains(key))
+                siblings.Add(key);
+        }
+
+        /// <summary>
+        /// The order the columns are drawn in: depth-first through the keys, siblings in the
+        /// order they were first seen inside their own container.
+        ///
+        /// Registration order alone gets this wrong, and visibly so. A property that first turns
+        /// up in element 22 - GeoJSON's <c>geometry.geometries</c>, which only a
+        /// GeometryCollection has - is registered after everything the earlier elements held, so
+        /// it lands past <c>properties</c> instead of beside the other <c>geometry.*</c> columns.
+        /// An expanded container's columns have to read as a group whatever element each one was
+        /// discovered from.
+        ///
+        /// Costs a walk over the registered columns - at most <see cref="MaxColumns"/> of them -
+        /// once per discovery. No token is re-read and the sample is not walked again.
+        /// </summary>
+        private List<int> DrawingOrder()
+        {
+            var order = new List<int>(this.displays.Count);
+            Visit(string.Empty);
+            return order;
+
+            void Visit(string parent)
+            {
+                if (!this.childKeys.TryGetValue(parent, out var siblings))
+                    return;
+
+                foreach (string key in siblings)
+                {
+                    // A column and a container are not exclusive: an open array draws its
+                    // positions AND a remainder column keyed on the array itself.
+                    if (this.columns.TryGetValue(key, out int column))
+                        order.Add(column);
+
+                    Visit(key);
+                }
+            }
+        }
+
+        /// <summary>Puts the parallel per-column lists into <see cref="DrawingOrder"/>. Routes
+        /// carry no column index of their own - <see cref="ExpandedRoutes.Build"/> takes it from
+        /// the position in the list - so re-ordering the list IS the remap.</summary>
+        private void Reorder()
+        {
+            var order = DrawingOrder();
+            if (order.Count != this.displays.Count)
+                return; // a column registered under no parent would be dropped; leave the order alone
+
+            Permute(this.displays, order);
+            Permute(this.maxChars, order);
+            Permute(this.nesting, order);
+            Permute(this.routes, order);
+            Permute(this.headers, order);
+        }
+
+        private static void Permute<T>(List<T> values, List<int> order)
+        {
+            var reordered = new T[order.Count];
+            for (int i = 0; i < order.Count; i++)
+                reordered[i] = values[order[i]];
+
+            values.Clear();
+            values.AddRange(reordered);
         }
 
         public DiscoveredColumns Finish()
@@ -306,6 +394,8 @@ public static class JsonArrayColumnDiscovery
                 return new DiscoveredColumns(Structure(), ExpandedRoutes.None, this.nesting, this.headers,
                     SawObject: false, this.truncated);
             }
+
+            Reorder();
 
             return new DiscoveredColumns(Structure(), ExpandedRoutes.Build(this.routes), this.nesting, this.headers,
                 SawObject: true, this.truncated);

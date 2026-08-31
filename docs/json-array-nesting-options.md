@@ -227,7 +227,13 @@ No extra walk, no extra read, no decoded text.
    identical to today's, new machinery underneath — testable end to end with no UI at all.
 2. **Clickable headers**, expand/collapse, the array cap and its toolbar setting, the column-count
    guard, and the `SameShape` fix.
-3. **The cell detail pane.**
+3. **The cell detail pane.** Built. The tree is `JsonVisibleRowCollection` with a root token
+   other than 0 - the same machinery the JSON view uses, so the pane virtualizes identically and a
+   2,199-item array opens instantly. Depths (and therefore "open two levels") are relative to that
+   root, or a cell four levels into a file would open collapsed and indented off the right edge.
+   Clicking a cell resolves its token by walking the element again rather than remembering one per
+   realized cell: one bounded walk per click beats an int per column across a thousand cached rows
+   for a lookup almost none of them are asked for.
 
 Each slice is shippable on its own and none of them changes the collapsed-cell cost, which is the
 budget the whole feature has to live inside.

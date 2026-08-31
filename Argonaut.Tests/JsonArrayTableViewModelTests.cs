@@ -586,4 +586,113 @@ public class JsonArrayTableViewModelTests
             Assert.Equal(["bbox[0]", "bbox[1]", "bbox[2]", "bbox[3]", "bbox[…]", "z"], ColumnNames(document));
             return Task.CompletedTask;
         });
+
+    private static JsonRow[] DetailRows(JsonArrayCellDetail detail)
+        => Enumerable.Range(0, detail.Rows!.Count).Select(i => (JsonRow)detail.Rows[i]!).ToArray();
+
+    [Fact]
+    public Task ShowCell_OnAContainer_OpensItsOwnTreeRootedThere()
+        => WithDocument("""[{"id":1,"geometry":{"type":"Point","coordinates":[1,2]}}]""", document =>
+        {
+            document.ShowCell(0, 1);
+
+            var detail = Assert.IsType<JsonArrayCellDetail>(document.CellDetail);
+            Assert.True(detail.IsTree);
+            Assert.Contains("geometry", detail.Title);
+
+            var rows = DetailRows(detail);
+            // Rooted at the cell: the object itself, then its members - and indented from zero,
+            // not from however deep in the file it happens to sit.
+            Assert.Equal(0, rows[0].Depth);
+            Assert.Equal(1, rows[1].Depth);
+            // The root row keeps its own property name, so the pane says what it is showing
+            // before it shows the members.
+            Assert.Equal(["geometry", "type", "coordinates"], rows.Where(r => r.Name is not null).Select(r => r.Name));
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task ShowCell_OnALongScalar_ShowsWhatTheColumnCannot()
+        => WithDocument($$"""[{"note":"{{new string('x', 3000)}}"}]""", document =>
+        {
+            // The grid caps a cell's text; the pane is the only place the whole value is readable.
+            Assert.True(CellsOf(document, 0)[0].Length < 3000);
+
+            document.ShowCell(0, 0);
+
+            var detail = Assert.IsType<JsonArrayCellDetail>(document.CellDetail);
+            Assert.True(detail.IsText);
+            Assert.Equal(3000, detail.Text!.Length);
+            Assert.False(detail.Truncated);
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task ShowCell_FollowsAnExpandedColumnsRoute()
+        => WithDocument("""[{"geometry":{"coordinates":[7,8]}}]""", document =>
+        {
+            document.ToggleColumn(KeyOf(document, 0));
+            Assert.Equal(["geometry.coordinates"], ColumnNames(document));
+
+            document.ShowCell(0, 0);
+
+            var detail = Assert.IsType<JsonArrayCellDetail>(document.CellDetail);
+            // The array's own elements, which the pane opens two levels deep - the closing
+            // bracket rows the tree shows for an expanded container are not values.
+            Assert.Equal(["7", "8"], DetailRows(detail).Where(r => r.ArrayIndex is not null).Select(r => r.Value));
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task ShowCell_OnAnEmptyCell_LeavesThePaneAsItWas()
+        => WithDocument("""[{"id":1,"note":"here"},{"id":2}]""", document =>
+        {
+            document.ShowCell(0, 1);
+            var shown = document.CellDetail;
+
+            // Row 2 has no note. Clicking past the data must not throw away what is on screen.
+            document.ShowCell(1, 1);
+
+            Assert.Same(shown, document.CellDetail);
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task ExpandingAColumn_ClosesThePane()
+        => WithDocument("""[{"geometry":{"type":"Point"}}]""", document =>
+        {
+            document.ShowCell(0, 0);
+            Assert.True(document.HasCellDetail);
+
+            // The pane is labelled with a column's route, and a re-shape moves what that column
+            // holds - so what it shows may no longer be what its title says.
+            document.ToggleColumn(KeyOf(document, 0));
+
+            Assert.False(document.HasCellDetail);
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public async Task DisposingTheDocument_DisposesTheOpenPane()
+    {
+        string path = Path.GetTempFileName();
+        File.WriteAllBytes(path, System.Text.Encoding.UTF8.GetBytes("""[{"geometry":{"type":"Point"}}]"""));
+        try
+        {
+            var document = new JsonArrayTableViewModel();
+            await document.LoadAsync(path, 0, new FileInfo(path).Length, "$");
+            document.ShowCell(0, 0);
+            var rows = document.CellDetail!.Rows!;
+            Assert.NotEmpty(rows);
+
+            // The pane's tree reads the session's index, so it must go before the session does.
+            document.Dispose();
+
+            Assert.Empty(rows);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }

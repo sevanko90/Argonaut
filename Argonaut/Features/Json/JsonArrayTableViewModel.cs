@@ -51,6 +51,7 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
     private readonly OpenColumns openColumns = new();
 
     private int arrayColumns = JsonArrayColumnDiscovery.DefaultArrayColumns;
+    private JsonArrayCellDetail? cellDetail;
 
     protected override IDocumentSession? Session => this.session;
 
@@ -84,6 +85,55 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
     /// columns are genuinely different ones rather than the same columns relabelled.
     /// </summary>
     public IReadOnlyList<JsonArrayColumnHeader> Headers => this.headers;
+
+    /// <summary>
+    /// The cell being shown in full beside the grid, or null when the pane is closed. Replaced by
+    /// each new cell shown and disposed with the document - it holds a tree over the session's
+    /// index, so it must not outlive it.
+    /// </summary>
+    public JsonArrayCellDetail? CellDetail
+    {
+        get => this.cellDetail;
+        private set
+        {
+            var outgoing = this.cellDetail;
+            if (ReferenceEquals(outgoing, value))
+                return;
+
+            this.cellDetail = value;
+            outgoing?.Dispose();
+
+            OnPropertyChanged(nameof(CellDetail));
+            OnPropertyChanged(nameof(HasCellDetail));
+        }
+    }
+
+    public bool HasCellDetail => this.cellDetail is not null;
+
+    /// <summary>
+    /// Opens the pane on one cell. An empty cell - an element missing that property, or a
+    /// position past the end of a short row - has no value to show, so the pane is left as it
+    /// was rather than blanked: clicking past the data should not throw away what the reader was
+    /// looking at.
+    /// </summary>
+    public void ShowCell(int row, int column)
+    {
+        if (this.session is not { } current || this.rows is null || this.structure is null)
+            return;
+
+        if (column >= this.structure.ColumnCount)
+            return;
+
+        int token = this.rows.TokenForCell(row, column);
+        if (token < 0)
+            return;
+
+        string path = column < this.headers.Count ? this.headers[column].Display : this.structure.Columns[column].Name;
+        CellDetail = JsonArrayCellDetail.ForToken(current.Inner.Index, current.Inner.File, token,
+            $"{path} — row {row + 1:N0}");
+    }
+
+    public void CloseCellDetail() => CellDetail = null;
 
     /// <summary>Whether any column holds an array, and so whether how many positions an
     /// expansion draws is a question worth putting in the toolbar.</summary>
@@ -212,6 +262,14 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
         MonitorIndexing();
     }
 
+    /// <summary>The cell pane's tree reads the session's index, so it goes before the session
+    /// does - which is exactly what DisposeCore runs between.</summary>
+    protected override void DisposeCore()
+    {
+        this.cellDetail?.Dispose();
+        this.cellDetail = null;
+    }
+
     protected override void OnIndexingCompleted()
     {
         OnPropertyChanged(nameof(RowCount));
@@ -287,6 +345,10 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
 
     private void PublishShape()
     {
+        // A re-shape moves which value a column holds, and the pane is labelled with a column's
+        // route - so what it is showing may no longer be what its title says.
+        CloseCellDetail();
+
         // Nothing to publish before LoadAsync has discovered a shape - and nothing calls this
         // that early, which is what makes the null a guard rather than a case to handle.
         if (this.structure is not { } shape)

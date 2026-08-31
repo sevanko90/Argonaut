@@ -166,6 +166,62 @@ public sealed class JsonArrayRowCollection : MemoryMappedCollectionBase, IColumn
     /// single cell in the first column; that is also the shape a whole array of scalars takes,
     /// where discovery produced one "value" column to begin with.
     /// </summary>
+    /// <summary>
+    /// The token one cell's value came from, or -1 when the cell is empty - an element missing
+    /// that property, or a position past the end of a short row.
+    ///
+    /// Walks the element again rather than remembering a token per realized cell: a click is one
+    /// bounded walk, whereas the cache holds a thousand rows and would carry an int per column
+    /// of every one of them for a lookup almost none of them are ever asked for.
+    /// </summary>
+    public int TokenForCell(int rowIndex, int column)
+    {
+        if (column < 0 || rowIndex < 0 || rowIndex >= Count)
+            return -1;
+
+        if (mode == JsonArrayColumnMode.Reshape)
+        {
+            int first = rowIndex * Math.Max(1, structure.ColumnCount) + column;
+            return first < elements.ElementCount ? elements.TokenForElement(first) : -1;
+        }
+
+        int token = elements.TokenForElement(rowIndex);
+        var element = index.GetToken(token);
+
+        if (element.Kind != JsonTokenKind.StartObject)
+            return column == 0 ? token : -1;
+
+        return TokenIn(routes, token, element, column);
+    }
+
+    /// <summary>The same descent <see cref="FillFrom"/> makes, stopping at one column.</summary>
+    private int TokenIn(ExpandedRoutes level, int containerToken, JsonTokenInfo container, int wanted)
+    {
+        int ordinal = 0;
+        for (int child = containerToken + 1; child < container.EndIndex; ordinal++)
+        {
+            var info = index.GetToken(child);
+            bool isContainer = IsContainer(info.Kind);
+
+            bool matched = info.NameLength >= 0
+                ? level.TryMatchName(mmap.GetSpan(info.NameOffset, info.NameLength), out int column, out var inner)
+                : level.TryMatchIndex(ordinal, out column, out inner);
+
+            if (matched)
+            {
+                if (column == wanted)
+                    return child;
+
+                if (inner is not null && isContainer && TokenIn(inner, child, info, wanted) is var found and >= 0)
+                    return found;
+            }
+
+            child = isContainer ? info.EndIndex + 1 : child + 1;
+        }
+
+        return -1;
+    }
+
     private CsvCell[] ByPropertyCells(int rowIndex)
     {
         int token = elements.TokenForElement(rowIndex);

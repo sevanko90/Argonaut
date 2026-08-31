@@ -48,6 +48,13 @@ internal sealed class JsonRowFactory
     /// here (see JsonSchemaDocument's remarks for why it is top-down only).</summary>
     public JsonSchemaDocument? Schema { get; set; }
 
+    /// <summary>
+    /// Subtracted from every row's depth, so a tree rooted at something other than the document
+    /// root still indents from zero - what the array table's cell pane needs, showing one cell's
+    /// subtree beside the grid. Zero for a whole-document tree, which is every other caller.
+    /// </summary>
+    public int DepthOffset { get; init; }
+
     public JsonRow BuildRow(int position, int tokenIndex, int arrayIndexOrMinusOne, int schemaNodeId, bool expanded)
     {
         var token = index.GetToken(tokenIndex);
@@ -99,7 +106,7 @@ internal sealed class JsonRowFactory
 
         int? arrayIndex = arrayIndexOrMinusOne >= 0 ? arrayIndexOrMinusOne : null;
 
-        return new JsonRow(position, tokenIndex, token.Depth, token.Kind, name, value, hasChildren, expanded, isPlaceholder: false, hint: hint, truncationHint: truncationHint, truncatedValueOffset: truncatedValueOffset, arrayIndex: arrayIndex, schemaTitle: schemaTitle, schemaDescription: schemaDescription, schemaLabel: schemaLabel);
+        return new JsonRow(position, tokenIndex, token.Depth - DepthOffset, token.Kind, name, value, hasChildren, expanded, isPlaceholder: false, hint: hint, truncationHint: truncationHint, truncatedValueOffset: truncatedValueOffset, arrayIndex: arrayIndex, schemaTitle: schemaTitle, schemaDescription: schemaDescription, schemaLabel: schemaLabel);
     }
 
     private string? BuildHint(int tokenIndex, JsonTokenInfo token)

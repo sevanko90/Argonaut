@@ -150,6 +150,12 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
 
     private readonly JsonStructureIndex index;
     private readonly MMapFile mmap;
+    private readonly int rootTokenIndex;
+
+    /// <summary>The scoped root's own depth, subtracted everywhere a depth is compared or shown -
+    /// so "expand two levels" means two levels of what the pane is showing, not two levels of the
+    /// file it was cut from. Zero for a whole-document tree.</summary>
+    private readonly int depthOffset;
     private readonly IReadOnlyList<IValueHintProvider>? hintProviders;
     private readonly JsonRowFactory rowFactory;
 
@@ -192,13 +198,19 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
     // everything on every poll for the rest of indexing.
     private bool visibleTreeSettled;
 
-    public JsonVisibleRowCollection(JsonStructureIndex index, MMapFile mmap, IReadOnlyList<IValueHintProvider>? hintProviders = null, int defaultExpandDepth = 1)
+    /// <param name="rootTokenIndex">Token the visible tree starts at. 0 - the document root -
+    /// for every view of a whole file; the array table's cell pane passes the token of the cell
+    /// it is showing, so the same machinery renders one subtree without the file around it.
+    /// Depths are reported relative to it, so a scoped tree indents from zero.</param>
+    public JsonVisibleRowCollection(JsonStructureIndex index, MMapFile mmap, IReadOnlyList<IValueHintProvider>? hintProviders = null, int defaultExpandDepth = 1, int rootTokenIndex = 0)
     {
         this.index = index;
         this.mmap = mmap;
+        this.rootTokenIndex = rootTokenIndex;
+        this.depthOffset = rootTokenIndex > 0 ? index.GetToken(rootTokenIndex).Depth : 0;
         this.defaultExpandDepth = Math.Max(0, defaultExpandDepth);
         this.hintProviders = hintProviders;
-        this.rowFactory = new JsonRowFactory(index, mmap, hintProviders);
+        this.rowFactory = new JsonRowFactory(index, mmap, hintProviders) { DepthOffset = this.depthOffset };
 
         if (hintProviders is not null)
         {
@@ -237,7 +249,8 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
     /// A container is expanded when its nesting depth is within the default-expand depth,
     /// unless the user has explicitly toggled it the other way (see expandOverrides).
     /// </summary>
-    private bool IsExpanded(int tokenIndex, int depth) => (depth < defaultExpandDepth) ^ expandOverrides.Contains(tokenIndex);
+    private bool IsExpanded(int tokenIndex, int depth)
+        => (depth - depthOffset < defaultExpandDepth) ^ expandOverrides.Contains(tokenIndex);
 
     protected override int GetCount() => visibleRows.Count;
 
@@ -538,7 +551,7 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
             string text = canLoadMore
                 ? "… more items (click to show more)"
                 : $"… display limit reached ({MaxDisplayedChildrenPerContainer:N0} items shown)";
-            return new JsonRow(position, vrow.PlaceholderContainerTokenIndex, container.Depth + 1, container.Kind,
+            return new JsonRow(position, vrow.PlaceholderContainerTokenIndex, container.Depth + 1 - depthOffset, container.Kind,
                 name: null, value: text,
                 hasChildren: canLoadMore, isExpanded: false, isPlaceholder: true);
         }
@@ -564,9 +577,9 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
         // would repeatedly re-grow-by-doubling from empty for what's usually a similarly
         // sized visible set each time.
         var newVisible = new List<VisibleRow>(visibleRows.Count);
-        visibleTreeSettled = index.TokenCount > 0; // AppendSubtree clears it on any incomplete container
-        if (index.TokenCount > 0)
-            AppendSubtree(0, newVisible, arrayIndex: -1, schemaNodeId: schema?.RootId ?? -1);
+        visibleTreeSettled = index.TokenCount > rootTokenIndex; // AppendSubtree clears it on any incomplete container
+        if (index.TokenCount > rootTokenIndex)
+            AppendSubtree(rootTokenIndex, newVisible, arrayIndex: -1, schemaNodeId: schema?.RootId ?? -1);
 
         var oldVisible = visibleRows;
         var oldUnsettledCollapsed = unsettledCollapsedContainerTokens;

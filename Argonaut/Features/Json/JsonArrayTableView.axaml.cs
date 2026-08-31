@@ -2,12 +2,16 @@ using System;
 using System.ComponentModel;
 using Argonaut.Features.Csv;
 using Argonaut.Infrastructure;
+using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Templates;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Markup.Xaml.MarkupExtensions;
 using Avalonia.Media;
+using Avalonia.VisualTree;
 
 namespace Argonaut.Features.Json;
 
@@ -31,14 +35,20 @@ namespace Argonaut.Features.Json;
 /// </summary>
 public partial class JsonArrayTableView : UserControl
 {
+    /// <summary>How wide the cell pane opens, and how wide it stays once dragged - the splitter
+    /// writes the column's width, and this remembers it across the pane closing and reopening.</summary>
+    private const double DefaultDetailWidth = 380;
+
     private readonly TableGridColumns columns;
     private JsonArrayTableViewModel? subscribedViewModel;
+    private double detailWidth = DefaultDetailWidth;
 
     public JsonArrayTableView()
     {
         InitializeComponent();
 
         this.columns = new TableGridColumns(Table);
+        Table.AddHandler(PointerPressedEvent, OnTablePointerPressed, RoutingStrategies.Tunnel);
         DataContextChanged += OnDataContextChanged;
         DetachedFromVisualTree += OnDetachedFromVisualTree;
     }
@@ -54,6 +64,80 @@ public partial class JsonArrayTableView : UserControl
 
         this.subscribedViewModel.PropertyChanged += OnViewModelPropertyChanged;
         RebuildColumns(this.subscribedViewModel);
+        ShowDetail(this.subscribedViewModel.HasCellDetail);
+    }
+
+    /// <summary>
+    /// Which cell was clicked. The cell control carries its own column, which is the reliable
+    /// answer; a click that lands on the row instead - an empty cell has no text to hit - falls
+    /// back to measuring the pointer against the columns' widths, so a missing property is still
+    /// a cell the reader can ask about.
+    /// </summary>
+    private void OnTablePointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (this.subscribedViewModel is not { } vm || e.ClickCount != 1)
+            return;
+
+        if (e.Source is not Visual source || source.FindAncestorOfType<TableViewRow>() is not { } row)
+            return;
+
+        int rowIndex = Table.IndexFromContainer(row);
+        if (rowIndex < 0)
+            return;
+
+        int column = source.FindAncestorOfType<TableViewCell>() is { Column: { } cell }
+            ? Table.Columns.IndexOf(cell)
+            : ColumnAt(e.GetPosition(row).X);
+
+        if (column >= 0)
+            vm.ShowCell(rowIndex, column);
+    }
+
+    /// <summary>The column an x offset inside a row falls in, or -1 past the last one.</summary>
+    private int ColumnAt(double x)
+    {
+        double edge = 0;
+        for (int c = 0; c < Table.Columns.Count; c++)
+        {
+            edge += Table.Columns[c].ActualWidth;
+            if (x < edge)
+                return c;
+        }
+
+        return -1;
+    }
+
+    private void OnCloseDetail(object? sender, RoutedEventArgs e) => this.subscribedViewModel?.CloseCellDetail();
+
+    private void OnDetailToggleExpandClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Control { DataContext: JsonRow row })
+            this.subscribedViewModel?.CellDetail?.Rows?.ToggleExpand(row.Position);
+    }
+
+    private void OnDetailRowDoubleTapped(object? sender, TappedEventArgs e)
+    {
+        if ((e.Source as Visual)?.FindAncestorOfType<ListBoxItem>()?.DataContext is JsonRow row)
+            this.subscribedViewModel?.CellDetail?.Rows?.ToggleExpand(row.Position);
+    }
+
+    /// <summary>
+    /// Opens or closes the pane's grid column. Width lives here rather than in the view model:
+    /// dragging the splitter writes it, and the view model has no business knowing pixels.
+    /// </summary>
+    private void ShowDetail(bool visible)
+    {
+        var pane = Layout.ColumnDefinitions[2];
+        if (visible)
+        {
+            pane.Width = new GridLength(this.detailWidth);
+            return;
+        }
+
+        if (pane.Width.IsAbsolute && pane.Width.Value > 0)
+            this.detailWidth = pane.Width.Value;
+
+        pane.Width = new GridLength(0);
     }
 
     /// <summary>
@@ -63,8 +147,14 @@ public partial class JsonArrayTableView : UserControl
     /// </summary>
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (sender is JsonArrayTableViewModel vm && e.PropertyName is null or nameof(JsonArrayTableViewModel.Structure))
+        if (sender is not JsonArrayTableViewModel vm)
+            return;
+
+        if (e.PropertyName is null or nameof(JsonArrayTableViewModel.Structure))
             RebuildColumns(vm);
+
+        if (e.PropertyName is null or nameof(JsonArrayTableViewModel.HasCellDetail))
+            ShowDetail(vm.HasCellDetail);
     }
 
     private void RebuildColumns(JsonArrayTableViewModel vm)
@@ -121,6 +211,7 @@ public partial class JsonArrayTableView : UserControl
     {
         DataContextChanged -= OnDataContextChanged;
         DetachedFromVisualTree -= OnDetachedFromVisualTree;
+        Table.RemoveHandler(PointerPressedEvent, OnTablePointerPressed);
 
         if (this.subscribedViewModel is not null)
         {

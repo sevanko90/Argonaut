@@ -188,7 +188,7 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
         bool elementsAreObjects = discovered.SawObject;
 
         this.rows = new JsonArrayRowCollection(session.Elements, session.Inner.Index, session.Inner.File,
-            this.structure, this.routes, this.mode);
+            discovered.Structure, this.routes, this.mode);
 
         // Built here rather than before the wait because it takes the answer discovery just
         // produced: an array of objects is already columned by its property names, so it is
@@ -287,7 +287,12 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
 
     private void PublishShape()
     {
-        this.rows?.SetShape(this.structure!, this.routes, this.mode);
+        // Nothing to publish before LoadAsync has discovered a shape - and nothing calls this
+        // that early, which is what makes the null a guard rather than a case to handle.
+        if (this.structure is not { } shape)
+            return;
+
+        this.rows?.SetShape(shape, this.routes, this.mode);
         this.toolbar?.ShowArrayColumns(HasArrayColumns);
 
         OnPropertyChanged(nameof(Headers));

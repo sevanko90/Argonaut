@@ -44,5 +44,21 @@
                 </ComboBox.ItemTemplate>
             </ComboBox>
         </StackPanel>
+
+        <!-- Only shown once a column is known to hold an array - which can become true after an
+             expansion reveals one, so the document answers it after every discovery rather than
+             once at load. Same plain-ComboBox reasoning as the mode picker above. -->
+        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center"
+                    IsVisible="{Binding CanExpandArrays}">
+            <TextBlock Text="Array columns"
+                       VerticalAlignment="Center"
+                       Foreground="{DynamicResource AppMutedTextBrush}"
+                       FontSize="12" />
+            <ComboBox ItemsSource="{Binding ArrayColumnCounts}"
+                      SelectedItem="{Binding SelectedArrayColumns}"
+                      MinWidth="60"
+                      VerticalAlignment="Center"
+                      ToolTip.Tip="How many positions an expanded array column draws before the rest are summarised in one" />
+        </StackPanel>
     </StackPanel>
 </UserControl>

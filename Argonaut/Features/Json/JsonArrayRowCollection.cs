@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Specialized;
-using System.Text;
 using Argonaut.Features.Csv;
 using Argonaut.Infrastructure;
 
@@ -33,11 +32,13 @@ public enum JsonArrayColumnMode
 /// <see cref="JsonArrayElementIndex.ElementCount"/>, and realizing a row is a
 /// <see cref="JsonArrayElementIndex.TokenForElement"/> lookup per element the row covers - one in
 /// <see cref="JsonArrayColumnMode.ByProperty"/> mode (plus a bounded read of that element's
-/// direct children), N in <see cref="JsonArrayColumnMode.Reshape"/> mode - and nothing else.
+/// direct children, and of the children of whatever has been expanded inside it), N in
+/// <see cref="JsonArrayColumnMode.Reshape"/> mode - and nothing else.
 /// Reshape is therefore a pure re-chunking of the same per-element decode, not a second
 /// value-reading path.
 ///
-/// It invents no columns: <see cref="CsvStructure"/> arrives finished, from whoever discovered
+/// It invents no columns: <see cref="CsvStructure"/> and the <see cref="ExpandedRoutes"/> that
+/// say where each of them lives inside an element both arrive finished, from whoever discovered
 /// the property names or chose the reshape width.
 /// </summary>
 public sealed class JsonArrayRowCollection : MemoryMappedCollectionBase, IColumnFitSource
@@ -57,26 +58,25 @@ public sealed class JsonArrayRowCollection : MemoryMappedCollectionBase, IColumn
     private CsvStructure structure;
     private JsonArrayColumnMode mode;
 
-    // The column names as raw UTF-8, so matching a child's property name against them is a span
-    // comparison against the mapping rather than a decoded string per child per realized row.
-    // Property names are compared RAW (escapes and all), which is exactly what the column names
-    // were discovered from and what the tree shows for the same token - so the two never
-    // disagree about which property a cell belongs to.
-    private byte[][] columnNameBytes;
+    // Where each column's value sits inside an element. Property names are matched RAW (escapes
+    // and all) against the mapping, which is exactly what the columns were discovered from and
+    // what the tree shows for the same token - so the two never disagree about which property a
+    // cell belongs to - and no name is ever decoded to realize a row.
+    private ExpandedRoutes routes;
 
     private IndexGrowthMonitor? growthMonitor;
     private int notifiedCount;
 
     public JsonArrayRowCollection(JsonArrayElementIndex elements, JsonStructureIndex index, MMapFile mmap,
-        CsvStructure structure, JsonArrayColumnMode mode)
+        CsvStructure structure, ExpandedRoutes routes, JsonArrayColumnMode mode)
     {
         this.elements = elements;
         this.index = index;
         this.mmap = mmap;
         this.rowFactory = new JsonRowFactory(index, mmap, hintProviders: null);
         this.structure = structure;
+        this.routes = routes;
         this.mode = mode;
-        this.columnNameBytes = EncodeColumnNames(structure);
         // Sampled before the count snapshot, for the reason JsonDiffRowCollection's constructor
         // states: a walk that finishes in the window between the snapshot and a check made
         // after it would leave this collection with no monitor, permanently reporting the
@@ -112,14 +112,14 @@ public sealed class JsonArrayRowCollection : MemoryMappedCollectionBase, IColumn
     /// re-realizes what is visible. This never re-walks the array: element addressing is
     /// independent of how the columns are drawn.
     /// </summary>
-    public void SetShape(CsvStructure newStructure, JsonArrayColumnMode newMode)
+    public void SetShape(CsvStructure newStructure, ExpandedRoutes newRoutes, JsonArrayColumnMode newMode)
     {
-        if (ReferenceEquals(structure, newStructure) && mode == newMode)
+        if (ReferenceEquals(structure, newStructure) && ReferenceEquals(routes, newRoutes) && mode == newMode)
             return;
 
         structure = newStructure;
+        routes = newRoutes;
         mode = newMode;
-        columnNameBytes = EncodeColumnNames(newStructure);
         cache.Clear();
         notifiedCount = GetCount();
         RaiseCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
@@ -178,21 +178,44 @@ public sealed class JsonArrayRowCollection : MemoryMappedCollectionBase, IColumn
         for (int c = 0; c < cells.Length; c++)
             cells[c] = new CsvCell(string.Empty);
 
-        // Direct children only, skipping each nested container whole - the same bounded walk
-        // JsonRowFactory.DescribeChildCount does. Safe to read EndIndex here without a wait:
-        // every element the element index published has closed, so its whole subtree has too.
-        for (int child = token + 1; child < element.EndIndex;)
+        FillFrom(cells, routes, token, element);
+        return cells;
+    }
+
+    /// <summary>
+    /// Draws one container's children into the cells the given level of the routes asks for, and
+    /// descends into exactly those children something is expanded inside of.
+    ///
+    /// Everything else is skipped whole via <c>EndIndex + 1</c>, which is why an unexpanded grid
+    /// costs precisely what it did before columns became routes: the element's direct children,
+    /// once. Recursion depth is the depth someone expanded to, not the document's.
+    ///
+    /// Safe to read EndIndex here without a wait: every element the element index published has
+    /// closed, so its whole subtree has too.
+    /// </summary>
+    private void FillFrom(CsvCell[] cells, ExpandedRoutes level, int containerToken, JsonTokenInfo container)
+    {
+        int ordinal = 0;
+        for (int child = containerToken + 1; child < container.EndIndex; ordinal++)
         {
             var info = index.GetToken(child);
+            bool isContainer = IsContainer(info.Kind);
 
-            int column = ColumnFor(info);
-            if (column >= 0)
-                cells[column] = new CsvCell(TextFor(child, info));
+            bool matched = info.NameLength >= 0
+                ? level.TryMatchName(mmap.GetSpan(info.NameOffset, info.NameLength), out int column, out var inner)
+                : level.TryMatchIndex(ordinal, out column, out inner);
 
-            child = IsContainer(info.Kind) ? info.EndIndex + 1 : child + 1;
+            if (matched)
+            {
+                if (column >= 0 && column < cells.Length)
+                    cells[column] = new CsvCell(TextFor(child, info));
+
+                if (inner is not null && isContainer)
+                    FillFrom(cells, inner, child, info);
+            }
+
+            child = isContainer ? info.EndIndex + 1 : child + 1;
         }
-
-        return cells;
     }
 
     /// <summary>
@@ -226,32 +249,6 @@ public sealed class JsonArrayRowCollection : MemoryMappedCollectionBase, IColumn
         => IsContainer(token.Kind)
             ? rowFactory.BuildContainerSummary(tokenIndex, token, expanded: false)
             : rowFactory.BuildScalarText(token, out _);
-
-    /// <summary>Column index for a property name, or -1 for a property this grid has no column
-    /// for (an element carrying a key the sample never saw).</summary>
-    private int ColumnFor(JsonTokenInfo token)
-    {
-        if (token.NameLength < 0)
-            return -1;
-
-        var name = mmap.GetSpan(token.NameOffset, token.NameLength);
-        for (int c = 0; c < columnNameBytes.Length; c++)
-        {
-            if (name.SequenceEqual(columnNameBytes[c]))
-                return c;
-        }
-
-        return -1;
-    }
-
-    private static byte[][] EncodeColumnNames(CsvStructure structure)
-    {
-        var names = new byte[structure.ColumnCount][];
-        for (int c = 0; c < names.Length; c++)
-            names[c] = Encoding.UTF8.GetBytes(structure.Columns[c].Name);
-
-        return names;
-    }
 
     private void StartGrowthMonitor()
     {

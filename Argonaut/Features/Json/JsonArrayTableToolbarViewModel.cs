@@ -42,13 +42,17 @@ public sealed class JsonArrayTableToolbarViewModel : ObservableObject
     private const int MaxReshapeColumns = 5;
 
     private readonly Action<JsonArrayColumnModeOption> setColumnMode;
+    private readonly Action<int> setArrayColumns;
     private readonly Func<Task> back;
     private JsonArrayColumnModeOption selectedColumnMode;
+    private int selectedArrayColumns = JsonArrayColumnDiscovery.DefaultArrayColumns;
+    private bool canExpandArrays;
 
     public JsonArrayTableToolbarViewModel(string originPath, string originFilePath, bool canReshape,
-        Action<JsonArrayColumnModeOption> setColumnMode, Func<Task> back)
+        Action<JsonArrayColumnModeOption> setColumnMode, Action<int> setArrayColumns, Func<Task> back)
     {
         this.setColumnMode = setColumnMode;
+        this.setArrayColumns = setArrayColumns;
         this.back = back;
 
         OriginPath = originPath;
@@ -68,6 +72,12 @@ public sealed class JsonArrayTableToolbarViewModel : ObservableObject
 
         ColumnModes = options;
         selectedColumnMode = options[0];
+
+        var widths = new int[JsonArrayColumnDiscovery.MaxArrayColumns];
+        for (int n = 1; n <= widths.Length; n++)
+            widths[n - 1] = n;
+
+        ArrayColumnCounts = widths;
     }
 
     /// <summary>The JSONPath this array sits at in the origin document.</summary>
@@ -98,6 +108,36 @@ public sealed class JsonArrayTableToolbarViewModel : ObservableObject
             setColumnMode(value);
         }
     }
+
+    /// <summary>How many positions an expanded array column draws. Small on purpose - past a
+    /// handful the reader wants the cell pane, not more columns.</summary>
+    public IReadOnlyList<int> ArrayColumnCounts { get; }
+
+    public int SelectedArrayColumns
+    {
+        get => selectedArrayColumns;
+        set
+        {
+            if (value <= 0 || !SetField(ref selectedArrayColumns, value))
+                return;
+
+            setArrayColumns(value);
+        }
+    }
+
+    /// <summary>
+    /// Whether the array-width picker is shown. Answered by the document after every discovery
+    /// rather than once at construction: expanding an object column can reveal an array nobody
+    /// could see when the table opened.
+    /// </summary>
+    public bool CanExpandArrays
+    {
+        get => canExpandArrays;
+        private set => SetField(ref canExpandArrays, value);
+    }
+
+    /// <summary>Called by the document with what its freshly discovered columns hold.</summary>
+    public void ShowArrayColumns(bool hasArrayColumns) => CanExpandArrays = hasArrayColumns;
 
     /// <summary>Reloads the origin file as JSON and reveals the path this table came from.</summary>
     public Task BackAsync() => back();

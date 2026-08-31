@@ -578,4 +578,105 @@ public sealed class TableGridVirtualizationTests
             }
         }, CancellationToken.None);
     }
+
+    /// <summary>A header content object rendered as a clickable link, the shape the JSON array
+    /// table's route headers take.</summary>
+    private sealed record HeaderLabel(string Text);
+
+    private static Avalonia.Controls.Templates.IDataTemplate LinkHeaders(Action<string> clicked)
+        => new Avalonia.Controls.Templates.FuncDataTemplate<HeaderLabel>((label, _) =>
+        {
+            var link = new Button { Content = new TextBlock { Text = label.Text } };
+            link.Click += (_, _) => clicked(label.Text);
+            return link;
+        }, supportsRecycling: false);
+
+    [Fact]
+    public Task NewHeaders_RebuildTheColumnsEvenWhenTheMeasuredShapeIsIdentical()
+    {
+        var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(TableGridVirtualizationTests).Assembly);
+        return session.Dispatch(async () =>
+        {
+            var rows = new CountingRows(1_000);
+            var table = new TableView { ItemsSource = rows, SelectionMode = SelectionMode.Single };
+            var columns = new TableGridColumns(table);
+
+            var before = new object[] { new HeaderLabel("geometry"), new HeaderLabel("b"), new HeaderLabel("c") };
+            columns.Rebuild(StructureOf(3), rows, highlightTerm: null, before, LinkHeaders(_ => { }));
+
+            var window = new Window { Width = 900, Height = 600, Content = table };
+            try
+            {
+                window.Show();
+                await PumpAsync();
+                window.UpdateLayout();
+
+                // Same column count and same discovered widths, but these are DIFFERENT columns -
+                // an expansion that happens to measure the same. Taking the relabel shortcut here
+                // would leave every cell template bound to the previous column's index.
+                var after = new object[] { new HeaderLabel("geometry.type"), new HeaderLabel("b"), new HeaderLabel("c") };
+                columns.Rebuild(StructureOf(3), rows, highlightTerm: null, after, LinkHeaders(_ => { }));
+                await PumpAsync();
+                window.UpdateLayout();
+
+                Assert.Same(after[0], table.Columns[0].Header);
+                Assert.Contains("geometry.type", window.GetVisualDescendants().OfType<TextBlock>().Select(t => t.Text));
+
+                // Publishing the SAME shape again is the relabel path - which must leave header
+                // content alone rather than writing the structure's plain name over it.
+                columns.Rebuild(StructureOf(3), rows, highlightTerm: null, after, LinkHeaders(_ => { }));
+                await PumpAsync();
+                window.UpdateLayout();
+
+                Assert.Same(after[0], table.Columns[0].Header);
+                return true;
+            }
+            finally
+            {
+                columns.Dispose();
+                window.Close();
+            }
+        }, CancellationToken.None);
+    }
+
+    [Fact]
+    public Task ClickingAHeaderLink_ReachesItsHandler()
+    {
+        var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(TableGridVirtualizationTests).Assembly);
+        return session.Dispatch(async () =>
+        {
+            var rows = new CountingRows(1_000);
+            var table = new TableView { ItemsSource = rows, SelectionMode = SelectionMode.Single };
+            var columns = new TableGridColumns(table);
+
+            string? clicked = null;
+            var headers = new object[] { new HeaderLabel("geometry"), new HeaderLabel("b"), new HeaderLabel("c") };
+            columns.Rebuild(StructureOf(3), rows, highlightTerm: null, headers, LinkHeaders(text => clicked = text));
+
+            var window = new Window { Width = 900, Height = 600, Content = table };
+            try
+            {
+                window.Show();
+                await PumpAsync();
+                window.UpdateLayout();
+
+                var link = window.GetVisualDescendants().OfType<Button>()
+                    .First(b => b.Content is TextBlock { Text: "geometry" });
+                var at = link.TranslatePoint(new Point(link.Bounds.Width / 2, link.Bounds.Height / 2), window)
+                    ?? throw new InvalidOperationException("The header link is not in the window's visual tree.");
+
+                window.MouseDown(at, MouseButton.Left, RawInputModifiers.None);
+                window.MouseUp(at, MouseButton.Left, RawInputModifiers.None);
+                await PumpAsync();
+
+                Assert.Equal("geometry", clicked);
+                return true;
+            }
+            finally
+            {
+                columns.Dispose();
+                window.Close();
+            }
+        }, CancellationToken.None);
+    }
 }

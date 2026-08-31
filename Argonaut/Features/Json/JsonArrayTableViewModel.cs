@@ -41,7 +41,16 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
     private JsonArrayRowCollection? rows;
     private JsonArrayTableToolbarViewModel? toolbar;
     private CsvStructure? structure;
+    private ExpandedRoutes routes = ExpandedRoutes.None;
+    private IReadOnlyList<ColumnNesting> nesting = [];
+    private IReadOnlyList<JsonArrayColumnHeader> headers = [];
     private JsonArrayColumnMode mode = JsonArrayColumnMode.ByProperty;
+
+    /// <summary>Containers the user has opened from a column header. Survives a re-shape, so
+    /// going out to a reshape mode and back restores what was open.</summary>
+    private readonly OpenColumns openColumns = new();
+
+    private int arrayColumns = JsonArrayColumnDiscovery.DefaultArrayColumns;
 
     protected override IDocumentSession? Session => this.session;
 
@@ -56,6 +65,76 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
     public int ColumnCount => this.structure?.ColumnCount ?? 0;
 
     public int RowCount => this.rows?.Count ?? 0;
+
+    /// <summary>Where each column's value sits inside an element. Flat - one property step per
+    /// column - until a header expands something.</summary>
+    public ExpandedRoutes Routes => this.routes;
+
+    /// <summary>
+    /// What the sample saw inside each column, parallel to <see cref="Structure"/>'s columns:
+    /// which of them have anything nested to expand, and how wide expanding an array would be.
+    /// Empty in a reshape mode, where a cell is a whole element and there is nothing to expand
+    /// into.
+    /// </summary>
+    public IReadOnlyList<ColumnNesting> Nesting => this.nesting;
+
+    /// <summary>
+    /// One header per column of <see cref="Structure"/>, spelled out as the clickable pieces of
+    /// its route. Replaced wholesale on every shape change, which is also what tells the view its
+    /// columns are genuinely different ones rather than the same columns relabelled.
+    /// </summary>
+    public IReadOnlyList<JsonArrayColumnHeader> Headers => this.headers;
+
+    /// <summary>Whether any column holds an array, and so whether how many positions an
+    /// expansion draws is a question worth putting in the toolbar.</summary>
+    public bool HasArrayColumns
+    {
+        get
+        {
+            foreach (var column in this.nesting)
+            {
+                if (column.HasArrays)
+                    return true;
+            }
+
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Positions an open array column draws. Changing it re-discovers the columns - which is a
+    /// walk over the sample, not over the array - and leaves what is open alone.
+    /// </summary>
+    public int ArrayColumns
+    {
+        get => this.arrayColumns;
+        set
+        {
+            int clamped = Math.Clamp(value, 1, JsonArrayColumnDiscovery.MaxArrayColumns);
+            if (clamped == this.arrayColumns)
+                return;
+
+            this.arrayColumns = clamped;
+            ReShape();
+        }
+    }
+
+    /// <summary>
+    /// Opens a container column, or closes it and everything under it - the click on a piece of a
+    /// column header. Unknown keys are ignored rather than throwing: a header the user clicked is
+    /// only as fresh as the last discovery.
+    ///
+    /// Re-discovers from the sample and re-shapes the grid. The array itself is never re-walked;
+    /// element addressing does not depend on how the columns are drawn.
+    /// </summary>
+    public void ToggleColumn(string key)
+    {
+        if (this.session is null || this.rows is null || this.mode != JsonArrayColumnMode.ByProperty)
+            return;
+
+        this.openColumns.Toggle(key);
+        ReShape();
+    }
 
     public override object? Toolbar => this.toolbar;
 
@@ -104,8 +183,12 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
         // from the text that will actually be shown.
         this.cellText = new JsonRowFactory(session.Inner.Index, session.Inner.File, hintProviders: null);
 
-        this.structure = BuildByPropertyStructure(session, out bool elementsAreObjects);
-        this.rows = new JsonArrayRowCollection(session.Elements, session.Inner.Index, session.Inner.File, this.structure, this.mode);
+        var discovered = Discover(session);
+        Adopt(discovered);
+        bool elementsAreObjects = discovered.SawObject;
+
+        this.rows = new JsonArrayRowCollection(session.Elements, session.Inner.Index, session.Inner.File,
+            this.structure, this.routes, this.mode);
 
         // Built here rather than before the wait because it takes the answer discovery just
         // produced: an array of objects is already columned by its property names, so it is
@@ -113,10 +196,14 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
         this.toolbar = new JsonArrayTableToolbarViewModel(originPath, filePath,
             canReshape: !elementsAreObjects,
             setColumnMode: ApplyColumnMode,
+            setArrayColumns: columns => ArrayColumns = columns,
             back: () => navigateBack?.Invoke(originPath) ?? Task.CompletedTask);
+
+        this.toolbar.ShowArrayColumns(HasArrayColumns);
 
         OnPropertyChanged(nameof(Toolbar));
         OnPropertyChanged(nameof(Rows));
+        OnPropertyChanged(nameof(Headers));
         OnPropertyChanged(nameof(Structure));
         OnPropertyChanged(nameof(ColumnCount));
         OnPropertyChanged(nameof(RowCount));
@@ -150,87 +237,77 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
             return;
 
         this.mode = option.Mode;
-        this.structure = option.Mode == JsonArrayColumnMode.ByProperty
-            ? BuildByPropertyStructure(current, out _)
-            : BuildReshapeStructure(current, option.Columns);
+        if (option.Mode == JsonArrayColumnMode.ByProperty)
+        {
+            Adopt(Discover(current));
+        }
+        else
+        {
+            // A reshape cell is a whole element, so there is no route into one, nothing to
+            // report about what is nested in it, and no header piece to click.
+            this.structure = BuildReshapeStructure(current, option.Columns);
+            this.routes = ExpandedRoutes.None;
+            this.nesting = [];
+            this.headers = PlainHeaders(this.structure);
+        }
 
-        this.rows.SetShape(this.structure, this.mode);
+        PublishShape();
+    }
 
+    /// <summary>Re-discovers the columns for the expansion state as it now is, and re-shapes the
+    /// grid. Only ever called in by-property mode - the reshape modes have nothing to expand.</summary>
+    private void ReShape()
+    {
+        if (this.session is not { } current || this.rows is null)
+            return;
+
+        Adopt(Discover(current));
+        PublishShape();
+    }
+
+    private DiscoveredColumns Discover(JsonArrayTableSession current)
+        => JsonArrayColumnDiscovery.FromSample(current.Inner.Index, current.Inner.File, current.Elements,
+            Math.Min(current.Elements.ElementCount, InitialElementTarget),
+            this.cellText ?? throw new InvalidOperationException("The cell-text builder must exist before discovery."),
+            this.openColumns, this.arrayColumns);
+
+    private void Adopt(DiscoveredColumns discovered)
+    {
+        this.structure = discovered.Structure;
+        this.routes = discovered.Routes;
+        this.nesting = discovered.Nesting;
+        this.headers = discovered.Headers;
+
+        if (discovered.Truncated)
+        {
+            ToastService.Show(
+                $"Stopped at {JsonArrayColumnDiscovery.MaxColumns} columns — collapse a column to see the rest.");
+        }
+    }
+
+    private void PublishShape()
+    {
+        this.rows?.SetShape(this.structure!, this.routes, this.mode);
+        this.toolbar?.ShowArrayColumns(HasArrayColumns);
+
+        OnPropertyChanged(nameof(Headers));
         OnPropertyChanged(nameof(Structure));
         OnPropertyChanged(nameof(ColumnCount));
         OnPropertyChanged(nameof(RowCount));
     }
 
-    /// <summary>
-    /// Discovers the columns from the sampled elements: the union of their direct property
-    /// names, in first-seen order, and a per-column width from the longest CHILD VALUE token
-    /// seen for it - not the element's own token length, which for a StartObject is 1 (the brace
-    /// itself). Seeded with each name's own length so the header always fits.
-    ///
-    /// An array whose sampled elements are not objects gets a single "value" column, widthed
-    /// from the elements' own token lengths. Ragged input needs no further special case: an
-    /// element missing a property leaves that cell empty, and one carrying a key the sample never
-    /// saw simply has no column to land in.
-    ///
-    /// Property names are decoded here, once per distinct column plus one per sampled child -
-    /// bounded by the initial batch, and nothing is retained but the names themselves. The row
-    /// collection never decodes a name at all; it matches raw UTF-8 against these.
-    ///
-    /// <paramref name="sawObject"/> reports which of those two shapes the sample was, which is
-    /// also what decides whether the toolbar offers reshape at all.
-    /// </summary>
-    private CsvStructure BuildByPropertyStructure(JsonArrayTableSession current, out bool sawObject)
+    /// <summary>Headers for columns that are not routes into an element - the reshape modes'
+    /// generic labels, which nothing can be expanded from.</summary>
+    private static IReadOnlyList<JsonArrayColumnHeader> PlainHeaders(CsvStructure structure)
     {
-        var index = current.Inner.Index;
-        var file = current.Inner.File;
-        int sample = Math.Min(current.Elements.ElementCount, InitialElementTarget);
-
-        var columns = new Dictionary<string, int>(StringComparer.Ordinal);
-        var names = new List<string>();
-        var maxChars = new List<int>();
-        sawObject = false;
-        int valueChars = 0;
-
-        for (int e = 0; e < sample; e++)
+        var plain = new JsonArrayColumnHeader[structure.ColumnCount];
+        for (int c = 0; c < plain.Length; c++)
         {
-            int token = current.Elements.TokenForElement(e);
-            var element = index.GetToken(token);
-
-            if (element.Kind != JsonTokenKind.StartObject)
-            {
-                valueChars = Math.Max(valueChars, RenderedLength(token, element));
-                continue;
-            }
-
-            sawObject = true;
-            for (int child = token + 1; child < element.EndIndex;)
-            {
-                var info = index.GetToken(child);
-                if (info.NameLength >= 0)
-                {
-                    string name = DisplayText.Read(file, info.NameOffset, info.NameLength, out _);
-                    if (!columns.TryGetValue(name, out int column))
-                    {
-                        column = names.Count;
-                        columns[name] = column;
-                        names.Add(name);
-                        maxChars.Add(name.Length);
-                    }
-
-                    maxChars[column] = Math.Max(maxChars[column], RenderedLength(child, info));
-                }
-
-                child = IsContainer(info.Kind) ? info.EndIndex + 1 : child + 1;
-            }
+            string name = structure.Columns[c].Name;
+            plain[c] = new JsonArrayColumnHeader([new JsonArrayColumnHeaderSegment(name, null)], name);
         }
 
-        if (!sawObject)
-        {
-            names.Add("value");
-            maxChars.Add(Math.Max(valueChars, "value".Length));
-        }
-
-        return CsvStructure.FromMaxChars(names, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(maxChars));
+        return plain;
     }
 
     /// <summary>

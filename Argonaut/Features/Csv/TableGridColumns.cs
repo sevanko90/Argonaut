@@ -50,6 +50,7 @@ public sealed class TableGridColumns : IDisposable
 
     private IColumnFitSource? fitSource;
     private CsvStructure? seeded;
+    private IReadOnlyList<object>? seededHeaders;
 
     public TableGridColumns(TableView table)
     {
@@ -82,8 +83,13 @@ public sealed class TableGridColumns : IDisposable
     /// double-click; null disables the gesture (columns still resize by dragging).
     /// <paramref name="highlightTerm"/> binds the find term into every cell and header, for the
     /// grid that has a search navigator; null renders plain text.
+    ///
+    /// <paramref name="headers"/> replaces the plain string labels with one content object per
+    /// column, rendered by <paramref name="headerTemplate"/> - what the JSON array table's
+    /// clickable route headers arrive as. A grid whose headers are plain text passes neither.
     /// </summary>
-    public void Rebuild(CsvStructure structure, IColumnFitSource? fitSource = null, BindingBase? highlightTerm = null)
+    public void Rebuild(CsvStructure structure, IColumnFitSource? fitSource = null, BindingBase? highlightTerm = null,
+        IReadOnlyList<object>? headers = null, IDataTemplate? headerTemplate = null)
     {
         this.fitSource = fitSource;
 
@@ -91,16 +97,32 @@ public sealed class TableGridColumns : IDisposable
         // structure with the same columns under different names, and rebuilding for that would
         // throw away every width the user had set. Same count, same discovered widths - so the
         // columns are the same columns, and only their labels change.
-        if (this.seeded is { } previous && SameShape(previous, structure))
+        //
+        // Widths alone cannot say that, though: expanding a column in the JSON array table can
+        // land on the same count and the same measured widths while every column is now a
+        // DIFFERENT one, and the cell templates bind by index. So a grid that supplies its own
+        // headers says which columns these are by supplying a new list - identity the count
+        // cannot carry.
+        if (this.seeded is { } previous && SameShape(previous, structure)
+            && ReferenceEquals(this.seededHeaders, headers))
         {
             this.seeded = structure;
             for (int c = 0; c < this.table.Columns.Count && c < structure.ColumnCount; c++)
-                this.table.Columns[c].Header = structure.Columns[c].Name;
+            {
+                // Only the plain-label grids relabel from the structure. A grid that supplies
+                // header content keeps it: writing the structure's name over it here would strip
+                // a route header back to a string the second time the same shape is published,
+                // which the view does whenever it rebuilds for an unchanged view model.
+                this.table.Columns[c].Header = headers is not null && c < headers.Count
+                    ? headers[c]
+                    : structure.Columns[c].Name;
+            }
 
             return;
         }
 
         this.seeded = structure;
+        this.seededHeaders = headers;
         this.table.Columns.Clear();
         this.appliedWidths.Clear();
 
@@ -109,9 +131,9 @@ public sealed class TableGridColumns : IDisposable
             var source = structure.Columns[c];
             this.table.Columns.Add(new TableViewColumn
             {
-                Header = source.Name,
+                Header = headers is not null && c < headers.Count ? headers[c] : source.Name,
                 Width = new GridLength(source.Width),
-                HeaderTemplate = highlightTerm is null ? null : HeaderTemplate(highlightTerm),
+                HeaderTemplate = headerTemplate ?? (highlightTerm is null ? null : HeaderTemplate(highlightTerm)),
                 CellTemplate = CellTemplate(c, highlightTerm),
             });
 
@@ -134,6 +156,7 @@ public sealed class TableGridColumns : IDisposable
         this.appliedWidths.Clear();
         this.fitSource = null;
         this.seeded = null;
+        this.seededHeaders = null;
     }
 
     private static bool SameShape(CsvStructure previous, CsvStructure next)

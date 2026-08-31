@@ -314,4 +314,232 @@ public class JsonArrayTableViewModelTests
             document.Dispose();
             return Task.CompletedTask;
         });
+
+    [Fact]
+    public Task Nesting_ReportsWhichColumnsHaveSomethingInsideThem()
+        => WithDocument("""[{"id":1,"geometry":{"type":"Point"},"bbox":[1,2,3]}]""", document =>
+        {
+            Assert.Equal(["id", "geometry", "bbox"], ColumnNames(document));
+
+            Assert.False(document.Nesting[0].CanExpand);
+            Assert.True(document.Nesting[1].HasObjects);
+            Assert.False(document.Nesting[1].HasArrays);
+            Assert.True(document.Nesting[2].HasArrays);
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task Nesting_ReportsTheWidestArraySeenInAColumn()
+        => WithDocument("""[{"bbox":[1,2]},{"bbox":[1,2,3,4]},{"bbox":[1,2,3]}]""", document =>
+        {
+            // How many index columns expanding this one would draw, before the cap applies.
+            Assert.Equal(4, document.Nesting[0].WidestArity);
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task Nesting_StopsCountingAtTheArityCap()
+        => WithDocument($$"""[{"wide":[{{string.Join(',', Enumerable.Range(0, 200))}}]}]""", document =>
+        {
+            // Past the cap the number is no longer an expansion width, so the walk stops rather
+            // than counting a 7,982-element array out to the end.
+            Assert.Equal(ColumnNesting.ArityCap, document.Nesting[0].WidestArity);
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task Nesting_MeasuresAContainerFromItsBraceToItsCloseNotItsOwnToken()
+        => WithDocument("""[{"geometry":{"type":"Point","coordinates":[1,2]}}]""", document =>
+        {
+            // A StartObject token's own Length is 1; the column's size is the whole span.
+            Assert.Equal("""{"type":"Point","coordinates":[1,2]}""".Length, document.Nesting[0].LargestBytes);
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task Routes_AreFlatUntilSomethingIsExpanded()
+        => WithDocument("""[{"id":1,"geometry":{"type":"Point"}}]""", document =>
+        {
+            Assert.True(document.Routes.TryMatchName("geometry"u8, out int column, out var inner));
+            Assert.Equal(1, column);
+            Assert.Null(inner); // discovery expands nothing - a container is a summary cell
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task Routes_AreEmptyForAnArrayOfScalars()
+        => WithDocument("[1,2,3]", document =>
+        {
+            // The single "value" column is the element itself, not a property of it.
+            Assert.True(document.Routes.IsEmpty);
+            Assert.Single(document.Nesting);
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task Reshape_ClearsTheRoutesAndTheNesting()
+        => WithDocument("[1,2,3,4]", document =>
+        {
+            var toolbar = Assert.IsType<JsonArrayTableToolbarViewModel>(document.Toolbar);
+            toolbar.SelectedColumnMode = toolbar.ColumnModes.Single(o => o.Mode == JsonArrayColumnMode.Reshape && o.Columns == 2);
+
+            Assert.True(document.Routes.IsEmpty);
+            Assert.Empty(document.Nesting);
+            return Task.CompletedTask;
+        });
+
+    private static string[] CellsOf(JsonArrayTableViewModel document, int row)
+        => ((CsvVisibleRow)document.Rows[row]!).Cells.Select(c => c.Text).ToArray();
+
+    /// <summary>The key a header piece toggles - what a click on it hands the document.</summary>
+    private static string KeyOf(JsonArrayTableViewModel document, int column)
+        => document.Headers[column].Segments[^1].Key
+           ?? throw new InvalidOperationException($"Column {column} offers nothing to expand.");
+
+    [Fact]
+    public Task ExpandingAnObjectColumn_ReplacesItWithItsChildren()
+        => WithDocument("""[{"id":1,"geometry":{"type":"Point","nested":{"a":1}}}]""", document =>
+        {
+            document.ToggleColumn(KeyOf(document, 1));
+
+            Assert.Equal(["id", "geometry.type", "geometry.nested"], ColumnNames(document));
+            // The child that was not expanded is still a summary - depth grows by clicks only.
+            Assert.Equal(["1", "\"Point\"", "{ 1 member }"], CellsOf(document, 0));
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task ExpandingTwice_CollapsesBackToTheContainerColumn()
+        => WithDocument("""[{"geometry":{"type":"Point"}}]""", document =>
+        {
+            string key = KeyOf(document, 0);
+            document.ToggleColumn(key);
+            Assert.Equal(["geometry.type"], ColumnNames(document));
+
+            // The ancestor piece of the expanded column's header toggles the same key.
+            Assert.Equal(key, document.Headers[0].Segments[0].Key);
+            document.ToggleColumn(key);
+
+            Assert.Equal(["geometry"], ColumnNames(document));
+            Assert.Equal(["{ 1 member }"], CellsOf(document, 0));
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task CollapsingAContainer_ClosesWhatWasOpenInsideIt()
+        => WithDocument("""[{"a":{"b":{"c":1}}}]""", document =>
+        {
+            string outer = KeyOf(document, 0);
+            document.ToggleColumn(outer);
+            document.ToggleColumn(KeyOf(document, 0)); // a.b
+            Assert.Equal(["a.b.c"], ColumnNames(document));
+
+            document.ToggleColumn(outer);
+            document.ToggleColumn(outer);
+
+            // Reopening shows a's own children, not the expansion from before it was closed.
+            Assert.Equal(["a.b"], ColumnNames(document));
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task ExpandingAnArray_DrawsTheFirstPositionsAndSummarisesTheRest()
+        => WithDocument("""[{"coordinates":[10,20,30,40,50,60,70]}]""", document =>
+        {
+            document.ToggleColumn(KeyOf(document, 0));
+
+            // Four positions by default, then one remainder column carrying the real count -
+            // this is the $.features[7].geometry.coordinates[7982] case in miniature.
+            Assert.Equal(
+                ["coordinates[0]", "coordinates[1]", "coordinates[2]", "coordinates[3]", "coordinates[…]"],
+                ColumnNames(document));
+            Assert.Equal(["10", "20", "30", "40", "[ 7 items ]"], CellsOf(document, 0));
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task ExpandingAnArrayThatFits_DrawsNoRemainderColumn()
+        => WithDocument("""[{"bbox":[1,2,3]}]""", document =>
+        {
+            document.ToggleColumn(KeyOf(document, 0));
+
+            Assert.Equal(["bbox[0]", "bbox[1]", "bbox[2]"], ColumnNames(document));
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task ArrayColumns_ChangesHowManyPositionsAnOpenArrayDraws()
+        => WithDocument("""[{"bbox":[1,2,3,4,5,6]}]""", document =>
+        {
+            document.ToggleColumn(KeyOf(document, 0));
+            Assert.Equal(5, document.ColumnCount); // four positions plus the remainder
+
+            document.ArrayColumns = 2;
+
+            Assert.Equal(["bbox[0]", "bbox[1]", "bbox[…]"], ColumnNames(document));
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task ArrayColumns_IsOfferedOnlyWhenAColumnHoldsAnArray()
+        => WithDocument("""[{"id":1,"geometry":{"bbox":[1,2]}}]""", document =>
+        {
+            var toolbar = Assert.IsType<JsonArrayTableToolbarViewModel>(document.Toolbar);
+            Assert.False(toolbar.CanExpandArrays);
+
+            // Expanding an object can reveal an array nobody could see when the table opened.
+            document.ToggleColumn(KeyOf(document, 1));
+
+            Assert.True(toolbar.CanExpandArrays);
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task HeaderSegments_LinkTheContainersAndLeaveScalarsPlain()
+        => WithDocument("""[{"geometry":{"type":"Point"}}]""", document =>
+        {
+            document.ToggleColumn(KeyOf(document, 0));
+
+            var segments = document.Headers[0].Segments;
+            Assert.Equal(["geometry", ".type"], segments.Select(s => s.Text));
+            Assert.NotNull(segments[0].Key);  // collapses back to geometry
+            Assert.Null(segments[1].Key);     // a scalar has nothing to open
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public async Task TooManyColumns_StopsAtTheCapAndSaysSo()
+    {
+        string wide = "[{" + string.Join(',', Enumerable.Range(0, 200).Select(i => $"\"p{i}\":{i}")) + "}]";
+
+        string? toast = null;
+        void Capture(string message) => toast = message;
+        ToastService.Requested += Capture;
+        try
+        {
+            await WithDocument(wide, document =>
+            {
+                Assert.Equal(JsonArrayColumnDiscovery.MaxColumns, document.ColumnCount);
+                return Task.CompletedTask;
+            });
+        }
+        finally
+        {
+            ToastService.Requested -= Capture;
+        }
+
+        Assert.Contains($"{JsonArrayColumnDiscovery.MaxColumns} columns", toast);
+    }
+
+    [Fact]
+    public Task ReshapeHeaders_OfferNothingToExpand()
+        => WithDocument("[1,2,3,4]", document =>
+        {
+            var toolbar = Assert.IsType<JsonArrayTableToolbarViewModel>(document.Toolbar);
+            toolbar.SelectedColumnMode = toolbar.ColumnModes.Single(o => o.Mode == JsonArrayColumnMode.Reshape && o.Columns == 2);
+
+            Assert.Equal(2, document.Headers.Count);
+            Assert.All(document.Headers, header => Assert.Null(header.Segments[^1].Key));
+            return Task.CompletedTask;
+        });
 }

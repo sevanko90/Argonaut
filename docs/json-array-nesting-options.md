@@ -232,6 +232,20 @@ No extra walk, no extra read, no decoded text.
 Each slice is shippable on its own and none of them changes the collapsed-cell cost, which is the
 budget the whole feature has to live inside.
 
+**Slices 1 and 2 are built.** Three details were settled while building them:
+
+- **The remainder column shows the array's own summary**, because its route IS the array's. So an
+  open `coordinates` reads `[0] [1] [2] [3] [ 7982 items ]` - the positions drawn and the true
+  count, side by side - and that column is already the right target for a future "open this as its
+  own table" gesture.
+- **Column keys are built from control-character markers** (`JsonArrayColumnDiscovery.NameMarker`),
+  not dots. JSON requires control characters inside strings to be escaped, so a marker cannot occur
+  in a raw property name: a property literally named `a.b` and an expanded `a` containing `b` stay
+  distinct, and a key splits back into route steps by parsing rather than guessing.
+- **The expand affordance is the link styling itself**, with no chevron or separate expander glyph.
+  A glyph would have to be paid for out of the column's discovered width, and the thing it would
+  mark is already the only underlined, accent-coloured text in the header.
+
 ## 6. Open questions
 
 - **Does an expansion survive Back and re-entry?** The table document is rebuilt from scratch on

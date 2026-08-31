@@ -23,7 +23,8 @@ public class JsonArrayRowCollectionTests
             using var session = JsonArrayTableSession.Start(path, 0, new FileInfo(path).Length);
             await session.IndexingTask;
 
-            using var rows = new JsonArrayRowCollection(session.Elements, session.Inner.Index, session.Inner.File, structure, mode);
+            using var rows = new JsonArrayRowCollection(session.Elements, session.Inner.Index, session.Inner.File,
+                structure, RoutesFor(structure, mode), mode);
             assert(rows);
         }
         finally
@@ -34,6 +35,35 @@ public class JsonArrayRowCollectionTests
 
     private static CsvStructure Columns(params string[] names)
         => CsvStructure.FromMaxChars(names, names.Select(n => n.Length).ToArray());
+
+    /// <summary>The flat routes discovery would have produced for these columns - one direct
+    /// property step each - and none at all for a reshape, whose cells are whole elements.</summary>
+    private static ExpandedRoutes RoutesFor(CsvStructure structure, JsonArrayColumnMode mode)
+        => mode == JsonArrayColumnMode.ByProperty
+            ? ExpandedRoutes.ForProperties(structure.Columns.Select(c => c.Name).ToArray())
+            : ExpandedRoutes.None;
+
+    /// <summary>The same harness with routes chosen by the caller - what a header expansion
+    /// will hand the collection once slice 2 can build one.</summary>
+    private static async Task WithRoutedRows(string json, CsvStructure structure, ExpandedRoutes routes,
+        Action<JsonArrayRowCollection> assert)
+    {
+        string path = Path.GetTempFileName();
+        File.WriteAllBytes(path, Encoding.UTF8.GetBytes(json));
+        try
+        {
+            using var session = JsonArrayTableSession.Start(path, 0, new FileInfo(path).Length);
+            await session.IndexingTask;
+
+            using var rows = new JsonArrayRowCollection(session.Elements, session.Inner.Index, session.Inner.File,
+                structure, routes, JsonArrayColumnMode.ByProperty);
+            assert(rows);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 
     private static string[] TextOf(JsonArrayRowCollection rows, int i)
         => ((CsvVisibleRow)rows[i]!).Cells.Select(c => c.Text).ToArray();
@@ -144,7 +174,7 @@ public class JsonArrayRowCollectionTests
         {
             Assert.Equal(6, rows.Count);
 
-            rows.SetShape(Columns("Column 1", "Column 2", "Column 3"), JsonArrayColumnMode.Reshape);
+            rows.SetShape(Columns("Column 1", "Column 2", "Column 3"), ExpandedRoutes.None, JsonArrayColumnMode.Reshape);
 
             Assert.Equal(2, rows.Count);
             Assert.Equal(["1", "2", "3"], TextOf(rows, 0));
@@ -159,7 +189,7 @@ public class JsonArrayRowCollectionTests
             System.Collections.Specialized.NotifyCollectionChangedEventArgs? captured = null;
             rows.CollectionChanged += (_, e) => captured = e;
 
-            rows.SetShape(Columns("Column 1", "Column 2"), JsonArrayColumnMode.Reshape);
+            rows.SetShape(Columns("Column 1", "Column 2"), ExpandedRoutes.None, JsonArrayColumnMode.Reshape);
 
             Assert.NotNull(captured);
             Assert.Equal(System.Collections.Specialized.NotifyCollectionChangedAction.Reset, captured!.Action);
@@ -171,11 +201,12 @@ public class JsonArrayRowCollectionTests
         => WithRows("[1,2,3,4]", Columns("value"), JsonArrayColumnMode.ByProperty, rows =>
         {
             var structure = Columns("value");
-            rows.SetShape(structure, JsonArrayColumnMode.ByProperty);
+            var routes = RoutesFor(structure, JsonArrayColumnMode.ByProperty);
+            rows.SetShape(structure, routes, JsonArrayColumnMode.ByProperty);
 
             bool raised = false;
             rows.CollectionChanged += (_, _) => raised = true;
-            rows.SetShape(structure, JsonArrayColumnMode.ByProperty);
+            rows.SetShape(structure, routes, JsonArrayColumnMode.ByProperty);
 
             Assert.False(raised);
         });
@@ -205,4 +236,64 @@ public class JsonArrayRowCollectionTests
             Assert.Equal(1, ((CsvVisibleRow)rows[0]!).RowNumber);
             Assert.Equal(3, ((CsvVisibleRow)rows[2]!).RowNumber);
         });
+
+    [Fact]
+    public Task ExpandedContainer_DrawsItsChildrenIntoTheirOwnColumns()
+        => WithRoutedRows("""[{"id":1,"geometry":{"type":"Point","coordinates":[1,2]}}]""",
+            Columns("id", "geometry.type", "geometry.coordinates"),
+            ExpandedRoutes.Build([
+                ColumnRoute.Property("id"),
+                new ColumnRoute([RouteStep.Property("geometry"), RouteStep.Property("type")], "geometry.type"),
+                new ColumnRoute([RouteStep.Property("geometry"), RouteStep.Property("coordinates")], "geometry.coordinates"),
+            ]),
+            rows => Assert.Equal(["1", "\"Point\"", "[ 2 items ]"], TextOf(rows, 0)));
+
+    [Fact]
+    public Task ExpandedArray_DrawsThePositionsExpandedAndNoMore()
+        => WithRoutedRows("""[{"bbox":[10,20,30,40,50,60,70,80]}]""",
+            Columns("bbox[0]", "bbox[1]"),
+            ExpandedRoutes.Build([
+                new ColumnRoute([RouteStep.Property("bbox"), RouteStep.At(0)], "bbox[0]"),
+                new ColumnRoute([RouteStep.Property("bbox"), RouteStep.At(1)], "bbox[1]"),
+            ]),
+            // The eight-element array costs two cells: this is what keeps
+            // $.features[7].geometry.coordinates[7982] finite.
+            rows => Assert.Equal(["10", "20"], TextOf(rows, 0)));
+
+    [Fact]
+    public Task ExpansionNestsAsDeepAsTheRouteAsksAndNoDeeper()
+        => WithRoutedRows("""[{"a":{"b":{"c":1,"d":{"e":2}}}}]""",
+            Columns("a.b.c", "a.b.d"),
+            ExpandedRoutes.Build([
+                new ColumnRoute([RouteStep.Property("a"), RouteStep.Property("b"), RouteStep.Property("c")], "a.b.c"),
+                new ColumnRoute([RouteStep.Property("a"), RouteStep.Property("b"), RouteStep.Property("d")], "a.b.d"),
+            ]),
+            // "d" is drawn as a summary, not walked into - nothing below it was asked for.
+            rows => Assert.Equal(["1", "{ 1 member }"], TextOf(rows, 0)));
+
+    [Fact]
+    public Task ElementMissingTheExpandedRoute_LeavesThoseCellsEmpty()
+        => WithRoutedRows("""[{"geometry":{"type":"Point"}},{"id":2},{"geometry":{}}]""",
+            Columns("id", "geometry.type"),
+            ExpandedRoutes.Build([
+                ColumnRoute.Property("id"),
+                new ColumnRoute([RouteStep.Property("geometry"), RouteStep.Property("type")], "geometry.type"),
+            ]),
+            rows =>
+            {
+                Assert.Equal(["", "\"Point\""], TextOf(rows, 0));
+                Assert.Equal(["2", ""], TextOf(rows, 1));
+                Assert.Equal(["", ""], TextOf(rows, 2));
+            });
+
+    [Fact]
+    public Task ScalarWhereAContainerWasExpected_IsDrawnRatherThanDescendedInto()
+        => WithRoutedRows("""[{"geometry":"Point"}]""",
+            Columns("geometry.type"),
+            ExpandedRoutes.Build([
+                new ColumnRoute([RouteStep.Property("geometry"), RouteStep.Property("type")], "geometry.type"),
+            ]),
+            // Ragged data, not an error: the route passes through a scalar, so it draws nothing
+            // and the walk moves on rather than reading EndIndex off a scalar token.
+            rows => Assert.Equal([""], TextOf(rows, 0)));
 }

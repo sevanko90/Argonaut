@@ -38,6 +38,28 @@
                     <Setter Property="FontSize" Value="12" />
                     <Setter Property="FontWeight" Value="SemiBold" />
                 </Style>
+
+                <!-- A header piece that names a container: it reads as a link because clicking it
+                     is what opens that container into columns (or collapses it back). Chrome-free
+                     so the header still reads as a header, not a row of buttons. -->
+                <Style Selector="Button.columnLink">
+                    <Setter Property="Background" Value="Transparent" />
+                    <Setter Property="BorderThickness" Value="0" />
+                    <Setter Property="Padding" Value="0" />
+                    <Setter Property="MinWidth" Value="0" />
+                    <Setter Property="MinHeight" Value="0" />
+                    <Setter Property="VerticalAlignment" Value="Center" />
+                    <Setter Property="Foreground" Value="{DynamicResource AppAccentBrush}" />
+                </Style>
+                <Style Selector="Button.columnLink /template/ ContentPresenter">
+                    <Setter Property="Background" Value="Transparent" />
+                </Style>
+                <Style Selector="Button.columnLink TextBlock">
+                    <Setter Property="Foreground" Value="{DynamicResource AppAccentBrush}" />
+                </Style>
+                <Style Selector="Button.columnLink:pointerover TextBlock">
+                    <Setter Property="TextDecorations" Value="Underline" />
+                </Style>
             </TableView.Styles>
         </TableView>
     </Border>

@@ -39,6 +39,11 @@ public partial class JsonArrayTableView : UserControl
     /// writes the column's width, and this remembers it across the pane closing and reopening.</summary>
     private const double DefaultDetailWidth = 380;
 
+    /// <summary>What a click on a cell does, said in the cell's own tooltip. Nothing else in a
+    /// grid of values says the cells are clickable at all, so the grid's cues are this, the hover
+    /// mark and tint TableGridColumns and the styles draw, and nothing more.</summary>
+    private const string CellClickHint = "Click to open this cell in the detail pane";
+
     private readonly TableGridColumns columns;
     private JsonArrayTableViewModel? subscribedViewModel;
     private double detailWidth = DefaultDetailWidth;
@@ -166,13 +171,15 @@ public partial class JsonArrayTableView : UserControl
 
         // The row collection is the fit source: a double-click on a resizer measures the rows it
         // has already realized.
-        this.columns.Rebuild(vm.Structure, vm.Rows, highlightTerm: null, vm.Headers, HeaderTemplate(vm));
+        this.columns.Rebuild(vm.Structure, vm.Rows, highlightTerm: null, vm.Headers, HeaderTemplate(vm), CellClickHint);
     }
 
     /// <summary>
     /// A header as its route's pieces: plain text for anything with nothing inside it, a link for
     /// each container - the last piece opening one, the pieces before it collapsing back to it.
-    /// The link styling IS the affordance, which is why nothing else marks an expandable column.
+    /// The link styling is the affordance; each link's own tooltip is what says which of the two
+    /// clicking it does, since accent-and-underline alone cannot tell open from collapse.
+    /// The whole route stays on the panel, so hovering the plain pieces still gives the path.
     /// </summary>
     private static IDataTemplate HeaderTemplate(JsonArrayTableViewModel vm)
         => new FuncDataTemplate<JsonArrayColumnHeader>((header, _) =>
@@ -180,20 +187,40 @@ public partial class JsonArrayTableView : UserControl
             var pieces = new StackPanel { Orientation = Orientation.Horizontal };
             pieces.SetValue(ToolTip.TipProperty, header.Display);
 
-            foreach (var segment in header.Segments)
-                pieces.Children.Add(segment.Key is { } key ? Link(segment.Text, key, vm) : Plain(segment.Text));
+            for (int i = 0; i < header.Segments.Count; i++)
+            {
+                var segment = header.Segments[i];
+
+                // The last piece is this column's own value, so its link opens what is inside it;
+                // every piece before it is a container already open around this column, so its
+                // link folds that container - and these columns - back up.
+                pieces.Children.Add(segment.Key is { } key
+                    ? Link(segment.Text, key, vm, i == header.Segments.Count - 1)
+                    : Plain(segment.Text));
+            }
 
             return pieces;
         }, supportsRecycling: false);
 
-    private static Control Link(string text, string key, JsonArrayTableViewModel vm)
+    private static Control Link(string text, string key, JsonArrayTableViewModel vm, bool opens)
     {
+        // The link's own text carries the class the accent-and-underline styling selects on.
+        // A descendant selector would reach further than it looks: a tooltip's content is
+        // parented under the control it belongs to, so "Button.columnLink TextBlock" styled the
+        // tip that explains the link as though it were another link.
+        var label = Plain(text);
+        label.Classes.Add("columnLinkText");
+
         var link = new Button
         {
-            Content = Plain(text),
+            Content = label,
             Classes = { "columnLink" },
             Cursor = new Cursor(StandardCursorType.Hand),
         };
+
+        link.SetValue(ToolTip.TipProperty, opens
+            ? "Click to expand this into its own columns"
+            : "Click to collapse these columns back into one");
 
         // Deferred: this replaces the columns collection the clicked button is sitting inside.
         link.Click += (_, _) => UiDeferral.AfterCurrentInput(() => vm.ToggleColumn(key));

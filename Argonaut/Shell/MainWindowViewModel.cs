@@ -818,7 +818,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 text += $" ({percent}%)";
             }
 
-            Dispatcher.UIThread.Post(() =>
+            ProgressPost.ToUiThread(() =>
             {
                 if (!stopped && owner.openRequest.IsCurrent(requestId))
                     owner.StatusText = text;

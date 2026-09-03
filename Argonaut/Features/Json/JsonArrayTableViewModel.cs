@@ -453,7 +453,7 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
                 text += $"… ({percent}%)";
             }
 
-            Dispatcher.UIThread.Post(() =>
+            ProgressPost.ToUiThread(() =>
             {
                 if (!this.owner.IsDisposed)
                     this.owner.StatusText = text;

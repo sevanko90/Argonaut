@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -22,15 +23,22 @@ public abstract class AppendLogIndexBase<T> where T : struct
     // full reasoning.
     protected readonly SegmentedAppendLog<T> items = new();
 
-    // Guards ONLY the cold waiter machinery below (registration and completion of
-    // countReady). Nothing on the per-record hot path takes this lock.
+    // Guards ONLY the cold waiter machinery below (registration and completion of the
+    // outstanding waits). Nothing on the per-record hot path takes this lock.
     private readonly Lock sync = new();
 
-    private TaskCompletionSource<bool>? countReady;
-    private int countReadyTarget;
+    // Every outstanding wait with the count it is waiting for. A LIST rather than the single
+    // shared TaskCompletionSource this used to hold: the waits genuinely overlap and genuinely
+    // want different targets - a document's date-scheme inference waits for its whole sample
+    // while a path resolve waits for the next batch - and one slot cannot hold both. It used to
+    // be overwritten by whichever wait asked for a larger target, which stranded the smaller
+    // one's task forever: nothing completed it, MarkComplete only ever saw the newer slot, and
+    // the task the caller had already awaited never finished. That is a hang, not a delay - it
+    // deadlocked IndexedFileSession.Dispose, which joins exactly these registered tasks.
+    private readonly List<(int Target, TaskCompletionSource<bool> Ready)> waiters = [];
 
-    // Hot-path mirror of countReadyTarget: 0 means "nobody is waiting", so the writer
-    // can skip the waiter lock entirely with one volatile read per record. Written only
+    // Hot-path mirror of the LOWEST outstanding target: 0 means "nobody is waiting", so the
+    // writer can skip the waiter lock entirely with one volatile read per record. Written only
     // inside the sync lock.
     private volatile int pendingWaitTarget;
 
@@ -61,7 +69,9 @@ public abstract class AppendLogIndexBase<T> where T : struct
     public int ItemCount => this.items.Count;
 
     /// <summary>
-    /// Waits (asynchronously) for the writer to reach a target item count.
+    /// Waits (asynchronously) for the writer to reach a target item count. Any number of these
+    /// may be outstanding at once, each for its own target; each completes on the first of its
+    /// own target being reached or the scan stopping.
     /// </summary>
     /// <param name="targetCount">Number of items that must be published before the task completes</param>
     /// <returns>A task that completes once the scan is complete or the log contains the target number of items</returns>
@@ -72,27 +82,41 @@ public abstract class AppendLogIndexBase<T> where T : struct
             if (this.items.Count >= targetCount || this.complete)
                 return Task.CompletedTask;
 
-            if (this.countReady is null || this.countReady.Task.IsCompleted || targetCount > this.countReadyTarget)
-            {
-                this.countReadyTarget = targetCount;
-                this.countReady = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            }
-
-            this.pendingWaitTarget = this.countReadyTarget;
+            var ready = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            this.waiters.Add((targetCount, ready));
+            this.pendingWaitTarget = LowestTarget();
 
             // Re-check after publishing the flag: the writer may have crossed the target
             // between the first check above and the flag becoming visible to it. The
             // condition is monotone (count only grows), so any later append also notices
             // the flag - this re-check only matters if no further item is ever appended.
-            if (this.items.Count >= this.countReadyTarget || this.complete)
+            // MarkComplete drains the list under this same lock, so a scan that stopped
+            // before the flag went up is caught here rather than left waiting.
+            if (this.items.Count >= targetCount || this.complete)
             {
-                var waiter = this.countReady;
-                this.pendingWaitTarget = 0;
-                waiter.TrySetResult(true);
+                this.waiters.RemoveAt(this.waiters.Count - 1);
+                this.pendingWaitTarget = LowestTarget();
+                return Task.CompletedTask;
             }
 
-            return this.countReady.Task;
+            return ready.Task;
         }
+    }
+
+    /// <summary>The smallest count any outstanding wait is waiting for, or 0 when none is. The
+    /// smallest, because the writer's hot-path check is a single comparison and has to fire on
+    /// the FIRST target crossed; <see cref="NotifyCountReady"/> then works out which waits that
+    /// actually released. Callers hold <see cref="sync"/>.</summary>
+    private int LowestTarget()
+    {
+        int lowest = 0;
+        foreach (var (target, _) in this.waiters)
+        {
+            if (lowest == 0 || target < lowest)
+                lowest = target;
+        }
+
+        return lowest;
     }
 
     /// <summary>
@@ -112,37 +136,53 @@ public abstract class AppendLogIndexBase<T> where T : struct
 
     private void NotifyCountReady()
     {
-        TaskCompletionSource<bool>? waiter = null;
+        List<TaskCompletionSource<bool>>? reached = null;
         lock (this.sync)
         {
-            if (this.countReady is not null && !this.countReady.Task.IsCompleted && this.countReadyTarget > 0 &&
-                this.items.Count >= this.countReadyTarget)
+            int count = this.items.Count;
+            for (int i = this.waiters.Count - 1; i >= 0; i--)
             {
-                waiter = this.countReady;
-                this.pendingWaitTarget = 0;
+                if (this.waiters[i].Target > count)
+                    continue;
+
+                (reached ??= []).Add(this.waiters[i].Ready);
+                this.waiters.RemoveAt(i);
             }
+
+            this.pendingWaitTarget = LowestTarget();
         }
 
-        waiter?.TrySetResult(true);
+        // Completed outside the lock: nothing here needs it held, and the waiter machinery is
+        // the one thing the writer must never be made to queue behind.
+        if (reached is null)
+            return;
+
+        foreach (var waiter in reached)
+            waiter.TrySetResult(true);
     }
 
     /// <summary>
-    /// Marks the scan as complete and releases any waiter unconditionally - waits for
-    /// targets the file never reaches (e.g. an initial-batch wait on a small file) depend
-    /// on this signal to complete.
+    /// Marks the scan as complete and releases EVERY outstanding wait unconditionally - waits
+    /// for targets the file never reaches (e.g. an initial-batch wait on a small file, or any
+    /// wait outstanding when the scan is cancelled) depend on this signal to complete.
     /// </summary>
     protected void MarkComplete()
     {
         this.complete = true;
 
-        TaskCompletionSource<bool>? waiter;
+        TaskCompletionSource<bool>[] outstanding;
         lock (this.sync)
         {
-            waiter = this.countReady;
+            outstanding = new TaskCompletionSource<bool>[this.waiters.Count];
+            for (int i = 0; i < this.waiters.Count; i++)
+                outstanding[i] = this.waiters[i].Ready;
+
+            this.waiters.Clear();
             this.pendingWaitTarget = 0;
         }
 
-        waiter?.TrySetResult(true);
+        foreach (var waiter in outstanding)
+            waiter.TrySetResult(true);
     }
 
     /// <summary>

@@ -5,10 +5,13 @@ using Argonaut.Infrastructure;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
+using Avalonia.Controls.Shapes;
 using Avalonia.Controls.Templates;
 using Avalonia.Data;
+using Avalonia.Data.Converters;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Layout;
 using Avalonia.Markup.Xaml.MarkupExtensions;
 using Avalonia.Media;
 using Avalonia.Reactive;
@@ -87,9 +90,14 @@ public sealed class TableGridColumns : IDisposable
     /// <paramref name="headers"/> replaces the plain string labels with one content object per
     /// column, rendered by <paramref name="headerTemplate"/> - what the JSON array table's
     /// clickable route headers arrive as. A grid whose headers are plain text passes neither.
+    ///
+    /// <paramref name="clickHint"/> says that a click on a cell of this grid opens something, and
+    /// names what: the cells then carry the hover mark that teaches the gesture and repeat the
+    /// hint under the value in their tooltip. Null - a grid whose cells only select - renders
+    /// exactly the plain trimmed text with the untrimmed tooltip it always did.
     /// </summary>
     public void Rebuild(CsvStructure structure, IColumnFitSource? fitSource = null, BindingBase? highlightTerm = null,
-        IReadOnlyList<object>? headers = null, IDataTemplate? headerTemplate = null)
+        IReadOnlyList<object>? headers = null, IDataTemplate? headerTemplate = null, string? clickHint = null)
     {
         this.fitSource = fitSource;
 
@@ -134,7 +142,7 @@ public sealed class TableGridColumns : IDisposable
                 Header = headers is not null && c < headers.Count ? headers[c] : source.Name,
                 Width = new GridLength(source.Width),
                 HeaderTemplate = headerTemplate ?? (highlightTerm is null ? null : HeaderTemplate(highlightTerm)),
-                CellTemplate = CellTemplate(c, highlightTerm),
+                CellTemplate = CellTemplate(c, highlightTerm, clickHint),
             });
 
             this.appliedWidths.Add(source.Width);
@@ -178,17 +186,116 @@ public sealed class TableGridColumns : IDisposable
     /// template's DataContext is the whole <see cref="CsvVisibleRow"/>, so the index is the only
     /// thing that tells one column's cells from another's. Trimming plus a tooltip carrying the
     /// untrimmed text is what makes a too-narrow column readable without resizing it.
+    ///
+    /// With a <paramref name="clickHint"/> the cell gains the two cues a clickable cell needs and
+    /// a grid of plain values must not have: the mark that appears under the pointer, and the
+    /// hint below the value in the tooltip. Neither costs the column any width - the mark is
+    /// drawn over the cell's right edge rather than laid out beside the text.
     /// </summary>
-    private static IDataTemplate CellTemplate(int columnIndex, BindingBase? highlightTerm)
+    private static IDataTemplate CellTemplate(int columnIndex, BindingBase? highlightTerm, string? clickHint)
         => new FuncDataTemplate<CsvVisibleRow>((_, _) =>
         {
             var text = CellTextBlock();
             var cellText = new Binding($"Cells[{columnIndex}].Text");
 
-            text.Bind(ToolTip.TipProperty, cellText);
             BindText(text, cellText, highlightTerm);
-            return text;
+
+            if (clickHint is null)
+            {
+                text.Bind(ToolTip.TipProperty, cellText);
+                return text;
+            }
+
+            var cell = new Grid();
+            cell.Children.Add(text);
+            cell.Children.Add(HoverMark());
+            cell.SetValue(ToolTip.TipProperty, CellTip(text, clickHint));
+            return cell;
         }, supportsRecycling: true);
+
+    /// <summary>
+    /// The "this opens something" mark, drawn over the right edge of whichever cell the pointer is
+    /// on. It carries the hover tint as its own background so it masks the tail of a long value
+    /// instead of sitting on top of it, and it is a vector for the same reason the tree's
+    /// triangles are: a glyph character renders at a different size on every platform.
+    ///
+    /// Its trigger is the containing <see cref="TableViewCell"/>'s pointer-over, found on attach:
+    /// the cell is what the tint is styled on, so anything else would light the mark up over a
+    /// different area than the one that highlights.
+    /// </summary>
+    private static Control HoverMark()
+    {
+        // Material "open_in_full".
+        var arrows = new Path
+        {
+            Data = Geometry.Parse("M21 11V3h-8l3.29 3.29-10 10L3 13v8h8l-3.29-3.29 10-10z"),
+            Stretch = Stretch.Uniform,
+            Width = 9,
+            Height = 9,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        arrows.Bind(Shape.FillProperty, new DynamicResourceExtension("AppMutedTextBrush"));
+
+        var mark = new Border
+        {
+            Child = arrows,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Stretch,
+            Padding = new Thickness(6, 0, 0, 0),
+            IsVisible = false,
+
+            // Never a hit target: a press on the mark is a press on the cell it is marking.
+            IsHitTestVisible = false,
+        };
+        mark.Bind(Border.BackgroundProperty, new DynamicResourceExtension("AppHoverBackgroundBrush"));
+
+        IDisposable? pointerOver = null;
+        mark.AttachedToVisualTree += (_, _) =>
+        {
+            pointerOver?.Dispose();
+            pointerOver = mark.FindAncestorOfType<TableViewCell>() is { } owner
+                ? mark.Bind(Visual.IsVisibleProperty, owner.GetObservable(InputElement.IsPointerOverProperty))
+                : null;
+        };
+        mark.DetachedFromVisualTree += (_, _) =>
+        {
+            pointerOver?.Dispose();
+            pointerOver = null;
+            mark.IsVisible = false;
+        };
+
+        return mark;
+    }
+
+    /// <summary>
+    /// The cell's tooltip when its cells open something: the untrimmed value, then what a click
+    /// does, muted and separated so the hint reads as chrome rather than as part of the value.
+    ///
+    /// The value is bound from the realized <paramref name="cell"/> block rather than from the
+    /// row: a tooltip's content is not in the cell's visual tree and inherits no DataContext, and
+    /// this way the tooltip can only ever show the string the cell itself is showing. An empty
+    /// cell drops the value and the rule, leaving the hint alone - a missing property is still a
+    /// cell worth clicking.
+    /// </summary>
+    private static Control CellTip(TextBlock cell, string clickHint)
+    {
+        var shown = new Binding(nameof(TextBlock.Text)) { Source = cell };
+        var hasValue = new Binding(nameof(TextBlock.Text)) { Source = cell, Converter = StringConverters.IsNotNullOrEmpty };
+
+        var value = new TextBlock { TextWrapping = TextWrapping.Wrap, MaxWidth = 420 };
+        value.Bind(TextBlock.TextProperty, shown);
+        value.Bind(Visual.IsVisibleProperty, hasValue);
+        value.Bind(TextBlock.FontFamilyProperty, new DynamicResourceExtension("AppContentFontFamily"));
+
+        var rule = new Border { Height = 1, Margin = new Thickness(0, 6, 0, 5) };
+        rule.Bind(Border.BackgroundProperty, new DynamicResourceExtension("AppBorderBrush"));
+        rule.Bind(Visual.IsVisibleProperty, hasValue);
+
+        var hint = new TextBlock { Text = clickHint, FontSize = 11 };
+        hint.Bind(TextBlock.ForegroundProperty, new DynamicResourceExtension("AppMutedTextBrush"));
+
+        return new StackPanel { Children = { value, rule, hint } };
+    }
 
     /// <summary>The column label, in the same highlight-aware shape as a cell - a find match on a
     /// CSV header line has to light up where the user can see it.</summary>

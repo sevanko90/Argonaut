@@ -44,6 +44,21 @@
                         <Setter Property="FontWeight" Value="SemiBold" />
                     </Style>
 
+                    <!-- Every cell here opens the pane beside the grid, and nothing in a grid of
+                         values says so on its own. The tint plus the hand is the cue that teaches
+                         it on the first pass of the pointer; the mark drawn into the cell's right
+                         edge and the hint in its tooltip are built in TableGridColumns, which is
+                         where the cell content is. Transparent at rest rather than unset, because
+                         a cell with no background is not hit-tested, and one that is never under
+                         the pointer never lights up. -->
+                    <Style Selector="TableViewCell">
+                        <Setter Property="Background" Value="Transparent" />
+                        <Setter Property="Cursor" Value="Hand" />
+                    </Style>
+                    <Style Selector="TableViewCell:pointerover">
+                        <Setter Property="Background" Value="{DynamicResource AppHoverBackgroundBrush}" />
+                    </Style>
+
                     <!-- A header piece that names a container: it reads as a link because clicking it
                          is what opens that container into columns (or collapses it back). Chrome-free
                          so the header still reads as a header, not a row of buttons. -->
@@ -54,15 +69,29 @@
                         <Setter Property="MinWidth" Value="0" />
                         <Setter Property="MinHeight" Value="0" />
                         <Setter Property="VerticalAlignment" Value="Center" />
-                        <Setter Property="Foreground" Value="{DynamicResource AppAccentBrush}" />
                     </Style>
                     <Style Selector="Button.columnLink /template/ ContentPresenter">
                         <Setter Property="Background" Value="Transparent" />
                     </Style>
-                    <Style Selector="Button.columnLink TextBlock">
+
+                    <!-- Selected by CLASS, never as a descendant of the button: a tooltip's
+                         content is parented under the control it belongs to, so
+                         "Button.columnLink TextBlock" also painted the tip explaining the link -
+                         and a sentence telling you what clicking does must not itself read as
+                         something to click.
+
+                         Dotted at rest, solid under the pointer: an expandable column has to
+                         read as clickable before anyone hovers it, but a solid underline on every
+                         piece of every header across a wide grid reads as noise. -->
+                    <Style Selector="TextBlock.columnLinkText">
                         <Setter Property="Foreground" Value="{DynamicResource AppAccentBrush}" />
+                        <Setter Property="TextDecorations">
+                            <TextDecorationCollection>
+                                <TextDecoration Location="Underline" StrokeDashArray="1,2" StrokeThickness="1" />
+                            </TextDecorationCollection>
+                        </Setter>
                     </Style>
-                    <Style Selector="Button.columnLink:pointerover TextBlock">
+                    <Style Selector="Button.columnLink:pointerover TextBlock.columnLinkText">
                         <Setter Property="TextDecorations" Value="Underline" />
                     </Style>
                 </TableView.Styles>

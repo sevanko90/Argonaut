@@ -8,6 +8,9 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Data;
 using Avalonia.Headless;
 using Avalonia.Input;
+using Avalonia.LogicalTree;
+using Avalonia.Media;
+using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 
@@ -679,4 +682,130 @@ public sealed class TableGridVirtualizationTests
             }
         }, CancellationToken.None);
     }
+
+    /// <summary>The hint the JSON array table passes; its cells open the detail pane.</summary>
+    private const string ClickHint = "Click to open this cell in the detail pane";
+
+    [Fact]
+    public Task CellsThatOpenSomething_SaySoInTheirTooltipAndUnderThePointer()
+    {
+        var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(TableGridVirtualizationTests).Assembly);
+        return session.Dispatch(async () =>
+        {
+            // Clicking a cell of the JSON array table opens it in the pane beside the grid, and
+            // a grid of values says nothing about that on its own. Two cues carry it: the tooltip
+            // names the gesture under the untrimmed value, and the mark appears in whichever cell
+            // the pointer is over.
+            var rows = new CountingRows(1_000);
+            var table = new TableView { ItemsSource = rows, SelectionMode = SelectionMode.Single };
+
+            // The one thing the view's own styles contribute, mirrored here because the mark is
+            // keyed off the cell's pointer-over: a cell with no background is not hit-tested, so
+            // it is never the thing under the pointer and never lights anything up.
+            table.Styles.Add(new Style(x => x.OfType<TableViewCell>())
+            {
+                Setters = { new Setter(TemplatedControl.BackgroundProperty, Brushes.Transparent) },
+            });
+
+            var columns = new TableGridColumns(table);
+            columns.Rebuild(StructureOf(3), rows, highlightTerm: null, headers: null, headerTemplate: null,
+                clickHint: ClickHint);
+
+            var window = new Window { Width = 900, Height = 400, Content = table };
+            try
+            {
+                window.Show();
+                await PumpAsync();
+                window.UpdateLayout();
+
+                var cell = window.GetVisualDescendants().OfType<TableViewCell>()
+                    .First(c => c.Bounds.Width > 0 && Text(c) is { Length: > 0 });
+                var tip = Assert.IsAssignableFrom<Control>(ToolTip.GetTip(TipCarrier(cell)));
+                var lines = tip.GetLogicalDescendants().OfType<TextBlock>().Select(t => t.Text).ToList();
+
+                Assert.Contains(Text(cell), lines);
+                Assert.Contains(ClickHint, lines);
+
+                // At rest the grid is plain: the mark belongs to the cell under the pointer, and
+                // there is no pointer on it yet.
+                Assert.All(Marks(window), mark => Assert.False(mark.IsVisible));
+
+                window.MouseMove(Centre(cell, window), RawInputModifiers.None);
+                await PumpAsync();
+                window.UpdateLayout();
+
+                var lit = Marks(window).Where(m => m.IsVisible).ToList();
+                Assert.Single(lit);
+                Assert.Same(cell, lit[0].FindAncestorOfType<TableViewCell>());
+
+                // Off the grid entirely - the mark follows the pointer away.
+                window.MouseMove(new Point(-10, -10), RawInputModifiers.None);
+                await PumpAsync();
+                window.UpdateLayout();
+
+                Assert.All(Marks(window), mark => Assert.False(mark.IsVisible));
+                return true;
+            }
+            finally
+            {
+                columns.Dispose();
+                window.Close();
+            }
+        }, CancellationToken.None);
+    }
+
+    [Fact]
+    public Task CellsThatOnlySelect_StayPlainTextWithTheUntrimmedTooltip()
+    {
+        var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(TableGridVirtualizationTests).Assembly);
+        return session.Dispatch(async () =>
+        {
+            // The CSV grid passes no hint, because clicking one of its cells does nothing a cue
+            // could promise. Its cells keep the plain trimmed block whose tooltip is the value.
+            var rows = new CountingRows(1_000);
+            var (table, columns) = BuildTable(rows, StructureOf(3));
+            var window = new Window { Width = 900, Height = 400, Content = table };
+            try
+            {
+                window.Show();
+                await PumpAsync();
+                window.UpdateLayout();
+
+                var cell = window.GetVisualDescendants().OfType<TableViewCell>()
+                    .First(c => c.Bounds.Width > 0 && Text(c) is { Length: > 0 });
+
+                Assert.Equal(Text(cell), ToolTip.GetTip(TipCarrier(cell)));
+                Assert.Empty(Marks(window));
+
+                window.MouseMove(Centre(cell, window), RawInputModifiers.None);
+                await PumpAsync();
+                window.UpdateLayout();
+
+                Assert.Empty(Marks(window));
+                return true;
+            }
+            finally
+            {
+                columns.Dispose();
+                window.Close();
+            }
+        }, CancellationToken.None);
+    }
+
+    /// <summary>The text a realized cell is showing.</summary>
+    private static string? Text(TableViewCell cell)
+        => cell.GetVisualDescendants().OfType<TextBlock>().FirstOrDefault()?.Text;
+
+    /// <summary>The control inside a cell that carries the tooltip - the template's root, which
+    /// is the text block itself when the cells are plain.</summary>
+    private static Control TipCarrier(TableViewCell cell)
+        => cell.GetVisualDescendants().OfType<Control>().First(c => ToolTip.GetTip(c) is not null);
+
+    /// <summary>Every "this opens something" mark the grid has realized, lit or not.</summary>
+    private static List<Border> Marks(Window window)
+        => window.GetVisualDescendants().OfType<Border>().Where(b => b.Child is Avalonia.Controls.Shapes.Path).ToList();
+
+    private static Point Centre(Visual control, Window window)
+        => control.TranslatePoint(new Point(control.Bounds.Width / 2, control.Bounds.Height / 2), window)
+            ?? throw new InvalidOperationException("The control is not in the window's visual tree.");
 }

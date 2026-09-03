@@ -49,7 +49,8 @@ public class JsonDiffRowsSettleTests
                 // Preview rows carry no Added record, so this both locates the change and
                 // proves the collection left preview mode.
                 vm.GoToNextDiff();
-                Assert.NotNull(vm.SelectedPosition);
+                Assert.True(vm.SelectedPosition is not null,
+                    $"load {i}: rows={vm.Rows.Count} status='{vm.StatusText}' failure='{vm.IndexFailure?.Message}'");
 
                 var row = (JsonDiffRow)vm.Rows[vm.SelectedPosition!.Value]!;
                 Assert.Equal(DiffStatus.Added, row.Status);

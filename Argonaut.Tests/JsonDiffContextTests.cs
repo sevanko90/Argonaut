@@ -40,6 +40,19 @@ public class JsonDiffContextTests
         return list;
     }
 
+    /// <summary>What the document actually held, for an assertion about to fail on a
+    /// timing-dependent state.</summary>
+    private static string Describe(JsonDiffViewModel vm)
+    {
+        var rows = Materialize(vm.Rows);
+        var lines = new List<string>();
+        for (int i = 0; i < rows.Count; i++)
+            lines.Add($"  [{i}] {rows[i].Status} left={rows[i].Left?.Name} right={rows[i].Right?.Name}");
+
+        return $"rows={rows.Count} selected={vm.SelectedPosition} status='{vm.StatusText}' "
+            + $"failure='{vm.IndexFailure?.Message}'\n" + string.Join("\n", lines);
+    }
+
     private static void Cleanup(JsonDiffViewModel vm, string leftPath, string rightPath)
     {
         vm.Dispose();
@@ -168,7 +181,7 @@ public class JsonDiffContextTests
         {
             vm.GoToNextDiff();
 
-            Assert.True(vm.HasSelection);
+            Assert.True(vm.HasSelection, Describe(vm));
             Assert.Equal("\"https://example.com/v", vm.SourcePrefix);
             Assert.Equal("1", vm.SourceChanged);
             Assert.Equal("/users\"", vm.SourceSuffix);

@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Threading.Tasks;
 using Argonaut.Infrastructure;
 
@@ -48,7 +47,7 @@ public sealed class JsonArrayTableToolbarViewModel : ObservableObject
     private int selectedArrayColumns = JsonArrayColumnDiscovery.DefaultArrayColumns;
     private bool canExpandArrays;
 
-    public JsonArrayTableToolbarViewModel(string originPath, string originFilePath, bool canReshape,
+    public JsonArrayTableToolbarViewModel(string originPath, bool canReshape,
         Action<JsonArrayColumnModeOption> setColumnMode, Action<int> setArrayColumns, Func<Task> back)
     {
         this.setColumnMode = setColumnMode;
@@ -56,7 +55,6 @@ public sealed class JsonArrayTableToolbarViewModel : ObservableObject
         this.back = back;
 
         OriginPath = originPath;
-        OriginFileName = Path.GetFileName(originFilePath);
 
         CanReshape = canReshape;
 
@@ -83,11 +81,8 @@ public sealed class JsonArrayTableToolbarViewModel : ObservableObject
     /// <summary>The JSONPath this array sits at in the origin document.</summary>
     public string OriginPath { get; }
 
-    /// <summary>File name of the origin document, for the banner.</summary>
-    public string OriginFileName { get; }
-
-    /// <summary>Banner text: where this table came from, in one line.</summary>
-    public string OriginDescription => $"Table view of {OriginPath} in {OriginFileName}";
+    /// <summary>Banner text identifying the array in the origin document.</summary>
+    public string OriginDescription => $"Table view of {OriginPath}";
 
     /// <summary>Whether the column-mode picker is shown at all. False for an array of objects,
     /// whose columns are the property names by definition - the by-property entry is then the

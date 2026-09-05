@@ -243,7 +243,7 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
         // Built here rather than before the wait because it takes the answer discovery just
         // produced: an array of objects is already columned by its property names, so it is
         // offered no reshape widths and shows no picker.
-        this.toolbar = new JsonArrayTableToolbarViewModel(originPath, filePath,
+        this.toolbar = new JsonArrayTableToolbarViewModel(originPath,
             canReshape: !elementsAreObjects,
             setColumnMode: ApplyColumnMode,
             setArrayColumns: columns => ArrayColumns = columns,

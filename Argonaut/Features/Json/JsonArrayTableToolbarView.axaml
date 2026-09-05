@@ -4,11 +4,10 @@
              x:Class="Argonaut.Features.Json.JsonArrayTableToolbarView"
              x:DataType="json:JsonArrayTableToolbarViewModel">
     <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
-        <!-- Provenance: this document has no path of its own, so the banner is the only thing
-             saying which array of which file is on screen. -->
+        <!-- Identify the array; the window title already identifies the file. -->
         <TextBlock Text="{Binding OriginDescription}"
                    VerticalAlignment="Center"
-                   TextTrimming="CharacterEllipsis"
+                   TextWrapping="Wrap"
                    MaxWidth="420"
                    Foreground="{DynamicResource AppMutedTextBrush}"
                    FontSize="12"

@@ -19,11 +19,9 @@ namespace Argonaut.Infrastructure;
 /// check cancellation every ~65536 tokens / 4MB chunk, so the joins resolve in low
 /// single-digit milliseconds even on multi-GB files.
 ///
-/// What the session CANNOT know about: readers it didn't start. There is one class of those
-/// left - UI-thread work registered via <see cref="RegisterDependentTask"/> - and search is
-/// deliberately no longer among them: a <see cref="Argonaut.Features.Search.FileSearchSession"/>
-/// opens its own mapping of the path, so nothing about a search constrains when this session
-/// may release its own.
+/// Additional readers start through <see cref="StartDependentRead{TResult}"/>, which
+/// registers only background completion. UI continuations are never joined. Search owns
+/// independent chunk mappings, so its lifetime does not constrain this session's release.
 ///
 /// Not thread-safe: create, register and dispose from one thread (the UI thread in this
 /// app). The indexing/dependent tasks themselves of course run in the background.
@@ -83,8 +81,20 @@ public sealed class IndexedFileSession<TIndex> : IDocumentSession where TIndex :
         }
     }
 
+    /// <summary>Starts a mapping reader on the pool and registers only its background
+    /// completion. UI continuations awaiting the returned task must never be joined by
+    /// Dispose: they need the very thread performing disposal.</summary>
+    public Task<TResult> StartDependentRead<TResult>(Func<CancellationToken, Task<TResult>> read)
+    {
+        ObjectDisposedException.ThrowIf(this.disposed, this);
+        var tearingDown = this.TearingDown;
+        var reading = Task.Run(() => read(tearingDown));
+        RegisterDependentTask(reading);
+        return reading;
+    }
+
     /// <summary>
-    /// Registers a background task that dereferences <see cref="File"/> (date-hint inference,
+    /// Registers a background-only task (never a UI-context continuation) that dereferences <see cref="File"/> (date-hint inference,
     /// JSON path resolution) so <see cref="Dispose"/> joins it before releasing the mapping.
     /// No-op if the session is already disposed - <see cref="TearingDown"/> is cancelled by
     /// then, so such a task dies immediately without touching the file.
@@ -97,7 +107,7 @@ public sealed class IndexedFileSession<TIndex> : IDocumentSession where TIndex :
     /// <see cref="System.Threading.Tasks.TaskScheduler.UnobservedTaskException"/> at
     /// finalization instead.
     /// </summary>
-    public void RegisterDependentTask(Task task)
+    internal void RegisterDependentTask(Task task)
     {
         if (this.disposed)
             return;

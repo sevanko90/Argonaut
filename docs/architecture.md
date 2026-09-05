@@ -202,9 +202,10 @@ chain changes.
 - `IndexedFileSession<TIndex>` (`Infrastructure/IndexedFileSession.cs`) owns the trio
   {mapping, background index, CancellationTokenSource} and encodes teardown ordering:
   cancel → join indexing task → join dependent tasks → release mapping. It owns the `MMapFile`
-  once `Start` is called (disposes it even if the index factory throws). `RegisterDependentTask`
-  joins background readers it didn't itself start (date-hint inference, JSON path resolution)
-  before releasing the mapping. `RawIndexSession` is the wrap-width-restartable variant, with
+  once `Start` is called (disposes it even if the index factory throws). `StartDependentRead`
+  starts date-hint inference and JSON path resolution on the pool and joins those background
+  readers before releasing the mapping. Their UI continuations are awaited separately and
+  never joined by disposal, avoiding a wait on the UI thread from the UI thread itself. `RawIndexSession` is the wrap-width-restartable variant, with
   two cancellation sources: `mappingCts` for the document's lifetime and `indexCts` (linked from
   it) for the index `RestartIndex` recycles; `JsonDiffSession` composes two
   `IndexedFileSession<JsonStructureIndex>`s; `JsonArrayTableSession` composes one of them with

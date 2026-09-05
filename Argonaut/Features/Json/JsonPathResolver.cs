@@ -88,6 +88,7 @@ public static class JsonPathResolver
 
             int endIndex = await WaitForEndIndexAsync(index, current, cancellationToken);
 
+            byte[]? memberUtf8 = segment.IsArrayIndex ? null : Encoding.UTF8.GetBytes(segment.Name!);
             int? next = null;
             int i = current + 1;
             int position = 0;
@@ -99,7 +100,7 @@ public static class JsonPathResolver
 
                 bool isMatch = segment.IsArrayIndex
                     ? position == segment.ArrayIndex
-                    : child.NameLength >= 0 && mmap.GetUtf8String(child.NameOffset, child.NameLength) == segment.Name;
+                    : child.NameLength >= 0 && JsonUnescape.EqualsDecodedUtf8(mmap.GetSpan(child.NameOffset, child.NameLength), memberUtf8);
 
                 if (isMatch)
                 {

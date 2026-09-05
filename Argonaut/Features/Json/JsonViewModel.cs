@@ -9,7 +9,6 @@ using Argonaut.Features.Json.Schema;
 using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
 using Argonaut.Shell;
-using Avalonia.Threading;
 
 namespace Argonaut.Features.Json;
 
@@ -185,20 +184,21 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
     /// the target token if found, or surfaces a toast on parse/lookup failure. Wired into
     /// <see cref="JsonToolbarViewModel"/>'s "Go to path" action.
     ///
-    /// Registers the resolve task with the session (RegisterDependentTask) because, on a
+    /// Starts and registers the resolver on the pool because, on a
     /// still-indexing file, it can await across several ticks while the document is closed -
     /// without this, Dispose could free the mapping while ResolveAsync is still reading it.
     /// </summary>
     public async Task NavigateToPathAsync(string path)
     {
-        if (session is null)
+        if (session is null || IsDisposed)
         {
             ToastService.Show("No file loaded yet.");
             return;
         }
 
-        var resolveTask = JsonPathResolver.ResolveAsync(session.Index, session.File, path, session.TearingDown);
-        session.RegisterDependentTask(resolveTask);
+        var current = session;
+        var resolveTask = current.StartDependentRead(tearingDown =>
+            JsonPathResolver.ResolveAsync(current.Index, current.File, path, tearingDown));
 
         JsonPathResolveResult result;
         try
@@ -373,7 +373,7 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
         UpdateSchemaRootMatches();
 
         // Inference dereferences the mapping, so the session must join it before unmapping.
-        session.RegisterDependentTask(InferDefaultDateSchemeAsync(session.Index, session.File, session.TearingDown));
+        _ = InferDefaultDateSchemeAsync(session);
 
         StatusText = $"{FilePath} — {TokenCount:N0} tokens indexed so far";
         MonitorIndexing();
@@ -414,22 +414,22 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
     /// background for the first classifiable date value, and sets it as the file default if
     /// found. Never a full-file scan. No-ops if the user has already picked a scheme.
     /// </summary>
-    private async Task InferDefaultDateSchemeAsync(JsonStructureIndex index, MMapFile mmap, CancellationToken cancellationToken)
+    private async Task InferDefaultDateSchemeAsync(IndexedFileSession<JsonStructureIndex> current)
     {
         try
         {
-            await index.WaitForTokenCountAsync(DateHintInference.MaxTokensToScan);
-            if (IsDisposed)
-                return;
-
-            var scheme = await Task.Run(() => IsDisposed ? null : DateHintInference.FindFirstScheme(index, mmap, DateHintInference.MaxTokensToScan), cancellationToken);
-            if (scheme is { } s)
-                Dispatcher.UIThread.Post(() => { if (!IsDisposed) HintSettings.TrySetInferredDefault(s); });
+            var scheme = await current.StartDependentRead(async tearingDown =>
+            {
+                await current.Index.WaitForTokenCountAsync(DateHintInference.MaxTokensToScan);
+                tearingDown.ThrowIfCancellationRequested();
+                return DateHintInference.FindFirstScheme(current.Index, current.File, DateHintInference.MaxTokensToScan);
+            });
+            if (!IsDisposed && scheme is { } inferred)
+                HintSettings.TrySetInferredDefault(inferred);
         }
         catch
         {
-            // Indexing failures are surfaced elsewhere (OnIndexingFailed); inference simply
-            // leaves the default scheme at Off.
+            // Indexing failures are surfaced elsewhere; teardown also cancels this reader.
         }
     }
 }

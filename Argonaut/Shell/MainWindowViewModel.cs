@@ -4,8 +4,8 @@ using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Argonaut.Features.Json;
 using Argonaut.Features.Json.Diff;
-using Argonaut.Features.Raw;
 using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
 using Avalonia.Threading;
@@ -175,21 +175,21 @@ public sealed class MainWindowViewModel : ObservableObject
     /// <paramref name="byteOffset"/> - the shell-mediated action behind every failure
     /// location's "Line N" link (the JSON banner's and the incompatible placeholder's alike)
     /// and behind <see cref="RawJumpService"/> requests (e.g. JsonView's "view in raw" link
-    /// on a truncated value). Concrete-type match on <see cref="RawViewModel"/> because "jump
-    /// to an offset" is meaningful for exactly one view - every other document kind would have
+    /// on a truncated value). Asks the current document for the CAPABILITY
+    /// (<see cref="IByteOffsetNavigable"/>) rather than matching its concrete type: "jump to an
+    /// offset" is meaningful for exactly one view today - every other document kind would have
     /// to implement it as a no-op - so it stays off <see cref="IDocumentViewModel"/>, whose job
-    /// is the surface *every* document genuinely shares. This is the shell's only such match:
-    /// per-view state and behaviour otherwise reach their view through the document's own
-    /// injected <see cref="IDocumentViewModel.Toolbar"/>, never through a shell type-switch
-    /// (see docs/architecture.md).
+    /// is the surface *every* document genuinely shares, but an opt-in interface still lets a
+    /// second view honour it one day without a shell edit. The shell holds no concrete-type
+    /// match on a document at all (see docs/architecture.md).
     /// </summary>
     public async Task JumpToRawOffsetAsync(long byteOffset)
     {
         if (currentKind != FileTypeDetector.FileKind.Unidentified)
             await SwitchViewAsync(FileTypeDetector.FileKind.Unidentified);
 
-        if (CurrentDocument is RawViewModel raw)
-            await raw.JumpToByteOffsetAsync(byteOffset);
+        if (CurrentDocument is IByteOffsetNavigable navigable)
+            await navigable.JumpToByteOffsetAsync(byteOffset);
     }
 
     public IReadOnlyList<RecentFileItem> RecentFiles
@@ -266,6 +266,75 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         PublishDocument(document, leftPath, FileTypeDetector.FileKind.Unknown, addToRecents: false);
+    }
+
+    /// <summary>
+    /// Opens the JSON array occupying <paramref name="request"/>'s byte range as a table,
+    /// replacing the current document with a <see cref="JsonArrayTableViewModel"/>. Modelled on
+    /// <see cref="OpenDiffAsync"/>, and entered the same way - explicitly, never via
+    /// <see cref="FileTypeDetector"/> - so the published document carries
+    /// <see cref="FileTypeDetector.FileKind.Unknown"/>: the view switcher shows no selection for
+    /// it, and picking any view there re-indexes the origin file as that kind through the normal
+    /// switch path, which is a second route back for free. Publishing it as
+    /// <see cref="FileTypeDetector.FileKind.Json"/> instead would make
+    /// <see cref="SwitchViewAsync"/> no-op on the unchanged kind and strand the user on the
+    /// banner link. Not added to recent files - a byte range is not a reopenable path.
+    ///
+    /// The table reports its own indexing progress (like a diff), so the shell's part is only to
+    /// silence the outgoing load's reporter.
+    /// </summary>
+    public async Task OpenArrayTableAsync(ArrayTableRequest request)
+    {
+        var requestId = openRequest.Begin();
+
+        // UI hygiene before the swap, exactly as OpenDiffAsync does it - see the remark there
+        // for why this is not what makes the swap safe.
+        DetachFind();
+        FindBarResetRequested?.Invoke();
+        indexProgressReporter?.Stop();
+        StatusText = $"Opening {request.OriginPath} as a table…";
+
+        var document = new JsonArrayTableViewModel();
+        try
+        {
+            await document.LoadAsync(request.Path, request.Offset, request.Length, request.OriginPath,
+                navigateBack: NavigateBackToJsonAsync);
+        }
+        catch (Exception ex)
+        {
+            OpenDebugLog.Write($"OpenArrayTable: load threw: {ex}");
+            document.Dispose();
+            if (openRequest.IsCurrent(requestId))
+                StatusText = $"{request.Path} — failed to open as a table";
+            return;
+        }
+
+        if (!openRequest.IsCurrent(requestId))
+        {
+            document.Dispose();
+            return;
+        }
+
+        PublishDocument(document, request.Path, FileTypeDetector.FileKind.Unknown, addToRecents: false);
+    }
+
+    /// <summary>
+    /// The table's Back: reload the origin file as JSON, then reveal the path the table was
+    /// opened from. The reveal is a capability query (<see cref="IPathNavigable"/>), not a type
+    /// test - see <see cref="JumpToRawOffsetAsync"/>.
+    ///
+    /// <see cref="SwitchViewAsync"/> reaches <see cref="SetCurrentDocument"/>, which disposes the
+    /// outgoing document - the very table whose toolbar raised this - BEFORE the swap. So
+    /// everything after that first await runs with that document already torn down. Nothing here
+    /// touches it: <paramref name="originPath"/> is a string the toolbar captured at
+    /// construction, and the reveal targets whatever document is current afterwards.
+    /// </summary>
+    private async Task NavigateBackToJsonAsync(string originPath)
+    {
+        await SwitchViewAsync(FileTypeDetector.FileKind.Json);
+
+        if (CurrentDocument is IPathNavigable navigable)
+            await navigable.NavigateToPathAsync(originPath);
     }
 
     /// <summary>
@@ -749,7 +818,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 text += $" ({percent}%)";
             }
 
-            Dispatcher.UIThread.Post(() =>
+            ProgressPost.ToUiThread(() =>
             {
                 if (!stopped && owner.openRequest.IsCurrent(requestId))
                     owner.StatusText = text;

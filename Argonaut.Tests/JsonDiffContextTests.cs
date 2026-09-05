@@ -24,11 +24,11 @@ public class JsonDiffContextTests
         await vm.LoadAsync(leftPath, rightPath);
         try { await vm.IndexingTask; } catch { }
 
-        // The collection's final rebuild is driven by the growth monitor in the app; in
-        // dispatcher-free tests, poll the diff-complete state and rebuild via the filter
-        // round-trip (ChangesOnly toggle forces a rebuild without changing semantics).
-        vm.Rows.ChangesOnly = true;
-        vm.Rows.ChangesOnly = false;
+        // The collection's final rebuild is the growth monitor's, and with no dispatcher
+        // installed it runs on a POOL thread - so awaiting the scan alone would leave this
+        // test reading rows while that rebuild replaces them. Awaiting the refresh itself is
+        // what makes the state below deterministic; see IndexGrowthMonitor.FinalRefreshTask.
+        await vm.Rows.FinalRefreshTask;
         return (vm, leftPath, rightPath);
     }
 
@@ -38,6 +38,19 @@ public class JsonDiffContextTests
         for (int i = 0; i < rows.Count; i++)
             list.Add((JsonDiffRow)rows[i]!);
         return list;
+    }
+
+    /// <summary>What the document actually held, for an assertion about to fail on a
+    /// timing-dependent state.</summary>
+    private static string Describe(JsonDiffViewModel vm)
+    {
+        var rows = Materialize(vm.Rows);
+        var lines = new List<string>();
+        for (int i = 0; i < rows.Count; i++)
+            lines.Add($"  [{i}] {rows[i].Status} left={rows[i].Left?.Name} right={rows[i].Right?.Name}");
+
+        return $"rows={rows.Count} selected={vm.SelectedPosition} status='{vm.StatusText}' "
+            + $"failure='{vm.IndexFailure?.Message}'\n" + string.Join("\n", lines);
     }
 
     private static void Cleanup(JsonDiffViewModel vm, string leftPath, string rightPath)
@@ -168,7 +181,7 @@ public class JsonDiffContextTests
         {
             vm.GoToNextDiff();
 
-            Assert.True(vm.HasSelection);
+            Assert.True(vm.HasSelection, Describe(vm));
             Assert.Equal("\"https://example.com/v", vm.SourcePrefix);
             Assert.Equal("1", vm.SourceChanged);
             Assert.Equal("/users\"", vm.SourceSuffix);

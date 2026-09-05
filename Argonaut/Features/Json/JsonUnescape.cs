@@ -78,6 +78,68 @@ internal static class JsonUnescape
         return di;
     }
 
+    /// <summary>Compares serialized string content with decoded UTF-8 using constant
+    /// scratch space, even for a very large escaped property name.</summary>
+    public static bool EqualsDecodedUtf8(ReadOnlySpan<byte> raw, ReadOnlySpan<byte> decoded)
+    {
+        if (raw.SequenceEqual(decoded))
+            return IsPlain(raw);
+
+        Span<byte> escapeBytes = stackalloc byte[12];
+        while (!raw.IsEmpty)
+        {
+            int escape = raw.IndexOf((byte)'\\');
+            if (escape < 0)
+                return raw.SequenceEqual(decoded);
+            if (escape > decoded.Length || !raw[..escape].SequenceEqual(decoded[..escape]))
+                return false;
+            raw = raw[escape..];
+            decoded = decoded[escape..];
+            int width = EscapeWidth(raw);
+            int written = Unescape(raw[..width], escapeBytes);
+            if (written > decoded.Length || !escapeBytes[..written].SequenceEqual(decoded[..written]))
+                return false;
+            decoded = decoded[written..];
+            raw = raw[width..];
+        }
+        return decoded.IsEmpty;
+    }
+
+    /// <summary>Counts decoded UTF-16 characters with an empty destination, or writes
+    /// them into an exactly sized destination. Scratch space is independent of name length.</summary>
+    public static int DecodeUtf16(ReadOnlySpan<byte> raw, Span<char> destination)
+    {
+        bool countOnly = destination.IsEmpty;
+        int written = 0;
+        Span<byte> escapeBytes = stackalloc byte[12];
+        while (!raw.IsEmpty)
+        {
+            int escape = raw.IndexOf((byte)'\\');
+            int plainLength = escape < 0 ? raw.Length : escape;
+            var plain = raw[..plainLength];
+            written += countOnly ? Encoding.UTF8.GetCharCount(plain)
+                : Encoding.UTF8.GetChars(plain, destination[written..]);
+            raw = raw[plainLength..];
+            if (raw.IsEmpty)
+                break;
+            int width = EscapeWidth(raw);
+            int decodedLength = Unescape(raw[..width], escapeBytes);
+            written += countOnly ? Encoding.UTF8.GetCharCount(escapeBytes[..decodedLength])
+                : Encoding.UTF8.GetChars(escapeBytes[..decodedLength], destination[written..]);
+            raw = raw[width..];
+        }
+        return written;
+    }
+
+    private static int EscapeWidth(ReadOnlySpan<byte> raw)
+    {
+        if (raw[1] != (byte)'u')
+            return 2;
+        return ReadHex4(raw, 2) is >= 0xD800 and <= 0xDBFF &&
+            raw.Length >= 12 && raw[6] == (byte)'\\' && raw[7] == (byte)'u' &&
+            ReadHex4(raw, 8) is >= 0xDC00 and <= 0xDFFF ? 12 : 6;
+    }
+
     private static int ReadHex4(ReadOnlySpan<byte> raw, int start)
     {
         int value = 0;

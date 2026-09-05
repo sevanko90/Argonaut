@@ -10,6 +10,28 @@
 
     <Application.Styles>
         <FluentTheme />
+        <!-- Shared chrome stays lightweight: solid fills and existing Fluent templates. -->
+        <Style Selector="Window">
+            <Setter Property="FontFamily" Value="{DynamicResource AppSansFontFamily}" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+        </Style>
+        <Style Selector="Button.primary">
+            <Setter Property="Background" Value="{DynamicResource AppPrimaryButtonBrush}" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Padding" Value="22,12" />
+        </Style>
+        <Style Selector="Button.primary:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#1D4ED8" />
+            <Setter Property="Foreground" Value="White" />
+        </Style>
+        <Style Selector="Button.primary:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="#1E40AF" />
+            <Setter Property="Foreground" Value="White" />
+        </Style>
+
 
         <!-- Rounded form controls everywhere (toolbars, dialogs) instead of Fluent's square-ish
              defaults - matches the app's other rounded surfaces (panels, iconbuttons, rows).
@@ -102,6 +124,7 @@
                  find box). Consumed via DynamicResource; the status bar's font toggle swaps this
                  entry at runtime between the mono and sans families above, re-fonting all views
                  live (same mechanism as the theme brushes). -->
+            <x:Double x:Key="AppContentFontSize">12</x:Double>
             <FontFamily x:Key="AppContentFontFamily">Consolas, 'SF Mono', Menlo, Monaco, 'Cascadia Code', 'Courier New', monospace</FontFamily>
         </ResourceDictionary>
     </Application.Resources>

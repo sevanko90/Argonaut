@@ -9,11 +9,10 @@ using Argonaut.Features.Json.Schema;
 using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
 using Argonaut.Shell;
-using Avalonia.Threading;
 
 namespace Argonaut.Features.Json;
 
-public sealed class JsonViewModel : IndexedDocumentViewModel
+public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
 {
     private const int InitialTokenTarget = 250;
 
@@ -185,20 +184,21 @@ public sealed class JsonViewModel : IndexedDocumentViewModel
     /// the target token if found, or surfaces a toast on parse/lookup failure. Wired into
     /// <see cref="JsonToolbarViewModel"/>'s "Go to path" action.
     ///
-    /// Registers the resolve task with the session (RegisterDependentTask) because, on a
+    /// Starts and registers the resolver on the pool because, on a
     /// still-indexing file, it can await across several ticks while the document is closed -
     /// without this, Dispose could free the mapping while ResolveAsync is still reading it.
     /// </summary>
     public async Task NavigateToPathAsync(string path)
     {
-        if (session is null)
+        if (session is null || IsDisposed)
         {
             ToastService.Show("No file loaded yet.");
             return;
         }
 
-        var resolveTask = JsonPathResolver.ResolveAsync(session.Index, session.File, path, session.TearingDown);
-        session.RegisterDependentTask(resolveTask);
+        var current = session;
+        var resolveTask = current.StartDependentRead(tearingDown =>
+            JsonPathResolver.ResolveAsync(current.Index, current.File, path, tearingDown));
 
         JsonPathResolveResult result;
         try
@@ -219,6 +219,66 @@ public sealed class JsonViewModel : IndexedDocumentViewModel
             SelectToken(tokenIndex);
         else
             ToastService.Show(result.Error ?? "Path not found.");
+    }
+
+    /// <summary>
+    /// Whether this document can offer "view as table" on its array rows. False for the
+    /// sub-range documents NDJSON nests per line: <see cref="JsonTokenInfo.Offset"/> is relative
+    /// to the indexed MAPPING, so a token offset from one of those is not a file offset, and the
+    /// table would map the wrong bytes. The base offset is right here in
+    /// <see cref="ScanTarget"/> if that restriction is ever lifted - the link is hidden rather
+    /// than the conversion skipped.
+    /// </summary>
+    public bool SupportsArrayTable => ScanTarget.Offset == 0;
+
+    /// <summary>
+    /// Resolves the array at <paramref name="tokenIndex"/> to a file byte range and raises an
+    /// <see cref="ArrayTableService"/> request for it. Raising rather than acting keeps this
+    /// view model unaware of the shell, the same way the truncated-value link reaches the raw
+    /// viewer through <see cref="RawJumpService"/>.
+    ///
+    /// The wait matters: <see cref="JsonTokenInfo.EndIndex"/> is -1 until the container closes,
+    /// so on a still-indexing file the array's end - and therefore its length - is not yet
+    /// known. "Enabled once the array has an element" is not a sufficient guard. A file that
+    /// ends without closing the array throws out of the wait, and there is simply nothing to
+    /// open.
+    /// </summary>
+    public async Task RequestArrayTableAsync(int tokenIndex)
+    {
+        if (session is not { } current || !SupportsArrayTable)
+            return;
+
+        int endTokenIndex;
+        try
+        {
+            endTokenIndex = await JsonPathResolver.WaitForEndIndexAsync(current.Index, tokenIndex, current.TearingDown);
+        }
+        catch (OperationCanceledException)
+        {
+            return; // the document closed while we waited - nothing to open it into
+        }
+        catch (Exception ex)
+        {
+            if (!IsDisposed)
+                ToastService.Show($"Can't open as a table: {ex.Message}");
+            return;
+        }
+
+        if (IsDisposed)
+            return;
+
+        var start = current.Index.GetToken(tokenIndex);
+        var end = current.Index.GetToken(endTokenIndex);
+
+        // A StartArray/EndArray token records its offset AT the bracket with Length 1, so the
+        // closing term includes that bracket and the range is a whole JSON document. An
+        // off-by-one here surfaces as a JsonReaderException out of the table's own indexer
+        // rather than as anything legible.
+        long offset = start.Offset;
+        long length = end.Offset + end.Length - offset;
+
+        ArrayTableService.Request(new ArrayTableRequest(
+            FilePath, offset, length, JsonPathBuilder.Build(current.Index, current.File, tokenIndex)));
     }
 
     /// <summary>
@@ -313,7 +373,7 @@ public sealed class JsonViewModel : IndexedDocumentViewModel
         UpdateSchemaRootMatches();
 
         // Inference dereferences the mapping, so the session must join it before unmapping.
-        session.RegisterDependentTask(InferDefaultDateSchemeAsync(session.Index, session.File, session.TearingDown));
+        _ = InferDefaultDateSchemeAsync(session);
 
         StatusText = $"{FilePath} — {TokenCount:N0} tokens indexed so far";
         MonitorIndexing();
@@ -354,22 +414,22 @@ public sealed class JsonViewModel : IndexedDocumentViewModel
     /// background for the first classifiable date value, and sets it as the file default if
     /// found. Never a full-file scan. No-ops if the user has already picked a scheme.
     /// </summary>
-    private async Task InferDefaultDateSchemeAsync(JsonStructureIndex index, MMapFile mmap, CancellationToken cancellationToken)
+    private async Task InferDefaultDateSchemeAsync(IndexedFileSession<JsonStructureIndex> current)
     {
         try
         {
-            await index.WaitForTokenCountAsync(DateHintInference.MaxTokensToScan);
-            if (IsDisposed)
-                return;
-
-            var scheme = await Task.Run(() => IsDisposed ? null : DateHintInference.FindFirstScheme(index, mmap, DateHintInference.MaxTokensToScan), cancellationToken);
-            if (scheme is { } s)
-                Dispatcher.UIThread.Post(() => { if (!IsDisposed) HintSettings.TrySetInferredDefault(s); });
+            var scheme = await current.StartDependentRead(async tearingDown =>
+            {
+                await current.Index.WaitForTokenCountAsync(DateHintInference.MaxTokensToScan);
+                tearingDown.ThrowIfCancellationRequested();
+                return DateHintInference.FindFirstScheme(current.Index, current.File, DateHintInference.MaxTokensToScan);
+            });
+            if (!IsDisposed && scheme is { } inferred)
+                HintSettings.TrySetInferredDefault(inferred);
         }
         catch
         {
-            // Indexing failures are surfaced elsewhere (OnIndexingFailed); inference simply
-            // leaves the default scheme at Off.
+            // Indexing failures are surfaced elsewhere; teardown also cancels this reader.
         }
     }
 }

@@ -55,7 +55,8 @@ public partial class JsonView : UserControl
 
     /// <summary>
     /// Both ListBoxes' ScrollViewers come from their control themes, so they don't exist until
-    /// the visual tree is built - same lazy resolution CsvView uses for its sticky header.
+    /// the visual tree is built, which is why they are resolved here rather than in the
+    /// constructor.
     /// </summary>
     private void OnLoaded(object? sender, RoutedEventArgs e)
     {
@@ -313,6 +314,20 @@ public partial class JsonView : UserControl
             return;
 
         RawJumpService.Request(offset);
+    }
+
+    /// <summary>
+    /// The "view as table" link on an array row. Fire-and-forget because resolving the array's
+    /// end can wait on a still-running scan; the view model raises the shell request itself once
+    /// it has a byte range, so this control never learns the shell exists.
+    /// </summary>
+    private void OnViewAsTableClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (sender is not Control { DataContext: JsonRow { CanViewAsTable: true } row })
+            return;
+
+        if (DataContext is JsonViewModel vm)
+            _ = vm.RequestArrayTableAsync(row.TokenIndex);
     }
 
     private void OnHintClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)

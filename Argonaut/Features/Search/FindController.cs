@@ -167,10 +167,16 @@ public sealed class FindController
     {
         while (true)
         {
-            // Always fold before deciding. Scans can finish between the check below and the
-            // waits being built, and an early exit that skipped this reported "No matches"
-            // over results that had in fact just landed.
-            if (cursor.Fold(sessions, navigator!.OrderKey).HasStopAhead || AllComplete())
+            // Read completion BEFORE folding, the same way IndexGrowthMonitor's tick does.
+            // A scan publishes its matches and only then marks itself complete, so a fold taken
+            // after "everything finished" is guaranteed to see all of them - while the other
+            // order loses any match published in between, and this loop would exit on the
+            // completion it just observed without ever folding that match in. The press then
+            // moved onto an empty stop list and reported "No matches" over a match that was
+            // there, for good: nothing folds again until the next press.
+            bool complete = AllComplete();
+
+            if (cursor.Fold(sessions, navigator!.OrderKey).HasStopAhead || complete)
                 return true;
 
             statusChanged("Searching…");

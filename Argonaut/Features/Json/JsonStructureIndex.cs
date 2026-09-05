@@ -29,11 +29,17 @@ public enum JsonTokenKind
 /// </summary>
 /// <param name="Kind">StartObject/EndObject/StartArray/EndArray, or the scalar kind (String/Number/True/False/Null).</param>
 /// <param name="Depth">Container nesting depth of this token (0 at the document root).</param>
-/// <param name="Offset">Absolute byte offset in the file of this token's content (quotes/brackets excluded for strings).</param>
+/// <param name="Offset">Byte offset of this token's content (quotes/brackets excluded for strings),
+/// relative to the START OF THE INDEXED MAPPING - not to the file. The two are the same for a
+/// whole-file mapping and differ for every sub-range one (an NDJSON line's nested document, an
+/// array opened as a table), so anything handing an offset across a mapping boundary must add
+/// that mapping's own base offset first.</param>
 /// <param name="Length">Byte length of this token's content at <paramref name="Offset"/>.</param>
 /// <param name="ParentIndex">Token index of the enclosing container's Start token, or -1 at the document root.</param>
 /// <param name="EndIndex">For a Start token, the token index of its matching End token; -1 until the container closes. Unused for scalars.</param>
-/// <param name="NameOffset">Absolute byte offset of this token's property name, or -1 if it has none (array element/root value).</param>
+/// <param name="NameOffset">Byte offset of this token's property name in the same
+/// mapping-relative coordinate system as <paramref name="Offset"/>, or -1 if it has none
+/// (array element/root value).</param>
 /// <param name="NameLength">Byte length of the property name at <paramref name="NameOffset"/>, or -1 if there is no name.</param>
 public record struct JsonTokenInfo(
     JsonTokenKind Kind,
@@ -198,7 +204,7 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
         var index = new JsonStructureIndex();
         if (options.ComputeContentHashes)
             index.hashes = new SegmentedAppendLog<long>();
-        index.IndexingTask = Task.Run(() => index.RunIndexing(() => index.Build(file, progressReporter, cancellationToken)), cancellationToken);
+        index.IndexingTask = index.StartScan(() => index.Build(file, progressReporter, cancellationToken));
         return index;
     }
 

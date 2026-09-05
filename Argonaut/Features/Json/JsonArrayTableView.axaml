@@ -1,0 +1,221 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:json="clr-namespace:Argonaut.Features.Json"
+             xmlns:csv="clr-namespace:Argonaut.Features.Csv"
+             x:Class="Argonaut.Features.Json.JsonArrayTableView"
+             x:DataType="json:JsonArrayTableViewModel">
+    <UserControl.Resources>
+        <json:DepthToMarginConverter x:Key="DetailDepthToMargin" />
+    </UserControl.Resources>
+
+    <!-- A TableView (Avalonia 12.1) rather than the hand-rolled ListBox grid CsvView still uses:
+         it derives from ListBox, so the virtualizing panel and this document's lazily-realized
+         JsonArrayRowCollection behave exactly as before (see TableViewVirtualizationTests), and
+         in exchange it brings the sticky header, the horizontal-scroll tracking and the column
+         resizer that were all hand-built here.
+
+         Columns are absent from this markup on purpose: their count and names are data, so
+         TableGridColumns builds them in code-behind from the view model's CsvStructure and
+         rebuilds them whenever a re-shape replaces it.
+
+         The find highlight is absent here on purpose - the table returns no search navigator in
+         v1, so there is never a term to highlight. -->
+    <Grid x:Name="Layout" ColumnDefinitions="*,Auto,Auto">
+        <Border BorderBrush="{DynamicResource AppBorderBrush}"
+                BorderThickness="1"
+                CornerRadius="8"
+                Background="{DynamicResource AppWindowBackgroundBrush}"
+                ClipToBounds="True">
+            <TableView x:Name="Table"
+                       ItemsSource="{Binding Rows}"
+                       SelectionMode="Single"
+                       CanUserResizeColumns="True"
+                       Padding="0">
+                <TableView.Styles>
+                    <Style Selector="TableViewRow">
+                        <Setter Property="Padding" Value="0" />
+                        <Setter Property="MinHeight" Value="24" />
+                    </Style>
+                    <Style Selector="TableViewColumnHeader">
+                        <Setter Property="FontFamily" Value="{DynamicResource AppContentFontFamily}" />
+                        <Setter Property="FontSize" Value="12" />
+                        <Setter Property="FontWeight" Value="SemiBold" />
+                    </Style>
+
+                    <!-- Every cell here opens the pane beside the grid, and nothing in a grid of
+                         values says so on its own. The tint plus the hand is the cue that teaches
+                         it on the first pass of the pointer; the mark drawn into the cell's right
+                         edge and the hint in its tooltip are built in TableGridColumns, which is
+                         where the cell content is. Transparent at rest rather than unset, because
+                         a cell with no background is not hit-tested, and one that is never under
+                         the pointer never lights up. -->
+                    <Style Selector="TableViewCell">
+                        <Setter Property="Background" Value="Transparent" />
+                        <Setter Property="Cursor" Value="Hand" />
+                    </Style>
+                    <Style Selector="TableViewCell:pointerover">
+                        <Setter Property="Background" Value="{DynamicResource AppHoverBackgroundBrush}" />
+                    </Style>
+
+                    <!-- A header piece that names a container: it reads as a link because clicking it
+                         is what opens that container into columns (or collapses it back). Chrome-free
+                         so the header still reads as a header, not a row of buttons. -->
+                    <Style Selector="Button.columnLink">
+                        <Setter Property="Background" Value="Transparent" />
+                        <Setter Property="BorderThickness" Value="0" />
+                        <Setter Property="Padding" Value="0" />
+                        <Setter Property="MinWidth" Value="0" />
+                        <Setter Property="MinHeight" Value="0" />
+                        <Setter Property="VerticalAlignment" Value="Center" />
+                    </Style>
+                    <Style Selector="Button.columnLink /template/ ContentPresenter">
+                        <Setter Property="Background" Value="Transparent" />
+                    </Style>
+
+                    <!-- Selected by CLASS, never as a descendant of the button: a tooltip's
+                         content is parented under the control it belongs to, so
+                         "Button.columnLink TextBlock" also painted the tip explaining the link -
+                         and a sentence telling you what clicking does must not itself read as
+                         something to click.
+
+                         Dotted at rest, solid under the pointer: an expandable column has to
+                         read as clickable before anyone hovers it, but a solid underline on every
+                         piece of every header across a wide grid reads as noise. -->
+                    <Style Selector="TextBlock.columnLinkText">
+                        <Setter Property="Foreground" Value="{DynamicResource AppAccentBrush}" />
+                        <Setter Property="TextDecorations">
+                            <TextDecorationCollection>
+                                <TextDecoration Location="Underline" StrokeDashArray="1,2" StrokeThickness="1" />
+                            </TextDecorationCollection>
+                        </Setter>
+                    </Style>
+                    <Style Selector="Button.columnLink:pointerover TextBlock.columnLinkText">
+                        <Setter Property="TextDecorations" Value="Underline" />
+                    </Style>
+                </TableView.Styles>
+            </TableView>
+        </Border>
+
+        <GridSplitter Grid.Column="1"
+                      Width="6"
+                      Background="Transparent"
+                      ResizeDirection="Columns"
+                      IsVisible="{Binding HasCellDetail}" />
+
+        <!-- One CELL in full, beside the grid rather than instead of it: a long scalar the column
+             could never show, or a container's own tree. Scoped to the cell rather than the row -
+             a row's tree here would just be the JSON view with the element collapsed, which is
+             where the reader came from. The column's width is driven from code-behind, so that
+             dragging the splitter sizes the pane the user keeps. -->
+        <Border Grid.Column="2"
+                x:Name="Detail"
+                IsVisible="{Binding HasCellDetail}"
+                Margin="8,0,0,0"
+                BorderBrush="{DynamicResource AppBorderBrush}"
+                BorderThickness="1"
+                CornerRadius="8"
+                Background="{DynamicResource AppWindowBackgroundBrush}"
+                ClipToBounds="True">
+            <Grid RowDefinitions="Auto,*,Auto" Margin="8">
+                <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,6">
+                    <TextBlock Text="{Binding CellDetail.Title}"
+                               ToolTip.Tip="{Binding CellDetail.Title}"
+                               TextTrimming="CharacterEllipsis"
+                               VerticalAlignment="Center"
+                               FontWeight="SemiBold"
+                               FontSize="12" />
+                    <Button Grid.Column="1"
+                            Content="✕"
+                            Click="OnCloseDetail"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            Padding="6,0"
+                            ToolTip.Tip="Close the cell pane" />
+                </Grid>
+
+                <!-- Its own scroll: reading a value must never move the grid the reader is
+                     comparing rows in. -->
+                <ScrollViewer Grid.Row="1"
+                              IsVisible="{Binding CellDetail.IsText}"
+                              HorizontalScrollBarVisibility="Disabled"
+                              VerticalScrollBarVisibility="Auto">
+                    <SelectableTextBlock Text="{Binding CellDetail.Text}"
+                                         TextWrapping="Wrap"
+                                         FontFamily="{DynamicResource AppContentFontFamily}" />
+                </ScrollViewer>
+
+                <!-- The ordinary tree, rooted at this cell's token, so it virtualizes exactly as
+                     the JSON view does - a 2,199-item array opens instantly. -->
+                <ListBox Grid.Row="1"
+                         x:Name="DetailRows"
+                         IsVisible="{Binding CellDetail.IsTree}"
+                         ItemsSource="{Binding CellDetail.Rows}"
+                         SelectionMode="Single"
+                         DoubleTapped="OnDetailRowDoubleTapped"
+                         Background="Transparent"
+                         BorderThickness="0">
+                    <ListBox.Styles>
+                        <Style Selector="ListBoxItem">
+                            <Setter Property="Padding" Value="0" />
+                            <Setter Property="MinHeight" Value="22" />
+                        </Style>
+                    </ListBox.Styles>
+                    <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="json:JsonRow">
+                            <StackPanel Orientation="Horizontal"
+                                        Background="Transparent"
+                                        Margin="{Binding Depth, Converter={StaticResource DetailDepthToMargin}}">
+                                <TextBlock Text="{Binding ArrayIndex}"
+                                           IsVisible="{Binding ArrayIndex, Converter={x:Static json:IsNotNullConverter.Instance}}"
+                                           FontSize="9"
+                                           Foreground="{DynamicResource AppMutedTextBrush}"
+                                           FontFamily="{DynamicResource AppContentFontFamily}"
+                                           Width="26"
+                                           TextAlignment="Right"
+                                           Margin="0,0,2,0"
+                                           VerticalAlignment="Center" />
+                                <!-- Vector triangle for the same reason the JSON tree uses one: a
+                                     ▶/▼ character renders at different sizes per platform. -->
+                                <Button Click="OnDetailToggleExpandClick"
+                                        IsVisible="{Binding HasChildren}"
+                                        Background="Transparent"
+                                        BorderThickness="0"
+                                        Padding="0"
+                                        Width="20"
+                                        Height="22"
+                                        HorizontalContentAlignment="Center"
+                                        VerticalContentAlignment="Center">
+                                    <Path Data="{Binding IsExpanded, Converter={x:Static json:ExpandGlyphConverter.Instance}}"
+                                          Fill="{Binding $parent[Button].Foreground}"
+                                          Stretch="Uniform"
+                                          Width="7"
+                                          Height="7" />
+                                </Button>
+                                <TextBlock IsVisible="{Binding !HasChildren}" Width="20" />
+                                <TextBlock Text="{Binding Name, StringFormat='{}{0}: '}"
+                                           IsVisible="{Binding Name, Converter={x:Static json:IsNotNullConverter.Instance}}"
+                                           Foreground="{DynamicResource AppAccentBrush}"
+                                           VerticalAlignment="Center"
+                                           FontFamily="{DynamicResource AppContentFontFamily}" />
+                                <TextBlock Text="{Binding Value}"
+                                           TextWrapping="NoWrap"
+                                           VerticalAlignment="Center"
+                                           FontFamily="{DynamicResource AppContentFontFamily}" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+
+                <TextBlock Grid.Row="2"
+                           Text="Value truncated — open the file in the raw view to see all of it"
+                           IsVisible="{Binding CellDetail.Truncated}"
+                           Foreground="{DynamicResource AppMutedTextBrush}"
+                           TextWrapping="Wrap"
+                           FontSize="11"
+                           Margin="0,6,0,0" />
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>

@@ -25,10 +25,7 @@ public class CsvRowCollectionTests
             var index = FileOffsetIndex.StartIndexing(file);
             index.IndexingTask.GetAwaiter().GetResult();
 
-            var header = CsvFieldReader.ReadFields(file, index.GetLineSpan(0), (byte)',');
-            var layout = CsvColumnLayout.Compute(header, []);
-
-            using var rows = new CsvRowCollection(index, file, (byte)',', layout, dataStartIndex);
+            using var rows = new CsvRowCollection(index, file, (byte)',', dataStartIndex);
             assert(rows);
         }
         finally
@@ -65,16 +62,6 @@ public class CsvRowCollectionTests
             var row = (CsvVisibleRow)rows[0]!;
             Assert.Equal("id", row.Cells[0].Text);
             Assert.Equal("name", row.Cells[1].Text);
-        });
-    }
-
-    [Fact]
-    public void CellWidths_ComeFromColumnLayout()
-    {
-        WithRows(Content, dataStartIndex: 1, rows =>
-        {
-            var row = (CsvVisibleRow)rows[0]!;
-            Assert.Equal(60, row.Cells[0].Width); // clamps to the minimum for these short values
         });
     }
 
@@ -140,4 +127,5 @@ public class CsvRowCollectionTests
             Assert.Same(first, second);
         });
     }
+
 }

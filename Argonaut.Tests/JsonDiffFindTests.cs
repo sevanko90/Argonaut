@@ -58,10 +58,10 @@ public class JsonDiffFindTests
         await vm.LoadAsync(leftPath, rightPath);
         try { await vm.IndexingTask; } catch { }
 
-        // Same dispatcher-free rebuild nudge JsonDiffContextTests uses: in the app the growth
-        // monitor does this, here the filter round-trip forces the post-diff rebuild.
-        vm.Rows.ChangesOnly = true;
-        vm.Rows.ChangesOnly = false;
+        // Same wait JsonDiffContextTests uses: the growth monitor's final rebuild resumes on a
+        // pool thread with no dispatcher installed, so the scan's own task is not enough to
+        // know the rows have settled. See IndexGrowthMonitor.FinalRefreshTask.
+        await vm.Rows.FinalRefreshTask;
 
         var statuses = new List<string?>();
         var controller = new FindController(statuses.Add, () => null);
@@ -103,7 +103,7 @@ public class JsonDiffFindTests
 
         await h.Controller.FindAsync("needle", 1);
 
-        Assert.NotNull(h.Vm.SelectedPosition);
+        Assert.True(h.Vm.SelectedPosition is not null, Describe(h));
         var row = h.SelectedRow();
         Assert.Equal(DiffStatus.Added, row.Status);
         Assert.Equal("onlyright", row.Right!.Name);
@@ -129,6 +129,37 @@ public class JsonDiffFindTests
 
         Assert.Contains(expected, h.Statuses);
     }
+
+    /// <summary>Waits until the status has reported a total, whatever position it is at - i.e.
+    /// until both files have been scanned to the end and the ring of stops is whole.</summary>
+    private static async Task SettleOnStopCountAsync(Harness h, int stops)
+    {
+        string total = $"of {stops} rows";
+        bool Reported() => h.Statuses.Exists(s => s is not null && s.EndsWith(total, StringComparison.Ordinal));
+
+        for (int i = 0; i < 200 && !Reported(); i++)
+            await Task.Delay(10);
+
+        Assert.True(Reported(), $"No status reported {stops} stops; last was '{(h.Statuses.Count > 0 ? h.Statuses[^1] : null)}'.");
+    }
+
+    /// <summary>What the document actually held, for an assertion that is about to fail on a
+    /// timing-dependent state - the row list and every status the find reported.</summary>
+    private static string Describe(Harness h)
+    {
+        var rows = h.Rows();
+        var lines = new List<string>();
+        for (int i = 0; i < rows.Count; i++)
+            lines.Add($"  [{i}] {rows[i].Status} left={rows[i].Left?.Name} right={rows[i].Right?.Name}");
+
+        return $"rows={rows.Count} selected={h.Vm.SelectedPosition} status='{h.Vm.StatusText}' "
+            + $"failure='{h.Vm.IndexFailure?.Message}'\n"
+            + string.Join("\n", lines)
+            + "\nstatuses=" + string.Join(" | ", h.Statuses);
+    }
+
+    /// <summary>The stop's name, whichever side of the row carries it.</summary>
+    private static string Label(JsonDiffRow row) => row.Left?.Name ?? row.Right!.Name!;
 
     [Fact]
     public async Task Find_BothPanesOfOneRow_AreASingleStop()
@@ -176,30 +207,46 @@ public class JsonDiffFindTests
     [Fact]
     public async Task Find_StepsThroughBothDocumentsInMergedOrder_ThenWraps()
     {
-        // One match per side, and the left one sits at an EARLIER merged position (the removed
-        // property precedes the added one in the merged walk), so it must come first even
-        // though each document is scanned independently.
+        // Three stops interleaved across the two files - removed "aaa", added "mmm", removed
+        // "zzz" - so walking them in merged order is a different sequence from draining either
+        // document first. Two stops could not show that: a two-element ring is the same cycle
+        // whichever order it was built in.
         using var h = await LoadAsync(
-            """{"aaa":"needle","keep":1}""",
-            """{"keep":1,"zzz":"needle"}""");
+            """{"aaa":"needle","keep":1,"zzz":"needle"}""",
+            """{"mmm":"needle","keep":1}""");
 
+        // Which stop the FIRST press lands on is deliberately not asserted. The two files are
+        // scanned independently and a press stops on whatever has been found by the time it is
+        // made - that is the point of being able to search a file still being scanned, and the
+        // right file's scan legitimately wins that race sometimes. Merged order is a promise
+        // about the ring, and the ring is only whole once both scans have reported: settle
+        // first, then walk it.
         await h.Controller.FindAsync("needle", 1);
-        var first = h.SelectedRow();
-        Assert.Equal(DiffStatus.Removed, first.Status);
-        Assert.Equal("aaa", first.Left!.Name);
+        await SettleOnStopCountAsync(h, 3);
 
-        await h.Controller.FindAsync("needle", 1);
-        var second = h.SelectedRow();
-        Assert.Equal(DiffStatus.Added, second.Status);
-        Assert.Equal("zzz", second.Right!.Name);
+        string[] merged = ["aaa", "mmm", "zzz"];
 
-        // Wraps back round to the first.
-        await h.Controller.FindAsync("needle", 1);
-        Assert.Equal("aaa", h.SelectedRow().Left!.Name);
+        var walked = new List<string>();
+        for (int i = 0; i < 4; i++)
+        {
+            await h.Controller.FindAsync("needle", 1);
+            walked.Add(Label(h.SelectedRow()));
+        }
+
+        // Four steps over three stops, so this also proves the wrap: whichever stop the walk
+        // started from, it must run the merged order from there and come round again.
+        int start = Array.IndexOf(merged, walked[0]);
+        Assert.InRange(start, 0, merged.Length - 1);
+        for (int i = 0; i < walked.Count; i++)
+            Assert.Equal(merged[(start + i) % merged.Length], walked[i]);
 
         // And previous walks the same ring backwards.
-        await h.Controller.FindAsync("needle", -1);
-        Assert.Equal("zzz", h.SelectedRow().Right!.Name);
+        for (int i = 1; i <= merged.Length; i++)
+        {
+            await h.Controller.FindAsync("needle", -1);
+            int expected = ((start + walked.Count - 1 - i) % merged.Length + merged.Length) % merged.Length;
+            Assert.Equal(merged[expected], Label(h.SelectedRow()));
+        }
     }
 
     [Fact]

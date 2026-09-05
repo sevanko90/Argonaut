@@ -1,74 +1,85 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
-             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:shell="using:Argonaut.Shell"
-             mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="500"
              x:Class="Argonaut.Shell.EmptyStateView">
-
     <UserControl.Styles>
-        <!-- Button.linklike is a global style (App.axaml) shared with the failure-location links. -->
-        <Style Selector="Button.clearlist">
+        <Style Selector="Button.recentfile">
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Padding" Value="4,0" />
-            <Setter Property="Foreground" Value="{DynamicResource AppMutedTextBrush}" />
+            <Setter Property="Padding" Value="12,10" />
             <Setter Property="Cursor" Value="Hand" />
         </Style>
-        <Style Selector="Button.clearlist:pointerover /template/ ContentPresenter">
-            <Setter Property="Foreground" Value="{DynamicResource AppDangerHoverBrush}" />
+        <Style Selector="Button.recentfile:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource AppHoverBackgroundBrush}" />
         </Style>
     </UserControl.Styles>
 
-    <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
-        <StackPanel Orientation="Vertical" Spacing="16" HorizontalAlignment="Center">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <Grid MaxWidth="640" Margin="32,36" RowDefinitions="Auto,Auto,Auto"
+              HorizontalAlignment="Stretch" VerticalAlignment="Center">
+            <StackPanel Spacing="12" Margin="0,0,0,28">
+                <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center">
+                    <Border Background="{DynamicResource AppAccentSurfaceBrush}" CornerRadius="10" Padding="10">
+                        <Path Width="20" Height="20" Stretch="Uniform"
+                              Stroke="{DynamicResource AppAccentBrush}" StrokeThickness="1.8"
+                              Data="M8 3H5V9L2 12L5 15V21H8 M16 3H19V9L22 12L19 15V21H16 M10 15L14 9" />
+                    </Border>
+                    <TextBlock Text="Argonaut" FontSize="22" FontWeight="SemiBold" VerticalAlignment="Center" />
+                </StackPanel>
+                <TextBlock Text="Big files. Clear answers." FontSize="30" FontWeight="SemiBold"
+                           TextAlignment="Center" TextWrapping="Wrap" Margin="0,8,0,0" />
+                <TextBlock Text="Explore, search and compare your data."
+                           Foreground="{DynamicResource AppMutedTextBrush}" FontSize="14"
+                           TextAlignment="Center" TextWrapping="Wrap" />
+            </StackPanel>
 
-            <Viewbox Width="120" Height="120" Stretch="Uniform" HorizontalAlignment="Center">
-                <Path Fill="{DynamicResource AppSubtleIconBrush}"
-                      Data="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z" />
-            </Viewbox>
+            <Border Grid.Row="1" Background="{DynamicResource AppWindowBackgroundBrush}"
+                    BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
+                    CornerRadius="12" Padding="28,24">
+                <StackPanel Spacing="12" HorizontalAlignment="Center">
+                    <TextBlock Text="Drop a file here to get started" FontSize="16" FontWeight="Medium"
+                               TextAlignment="Center" TextWrapping="Wrap" />
+                    <TextBlock Text="JSON  ·  NDJSON  ·  CSV  ·  Plain text" FontSize="12"
+                               Foreground="{DynamicResource AppMutedTextBrush}" TextAlignment="Center" />
+                    <Button Content="Open file…" Classes="primary" Click="OnChooseFile"
+                            HorizontalAlignment="Center" Margin="0,6,0,0" />
+                </StackPanel>
+            </Border>
 
-            <TextBlock Text="Drag file here or choose from file picker to load"
-                       FontSize="16"
-                       Foreground="{DynamicResource AppMutedTextBrush}"
-                       TextAlignment="Center"
-                       TextWrapping="Wrap"
-                       HorizontalAlignment="Center"
-                       Width="320" />
-
-            <Button Content="Choose file…"
-                    Click="OnChooseFile"
-                    HorizontalAlignment="Center"
-                    Padding="16,8" />
-
-            <StackPanel Orientation="Vertical" Spacing="4" HorizontalAlignment="Center" Margin="0,16,0,0">
-                <Grid ColumnDefinitions="Auto,Auto" HorizontalAlignment="Center">
-                    <TextBlock Grid.Column="0" Text="Recent files" FontWeight="SemiBold" Opacity="0.7"
-                               VerticalAlignment="Center" />
-                    <Button x:Name="ClearRecentFilesButton" Grid.Column="1" Content="✕" FontSize="11"
-                            Classes="clearlist" Click="OnClearRecentFiles" Margin="8,0,0,0"
-                            VerticalAlignment="Center" ToolTip.Tip="Clear recent files" />
+            <StackPanel Grid.Row="2" Spacing="10" Margin="0,24,0,0">
+                <Grid ColumnDefinitions="*,Auto" Margin="12,0">
+                    <TextBlock Text="Recent files" FontSize="12" FontWeight="SemiBold"
+                               Foreground="{DynamicResource AppMutedTextBrush}" VerticalAlignment="Center" />
+                    <Button x:Name="ClearRecentFilesButton" Grid.Column="1" Content="Clear list"
+                            Classes="linklike" FontSize="12" Click="OnClearRecentFiles"
+                            ToolTip.Tip="Clear recent files" />
                 </Grid>
-                <TextBlock x:Name="NoRecentFilesText" Text="No recent files yet." Opacity="0.7"
-                           HorizontalAlignment="Center" />
-                <ItemsControl x:Name="RecentFilesList" HorizontalAlignment="Center">
-                    <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate>
-                            <StackPanel Orientation="Vertical" Spacing="4" HorizontalAlignment="Center" />
-                        </ItemsPanelTemplate>
-                    </ItemsControl.ItemsPanel>
+                <TextBlock x:Name="NoRecentFilesText" Text="Files you open will appear here."
+                           Foreground="{DynamicResource AppMutedTextBrush}" Margin="12,6" />
+                <ItemsControl x:Name="RecentFilesList">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="shell:RecentFileItem">
-                            <Button Classes="linklike"
-                                    Content="{Binding FileName}"
-                                    HorizontalAlignment="Center"
-                                    ToolTip.Tip="{Binding Path}"
-                                    Click="OnRecentFileClick" />
+                            <Button Classes="recentfile" ToolTip.Tip="{Binding Path}" Click="OnRecentFileClick">
+                                <Grid ColumnDefinitions="Auto,*">
+                                    <Border Background="{DynamicResource AppAccentSurfaceBrush}" CornerRadius="6"
+                                            Padding="8" Margin="0,0,12,0" VerticalAlignment="Center">
+                                        <Path Width="14" Height="18" Stretch="Uniform" StrokeThickness="1.5"
+                                              Stroke="{DynamicResource AppAccentBrush}"
+                                              Data="M3 1H11L17 7V21H3Z M11 1V7H17 M6 12H14 M6 16H12" />
+                                    </Border>
+                                    <StackPanel Grid.Column="1" Spacing="3">
+                                        <TextBlock Text="{Binding FileName}" FontWeight="Medium" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{Binding Path}" FontSize="11" TextTrimming="CharacterEllipsis"
+                                                   Foreground="{DynamicResource AppMutedTextBrush}" />
+                                    </StackPanel>
+                                </Grid>
+                            </Button>
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
             </StackPanel>
-
-        </StackPanel>
-    </Grid>
+        </Grid>
+    </ScrollViewer>
 </UserControl>

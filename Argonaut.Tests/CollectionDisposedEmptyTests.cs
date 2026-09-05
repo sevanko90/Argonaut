@@ -127,4 +127,28 @@ public class CollectionDisposedEmptyTests
             File.Delete(path);
         }
     }
+
+    [Fact]
+    public async Task JsonArrayRowCollection_AfterDispose_IsEmpty()
+    {
+        string path = WriteTempFile("""[{"id":1,"name":"a"},{"id":2,"name":"b"},{"id":3,"name":"c"}]""");
+        try
+        {
+            var vm = new JsonArrayTableViewModel();
+            await vm.LoadAsync(path, 0, new FileInfo(path).Length, "$");
+            await vm.IndexingTask;
+            var rows = vm.Rows;
+            Assert.True(rows.Count > 0);
+
+            vm.Dispose();
+
+            Assert.Empty(rows);
+            Assert.Equal(0, CountViaEnumerator(rows));
+            Assert.Null(rows[0]); // no mmap read after the mapping is gone
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }

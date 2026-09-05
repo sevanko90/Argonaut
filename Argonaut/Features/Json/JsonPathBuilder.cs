@@ -150,7 +150,15 @@ public static class JsonPathBuilder
         if (length <= 0)
             return string.Empty;
 
-        return mmap.GetUtf8String(offset, length);
+        var raw = mmap.GetSpan(offset, length);
+        if (JsonUnescape.IsPlain(raw))
+            return Encoding.UTF8.GetString(raw);
+
+        // Allocate only the final string. Even enormous escaped names use fixed scratch
+        // space: count first, then decode directly into the string's character storage.
+        int charCount = JsonUnescape.DecodeUtf16(raw, default);
+        return string.Create(charCount, (mmap, offset, length), static (destination, source) =>
+            JsonUnescape.DecodeUtf16(source.mmap.GetSpan(source.offset, source.length), destination));
     }
 
     private static bool IsContainer(JsonTokenKind kind) => kind is JsonTokenKind.StartObject or JsonTokenKind.StartArray;

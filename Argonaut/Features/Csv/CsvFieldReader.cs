@@ -22,10 +22,10 @@ public static class CsvFieldReader
 {
     /// <summary>
     /// Display cap on how many fields one row contributes to the grid. A row's field count is
-    /// bounded only by its length, and the CSV grid renders cells into a non-virtualizing
-    /// StackPanel (both the sticky header and each row) - so a file whose "first line" is the
-    /// whole file, as a minified JSON document forced into this view is, would otherwise build
-    /// millions of controls per row and never finish laying out. See <see cref="DisplayText"/>.
+    /// bounded only by its length, and the grid does not virtualize COLUMNS - every column is
+    /// realized in every visible row - so a file whose "first line" is the whole file, as a
+    /// minified JSON document forced into this view is, would otherwise build millions of
+    /// controls per row and never finish laying out. See <see cref="DisplayText"/>.
     /// </summary>
     public const int MaxDisplayFields = 1000;
 

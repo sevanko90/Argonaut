@@ -25,7 +25,8 @@ chain changes.
   document: `FilePath`, observable `StatusText`, `CreateSearchNavigator()` (nullable — null for
   a document with nothing searchable), `CanHandleFileType(FileKind)`, observable
   `IndexFailure`, and `Toolbar`. Implemented by `JsonViewModel`, `NdJsonViewModel`,
-  `CsvViewModel`, `RawViewModel`, and the placeholder `IncompatibleViewModel`.
+  `CsvViewModel`, `RawViewModel`, `JsonDiffViewModel`, `JsonArrayTableViewModel`, and the
+  placeholder `IncompatibleViewModel`.
 - Each document view model owns its whole status line (initial, live indexing %, complete,
   failed, and — NDJSON — selected-line), which the shell mirrors into the status bar.
 - **Per-view toolbars are injected, not type-switched.** `IDocumentViewModel.Toolbar` is
@@ -36,8 +37,12 @@ chain changes.
   contract because the shell never calls a member on it; the toolbar region therefore swaps
   with the document itself, and adding a new document view means adding one toolbar view
   model plus one `DataTemplate`, with no shell logic to touch.
-- Consequently the shell reaches into a document view model for **nothing** except
-  `JumpToRawOffsetAsync`'s `RawViewModel` match (see below). Toolbar-driven state is passed
+- Consequently the shell never reaches into a document view model **by concrete type**. Where it
+  needs a behaviour only some documents can honour, it asks for an opt-in capability interface
+  the document declares — `IPathNavigable` (reveal a JSONPath; `JsonViewModel`) and
+  `IByteOffsetNavigable` (reveal a byte offset; `RawViewModel`), both in `Shell/`. These stay
+  *off* `IDocumentViewModel`, whose job is the surface every document genuinely shares, but a
+  new view that can honour one implements it with no shell edit. Toolbar-driven state is passed
   *down* at construction instead: the owning document view model builds its
   `JsonToolbarViewModel` in `LoadAsync`, handing it that document's own `DateHintSettings`
   and `JsonSchemaSettings` instances plus a `SetDefaultExpandDepth` callback (and, JSON only,
@@ -109,10 +114,10 @@ chain changes.
   its "Line N" location is a clickable link — in the banner (`MainWindow.axaml`'s
   `JumpToFailureLineButton`) and in `IncompatibleView`'s location panel alike — that calls
   `MainWindowViewModel.JumpToRawOffsetAsync(byteOffset)`: switches to the raw viewer (if
-  not already showing it) via `SwitchViewAsync`, then concrete-type-matches `CurrentDocument` to
-  `RawViewModel` — the shell's only such match, because "jump to a byte offset" is meaningful
-  for exactly one view and so has no place on `IDocumentViewModel` — and calls
-  `RawViewModel.JumpToByteOffsetAsync`, which resolves the offset to a display row via the
+  not already showing it) via `SwitchViewAsync`, then asks `CurrentDocument` for the
+  `IByteOffsetNavigable` capability — a query, not a type test, because "jump to a byte offset"
+  is meaningful for exactly one view today and so has no place on `IDocumentViewModel` — and calls
+  `JumpToByteOffsetAsync`, which resolves the offset to a display row via the
   existing `RawOffsetRowResolver` (waiting out an in-progress scan if needed - the same machinery
   `RawSearchNavigator` uses for a search reveal) and selects it. A resolve that outlives the
   document (closed/switched away mid-wait) surfaces as a catchable `ObjectDisposedException`
@@ -131,6 +136,59 @@ chain changes.
   Selection/scroll sync lives in code-behind; all behavior is in the view model.
 - `NdJsonViewModel` hosts a nested per-line `JsonViewModel` (`SelectedLineJsonViewModel`) for
   the right-hand JSON pane. That nested VM has its own single-line sub-range mapping.
+- `JsonArrayTableViewModel` renders one JSON array as a CSV-style grid, over its own sub-range
+  session covering exactly the array's `[`…`]` bytes — so it shares nothing with the JSON
+  document it was opened from, which is required rather than tidy, since the shell disposes the
+  outgoing document before publishing this one. Entered explicitly from a JSON array row's
+  "view as table" link (raised through `ArrayTableService`, with `MainWindow` the sole
+  subscriber — the same view-to-shell decoupling as `RawJumpService`) and published like a diff:
+  directly, with `FileKind.Unknown`, never via `DocumentViewCatalog`. It reuses CSV's
+  presentation types (`CsvStructure`, `CsvCell`, `CsvVisibleRow`) plus its own
+  `JsonArrayRowCollection`, and renders through the same grid `CsvView` does: Avalonia 12.1's
+  `TableView`. It derives from `ListBox`, so the lazily-realized row collections virtualize
+  exactly as the hand-rolled grid did (`TableGridVirtualizationTests`), and it owns the sticky
+  header, its horizontal-scroll tracking and the column resizer that both views used to build by
+  hand. Columns are data, not markup, so `TableGridColumns` — shared by both grids — builds them
+  in code-behind from the view model's `CsvStructure`: one `TableViewColumn` per column, each
+  binding its cells by index (`Cells[i].Text`), plus the find-term binding `CsvView` needs to
+  highlight matches in cells and headers. A re-shape (a different column count or different
+  discovered widths) rebuilds them; a pure relabelling — CSV's "first row is header" tickbox —
+  only swaps the headers, so widths the user set survive it.
+  Drag widths are left un-policed: `TableView` has no min/max of its own and its `ActualWidth` is
+  read-only, so any bound could only be applied after the fact — the column springs back out from
+  under the pointer, which reads worse than the width it was preventing. What `TableGridColumns`
+  does add is fit-to-content: double-clicking a resizer widths the column to the longest text its
+  already-realized rows hold (`IColumnFitSource`, implemented by `JsonArrayRowCollection` over its
+  LRU cache — never a file scan, since the true widest value in a multi-GB array is a full walk
+  away). That width write must be deferred through `UiDeferral`: writing `TableViewColumn.Width`
+  inline, from inside the pointer event the resizer is still handling, throws `Cannot call Measure
+  using a size with NaN values` out of the layout pass.
+  Seed widths come from the text a cell will actually render, not the raw token: a container's own
+  token is one byte (the brace) while its cell shows `{ 6 members }`, which is why every nested
+  column used to open at the minimum width. Turning that count into pixels is
+  `CellTextMetrics`, and both its terms are measured rather than chosen: the per-character advance
+  from the resolved content typeface at the resolved size (`FormattedText` over a sample — it is a
+  property of whichever face the platform picked out of `AppContentFontFamily`, not a number this
+  code gets to pick), and the cell inset from the first realized cell's padding, which is the only
+  place it is knowable (the cell theme's padding is a dynamic resource, and an unattached cell
+  never applies its theme). `TableGridColumns` reports that inset after the first layout following
+  a rebuild and re-applies the widths it seeded without it. Hard-coding either term caused the same
+  trimmed-text bug twice, so a cell template must not spend width the metrics do not know about — a
+  horizontal margin on the cell's TextBlock trims text the column was widthed to fit.
+  `CellTextMetrics.Current` is a settable seam (like `AppDataPaths.RootOverride`) for tests with no
+  Avalonia platform, where the fallback is one em per character: no face exceeds its em, so the
+  estimate errs wide rather than trimming. Because widths are derived rather than stored,
+  `CsvColumn` keeps the character count and `CsvCell` carries only text — a realized row holds no
+  geometry, so nothing goes stale when a column is resized or the content font is swapped. The
+  status bar's font toggle is wired through: `TableGridColumns` watches the two font resources,
+  re-measures the metrics and re-applies the discovered width to every column the user has not
+  sized themselves. Columns come from the sampled
+  elements: property names for an array of objects, a single `value` column otherwise — and the
+  toolbar's reshape-into-N-columns picker is offered *only* in the second case, since an object
+  array is already columned by its own data. Back reloads the origin file as
+  JSON and reveals the origin path through `IPathNavigable`. The link is hidden on the per-line
+  documents NDJSON nests, whose token offsets are mapping-relative and therefore not file
+  offsets.
 
 ## Memory-mapped files
 
@@ -144,12 +202,15 @@ chain changes.
 - `IndexedFileSession<TIndex>` (`Infrastructure/IndexedFileSession.cs`) owns the trio
   {mapping, background index, CancellationTokenSource} and encodes teardown ordering:
   cancel → join indexing task → join dependent tasks → release mapping. It owns the `MMapFile`
-  once `Start` is called (disposes it even if the index factory throws). `RegisterDependentTask`
-  joins background readers it didn't itself start (date-hint inference, JSON path resolution)
-  before releasing the mapping. `RawIndexSession` is the wrap-width-restartable variant, with
+  once `Start` is called (disposes it even if the index factory throws). `StartDependentRead`
+  starts date-hint inference and JSON path resolution on the pool and joins those background
+  readers before releasing the mapping. Their UI continuations are awaited separately and
+  never joined by disposal, avoiding a wait on the UI thread from the UI thread itself. `RawIndexSession` is the wrap-width-restartable variant, with
   two cancellation sources: `mappingCts` for the document's lifetime and `indexCts` (linked from
   it) for the index `RestartIndex` recycles; `JsonDiffSession` composes two
-  `IndexedFileSession<JsonStructureIndex>`s. All three implement `IDocumentSession`, which
+  `IndexedFileSession<JsonStructureIndex>`s; `JsonArrayTableSession` composes one of them with
+  the `JsonArrayElementIndex` derived from its token index. All four implement
+  `IDocumentSession`, which
   `IndexedDocumentViewModel` (below) drives — the teardown pair (`TearingDown` + `RequestStop()`
   + `Dispose()`) plus the two members the status line is driven from, `IndexingTask` and
   `Failure`. `TearingDown` is named for the moment it fires, per CLAUDE.md's naming convention.
@@ -162,12 +223,27 @@ chain changes.
   monitor recognise a retired scan. `JsonDiffSession.Failure` is always null on purpose — a diff
   failure belongs to the left or right file, and only `JsonDiffViewModel` knows the display
   names to attribute it with.
+- **A composed session is how a document waits on the right task.** `IndexedDocumentViewModel.IndexingTask`
+  is non-virtual and reads `Session.IndexingTask`, so a document whose "still growing" signal is
+  not its own file scan's expresses that one layer down. `JsonDiffSession` reports the diff's
+  task rather than either side's; `JsonArrayTableSession` reports the element index's, because
+  the token scan completing is not when the table stops growing — the element index publishes
+  one final stride afterwards. Both also own a teardown ordering their view model would
+  otherwise have to hand-encode: cancel the derived work, join it (after which nothing reads the
+  source index), then dispose the file session and release the mapping.
+- **A scan's completion signal must be unconditional.** Every index starts its scan through
+  `AppendLogIndexBase.StartScan` / `StartStreamingScan`, which deliberately do NOT pass the
+  cancellation token to `Task.Run`: a token already cancelled when the pool dequeues the work
+  item makes `Task.Run` skip the body, so `MarkComplete` would never run, `IsComplete` would
+  stay false forever, and every waiter would hang for the life of the process. The body observes
+  cancellation itself and still reaches the `finally`.
 
 ## Virtualized ItemsSources
 
 - `MemoryMappedCollectionBase` (`Infrastructure/MemoryMappedCollectionBase.cs`) is the shared
-  base for the three list ItemsSources: `JsonVisibleRowCollection`, `MemoryMappedFileLineCollection`,
-  `CsvRowCollection`. It supplies the read-only `IList` + `INotifyCollectionChanged` surface
+  base for the list ItemsSources: `JsonVisibleRowCollection`, `MemoryMappedFileLineCollection`,
+  `CsvRowCollection`, `JsonArrayRowCollection`. It supplies the read-only `IList` +
+  `INotifyCollectionChanged` surface
   Avalonia's `VirtualizingStackPanel` needs.
 - Subclasses implement only `GetCount()`, `GetItem(int)`, `DisposeCore()`. The base owns the
   `disposed` flag: `Count` returns 0 and the indexer returns null once disposed, and it
@@ -217,6 +293,17 @@ chain changes.
   `RawViewModel`'s wrap-width restart just replaces its field.
 - `OnIndexingCompleted()` takes no argument on purpose: every subclass reports from state it
   already has, so handing it the `IFileIndexer` would only widen what a hook can reach into.
+- **A row collection samples "is the scan still running?" BEFORE its first walk, never after.**
+  Every collection with an `IndexGrowthMonitor` (`JsonVisibleRowCollection`,
+  `JsonArrayRowCollection`, `JsonDiffRowCollection`) attaches one only when the scan was
+  unfinished — and a scan that finishes *during* that first walk would, on a check made
+  afterwards, read as "already complete, nothing to monitor", leaving the collection frozen on
+  what it saw mid-scan with nothing left to rebuild it (for the diff: the pre-diff preview of
+  the left document, permanently). Monitoring an already-finished task costs one immediate
+  final refresh, which is exactly what that window loses. `IndexGrowthMonitor.FinalRefreshTask`
+  completes once that refresh has run: dispatcher-free tests await it, because with no
+  `SynchronizationContext` installed the refresh resumes on a pool thread and would otherwise
+  rebuild the collection while the test reads it.
 
 ## Search interaction
 

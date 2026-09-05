@@ -8,6 +8,9 @@ Every cost claim below was checked against the code at the time of writing (bran
 `optimize-json-diff-alignment`, 2026-08-27), with file/line references kept so a future reader can
 tell whether the reasoning still holds or the code has moved out from under it.
 
+How the table renders *nested* objects and arrays is decided separately, in
+[json-array-nesting-options.md](json-array-nesting-options.md).
+
 ## Decisions at a glance
 
 - **Where the table lives** — swap `CurrentDocument` for a table document with a banner and a Back

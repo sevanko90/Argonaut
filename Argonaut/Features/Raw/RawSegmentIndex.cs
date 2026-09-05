@@ -197,7 +197,7 @@ public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IFileInd
         ArgumentOutOfRangeException.ThrowIfLessThan(wrapWidth, MaxUtf8Backoff + 1);
 
         var index = new RawSegmentIndex(file, wrapWidth);
-        index.IndexingTask = Task.Run(() => index.RunIndexing(() => index.ProduceRows(progressReporter, cancellationToken)), cancellationToken);
+        index.IndexingTask = index.StartScan(() => index.ProduceRows(progressReporter, cancellationToken));
         return index;
     }
 

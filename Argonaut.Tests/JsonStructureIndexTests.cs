@@ -247,4 +247,42 @@ public class JsonStructureIndexTests
             File.Delete(path);
         }
     }
+
+    [Fact]
+    public async Task CancelledBeforeTheScanStarts_StillMarksItselfComplete()
+    {
+        // Task.Run(body, token) SKIPS the body when the token is already cancelled as the pool
+        // dequeues the work item, which would leave MarkComplete uncalled and IsComplete false
+        // forever - hanging every waiter registered through WaitForTokenCountAsync for the life
+        // of the process. AppendLogIndexBase.StartScan is what makes the signal unconditional.
+        string path = Path.GetTempFileName();
+        File.WriteAllText(path, BuildSampleJson());
+        var file = new MMapFile(path);
+        try
+        {
+            using var cts = new CancellationTokenSource();
+            cts.Cancel();
+
+            var index = JsonStructureIndex.StartIndexing(file, cancellationToken: cts.Token);
+            try
+            {
+                await index.IndexingTask;
+            }
+            catch
+            {
+                // Cancellation faults the task; only the completion signal matters here.
+            }
+
+            Assert.True(index.IsComplete);
+
+            // A regression would hang the run rather than fail it, so the wait is raced.
+            var wait = index.WaitForTokenCountAsync(1000);
+            Assert.Same(wait, await Task.WhenAny(wait, Task.Delay(5000)));
+        }
+        finally
+        {
+            file.Dispose();
+            File.Delete(path);
+        }
+    }
 }

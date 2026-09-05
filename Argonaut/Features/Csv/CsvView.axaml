@@ -3,47 +3,19 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:csv="clr-namespace:Argonaut.Features.Csv"
-             xmlns:search="clr-namespace:Argonaut.Features.Search"
              x:Class="Argonaut.Features.Csv.CsvView"
              x:DataType="csv:CsvViewModel">
-    <UserControl.Resources>
-        <DataTemplate x:Key="CsvDataCellTemplate" x:DataType="csv:CsvCell">
-            <Border Width="{Binding Width}"
-                    Padding="6,4"
-                    BorderBrush="{DynamicResource AppBorderBrush}"
-                    BorderThickness="0,0,1,0">
-                <TextBlock search:SearchHighlight.Text="{Binding Text}"
-                           search:SearchHighlight.Term="{Binding $parent[csv:CsvView].((csv:CsvViewModel)DataContext).HighlightTerm}"
-                           TextTrimming="CharacterEllipsis"
-                           TextWrapping="NoWrap"
-                           ToolTip.Tip="{Binding Text}"
-                           FontFamily="{DynamicResource AppContentFontFamily}"
-                           FontSize="12" />
-            </Border>
-        </DataTemplate>
-        <DataTemplate x:Key="CsvHeaderCellTemplate" x:DataType="csv:CsvCell">
-            <Border Width="{Binding Width}"
-                    Padding="6,4"
-                    BorderBrush="{DynamicResource AppBorderBrush}"
-                    BorderThickness="0,0,1,0">
-                <TextBlock search:SearchHighlight.Text="{Binding Text}"
-                           search:SearchHighlight.Term="{Binding $parent[csv:CsvView].((csv:CsvViewModel)DataContext).HighlightTerm}"
-                           TextTrimming="CharacterEllipsis"
-                           TextWrapping="NoWrap"
-                           ToolTip.Tip="{Binding Text}"
-                           FontFamily="{DynamicResource AppContentFontFamily}"
-                           FontSize="12"
-                           FontWeight="SemiBold" />
-            </Border>
-        </DataTemplate>
-    </UserControl.Resources>
-
+    <!-- The grid is a TableView (Avalonia 12.1), which owns the sticky header, its
+         horizontal-scroll tracking and the column resizer - all of which used to be built here
+         by hand. Columns are absent from this markup because their count and names are data:
+         TableGridColumns builds them in code-behind from the view model's CsvStructure, and
+         carries the find-term binding into each cell so matches still highlight. -->
     <Border BorderBrush="{DynamicResource AppBorderBrush}"
             BorderThickness="1"
             CornerRadius="8"
             Background="{DynamicResource AppWindowBackgroundBrush}"
             ClipToBounds="True">
-        <Grid RowDefinitions="Auto,Auto,*">
+        <Grid RowDefinitions="Auto,*">
             <Border Grid.Row="0"
                     Padding="8,6"
                     BorderBrush="{DynamicResource AppBorderBrush}"
@@ -54,57 +26,24 @@
                           FontSize="12" />
             </Border>
 
-            <!-- Sticky header: not user-scrollable directly (IsHitTestVisible=False) - its
-                 horizontal Offset is mirrored from the body's ScrollViewer in code-behind so it
-                 stays pinned vertically but tracks horizontal scroll, keeping columns aligned
-                 with the virtualized rows below via the shared CsvCell.Width values. -->
-            <ScrollViewer Grid.Row="1"
-                          x:Name="HeaderScrollViewer"
-                          HorizontalScrollBarVisibility="Hidden"
-                          VerticalScrollBarVisibility="Disabled"
-                          IsHitTestVisible="False"
-                          Background="{DynamicResource AppPanelBackgroundBrush}">
-                <ItemsControl ItemsSource="{Binding HeaderCells}"
-                              ItemTemplate="{StaticResource CsvHeaderCellTemplate}">
-                    <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate>
-                            <StackPanel Orientation="Horizontal" />
-                        </ItemsPanelTemplate>
-                    </ItemsControl.ItemsPanel>
-                </ItemsControl>
-            </ScrollViewer>
-
-            <ListBox Grid.Row="2"
-                     x:Name="RowsListBox"
-                     ItemsSource="{Binding Rows}"
-                     SelectionMode="Single"
-                     ScrollViewer.HorizontalScrollBarVisibility="Auto"
-                     Padding="0">
-                <ListBox.Styles>
-                    <Style Selector="ListBoxItem">
+            <TableView Grid.Row="1"
+                       x:Name="Table"
+                       ItemsSource="{Binding Rows}"
+                       SelectionMode="Single"
+                       CanUserResizeColumns="True"
+                       Padding="0">
+                <TableView.Styles>
+                    <Style Selector="TableViewRow">
                         <Setter Property="Padding" Value="0" />
-                        <Setter Property="HorizontalContentAlignment" Value="Left" />
                         <Setter Property="MinHeight" Value="24" />
                     </Style>
-                </ListBox.Styles>
-                <ListBox.ItemsPanel>
-                    <ItemsPanelTemplate>
-                        <VirtualizingStackPanel />
-                    </ItemsPanelTemplate>
-                </ListBox.ItemsPanel>
-                <ListBox.ItemTemplate>
-                    <DataTemplate x:DataType="csv:CsvVisibleRow">
-                        <ItemsControl ItemsSource="{Binding Cells}"
-                                      ItemTemplate="{StaticResource CsvDataCellTemplate}">
-                            <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <StackPanel Orientation="Horizontal" />
-                                </ItemsPanelTemplate>
-                            </ItemsControl.ItemsPanel>
-                        </ItemsControl>
-                    </DataTemplate>
-                </ListBox.ItemTemplate>
-            </ListBox>
+                    <Style Selector="TableViewColumnHeader">
+                        <Setter Property="FontFamily" Value="{DynamicResource AppContentFontFamily}" />
+                        <Setter Property="FontSize" Value="{DynamicResource AppContentFontSize}" />
+                        <Setter Property="FontWeight" Value="SemiBold" />
+                    </Style>
+                </TableView.Styles>
+            </TableView>
         </Grid>
     </Border>
 </UserControl>

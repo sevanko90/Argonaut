@@ -11,7 +11,7 @@ namespace Argonaut.Tests;
 
 /// <summary>
 /// End-to-end coverage of document teardown while background work is live. Two scenarios per
-/// document type (JSON, CSV, NDJSON, Raw, JSON diff): disposing while the document's own
+/// document type (JSON, CSV, NDJSON, Raw, JSON diff, array table): disposing while the document's own
 /// background indexing is still running, and disposing while a search scan over the same file
 /// is wedged mid-chunk - the "view's own detach handler tears the document down without the
 /// shell's FindController stopping the search first" case (window close mid-search).
@@ -338,6 +338,29 @@ public class DocumentDisposalLifecycleTests
     }
 
     [Fact]
+    public async Task ArrayTable_CloseDuringIndexing_DoesNotHangOrCrash()
+    {
+        // The table has TWO background scans stacked - the token scan over its sub-range
+        // mapping, and the element walk reading that index - so its teardown has an ordering
+        // the single-index documents do not: join the walk before the mapping is released.
+        // There is no active-search variant because the table returns no navigator in v1.
+        string path = WriteLargeJson();
+        try
+        {
+            var vm = new JsonArrayTableViewModel();
+            await vm.LoadAsync(path, 0, new FileInfo(path).Length, "$");
+            Assert.False(vm.IndexingTask.IsCompleted); // sanity: the walk genuinely still running
+
+            await DisposeWithTimeoutAsync(vm.Dispose);
+            Assert.True(vm.IndexingTask.IsCompleted);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public async Task Diff_CloseDuringIndexing_DoesNotHangOrCrash()
     {
         string leftPath = WriteLargeJson();
@@ -450,6 +473,17 @@ public class DocumentDisposalLifecycleTests
             {
                 var vm = new RawViewModel();
                 await vm.LoadAsync(path);
+                await DisposeWithTimeoutAsync(vm.Dispose);
+                vm.Dispose();
+            }
+            finally { File.Delete(path); }
+        }
+        {
+            string path = WriteLargeJson();
+            try
+            {
+                var vm = new JsonArrayTableViewModel();
+                await vm.LoadAsync(path, 0, new FileInfo(path).Length, "$");
                 await DisposeWithTimeoutAsync(vm.Dispose);
                 vm.Dispose();
             }

@@ -1,0 +1,63 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:json="clr-namespace:Argonaut.Features.Json"
+             x:Class="Argonaut.Features.Json.JsonArrayTableToolbarView"
+             x:DataType="json:JsonArrayTableToolbarViewModel">
+    <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+        <!-- Identify the array; the window title already identifies the file. -->
+        <TextBlock Text="{Binding OriginDescription}"
+                   VerticalAlignment="Center"
+                   TextWrapping="Wrap"
+                   MaxWidth="420"
+                   Foreground="{DynamicResource AppMutedTextBrush}"
+                   FontSize="12"
+                   ToolTip.Tip="{Binding OriginDescription}" />
+
+        <Button Content="Back to JSON"
+                Click="OnBack"
+                VerticalAlignment="Center"
+                ToolTip.Tip="Reopen the file as JSON and select this array" />
+
+        <!-- Hidden for an array of objects: its columns are the property names by definition,
+             so there is nothing to re-width into.
+
+             A plain ComboBox, deliberately not a flyout that closes on pick: the selection
+             setter runs inside Avalonia's still-open selection commit, and the collection Reset
+             it causes is safe only because that Reset lands on the grid, never on this picker's
+             own ItemsSource (see the view model's remarks and CLAUDE.md). -->
+        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center"
+                    IsVisible="{Binding CanReshape}">
+            <TextBlock Text="Columns"
+                       VerticalAlignment="Center"
+                       Foreground="{DynamicResource AppMutedTextBrush}"
+                       FontSize="12" />
+            <ComboBox ItemsSource="{Binding ColumnModes}"
+                      SelectedItem="{Binding SelectedColumnMode}"
+                      MinWidth="130"
+                      VerticalAlignment="Center"
+                      ToolTip.Tip="One row per element by property name, or reshape a flat array into N columns">
+                <ComboBox.ItemTemplate>
+                    <DataTemplate x:DataType="json:JsonArrayColumnModeOption">
+                        <TextBlock Text="{Binding DisplayName}" />
+                    </DataTemplate>
+                </ComboBox.ItemTemplate>
+            </ComboBox>
+        </StackPanel>
+
+        <!-- Only shown once a column is known to hold an array - which can become true after an
+             expansion reveals one, so the document answers it after every discovery rather than
+             once at load. Same plain-ComboBox reasoning as the mode picker above. -->
+        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center"
+                    IsVisible="{Binding CanExpandArrays}">
+            <TextBlock Text="Array columns"
+                       VerticalAlignment="Center"
+                       Foreground="{DynamicResource AppMutedTextBrush}"
+                       FontSize="12" />
+            <ComboBox ItemsSource="{Binding ArrayColumnCounts}"
+                      SelectedItem="{Binding SelectedArrayColumns}"
+                      MinWidth="60"
+                      VerticalAlignment="Center"
+                      ToolTip.Tip="How many positions an expanded array column draws before the rest are summarised in one" />
+        </StackPanel>
+    </StackPanel>
+</UserControl>

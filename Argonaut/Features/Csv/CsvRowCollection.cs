@@ -7,7 +7,9 @@ using Argonaut.Infrastructure;
 
 namespace Argonaut.Features.Csv;
 
-/// <summary>One displayed data row: 1-based row number plus its already-widthed cells.</summary>
+/// <summary>One displayed data row: 1-based row number plus its cells' text. Carries no
+/// geometry - the grid owns column widths, so a realized row never goes stale when one is
+/// resized or the content font changes.</summary>
 public sealed class CsvVisibleRow
 {
     public CsvVisibleRow(int rowNumber, IReadOnlyList<CsvCell> cells)
@@ -27,7 +29,7 @@ public sealed class CsvVisibleRow
 // FileOffsetIndex keeps indexing in the background. The one addition is dataStartIndex, which
 // lets the "first row is header" tickbox shift which absolute line each virtual row index maps
 // to without re-indexing the file.
-public sealed class CsvRowCollection : MemoryMappedCollectionBase
+public sealed class CsvRowCollection : MemoryMappedCollectionBase, IColumnFitSource
 {
     private const int CacheCapacity = 1000;
     private static readonly TimeSpan GrowthPollInterval = TimeSpan.FromMilliseconds(120);
@@ -35,7 +37,6 @@ public sealed class CsvRowCollection : MemoryMappedCollectionBase
     private readonly FileOffsetIndex index;
     private readonly MMapFile mmap;
     private readonly byte delimiter;
-    private readonly CsvColumnLayout layout;
     private readonly Dictionary<int, LinkedListNode<(int Index, CsvVisibleRow Row)>> cache = new();
     private readonly LinkedList<(int Index, CsvVisibleRow Row)> cacheOrder = new();
 
@@ -43,12 +44,11 @@ public sealed class CsvRowCollection : MemoryMappedCollectionBase
     private DispatcherTimer? growthTimer;
     private int notifiedCount;
 
-    public CsvRowCollection(FileOffsetIndex index, MMapFile mmap, byte delimiter, CsvColumnLayout layout, int dataStartIndex)
+    public CsvRowCollection(FileOffsetIndex index, MMapFile mmap, byte delimiter, int dataStartIndex)
     {
         this.index = index;
         this.mmap = mmap;
         this.delimiter = delimiter;
-        this.layout = layout;
         this.dataStartIndex = dataStartIndex;
         notifiedCount = GetCount();
 
@@ -77,7 +77,7 @@ public sealed class CsvRowCollection : MemoryMappedCollectionBase
         var fields = CsvFieldReader.ReadFields(mmap, lineSpan, delimiter);
         var cells = new CsvCell[fields.Length];
         for (int c = 0; c < fields.Length; c++)
-            cells[c] = new CsvCell(fields[c], layout.WidthFor(c));
+            cells[c] = new CsvCell(fields[c]);
 
         var row = new CsvVisibleRow(i + 1, cells);
 
@@ -93,6 +93,28 @@ public sealed class CsvRowCollection : MemoryMappedCollectionBase
         }
 
         return row;
+    }
+
+    /// <summary>
+    /// The widest text this column has among the realized rows - what a fit-to-content
+    /// double-click on its resizer measures. Bounded to what has already been decoded on
+    /// purpose: the true widest field in a multi-gigabyte file is a full scan away, while the
+    /// cache is a free sample of exactly the rows the user has been looking at.
+    /// </summary>
+    public int LongestRealizedText(int columnIndex)
+    {
+        if (columnIndex < 0)
+            return 0;
+
+        int longest = 0;
+        foreach (var node in cacheOrder)
+        {
+            var cells = node.Row.Cells;
+            if (columnIndex < cells.Count)
+                longest = Math.Max(longest, cells[columnIndex].Text.Length);
+        }
+
+        return longest;
     }
 
     /// <summary>

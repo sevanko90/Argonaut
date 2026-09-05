@@ -463,7 +463,7 @@ public sealed class JsonDiffViewModel : IndexedDocumentViewModel
                 text += $"… ({percent}%)";
             }
 
-            Dispatcher.UIThread.Post(() =>
+            ProgressPost.ToUiThread(() =>
             {
                 if (!owner.IsDisposed)
                     owner.StatusText = text;

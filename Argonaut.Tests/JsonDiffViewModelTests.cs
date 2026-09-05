@@ -21,6 +21,11 @@ public class JsonDiffViewModelTests
         return path;
     }
 
+    /// <summary>
+    /// Every test below awaits <c>vm.Rows.FinalRefreshTask</c> after the scan's own task: with
+    /// no dispatcher installed the growth monitor's final rebuild resumes on a pool thread, so
+    /// the scan completing does not mean the rows have stopped changing underneath the asserts.
+    /// </summary>
     private static async Task WaitForAsync(Func<bool> condition, int timeoutMs = 5000)
     {
         var start = Environment.TickCount64;
@@ -40,6 +45,7 @@ public class JsonDiffViewModelTests
         {
             await vm.LoadAsync(leftPath, rightPath);
             try { await vm.IndexingTask; } catch { }
+            await vm.Rows.FinalRefreshTask;
 
             // MonitorAsync's continuation races the test; poll for its status write.
             await WaitForAsync(() => vm.StatusText.Contains("added"));
@@ -98,6 +104,7 @@ public class JsonDiffViewModelTests
         {
             await vm.LoadAsync(leftPath, rightPath);
             try { await vm.IndexingTask; } catch { }
+            await vm.Rows.FinalRefreshTask;
 
             await WaitForAsync(() => vm.IndexFailure is not null);
             Assert.StartsWith("Right file:", vm.IndexFailure!.Message);
@@ -139,6 +146,7 @@ public class JsonDiffViewModelTests
         {
             await vm.LoadAsync(leftPath, rightPath);
             try { await vm.IndexingTask; } catch { }
+            await vm.Rows.FinalRefreshTask;
 
             await WaitForAsync(() => vm.StatusText.Contains("identical"));
         }
@@ -160,6 +168,7 @@ public class JsonDiffViewModelTests
         {
             await vm.LoadAsync(leftPath, rightPath);
             try { await vm.IndexingTask; } catch { }
+            await vm.Rows.FinalRefreshTask;
 
             Assert.Equal(
                 $"Argonaut Diff ({Path.GetFileName(leftPath)} \u2194 {Path.GetFileName(rightPath)})",

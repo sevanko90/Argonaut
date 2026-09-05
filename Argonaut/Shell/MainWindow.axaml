@@ -13,7 +13,7 @@
         xmlns:csv="clr-namespace:Argonaut.Features.Csv"
         xmlns:raw="clr-namespace:Argonaut.Features.Raw"
         Title="{Binding Title}"
-        Background="{DynamicResource AppWindowBackgroundBrush}"
+        Background="{DynamicResource AppPanelBackgroundBrush}"
         Width="1000" Height="700">
 
     <Window.DataTemplates>

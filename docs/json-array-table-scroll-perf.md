@@ -24,30 +24,41 @@ Avalonia 12.1's `TableView` realizes a cell for **every column of every visible 
 column virtualization — `TableView`'s whole property surface is `CanUserResizeColumns` and
 `Columns`; there is no knob to enable it.
 
-Headless measurement, 13 visible rows:
+Headless measurement, 13 visible rows, settled ms per one-row scroll step (first pass discarded —
+see the methodology warning below, it matters by 2–3×):
 
-| columns | cells realized | ms per one-row scroll step |
-| ------- | -------------- | -------------------------- |
-| 97      | 1261           | ~24–31                     |
-| 10      | 130            | ~1.3                       |
+| 97 columns, 1261 cells | current | cells stripped to the bare minimum |
+| ---------------------- | ------- | ---------------------------------- |
+| click-hint cells       | 10.79   | 7.45                               |
+| plain cells            | 7.26    | 5.74                               |
+
+| 10 columns, 130 cells | current | stripped |
+| --------------------- | ------- | -------- |
+| either template       | ~0.43   | ~0.36    |
 
 Only about 10 columns fit on screen at 1400px, so ~87 of every 97 cells realized are off-screen.
-Against a 16.6 ms frame budget, a single row of scrolling cannot complete inside a frame — that is
-the stutter.
 
-Within the same run, the cell template also matters:
+**The count dominates everything else, and it is not close.** With the cell reduced to its floor —
+one `TextBlock`, one binding, no tooltip, no mark, font by inheritance — 97 columns still costs
+~16× what 10 columns costs. Emptying the cell buys about 1.5–2×; realizing only the visible
+columns would buy roughly 16×. That is why the remaining work is column virtualization and not
+further cell tuning: there is barely anything left in the cell to remove.
 
-| 97 columns          | ms/step |
-| ------------------- | ------- |
-| click-hint cells    | ~24     |
-| plain cells         | ~8      |
-
-The array table passes `clickHint`; the CSV grid does not, which is why only this grid stutters.
+The array table passes `clickHint` and the CSV grid does not, which is why only this grid was
+reported as glitchy — but even the plain template is 7.26 ms/step at 97 columns, so a wide CSV
+would stutter too.
 
 ## Methodology warning — read before trusting a number
 
-Cross-run comparisons in this harness are **not reliable**. Repeating the untouched baseline gave
-24.66 ms and 31.32 ms on consecutive runs: a 6.7 ms spread, larger than most changes worth making.
+**Discard the first pass.** Whichever configuration a process measures first pays JIT and
+first-window costs, and it is worth 2–3×: the same 97-column config measured 16.64 ms on its
+warm-up pass and 7.45 ms once settled. The harness sweeps configurations in a fixed order, so for
+a long time the first one measured always looked catastrophically slower than the rest — and every
+"the click-hint template costs 3×" figure taken from a single pass was mostly that artefact. The
+tell that finally exposed it: two *identical* configurations measured 16.88 vs 9.49 ms.
+
+**Cross-run comparisons are unreliable.** Repeating the untouched baseline gave 24.66 ms and
+31.32 ms on consecutive runs: a 6.7 ms spread, larger than most changes worth making.
 
 An earlier pass "showed" a 29% win from caching a per-cell `Geometry.Parse`, from comparing two
 single runs. Repeating it showed the effect was entirely inside the noise, and the change was
@@ -69,13 +80,13 @@ and will not match a Release build on Windows; the ratios are what carry.
    to whichever cell is hovered, and a cell is a single `TextBlock` again — about 3,800 fewer
    visuals in a 97-column viewport.
 
-   Measured click-hint overhead (the in-run `hint=yes` ÷ `hint=no` ratio) fell from **~3.0× to
-   ~1.8×**. Treat the residual as indicative, not precise: a control run measuring two
-   *identical* configurations against each other came out 20.19 vs 15.62 ms, so even the in-run
-   ratio carries roughly ±30%. A 3× gap is well outside that; a 1.8× one only barely.
+   Honest accounting: the "~3× click-hint penalty" this was sold on was largely a measurement
+   artefact (see the methodology warning - the first configuration measured in a process is
+   2-3× slow). Re-measured properly, click-hint cells at 97 columns went from 10.79 ms/step to
+   7.45 with the cell stripped entirely, so the mark was worth a part of that, not a 3×.
 
-   What is not noise-dependent is the structural claim: the per-cell work is strictly smaller,
-   because three controls per cell became zero.
+   The change is still right - three controls per cell became zero, which is strictly less work
+   - but it is a modest win, not the fix.
 
    The remaining gap is most likely `CellTip`, the tooltip built eagerly for every cell (four
    controls and five bindings) for a popup only one cell ever shows. It cannot simply be built on
@@ -84,8 +95,27 @@ and will not match a Release build on Windows; the ratios are what carry.
    lightweight `Tip` value plus a shared `DataTemplate` that materialises the visual only when
    shown is the shape worth trying next.
 
-2. **Reduce the column count** (not done — the ~20× lever). Nothing can be done inside `TableView`
-   to virtualize columns, so the only way to realize fewer cells is to create fewer columns: show a
-   subset by default and let the reader bring more in. 97 columns is unreadable anyway, so this is
-   a usability change as much as a performance one, and it needs a design decision rather than a
-   patch.
+2. **Realize only the columns in the horizontal viewport** (not done — the ~16× lever, and the
+   only one left that matters).
+
+   Picking a default subset was considered and rejected: Argonaut is a generic viewer, so there is
+   no heuristic for which of an arbitrary document's 97 properties are the useful ones. "The first
+   25, whatever they happen to be" is not a feature.
+
+   Two ways to get there:
+
+   **a. Window the columns inside `TableGridColumns`** — keep all 97 logical columns, but only
+   ever hand `TableView` the ~15 in view, plus a leading and a trailing spacer column whose widths
+   are the sums of the hidden ones so the horizontal scroll extent stays honest. Re-window on
+   horizontal scroll. Days, not weeks, and no new control. Unproven: spacers need empty headers
+   and no resizer, every index crossing the boundary (fit-to-content, `ShowCell(row, column)`,
+   header expansion) needs logical↔realized mapping, and horizontal scrolling may judder where
+   vertical no longer does. Worth a timeboxed spike before committing.
+
+   **b. Write a properly virtualizing grid control** — 2–3 weeks. The layout maths is the easy
+   part; the cost is cell recycling (this file bakes the column index into each cell template, so
+   recycling a cell from column 3 into column 40 needs one shared template that rebinds on reuse),
+   shared column geometry invalidated on every drag, scroll anchoring when widths change, keyboard
+   navigation across unrealized columns, and automation peers. It also means rebuilding what
+   `TableView` was adopted *for* — the sticky header, horizontal-scroll tracking and resizer that
+   `JsonArrayTableView.axaml` notes were hand-built before.

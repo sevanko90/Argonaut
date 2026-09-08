@@ -92,14 +92,27 @@ in the application folder.
 
 ### Or: no local .NET at all
 
-There's a Docker Compose + VS Code Dev Container setup in the repo, so you can build and test
-Argonaut without installing a .NET SDK on your machine:
+There's a Docker Compose + VS Code Dev Container setup in the repo, so you can build, test and
+package Argonaut without installing a .NET SDK on your machine. The commands are the same on
+Windows, macOS and Linux — you drive them from your normal shell, no container shell needed:
 
-    docker compose up
-    docker compose exec app bash
+    docker compose run --rm app dotnet build Argonaut.slnx
+    docker compose run --rm app dotnet test Argonaut.Tests/Argonaut.Tests.csproj
 
-...or open the folder in VS Code and pick **Reopen in Container**. Full details, including how
-to get the actual UI on screen from inside the container, are in
+To get something you can actually double-click, build in the container and run the binary
+natively — no X11 forwarding, no GUI plumbing:
+
+    docker compose run --rm app dotnet publish Argonaut/Argonaut.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+
+Swap the RID for your machine: `win-x64`, `osx-arm64`, `osx-x64` or `linux-x64`. The result lands
+in the usual place, visible from the host:
+
+    Argonaut/bin/Release/net10.0/<rid>/publish/
+
+A Linux container cross-compiles a complete Windows binary — icon and manifest included.
+
+Or open the folder in VS Code and pick **Reopen in Container**. Full details, including
+troubleshooting and how to run the UI inside the container if you really want to, are in
 [.devcontainer/README.md](.devcontainer/README.md).
 
 ## Updates

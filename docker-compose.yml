@@ -22,12 +22,6 @@ services:
       #  - Windows/WSL2 bind-mount performance isn't tanked by the cache
       #  - restored packages survive container rebuilds
       - argonaut-nuget:/home/vscode/.nuget/packages
-      # Build output goes to a named volume too (see ArtifactsPath below). The default
-      # bin/ and obj/ sit on the bind mount and are therefore shared with the host, so a
-      # Windows/Rider build left there makes the container trip over foreign binaries -
-      # VSTest rejects a win-x64 test dll outright. Keeping the two apart also spares the
-      # build the bind-mount write latency.
-      - argonaut-artifacts:/home/vscode/artifacts
       # X11 socket, so `dotnet run` can put a real Argonaut window on your
       # desktop when DISPLAY is set. Harmless (an empty dir) when it isn't.
       - /tmp/.X11-unix:/tmp/.X11-unix
@@ -36,9 +30,6 @@ services:
       # Unset by default: the container runs headless. Point it at an X server
       # to see the actual UI - see .env.example and .devcontainer/README.md.
       - DISPLAY
-      # MSBuild reads properties from the environment, so this redirects all build
-      # output into the named volume above without touching any .csproj.
-      - ArtifactsPath=/home/vscode/artifacts
 
     # Argonaut opens multi-gigabyte files and builds in-memory indexes that can
     # exceed the file size. Docker Desktop's default VM memory is often too small
@@ -61,15 +52,13 @@ services:
       echo '';
       echo 'Argonaut dev environment ready. It is a desktop app, so there is no';
       echo 'dev server to hand this terminal over to - the container idles instead.';
-      echo 'Open a shell in it and work from there:';
-      echo '  docker compose exec app bash';
-      echo '  dotnet build Argonaut.slnx';
-      echo '  dotnet test Argonaut.Tests/Argonaut.Tests.csproj';
-      echo '  xvfb-run -a dotnet run --project Argonaut     # run the UI headlessly';
+      echo 'Drive it from your host shell, no container shell needed:';
+      echo '  docker compose run --rm app dotnet build Argonaut.slnx';
+      echo '  docker compose run --rm app dotnet test Argonaut.Tests/Argonaut.Tests.csproj';
+      echo 'See .devcontainer/README.md for publishing a binary you can run natively.';
       echo '';
       exec ${DEV_COMMAND:-sleep infinity}
       "
 
 volumes:
   argonaut-nuget:
-  argonaut-artifacts:

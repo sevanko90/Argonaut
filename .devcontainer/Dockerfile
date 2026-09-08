@@ -32,13 +32,13 @@ RUN if [ -f /etc/apt/sources.list.d/yarn.list ]; then mv /etc/apt/sources.list.d
     && if [ -f /tmp/yarn.list.bak ]; then mv /tmp/yarn.list.bak /etc/apt/sources.list.d/yarn.list; fi \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Pre-create the mount points for the two named volumes, owned by `vscode`.
+# Pre-create the NuGet volume mount point, owned by `vscode`.
 # Docker creates a missing mount-point directory as root in *every* container, and seeds a
 # fresh named volume from whatever the image has at that path - so doing it here is what makes
 # `docker compose exec/run` work, not just `docker compose up`. (The preset repairs this at
 # runtime in compose's `command:`, which a command override skips.)
-RUN mkdir -p /home/vscode/.nuget/packages /home/vscode/artifacts \
-    && chown -R vscode:vscode /home/vscode/.nuget /home/vscode/artifacts
+RUN mkdir -p /home/vscode/.nuget/packages \
+    && chown -R vscode:vscode /home/vscode/.nuget
 
 # The devcontainers .NET 10 image is still on an RC SDK (10.0.100-rc.2), which drifts from
 # .github/workflows/publish.yml's `dotnet-version: 10.0.x` and makes the build emit NETSDK1057.

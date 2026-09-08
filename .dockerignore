@@ -1,0 +1,3 @@
+# The image build needs no repo files (the Dockerfile only installs packages),
+# so keep the build context as small as possible.
+*

@@ -90,6 +90,18 @@ I use [JetBrains Rider](https://www.jetbrains.com/rider/) for compiling / runnin
     dotnet publish
 in the application folder. 
 
+### Or: no local .NET at all
+
+There's a Docker Compose + VS Code Dev Container setup in the repo, so you can build and test
+Argonaut without installing a .NET SDK on your machine:
+
+    docker compose up
+    docker compose exec app bash
+
+...or open the folder in VS Code and pick **Reopen in Container**. Full details, including how
+to get the actual UI on screen from inside the container, are in
+[.devcontainer/README.md](.devcontainer/README.md).
+
 ## Updates
 
 Windows and macOS builds check GitHub Releases for updates on launch (at most once every 24 hours) and offer to download and apply them - no manual re-download needed going forward.

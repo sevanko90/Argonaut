@@ -107,3 +107,8 @@ Desktop.ini
 # BenchmarkDotNet
 ############################
 BenchmarkDotNet.Artifacts/
+
+############################
+# Docker dev environment
+############################
+.env

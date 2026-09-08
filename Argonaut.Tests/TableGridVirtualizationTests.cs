@@ -727,23 +727,26 @@ public sealed class TableGridVirtualizationTests
                 Assert.Contains(ClickHint, lines);
 
                 // At rest the grid is plain: the mark belongs to the cell under the pointer, and
-                // there is no pointer on it yet.
-                Assert.All(Marks(window), mark => Assert.False(mark.IsVisible));
+                // there is no pointer on it yet - so it is not realized at all.
+                Assert.Empty(Marks(window));
 
                 window.MouseMove(Centre(cell, window), RawInputModifiers.None);
                 await PumpAsync();
                 window.UpdateLayout();
 
+                // The mark lives in the adorner layer now, not inside the cell, so it is found by
+                // what it adorns rather than by walking up from it.
                 var lit = Marks(window).Where(m => m.IsVisible).ToList();
                 Assert.Single(lit);
-                Assert.Same(cell, lit[0].FindAncestorOfType<TableViewCell>());
+                Assert.Same(cell, AdornerLayer.GetAdornedElement(lit[0]));
 
                 // Off the grid entirely - the mark follows the pointer away.
                 window.MouseMove(new Point(-10, -10), RawInputModifiers.None);
                 await PumpAsync();
                 window.UpdateLayout();
 
-                Assert.All(Marks(window), mark => Assert.False(mark.IsVisible));
+                // Taken off the layer entirely rather than hidden in place.
+                Assert.Empty(Marks(window));
                 return true;
             }
             finally

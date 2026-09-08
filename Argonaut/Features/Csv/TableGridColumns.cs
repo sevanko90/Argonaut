@@ -52,6 +52,9 @@ public sealed class TableGridColumns : IDisposable
     private readonly List<IDisposable> fontSubscriptions = [];
 
     private IColumnFitSource? fitSource;
+    private Border? mark;
+    private TableViewCell? markedCell;
+    private bool hoverMarkTracked;
     private CsvStructure? seeded;
     private IReadOnlyList<object>? seededHeaders;
 
@@ -100,6 +103,19 @@ public sealed class TableGridColumns : IDisposable
         IReadOnlyList<object>? headers = null, IDataTemplate? headerTemplate = null, string? clickHint = null)
     {
         this.fitSource = fitSource;
+
+        // Only a grid whose cells open something wears the mark, and only one handler pair per
+        // grid however many times the columns are rebuilt.
+        if (clickHint is not null && !this.hoverMarkTracked)
+        {
+            this.hoverMarkTracked = true;
+            // PointerExited is a DIRECT event, so a tunnel-only handler never sees the pointer
+            // leave the grid and the mark stays lit on the last cell. Both strategies for both,
+            // and OnPointerMoved is idempotent when the cell has not changed.
+            const RoutingStrategies everyWay = RoutingStrategies.Tunnel | RoutingStrategies.Bubble | RoutingStrategies.Direct;
+            this.table.AddHandler(InputElement.PointerMovedEvent, OnPointerMoved, everyWay);
+            this.table.AddHandler(InputElement.PointerExitedEvent, OnPointerExited, everyWay);
+        }
 
         // A relabelling is not a re-shape: CSV's "first row is header" tickbox publishes a new
         // structure with the same columns under different names, and rebuilding for that would
@@ -154,6 +170,14 @@ public sealed class TableGridColumns : IDisposable
     public void Dispose()
     {
         this.table.RemoveHandler(InputElement.PointerPressedEvent, OnPointerPressed);
+        if (this.hoverMarkTracked)
+        {
+            this.table.RemoveHandler(InputElement.PointerMovedEvent, OnPointerMoved);
+            this.table.RemoveHandler(InputElement.PointerExitedEvent, OnPointerExited);
+        }
+
+        RemoveMark();
+        this.mark = null;
         this.table.LayoutUpdated -= OnFirstLayoutAfterRebuild;
 
         foreach (var subscription in this.fontSubscriptions)
@@ -191,6 +215,11 @@ public sealed class TableGridColumns : IDisposable
     /// a grid of plain values must not have: the mark that appears under the pointer, and the
     /// hint below the value in the tooltip. Neither costs the column any width - the mark is
     /// drawn over the cell's right edge rather than laid out beside the text.
+    ///
+    /// The cell stays ONE control either way. The mark used to be a second child under a panel
+    /// wrapping every cell, which meant a grid of 97 columns built ~1,300 of them - a panel, a
+    /// Border and a Path each - to show the one the pointer is actually over. It now lives in the
+    /// adorner layer (see <see cref="HoverMarkAdorner"/>), so nothing per-cell pays for it.
     /// </summary>
     private static IDataTemplate CellTemplate(int columnIndex, BindingBase? highlightTerm, string? clickHint)
         => new FuncDataTemplate<CsvVisibleRow>((_, _) =>
@@ -201,16 +230,11 @@ public sealed class TableGridColumns : IDisposable
             BindText(text, cellText, highlightTerm);
 
             if (clickHint is null)
-            {
                 text.Bind(ToolTip.TipProperty, cellText);
-                return text;
-            }
+            else
+                text.SetValue(ToolTip.TipProperty, CellTip(text, clickHint));
 
-            var cell = new Grid();
-            cell.Children.Add(text);
-            cell.Children.Add(HoverMark());
-            cell.SetValue(ToolTip.TipProperty, CellTip(text, clickHint));
-            return cell;
+            return text;
         }, supportsRecycling: true);
 
     /// <summary>
@@ -219,11 +243,13 @@ public sealed class TableGridColumns : IDisposable
     /// instead of sitting on top of it, and it is a vector for the same reason the tree's
     /// triangles are: a glyph character renders at a different size on every platform.
     ///
-    /// Its trigger is the containing <see cref="TableViewCell"/>'s pointer-over, found on attach:
-    /// the cell is what the tint is styled on, so anything else would light the mark up over a
-    /// different area than the one that highlights.
+    /// There is exactly ONE of these per grid, parked in the adorner layer and re-pointed at
+    /// whichever <see cref="TableViewCell"/> the pointer is over. It used to be built into every
+    /// cell and shown by its own pointer-over binding, which meant a 97-column grid constructed
+    /// ~1,300 marks - a Border, a Path and the panel wrapping them, per cell - so that one could
+    /// be visible. See docs/json-array-table-scroll-perf.md.
     /// </summary>
-    private static Control HoverMark()
+    private Border HoverMarkAdorner()
     {
         // Material "open_in_full".
         var arrows = new Path
@@ -242,29 +268,49 @@ public sealed class TableGridColumns : IDisposable
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Stretch,
             Padding = new Thickness(6, 0, 0, 0),
-            IsVisible = false,
 
             // Never a hit target: a press on the mark is a press on the cell it is marking.
             IsHitTestVisible = false,
         };
         mark.Bind(Border.BackgroundProperty, new DynamicResourceExtension("AppHoverBackgroundBrush"));
-
-        IDisposable? pointerOver = null;
-        mark.AttachedToVisualTree += (_, _) =>
-        {
-            pointerOver?.Dispose();
-            pointerOver = mark.FindAncestorOfType<TableViewCell>() is { } owner
-                ? mark.Bind(Visual.IsVisibleProperty, owner.GetObservable(InputElement.IsPointerOverProperty))
-                : null;
-        };
-        mark.DetachedFromVisualTree += (_, _) =>
-        {
-            pointerOver?.Dispose();
-            pointerOver = null;
-            mark.IsVisible = false;
-        };
-
         return mark;
+    }
+
+    /// <summary>
+    /// Moves the single mark onto the cell under the pointer, or takes it off the layer when the
+    /// pointer is not over a cell. Cheap enough to run on every move: the common case is that the
+    /// cell has not changed, which returns immediately.
+    /// </summary>
+    private void OnPointerMoved(object? sender, PointerEventArgs e)
+    {
+        var cell = (e.Source as Visual)?.FindAncestorOfType<TableViewCell>();
+        if (ReferenceEquals(cell, this.markedCell))
+            return;
+
+        RemoveMark();
+        this.markedCell = cell;
+
+        if (cell is null)
+            return;
+
+        this.mark ??= HoverMarkAdorner();
+        if (AdornerLayer.GetAdornerLayer(cell) is not { } layer)
+            return;
+
+        AdornerLayer.SetAdornedElement(this.mark, cell);
+        layer.Children.Add(this.mark);
+    }
+
+    /// <summary>The pointer leaving the grid entirely never reports a cell, so the mark has to be
+    /// taken off explicitly - otherwise it stays lit on the last cell hovered.</summary>
+    private void OnPointerExited(object? sender, PointerEventArgs e) => RemoveMark();
+
+    /// <summary>Takes the mark off whatever it was adorning, if anything.</summary>
+    private void RemoveMark()
+    {
+        this.markedCell = null;
+        if (this.mark is { } existing && AdornerLayer.GetAdornerLayer(existing) is { } layer)
+            layer.Children.Remove(existing);
     }
 
     /// <summary>

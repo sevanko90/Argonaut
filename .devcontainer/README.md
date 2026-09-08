@@ -60,6 +60,21 @@ since `obj/project.assets.json` records an absolute path to the NuGet cache that
 and container. Harmless and self-healing, but if a build ever looks confused, `dotnet restore` or
 deleting `bin`/`obj` sorts it out.
 
+## If `dotnet run` fails
+
+Two failures you can walk straight into, in order:
+
+    Couldn't find a project to run. Ensure a project exists in /workspace
+
+`/workspace` holds `Argonaut.slnx` and two project folders, no single `.csproj` at the root, so
+`dotnet run` cannot pick one. Pass `--project Argonaut`.
+
+    Unhandled exception. System.Exception: XOpenDisplay failed
+       at Avalonia.X11.AvaloniaX11Platform.Initialize(X11PlatformOptions options)
+
+Argonaut is a GUI app and the container has no display. Either publish and run natively (above),
+which is the intended path, or prefix with `xvfb-run -a` for a startup-only smoke test.
+
 ## Seeing the UI inside the container
 
 Usually unnecessary — publish natively as above instead. But if you want the app running *in* the

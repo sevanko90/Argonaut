@@ -1,0 +1,21 @@
+{
+  "name": "Argonaut Dev",
+
+  // Use the existing docker-compose.yml as the single source of truth
+  "dockerComposeFile": "../docker-compose.yml",
+  "service": "app",
+  "workspaceFolder": "/workspace",
+  "remoteUser": "vscode",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-dotnettools.csdevkit",
+        "avaloniateam.vscode-avalonia"
+      ],
+      "settings": {
+        "editor.formatOnSave": true
+      }
+    }
+  }
+}

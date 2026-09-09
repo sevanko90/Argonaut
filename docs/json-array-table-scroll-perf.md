@@ -95,27 +95,59 @@ and will not match a Release build on Windows; the ratios are what carry.
    lightweight `Tip` value plus a shared `DataTemplate` that materialises the visual only when
    shown is the shape worth trying next.
 
-2. **Realize only the columns in the horizontal viewport** (not done — the ~16× lever, and the
-   only one left that matters).
+2. **Realize only the columns in the horizontal viewport** (implemented 2026-09-09 in
+   `TableGridColumns.Viewport.cs`, shared by JSON and CSV).
 
    Picking a default subset was considered and rejected: Argonaut is a generic viewer, so there is
    no heuristic for which of an arbitrary document's 97 properties are the useful ones. "The first
    25, whatever they happen to be" is not a feature.
 
-   Two ways to get there:
+   All logical columns retain their names, routes and user widths. TableView receives recyclable
+   column slots covering the viewport, two columns of overscan on each side, and empty,
+   non-resizable leading/trailing spacers. Up to two additional slots are retained to avoid
+   recreating cells as partially visible columns cross the viewport edges. Pure vertical scrolling
+   does not update the column window or walk the logical columns.
 
-   **a. Window the columns inside `TableGridColumns`** — keep all 97 logical columns, but only
-   ever hand `TableView` the ~15 in view, plus a leading and a trailing spacer column whose widths
-   are the sums of the hidden ones so the horizontal scroll extent stays honest. Re-window on
-   horizontal scroll. Days, not weeks, and no new control. Unproven: spacers need empty headers
-   and no resizer, every index crossing the boundary (fit-to-content, `ShowCell(row, column)`,
-   header expansion) needs logical↔realized mapping, and horizontal scrolling may judder where
-   vertical no longer does. Worth a timeboxed spike before committing.
+   **The spike exposed the horizontal-scroll trap.** Avalonia 12.1 rebuilds headers and cells on
+   every column-list notification, including individual inserts/removes. Simply swapping the
+   window made horizontal scrolling expensive. The implementation instead rebinds existing slots'
+   source indices, headers and widths; one shared cell template reads both the row and the slot's
+   current index. Cell controls, text blocks and tooltips survive a horizontal shift. The column
+   collection changes only when the number of required slots changes.
 
-   **b. Write a properly virtualizing grid control** — 2–3 weeks. The layout maths is the easy
-   part; the cost is cell recycling (this file bakes the column index into each cell template, so
-   recycling a cell from column 3 into column 40 needs one shared template that rebinds on reuse),
-   shared column geometry invalidated on every drag, scroll anchoring when widths change, keyboard
-   navigation across unrealized columns, and automation peers. It also means rebuilding what
-   `TableView` was adopted *for* — the sticky header, horizontal-scroll tracking and resizer that
-   `JsonArrayTableView.axaml` notes were hand-built before.
+   Cell clicks and fit-to-content resolve a slot back to its logical column. A deferred fit captures
+   the logical target before its slot can be reused. Header routes remain attached to the logical
+   header objects. Dragging updates the logical width immediately, but re-windowing waits until
+   release/capture loss so it cannot destroy the active resize thumb. Font changes remeasure hidden
+   columns too, preserving widths the user chose.
+
+   Spacer geometry sums each column's **layout-rounded** width at the current display scaling.
+   Rounding the combined raw widths instead produced a measurable extent error with fractional
+   font metrics. Empty spacer themes suppress chrome and hit testing. When layout rounding is
+   disabled, the raw widths are used. Closing the view
+   detaches width/layout subscriptions and makes pending window updates inert.
+
+### Implementation measurements, 2026-09-09
+
+A one-process Release/headless probe on macOS used 1,422 synthetic rows, 97 columns seeded for
+10 characters, a 1400×600 window and the click-hint template. Each configuration ran three passes
+of 200 vertical and 200 horizontal 40px scroll steps, flushing layout and queued UI work after
+each step. Pass zero was discarded. The full-column comparison used the same shared cell template
+with all logical columns handed to TableView; these are layout measurements, not file-load timings.
+
+| Configuration | Cells in the initial 13-row viewport | Settled vertical ms/step | Settled horizontal ms/step |
+| --- | ---: | ---: | ---: |
+| All 97 columns | 1,261 | 11.30–11.34 | 0.02–0.04 |
+| Viewport slots and spacers | 195 | 1.38–1.40 | 2.43–2.86 |
+
+This is approximately **8× faster vertical scrolling** and **85% fewer initial realized cells**.
+Horizontal scrolling now has the cost of rebinding columns as they enter view; the first naive
+window replacement measured 18–19 ms/step. These are headless averages, not native frame-time
+guarantees or measurements of the original Keepa file. Interactive Windows/macOS rendering can
+differ.
+
+Permanent regressions in `TableGridVirtualizationTests` and `JsonArrayTableViewportTests` verify
+bounded row/cell realization, text-block reuse across horizontal shifts, stable scroll extent
+(including fractional widths), vertical scroll leaving the column collection alone, drag and fit
+targets, retained widths, font changes, relabelling, viewport resizing, reshaping at the far right,
+JSON detail clicks/header expansion after scrolling, and disposal with pending viewport work.

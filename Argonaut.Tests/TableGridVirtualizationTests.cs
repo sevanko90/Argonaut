@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Specialized;
 using Argonaut.Features.Csv;
+using Argonaut.Features.Json;
 using Argonaut.Infrastructure;
 using Avalonia;
 using Avalonia.Controls;
@@ -156,7 +157,7 @@ public sealed class TableGridVirtualizationTests
                 break;
         }
 
-        return x;
+        return x - (table.Scroll?.Offset.X ?? 0);
     }
 
     private static async Task DragResizerAsync(Window window, TableViewColumn column, double delta)
@@ -195,6 +196,197 @@ public sealed class TableGridVirtualizationTests
 
     private static double FirstCellWidth(Window window)
         => window.GetVisualDescendants().First(v => v.GetType().Name == "TableViewCell").Bounds.Width;
+
+    [Fact]
+    public Task WideTable_RealizesOnlyColumnsNearTheHorizontalViewport()
+    {
+        var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(TableGridVirtualizationTests).Assembly);
+        return session.Dispatch(async () =>
+        {
+            var rows = new CountingRows(1_422, 97);
+            var (table, columns) = BuildTable(rows, StructureOf(97));
+            var window = new Window { Width = 1_400, Height = 400, Content = table };
+            try
+            {
+                window.Show();
+                await PumpAsync();
+                window.UpdateLayout();
+
+                var realizedRows = window.GetVisualDescendants().OfType<TableViewRow>().Count();
+                var realizedCells = window.GetVisualDescendants().OfType<TableViewCell>().Count();
+                Assert.InRange(realizedCells, realizedRows, realizedRows * 20);
+                Assert.Contains("r0c1", window.GetVisualDescendants().OfType<TextBlock>().Select(t => t.Text));
+
+                var scroll = Assert.IsType<ScrollViewer>(table.Scroll);
+                double extent = scroll.Extent.Width;
+                scroll.Offset = new Vector(extent, 0);
+                await PumpAsync();
+                window.UpdateLayout();
+                Assert.Equal(extent, scroll.Extent.Width, 1);
+                Assert.Contains("r0c96", window.GetVisualDescendants().OfType<TextBlock>().Select(t => t.Text));
+                Assert.DoesNotContain("r0c1", window.GetVisualDescendants().OfType<TextBlock>().Select(t => t.Text));
+                Assert.InRange(table.Columns.Count, 1, 20);
+
+                scroll.Offset = new Vector(extent / 2, 0);
+                await PumpAsync();
+                window.UpdateLayout();
+                var recycledCell = table.GetVisualDescendants().OfType<TableViewRow>().First()
+                    .GetVisualDescendants().OfType<TableViewCell>().ElementAt(3);
+                var recycledText = recycledCell.GetVisualDescendants().OfType<TextBlock>().Single();
+                int previousLogicalIndex = columns.LogicalColumnIndex(recycledCell.Column!);
+                scroll.Offset = new Vector(scroll.Offset.X + recycledCell.Column!.Width.Value, 0);
+                await PumpAsync();
+                window.UpdateLayout();
+                var nextCell = table.GetVisualDescendants().OfType<TableViewRow>().First()
+                    .GetVisualDescendants().OfType<TableViewCell>().ElementAt(3);
+                Assert.Same(recycledCell, nextCell);
+                Assert.Same(recycledText, nextCell.GetVisualDescendants().OfType<TextBlock>().Single());
+                Assert.Equal(previousLogicalIndex + 1, columns.LogicalColumnIndex(nextCell.Column!));
+                Assert.Equal($"r0c{previousLogicalIndex + 1}", recycledText.Text);
+
+                var visibleColumns = table.Columns;
+                scroll.Offset = new Vector(scroll.Offset.X, 500);
+                await PumpAsync();
+                window.UpdateLayout();
+                Assert.Same(visibleColumns, table.Columns);
+                Assert.Equal(0, rows.ItemsEnumerated);
+                return true;
+            }
+            finally
+            {
+                columns.Dispose();
+                window.Close();
+            }
+        }, CancellationToken.None);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public Task WideTable_FractionalWidthsKeepTheSameExtentAcrossColumnWindows(bool roundWidths)
+    {
+        var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(TableGridVirtualizationTests).Assembly);
+        return session.Dispatch(async () =>
+        {
+            object? originalFontSize = Application.Current!.Resources["AppContentFontSize"];
+            var rows = new CountingRows(100, 97);
+            var structure = CsvStructure.FromMaxChars(Enumerable.Range(0, 97).Select(c => $"c{c}").ToArray(),
+                Enumerable.Range(0, 97).Select(c => 7 + c % 17).ToArray());
+            var (table, columns) = BuildTable(rows, structure);
+            table.UseLayoutRounding = roundWidths;
+            // Match the JSON/CSV views, whose rows have no outer inset beyond the columns.
+            table.Styles.Add(new Style(x => x.OfType<TableViewRow>())
+            {
+                Setters = { new Setter(TemplatedControl.PaddingProperty, new Thickness(0)) },
+            });
+            var window = new Window { Width = 1_400, Height = 400, Content = table };
+            try
+            {
+                window.Show();
+                Application.Current.Resources["AppContentFontSize"] = 12.375;
+                await PumpAsync();
+                window.UpdateLayout();
+                Assert.Contains(structure.Columns, c => c.Width != Math.Round(c.Width));
+                double expectedExtent = structure.Columns.Sum(c => roundWidths
+                    ? Avalonia.Layout.LayoutHelper.RoundLayoutValue(c.Width, window.RenderScaling) : c.Width);
+                var scroll = Assert.IsType<ScrollViewer>(table.Scroll);
+                foreach (double fraction in new[] { 0.0, 0.25, 0.5, 0.75, 1.0 })
+                {
+                    scroll.Offset = new Vector(expectedExtent * fraction, 0);
+                    await PumpAsync();
+                    window.UpdateLayout();
+                    Assert.Equal(expectedExtent, scroll.Extent.Width, 1);
+                }
+                return true;
+            }
+            finally
+            {
+                Application.Current.Resources["AppContentFontSize"] = originalFontSize;
+                columns.Dispose();
+                window.Close();
+            }
+        }, CancellationToken.None);
+    }
+
+    [Fact]
+    public Task WideTable_PreservesWidthsAndFitTargetsAcrossColumnWindows()
+    {
+        var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(TableGridVirtualizationTests).Assembly);
+        return session.Dispatch(async () =>
+        {
+            var rows = new CountingRows(1_422, 97) { FirstColumnLength = 40 };
+            var structure = StructureOf(97);
+            var (table, columns) = BuildTable(rows, structure);
+            var window = new Window { Width = 1_400, Height = 400, Content = table };
+            object? originalFontSize = Application.Current!.Resources["AppContentFontSize"];
+            try
+            {
+                window.Show();
+                await PumpAsync();
+                window.UpdateLayout();
+                var firstColumn = table.Columns.Single(c => columns.LogicalColumnIndex(c) == 0);
+                double originalWidth = firstColumn.Width.Value;
+                await DragResizerAsync(window, firstColumn, 600);
+                Assert.Equal(originalWidth + 600, firstColumn.Width.Value, 1);
+
+                var scroll = Assert.IsType<ScrollViewer>(table.Scroll);
+                scroll.Offset = new Vector(scroll.Extent.Width / 2, 0);
+                await PumpAsync();
+                window.UpdateLayout();
+                var visibleHeader = window.GetVisualDescendants().OfType<TableViewColumnHeader>()
+                    .First(h => h.Column is { } candidate && columns.LogicalColumnIndex(candidate) > 0
+                        && h.TranslatePoint(new Point(0, 0), window) is { X: > 50 and < 800 });
+                var middleColumn = visibleHeader.Column!;
+                int logicalIndex = columns.LogicalColumnIndex(middleColumn);
+                Assert.True(logicalIndex > table.Columns.Count);
+                int fitChars = Math.Max(middleColumn.Header!.ToString()!.Length, rows.LongestRealizedText(logicalIndex));
+                await DoubleClickResizerAsync(window, middleColumn);
+                middleColumn = table.Columns.Single(c => columns.LogicalColumnIndex(c) == logicalIndex);
+                Assert.Equal(CsvStructure.WidthForChars(fitChars), middleColumn.Width.Value, 1);
+
+                var spacer = table.Columns[0];
+                Assert.Equal(-1, columns.LogicalColumnIndex(spacer));
+                Assert.False(spacer.CanUserResize);
+                Assert.Equal(-1, columns.LogicalColumnAt(1));
+                double columnStart = table.Columns.TakeWhile(c => c != middleColumn).Sum(c => c.ActualWidth);
+                Assert.Equal(logicalIndex, columns.LogicalColumnAt(columnStart + 1));
+
+                // Hidden columns must also receive new font metrics; manually sized ones keep
+                // their logical width when they reappear in a recycled slot.
+                Application.Current.Resources["AppContentFontSize"] = 24.0;
+                await PumpAsync();
+                scroll.Offset = new Vector(0, 0);
+                await PumpAsync();
+                window.UpdateLayout();
+                Assert.Equal(originalWidth + 600,
+                    table.Columns.Single(c => columns.LogicalColumnIndex(c) == 0).Width.Value, 1);
+                Assert.True(table.Columns.Single(c => columns.LogicalColumnIndex(c) == 1).Width.Value > originalWidth);
+
+                columns.Rebuild(structure.WithNames(Enumerable.Range(0, 97).Select(c => $"Renamed {c}").ToArray()), rows);
+                scroll.Offset = new Vector(scroll.Extent.Width, 0);
+                await PumpAsync();
+                window.UpdateLayout();
+                Assert.Contains(table.Columns, c => Equals(c.Header, "Renamed 96"));
+
+                window.Width = 700;
+                await PumpAsync();
+                window.UpdateLayout();
+                Assert.InRange(table.Columns.Count, 1, 12);
+                columns.Rebuild(StructureOf(3), rows);
+                await PumpAsync();
+                window.UpdateLayout();
+                Assert.Equal(3, table.Columns.Count);
+                Assert.InRange(scroll.Offset.X, 0, Math.Max(0, scroll.Extent.Width - scroll.Viewport.Width));
+                return true;
+            }
+            finally
+            {
+                Application.Current.Resources["AppContentFontSize"] = originalFontSize;
+                columns.Dispose();
+                window.Close();
+            }
+        }, CancellationToken.None);
+    }
 
     [Fact]
     public Task TableView_OverHugeLazySource_RealizesOnlyTheViewport()
@@ -314,6 +506,49 @@ public sealed class TableGridVirtualizationTests
                 var third = table.Columns[2];
                 await DoubleClickResizerAsync(window, third);
                 Assert.Equal(CsvStructure.WidthForChars("Column 3".Length), third.ActualWidth, 1);
+                return true;
+            }
+            finally
+            {
+                columns.Dispose();
+                window.Close();
+            }
+        }, CancellationToken.None);
+    }
+
+    [Theory]
+    [InlineData("id")]
+    [InlineData("geometry.coordinates")]
+    public Task DoubleClickingAJsonHeaderResizer_ShrinksToTheDisplayedNameAndCachedCells(string displayName)
+    {
+        var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(TableGridVirtualizationTests).Assembly);
+        return session.Dispatch(async () =>
+        {
+            var rows = new CountingRows(100_000, columnCount: 1) { FirstColumnLength = 4 };
+            var structure = StructureOf(1).WithNames([displayName]);
+            var table = new TableView { ItemsSource = rows, CanUserResizeColumns = true };
+            using var columns = new TableGridColumns(table);
+            var header = new JsonArrayColumnHeader([new JsonArrayColumnHeaderSegment(displayName, null)], displayName);
+            columns.Rebuild(structure, rows, headers: [header],
+                headerTemplate: new Avalonia.Controls.Templates.FuncDataTemplate<JsonArrayColumnHeader>((label, _) =>
+                    new TextBlock { Text = label.Display }));
+            var window = new Window { Width = 1_400, Height = 400, Content = table };
+            try
+            {
+                window.Show();
+                await PumpAsync();
+                window.UpdateLayout();
+
+                var column = table.Columns[0];
+                await DragResizerAsync(window, column, 300);
+                double widened = column.Width.Value;
+                await DoubleClickResizerAsync(window, column);
+
+                double expected = CsvStructure.WidthForChars(Math.Max(displayName.Length, rows.FirstColumnLength));
+                Assert.Equal(expected, column.Width.Value, 1);
+                Assert.True(column.Width.Value < widened);
+                Assert.Equal(0, rows.ItemsEnumerated);
+                Assert.InRange(rows.IndexerHits, 1, 500);
                 return true;
             }
             finally

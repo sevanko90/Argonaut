@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
 using Avalonia;
@@ -21,15 +22,15 @@ namespace Argonaut.Features.Csv;
 
 /// <summary>
 /// Projects a <see cref="CsvStructure"/> onto a <see cref="TableView"/>'s columns - shared by
-/// both grids, the CSV viewer and the JSON array table - and adds the two things TableView has
-/// no answer for: fitting a column to its content, and keeping widths honest when what they
-/// were measured against changes.
+/// both grids, the CSV viewer and the JSON array table. Only columns near the horizontal
+/// viewport get cells; logical columns keep their headers and user widths off-screen. Also
+/// supports fitting a column to its content and remeasuring widths when the font changes.
 ///
 /// Columns are built here rather than declared in XAML because their number and names are data:
 /// a CSV header line, a JSON array's shared property names, or "Column 1..N" placeholders, all
-/// re-discovered whenever the grid is re-shaped. Each column binds its cells by index
-/// (<c>Cells[i].Text</c>) into <see cref="CsvVisibleRow"/>, so the row objects the virtualizing
-/// panel realizes stay exactly what they were under the hand-rolled grid.
+/// re-discovered whenever the grid is re-shaped. A shared cell template reads the source index
+/// of its recyclable column slot into <see cref="CsvVisibleRow"/>; the lazy row collection is
+/// unchanged by horizontal virtualization.
 ///
 /// Drag widths are deliberately un-policed - no floor, no ceiling. A clamp can only be applied
 /// after the fact (TableView exposes no MinWidth/MaxWidth and its ActualWidth is read-only), so
@@ -45,7 +46,7 @@ namespace Argonaut.Features.Csv;
 ///   * the content font, which the status bar can swap at runtime. The widths were measured for
 ///     the outgoing face, so the metrics re-measure and the columns follow.
 /// </summary>
-public sealed class TableGridColumns : IDisposable
+public sealed partial class TableGridColumns : IDisposable
 {
     private readonly TableView table;
     private readonly List<double> appliedWidths = [];
@@ -62,6 +63,9 @@ public sealed class TableGridColumns : IDisposable
     {
         this.table = table;
         this.table.AddHandler(InputElement.PointerPressedEvent, OnPointerPressed, RoutingStrategies.Tunnel);
+        this.table.AddHandler(InputElement.PointerReleasedEvent, OnResizerReleased, RoutingStrategies.Tunnel, handledEventsToo: true);
+        this.table.AddHandler(InputElement.PointerCaptureLostEvent, OnResizerCaptureLost, RoutingStrategies.Direct | RoutingStrategies.Bubble);
+        this.table.LayoutUpdated += OnViewportLayout;
 
         foreach (string key in new[] { "AppContentFontFamily", "AppContentFontSize" })
         {
@@ -80,10 +84,10 @@ public sealed class TableGridColumns : IDisposable
     }
 
     /// <summary>
-    /// Replaces every column with one per column of <paramref name="structure"/>, widthed from
-    /// the character count it discovered. Any width the user had dragged is dropped with the
-    /// column it belonged to - a re-shape means these are different columns, not the same ones
-    /// renamed.
+    /// Replaces the logical columns from <paramref name="structure"/>, widthed from
+    /// the character count it discovered, and realizes the horizontal viewport. Any width the
+    /// user had dragged is dropped with the column it belonged to - a re-shape means these are
+    /// different columns, not the same ones renamed.
     ///
     /// <paramref name="fitSource"/> is the body whose realized rows answer a fit-to-content
     /// double-click; null disables the gesture (columns still resize by dragging).
@@ -124,52 +128,65 @@ public sealed class TableGridColumns : IDisposable
         //
         // Widths alone cannot say that, though: expanding a column in the JSON array table can
         // land on the same count and the same measured widths while every column is now a
-        // DIFFERENT one, and the cell templates bind by index. So a grid that supplies its own
+        // DIFFERENT one, and the cells read by source index. So a grid that supplies its own
         // headers says which columns these are by supplying a new list - identity the count
         // cannot carry.
         if (this.seeded is { } previous && SameShape(previous, structure)
             && ReferenceEquals(this.seededHeaders, headers))
         {
             this.seeded = structure;
-            for (int c = 0; c < this.table.Columns.Count && c < structure.ColumnCount; c++)
+            for (int c = 0; c < this.logicalColumns.Count && c < structure.ColumnCount; c++)
             {
                 // Only the plain-label grids relabel from the structure. A grid that supplies
                 // header content keeps it: writing the structure's name over it here would strip
                 // a route header back to a string the second time the same shape is published,
                 // which the view does whenever it rebuilds for an unchanged view model.
-                this.table.Columns[c].Header = headers is not null && c < headers.Count
+                this.logicalColumns[c].Header = headers is not null && c < headers.Count
                     ? headers[c]
                     : structure.Columns[c].Name;
             }
 
+            RefreshColumnWindow();
             return;
         }
 
         this.seeded = structure;
         this.seededHeaders = headers;
-        this.table.Columns.Clear();
+        foreach (var column in this.logicalColumns)
+            column.PropertyChanged -= OnColumnWidthChanged;
+        this.logicalColumns.Clear();
         this.appliedWidths.Clear();
 
+        var cellTemplate = CellTemplate(highlightTerm, clickHint);
         for (int c = 0; c < structure.ColumnCount; c++)
         {
             var source = structure.Columns[c];
-            this.table.Columns.Add(new TableViewColumn
+            var column = new SourceColumn(c)
             {
                 Header = headers is not null && c < headers.Count ? headers[c] : source.Name,
                 Width = new GridLength(source.Width),
                 HeaderTemplate = headerTemplate ?? (highlightTerm is null ? null : HeaderTemplate(highlightTerm)),
-                CellTemplate = CellTemplate(c, highlightTerm, clickHint),
-            });
+                CellTemplate = cellTemplate,
+            };
+            column.PropertyChanged += OnColumnWidthChanged;
+            this.logicalColumns.Add(column);
 
             this.appliedWidths.Add(source.Width);
         }
 
+        this.firstRealizedColumn = -1;
+        RefreshColumnWindow();
+        this.table.LayoutUpdated -= OnFirstLayoutAfterRebuild;
         this.table.LayoutUpdated += OnFirstLayoutAfterRebuild;
     }
 
     public void Dispose()
     {
+        this.disposed = true;
+        this.table.LayoutUpdated -= OnViewportLayout;
         this.table.RemoveHandler(InputElement.PointerPressedEvent, OnPointerPressed);
+        this.table.RemoveHandler(InputElement.PointerReleasedEvent, OnResizerReleased);
+        this.table.RemoveHandler(InputElement.PointerCaptureLostEvent, OnResizerCaptureLost);
         if (this.hoverMarkTracked)
         {
             this.table.RemoveHandler(InputElement.PointerMovedEvent, OnPointerMoved);
@@ -184,7 +201,11 @@ public sealed class TableGridColumns : IDisposable
             subscription.Dispose();
         this.fontSubscriptions.Clear();
 
+        ReleaseRealizedColumns();
         this.table.Columns.Clear();
+        foreach (var column in this.logicalColumns)
+            column.PropertyChanged -= OnColumnWidthChanged;
+        this.logicalColumns.Clear();
         this.appliedWidths.Clear();
         this.fitSource = null;
         this.seeded = null;
@@ -206,9 +227,9 @@ public sealed class TableGridColumns : IDisposable
     }
 
     /// <summary>
-    /// One template per column, with the column's index baked into its bindings: a cell
-    /// template's DataContext is the whole <see cref="CsvVisibleRow"/>, so the index is the only
-    /// thing that tells one column's cells from another's. Trimming plus a tooltip carrying the
+    /// One template shared across columns. The row and the slot's current source index both
+    /// participate in the binding, so vertical recycling and horizontal re-windowing reuse the
+    /// same text block and tooltip. Trimming plus a tooltip carrying the
     /// untrimmed text is what makes a too-narrow column readable without resizing it.
     ///
     /// With a <paramref name="clickHint"/> the cell gains the two cues a clickable cell needs and
@@ -221,11 +242,25 @@ public sealed class TableGridColumns : IDisposable
     /// Border and a Path each - to show the one the pointer is actually over. It now lives in the
     /// adorner layer (see <see cref="HoverMarkAdorner"/>), so nothing per-cell pays for it.
     /// </summary>
-    private static IDataTemplate CellTemplate(int columnIndex, BindingBase? highlightTerm, string? clickHint)
+    private static IDataTemplate CellTemplate(BindingBase? highlightTerm, string? clickHint)
         => new FuncDataTemplate<CsvVisibleRow>((_, _) =>
         {
             var text = CellTextBlock();
-            var cellText = new Binding($"Cells[{columnIndex}].Text");
+            var cellText = new MultiBinding
+            {
+                Bindings =
+                {
+                    new Binding(nameof(CsvVisibleRow.Cells)),
+                    new Binding("Column.SourceIndex")
+                    {
+                        RelativeSource = new RelativeSource(RelativeSourceMode.FindAncestor)
+                        {
+                            AncestorType = typeof(TableViewCell),
+                        },
+                    },
+                },
+                Converter = SourceCellText.Instance,
+            };
 
             BindText(text, cellText, highlightTerm);
 
@@ -236,6 +271,26 @@ public sealed class TableGridColumns : IDisposable
 
             return text;
         }, supportsRecycling: true);
+
+    private sealed class SourceColumn(int sourceIndex) : TableViewColumn
+    {
+        public static readonly DirectProperty<SourceColumn, int> SourceIndexProperty =
+            AvaloniaProperty.RegisterDirect<SourceColumn, int>(nameof(SourceIndex), column => column.SourceIndex);
+
+        private int sourceIndex = sourceIndex;
+        public int SourceIndex => this.sourceIndex;
+
+        public void ShowSourceColumn(int index) => SetAndRaise(SourceIndexProperty, ref this.sourceIndex, index);
+    }
+
+    private sealed class SourceCellText : IMultiValueConverter
+    {
+        public static readonly SourceCellText Instance = new();
+
+        public object? Convert(IList<object?> inputs, Type targetType, object? parameter, CultureInfo culture)
+            => inputs.Count == 2 && inputs[0] is IReadOnlyList<CsvCell> cells && inputs[1] is int index
+                && index >= 0 && index < cells.Count ? cells[index].Text : null;
+    }
 
     /// <summary>
     /// The "this opens something" mark, drawn over the right edge of whichever cell the pointer is
@@ -283,7 +338,9 @@ public sealed class TableGridColumns : IDisposable
     /// </summary>
     private void OnPointerMoved(object? sender, PointerEventArgs e)
     {
-        var cell = (e.Source as Visual)?.FindAncestorOfType<TableViewCell>();
+        var cell = e.Source as TableViewCell ?? (e.Source as Visual)?.FindAncestorOfType<TableViewCell>();
+        if (cell?.Column is not { } hoveredColumn || LogicalColumnIndex(hoveredColumn) < 0)
+            cell = null;
         if (ReferenceEquals(cell, this.markedCell))
             return;
 
@@ -394,17 +451,24 @@ public sealed class TableGridColumns : IDisposable
     /// </summary>
     private void OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (e.ClickCount != 2 || this.fitSource is null)
-            return;
-
         if (ResizedColumn(e.Source as Visual) is not { } column)
             return;
 
-        int columnIndex = this.table.Columns.IndexOf(column);
+        this.resizingColumn = true;
+        if (e.ClickCount != 2 || this.fitSource is null || this.seeded is not { } structure)
+            return;
+
+        int columnIndex = LogicalColumnIndex(column);
         if (columnIndex < 0)
             return;
 
-        int chars = Math.Max(column.Header?.ToString()?.Length ?? 0, this.fitSource.LongestRealizedText(columnIndex));
+        // A realized slot may represent another column after horizontal movement. Capture
+        // the logical column before deferring the fit, so it keeps the intended target.
+        column = this.logicalColumns[columnIndex];
+
+        // Header content can be a route record rendered by a template. Its ToString() includes
+        // metadata, not just the label; the structure carries the actual displayed name.
+        int chars = Math.Max(structure.Columns[columnIndex].Name.Length, this.fitSource.LongestRealizedText(columnIndex));
         if (chars <= 0)
             return;
 
@@ -468,9 +532,9 @@ public sealed class TableGridColumns : IDisposable
         if (this.seeded is not { } structure)
             return;
 
-        for (int c = 0; c < this.table.Columns.Count && c < structure.ColumnCount && c < this.appliedWidths.Count; c++)
+        for (int c = 0; c < this.logicalColumns.Count && c < structure.ColumnCount && c < this.appliedWidths.Count; c++)
         {
-            var column = this.table.Columns[c];
+            var column = this.logicalColumns[c];
             if (Math.Abs(column.Width.Value - this.appliedWidths[c]) > 0.5)
                 continue;
 
@@ -492,6 +556,8 @@ public sealed class TableGridColumns : IDisposable
         foreach (var visual in this.table.GetVisualDescendants())
         {
             if (visual is not TableViewCell { Bounds.Width: > 0 } cell)
+                continue;
+            if (cell.Column is not { } column || LogicalColumnIndex(column) < 0)
                 continue;
 
             return cell.Padding.Left + cell.Padding.Right + cell.BorderThickness.Left + cell.BorderThickness.Right;

@@ -66,7 +66,10 @@ so length is derivable from the next line's offset (last line ends at file lengt
 `List<long>` of line starts is 8 bytes/line. Do not use `uint` — 4GB files sit exactly at
 the wraparound.
 
-### 7. `ParentIndex` costs 4 bytes/token and nothing in the app reads it — DEFERRED
+### 7. `ParentIndex` costs 4 bytes/token and nothing in the app reads it — OBSOLETE
+**No longer true as of 2026-09.** `JsonPathBuilder`, `JsonPathResolver`, `JsonArrayElementIndex`,
+`JsonDiffRowCollection` and `JsonVisibleRowCollection` all walk the parent chain in production
+code. Do not propose removing it. Original reasoning, for the record:
 Only tests consume `JsonTokenInfo.ParentIndex`; no UI feature does. Dropping it takes
 `PackedToken` from 24 to 20 bytes (~24MB at 6M tokens). Keep it if a "jump to parent"
 navigation feature is planned.

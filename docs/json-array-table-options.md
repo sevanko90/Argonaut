@@ -1,8 +1,8 @@
 # JSON array table — options considered
 
-Decision record for the "view a JSON array as a table" feature. The implementation that came out
-of this is [json-array-table-plan.md](json-array-table-plan.md); this document holds the options
-that were weighed and discarded, so the *why* survives the plan getting trimmed to the work.
+Decision record for the "view a JSON array as a table" feature. The feature shipped; its build
+plan has been deleted now that the code is the record of what was built. This document holds the
+options that were weighed and discarded, so the *why* survives.
 
 Every cost claim below was checked against the code at the time of writing (branch
 `optimize-json-diff-alignment`, 2026-08-27), with file/line references kept so a future reader can
@@ -158,7 +158,8 @@ enough to want reload-in-place. Not recommended as part of this plan.
 
 ### Outcome
 
-Build **C1** — see [json-array-table-plan.md](json-array-table-plan.md) for the work itself.
+Build **C1** — shipped; see `Argonaut/Features/Json/JsonArrayTableView*` and
+`Argonaut/Features/Csv/TableGridColumns*` for the implementation.
 
 It's the only option that doesn't either compromise the tree's virtualization
 (A) or add a permanent multi-pane concept to the shell for a transient detour (B). It reuses

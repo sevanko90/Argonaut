@@ -83,33 +83,20 @@ public partial class JsonArrayTableView : UserControl
         if (this.subscribedViewModel is not { } vm || e.ClickCount != 1)
             return;
 
-        if (e.Source is not Visual source || source.FindAncestorOfType<TableViewRow>() is not { } row)
+        if (e.Source is not Visual source
+            || (source as TableViewRow ?? source.FindAncestorOfType<TableViewRow>()) is not { } row)
             return;
 
         int rowIndex = Table.IndexFromContainer(row);
         if (rowIndex < 0)
             return;
 
-        int column = source.FindAncestorOfType<TableViewCell>() is { Column: { } cell }
-            ? Table.Columns.IndexOf(cell)
-            : ColumnAt(e.GetPosition(row).X);
+        int column = (source as TableViewCell ?? source.FindAncestorOfType<TableViewCell>()) is { Column: { } cell }
+            ? this.columns.LogicalColumnIndex(cell)
+            : this.columns.LogicalColumnAt(e.GetPosition(row).X);
 
         if (column >= 0)
             vm.ShowCell(rowIndex, column);
-    }
-
-    /// <summary>The column an x offset inside a row falls in, or -1 past the last one.</summary>
-    private int ColumnAt(double x)
-    {
-        double edge = 0;
-        for (int c = 0; c < Table.Columns.Count; c++)
-        {
-            edge += Table.Columns[c].ActualWidth;
-            if (x < edge)
-                return c;
-        }
-
-        return -1;
     }
 
     private void OnCloseDetail(object? sender, RoutedEventArgs e) => this.subscribedViewModel?.CloseCellDetail();

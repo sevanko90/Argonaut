@@ -61,6 +61,9 @@ public class RawTextSurface : Control, ILogicalScrollable
 
     private const string WrapMarker = "⏎";
 
+    /// <summary>Caret thickness, in device-independent pixels.</summary>
+    private const double CaretWidth = 1.5;
+
     /// <summary>
     /// Text layouts for the rows currently on screen. Keyed by row index and dropped wholesale
     /// whenever anything that changes how a row is drawn changes, which is cheaper and far easier
@@ -435,16 +438,30 @@ public class RawTextSurface : Control, ILogicalScrollable
             using (context.PushClip(new Rect(TextOriginX, y, TextViewportWidth, RowHeight)))
             {
                 var layout = LayoutFor(rowIndex, row, typeface, fontSize, foreground);
-                DrawSelection(context, layout, row, rowIndex, y);
-                DrawHighlights(context, layout, row, y);
-                layout.Draw(context, new Point(TextOriginX - this.panOffset, y));
-                DrawCaret(context, layout, rowIndex, y);
+
+                // Everything that belongs to the text - the glyphs, the selection behind them,
+                // the highlight, the caret - is drawn against the same centred band, so none of
+                // them can sit at a different height from the others.
+                double textTop = CentreInRow(layout, y);
+
+                DrawSelection(context, layout, row, rowIndex, textTop);
+                DrawHighlights(context, layout, row, textTop);
+                layout.Draw(context, new Point(TextOriginX - this.panOffset, textTop));
+                DrawCaret(context, layout, rowIndex, textTop);
             }
 
             if (row.IsSoftWrapped)
                 DrawWrapMarker(context, typeface, fontSize, gutter, y);
         }
     }
+
+    /// <summary>
+    /// Top of a line of text within its row band. Rows are a fixed 22px while the text is however
+    /// tall the content font makes it, so the difference is split above and below rather than
+    /// left at the bottom - which is what the ListBox item template used to do for free.
+    /// </summary>
+    private static double CentreInRow(TextLayout layout, double rowTop)
+        => rowTop + Math.Max(0, (RowHeight - layout.Height) / 2);
 
     private void DrawLineNumber(DrawingContext context, RawVisibleRow row, Typeface typeface, double fontSize, IBrush brush, double y)
     {
@@ -454,7 +471,7 @@ public class RawTextSurface : Control, ILogicalScrollable
 
         var layout = new TextLayout(lineNumber.ToString(), typeface, fontSize, brush);
         double x = ContentPaddingX + LineNumberColumnWidth - LineNumberGap - layout.WidthIncludingTrailingWhitespace;
-        layout.Draw(context, new Point(x, y));
+        layout.Draw(context, new Point(x, CentreInRow(layout, y)));
     }
 
     private void DrawWrapMarker(DrawingContext context, Typeface typeface, double fontSize, IBrush brush, double y)
@@ -462,7 +479,7 @@ public class RawTextSurface : Control, ILogicalScrollable
         var layout = new TextLayout(WrapMarker, typeface, fontSize, brush);
         double x = Bounds.Width - ContentPaddingX - WrapGutterWidth
                    + (WrapGutterWidth - layout.WidthIncludingTrailingWhitespace) / 2;
-        layout.Draw(context, new Point(x, y));
+        layout.Draw(context, new Point(x, CentreInRow(layout, y)));
     }
 
     /// <summary>
@@ -610,17 +627,48 @@ public class RawTextSurface : Control, ILogicalScrollable
             context.FillRectangle(brush, rect.Translate(origin));
     }
 
-    private void DrawCaret(DrawingContext context, TextLayout layout, int rowIndex, double y)
+    private void DrawCaret(DrawingContext context, TextLayout layout, int rowIndex, double textTop)
     {
-        if (this.caret is null || !this.caretVisible || CaretBrush is not { } brush)
+        if (!this.caretVisible || CaretBrush is not { } brush)
             return;
 
-        if (CaretRowIndex() != rowIndex)
-            return;
+        if (CaretRectFor(rowIndex, layout, textTop) is { } rect)
+            context.FillRectangle(brush, rect);
+    }
+
+    /// <summary>
+    /// Where the caret is drawn on this row, or null when the caret is not on it. As tall as the
+    /// text rather than as tall as the row: a caret spanning the full row height overhangs the
+    /// glyphs by the row's leading and reads as too long.
+    /// </summary>
+    private Rect? CaretRectFor(int rowIndex, TextLayout layout, double textTop)
+    {
+        if (this.caret is null || CaretRowIndex() != rowIndex)
+            return null;
 
         double x = TextOriginX - this.panOffset + XForOffset(rowIndex, layout, this.caret.Caret.Offset);
-        context.FillRectangle(brush, new Rect(Math.Floor(x), y, 1, RowHeight));
+        return new Rect(Math.Floor(x), textTop, CaretWidth, layout.Height);
     }
+
+    /// <summary>
+    /// The caret's rectangle in surface coordinates, for tests. Headless has no renderer, so the
+    /// geometry has to be reachable without drawing - and caret geometry is exactly the kind of
+    /// thing that looks fine in code and wrong on screen.
+    /// </summary>
+    internal Rect? CaretRect()
+    {
+        if (this.caret is null || CaretRowIndex() is not int rowIndex || DecodedRow(rowIndex) is not { } row)
+            return null;
+
+        var typeface = new Typeface(FontFamily);
+        var layout = LayoutFor(rowIndex, typeface, FontSize, Foreground ?? Brushes.Black, row.Text);
+        double y = rowIndex * RowHeight - this.offset.Y;
+        return CaretRectFor(rowIndex, layout, CentreInRow(layout, y));
+    }
+
+    /// <summary>Top of the row band the caret sits in, for tests.</summary>
+    internal double? CaretRowTop()
+        => CaretRowIndex() is int rowIndex ? rowIndex * RowHeight - this.offset.Y : null;
 
     /// <summary>Byte offset under a point, for click and drag.</summary>
     private long? OffsetAt(Point point)

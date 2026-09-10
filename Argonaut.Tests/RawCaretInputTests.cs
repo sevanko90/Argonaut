@@ -240,4 +240,32 @@ public sealed class RawCaretInputTests : IDisposable
 
             Assert.Equal(new long[] { 0, 1, 3, 4 }, visited);
         });
+    /// <summary>
+    /// The caret must be as tall as the text and sit centred in its row band, not span the whole
+    /// 22px row - which overhangs the glyphs by the row's leading and reads as a caret that is
+    /// too long and hangs below the line.
+    /// </summary>
+    [Fact]
+    public Task TheCaretIsTextHeightAndCentredInItsRow()
+        => WithView("abcdef\nghijkl\n", async (window, vm, surface) =>
+        {
+            Press(window, Key.Right);
+            await PumpAsync();
+
+            var rect = surface.CaretRect();
+            double? rowTop = surface.CaretRowTop();
+
+            Assert.NotNull(rect);
+            Assert.NotNull(rowTop);
+
+            // Shorter than the row, and not by a token amount.
+            Assert.InRange(rect!.Value.Height, 8, RawTextSurface.RowHeight - 2);
+
+            // Centred: the gap above equals the gap below.
+            double above = rect.Value.Top - rowTop!.Value;
+            double below = rowTop.Value + RawTextSurface.RowHeight - rect.Value.Bottom;
+            Assert.True(Math.Abs(above - below) <= 1.0,
+                $"caret sits {above:F1}px from the top of its row and {below:F1}px from the bottom");
+            Assert.True(above > 0, "caret starts at the very top of the row band");
+        });
 }

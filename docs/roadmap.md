@@ -8,14 +8,19 @@ Nothing here is scheduled. Items are grouped by area, and roughly ordered by val
 
 ## Editing
 
-Options weighed, and the sequencing, are in [editing-options.md](editing-options.md). Nothing is
-built. The decision recorded there is to build the byte layer once in the raw view rather than
-starting in the JSON tree, because the raw index is a pure function of the bytes and can be
-re-derived where the JSON index cannot.
+Options weighed, and the sequencing, are in [editing-options.md](editing-options.md). The decision
+recorded there is to build the byte layer once in the raw view rather than starting in the JSON
+tree, because the raw index is a pure function of the bytes and can be re-derived where the JSON
+index cannot. Step 1 of that sequencing is built; the rest is not, and nothing in the app is
+editable yet.
 
-- **Piece table over (original mapping, append-only scratch).** The byte layer everything else
-  needs. Raw view reads move to piece-space; anchor deltas and line-bounded re-flow keep a
-  keystroke off the tail of the file. Headlessly testable with no UI.
+- ~~**Piece table over (original mapping, append-only scratch).**~~ **Built** (`Features/Raw/`:
+  `RawPieceTable`, `RawEditedRowIndex`, `RawRowDecoder`, `RawCaretStops`, `RawEditJournal`,
+  `RawTextExtractor`, over the `IByteSource` seam). Raw reads are in piece-space; the row index
+  re-derives only the span an edit disturbed and reports `NeedsRebuild` when that span grows past
+  its threshold. No UI change — verified headlessly against a from-scratch index of the edited
+  bytes. Measured: ~1.6-12.5ns per offset resolution (1 to 1024 pieces, no allocation), ~10us per
+  keystroke including re-derivation.
 - **Editing UI in the raw view.** Caret, selection across rows, clipboard, undo/redo. Very likely
   the larger half of the feature — an estimate that prices the data structure and not the caret
   is wrong.

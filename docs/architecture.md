@@ -199,6 +199,15 @@ chain changes.
 - `Length` always comes from `FileInfo`, never the accessor capacity (see CLAUDE.md).
 - `GetSpan` throws `ObjectDisposedException` if used after `Dispose` — a use-after-free is a
   catchable managed error, never a silent access violation.
+- **`IByteSource` (`Infrastructure/IByteSource.cs`) is the seam the raw editor reads through.**
+  `MMapFile` implements it, and so does `RawPieceTable` — so `RawSegmentIndex`, `RawRowReader`
+  and `RawRowDecoder` read "the document" without knowing whether it is a plain mapping or a
+  piece table over (mapping, scratch). Its one difference from `GetSpan` is the contract that
+  makes a piece table expressible at all: `GetContiguousSpan` may return **fewer** bytes than
+  asked for, truncated at an internal boundary, so a caller wanting a whole range either loops
+  or uses `CopyTo`. It also returns empty past the end rather than throwing, because a scan
+  walking to EOF is the normal case there rather than a bug. Over a single mapping every request
+  is still served whole, so nothing about the read-only path changed.
 - `IndexedFileSession<TIndex>` (`Infrastructure/IndexedFileSession.cs`) owns the trio
   {mapping, background index, CancellationTokenSource} and encodes teardown ordering:
   cancel → join indexing task → join dependent tasks → release mapping. It owns the `MMapFile`

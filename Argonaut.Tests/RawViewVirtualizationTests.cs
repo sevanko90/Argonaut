@@ -206,4 +206,105 @@ public sealed class RawViewVirtualizationTests : IDisposable
             }
         }, CancellationToken.None);
     }
+    /// <summary>
+    /// The extent must follow the row count the instant it changes, not when something next
+    /// happens to refresh a cached copy.
+    ///
+    /// This is the bug behind a reveal landing short on a large file. A jump-to-offset resolves
+    /// as soon as the scan's published rows cover the target byte, which can be a whole growth
+    /// tick before a cached extent catches up - and the host clamps the offset it is handed
+    /// against that stale extent. At full scan speed one 120ms tick is over a million rows, so
+    /// the scroll stops roughly a million rows short of where it was asked to go and stays there.
+    /// </summary>
+    [Fact]
+    public Task TheExtentTracksTheRowCountWithoutWaitingForARefresh()
+    {
+        var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(RawViewVirtualizationTests).Assembly);
+        return session.Dispatch(async () =>
+        {
+            var vm = new RawViewModel();
+            Window? window = null;
+            try
+            {
+                await vm.LoadAsync(WriteBigFile());
+
+                var view = new RawView { DataContext = vm };
+                window = new Window { Width = 900, Height = 600, Content = view };
+                window.Show();
+                await PumpAsync();
+                window.UpdateLayout();
+
+                var surface = SurfaceOf(window);
+
+                // Let the scan finish, then read the extent with NO pump and NO layout pass in
+                // between: nothing has had a chance to refresh anything.
+                await vm.IndexingTask;
+
+                Assert.Equal(vm.RowCount * RawTextSurface.RowHeight, surface.Extent.Height);
+                return true;
+            }
+            finally
+            {
+                window?.Close();
+                vm.Dispose();
+            }
+        }, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// A reveal asked for while the row it names does not exist yet must land once it does,
+    /// rather than being applied once against a document that is still too short.
+    ///
+    /// Driven through a wrap-width change, which is the deterministic way to get this state: it
+    /// restarts the index synchronously, so the row count drops to near zero and climbs again,
+    /// and a reveal issued in that window names a row that genuinely is not there. Waiting for a
+    /// background scan to still be running instead would be a race - a few MB indexes faster than
+    /// the test can reach the next line.
+    /// </summary>
+    [Fact]
+    public Task ARevealIssuedBeforeTheRowExists_StillLands()
+    {
+        var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(RawViewVirtualizationTests).Assembly);
+        return session.Dispatch(async () =>
+        {
+            var vm = new RawViewModel();
+            Window? window = null;
+            try
+            {
+                await vm.LoadAsync(WriteBigFile());
+                await vm.IndexingTask;
+
+                var view = new RawView { DataContext = vm };
+                window = new Window { Width = 900, Height = 600, Content = view };
+                window.Show();
+                await PumpAsync();
+                window.UpdateLayout();
+
+                var surface = SurfaceOf(window);
+
+                // Restart the index; the row count collapses and starts climbing again.
+                vm.SetWrapWidth(80);
+                int target = 30_000;
+                Assert.True(vm.RowCount < target, $"expected a restarted scan to be short of {target}, was {vm.RowCount}");
+
+                surface.ScrollRowIntoView(target);
+
+                await vm.IndexingTask;
+                for (int i = 0; i < 20; i++)
+                {
+                    await PumpAsync();
+                    window.UpdateLayout();
+                }
+
+                Assert.True(vm.RowCount > target, "the file should index to more rows than the target");
+                Assert.InRange(target, surface.RealizedRowRange.First, surface.RealizedRowRange.Last);
+                return true;
+            }
+            finally
+            {
+                window?.Close();
+                vm.Dispose();
+            }
+        }, CancellationToken.None);
+    }
 }

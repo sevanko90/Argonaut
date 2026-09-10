@@ -99,8 +99,7 @@ public class RawTextSurface : Control, ILogicalScrollable
     /// </summary>
     private double? stickyX;
     private Vector offset;
-    private Size viewport;
-    private Size extent;
+    private int? pendingRevealRow;
     private double panOffset;
     private EventHandler? scrollInvalidated;
 
@@ -377,9 +376,8 @@ public class RawTextSurface : Control, ILogicalScrollable
 
     protected override Size ArrangeOverride(Size finalSize)
     {
-        this.viewport = finalSize;
-        this.extent = new Size(finalSize.Width, Math.Max(RowCount * RowHeight, finalSize.Height));
         UpdateRealizedRows(finalSize.Height);
+        ApplyPendingReveal();
         return finalSize;
     }
 
@@ -783,6 +781,7 @@ public class RawTextSurface : Control, ILogicalScrollable
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
         base.OnPointerPressed(e);
+        AbandonPendingReveal();
 
         if (this.caret is null || !e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
             return;
@@ -840,6 +839,7 @@ public class RawTextSurface : Control, ILogicalScrollable
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
+        AbandonPendingReveal();
 
         if (this.caret is null || e.Handled)
             return;
@@ -973,9 +973,16 @@ public class RawTextSurface : Control, ILogicalScrollable
     // Vertical only. Horizontal movement is PanOffset, driven by the view's own pan scrollbar,
     // because scrolling horizontally would take the gutters with it.
 
-    public Size Extent => this.extent;
+    /// <summary>
+    /// Computed live rather than cached. A cached extent goes stale between the row count
+    /// growing and whatever refreshes it running, and the host clamps any offset it is given
+    /// against that stale value - which silently turns a reveal deep in a large file into a
+    /// scroll that stops short. During a full-speed scan one 120ms growth tick is over a million
+    /// rows of staleness, so "stale by one tick" is not a rounding error, it is a mile.
+    /// </summary>
+    public Size Extent => new(Bounds.Width, Math.Max(RowCount * RowHeight, Bounds.Height));
 
-    public Size Viewport => this.viewport;
+    public Size Viewport => Bounds.Size;
 
     public Vector Offset
     {
@@ -1022,21 +1029,35 @@ public class RawTextSurface : Control, ILogicalScrollable
 
     public Control? GetControlInDirection(NavigationDirection direction, Control? from) => null;
 
-    /// <summary>Re-publishes the extent after the row count or the size changed.</summary>
+    /// <summary>Tells the host the extent moved, and re-tries a reveal that is still waiting.</summary>
     private void InvalidateScrollable()
     {
-        this.viewport = Bounds.Size;
-        this.extent = new Size(Bounds.Width, Math.Max(RowCount * RowHeight, Bounds.Height));
         UpdateRealizedRows(Bounds.Height);
         RaiseScrollInvalidated(EventArgs.Empty);
+        ApplyPendingReveal();
     }
 
-    /// <summary>Scrolls <paramref name="rowIndex"/> into view, the reveal a search hit or a
-    /// jump-to-offset needs.</summary>
+    /// <summary>
+    /// Scrolls <paramref name="rowIndex"/> into view - the reveal a search hit or a
+    /// jump-to-offset needs. Remembered rather than applied once and forgotten: a reveal can be
+    /// asked for while the scan is still short of that row, and the host can clamp the offset
+    /// against an extent that has not caught up, so it is re-tried until the row really is on
+    /// screen. Any input from the user abandons it - being yanked back to a search hit after
+    /// scrolling away would be worse than the reveal never landing.
+    /// </summary>
     public void ScrollRowIntoView(int rowIndex)
     {
-        if (Bounds.Height <= 0 || RowCount == 0)
+        this.pendingRevealRow = rowIndex;
+        ApplyPendingReveal();
+    }
+
+    private void ApplyPendingReveal()
+    {
+        if (this.pendingRevealRow is not int rowIndex)
             return;
+
+        if (Bounds.Height <= 0 || rowIndex >= RowCount)
+            return; // the scan has not reached it yet; a later growth tick will re-try
 
         double top = rowIndex * RowHeight;
         double bottom = top + RowHeight;
@@ -1047,9 +1068,20 @@ public class RawTextSurface : Control, ILogicalScrollable
         else if (bottom > y + Bounds.Height)
             y = bottom - Bounds.Height;
         else
+        {
+            this.pendingRevealRow = null; // already on screen
             return;
+        }
 
         Offset = new Vector(this.offset.X, Math.Max(0, y));
         RaiseScrollInvalidated(EventArgs.Empty);
+
+        // Settled only once the row is genuinely realized. If the host clamped the offset short,
+        // this stays pending and the next growth tick tries again against a larger extent.
+        if (RealizedRowRange.First <= rowIndex && rowIndex <= RealizedRowRange.Last)
+            this.pendingRevealRow = null;
     }
+
+    /// <summary>A reveal in flight belongs to the app, not the user; their first input ends it.</summary>
+    private void AbandonPendingReveal() => this.pendingRevealRow = null;
 }

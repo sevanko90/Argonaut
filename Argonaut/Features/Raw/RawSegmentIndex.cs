@@ -41,7 +41,7 @@ public readonly record struct RawRowAnchor(long PackedOffset, int LineNumber);
 /// row's bucket anchor is already visible; the base class's item (= anchor) waiter machinery
 /// underpins <see cref="WaitForRowCountAsync"/>.
 /// </summary>
-public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IFileIndexer
+public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IFileIndexer, IRawRowIndex
 {
     /// <summary>Rows per stored anchor. The RAM/rescan trade: 16 bytes per stride rows of
     /// index, at most stride × (WrapWidth + 1) bytes rescanned per row lookup.</summary>

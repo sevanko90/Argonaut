@@ -27,6 +27,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
     private RawToolbarViewModel? toolbar;
     private string? highlightTerm;
     private int? selectedRowIndex;
+    private RawCaretController? caret;
     private int wrapWidth = RawWrapWidthPreference.Default;
 
     protected override IDocumentSession? Session => this.session;
@@ -59,6 +60,26 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
     public int IndexGeneration { get; private set; }
 
     public RawRowCollection Rows => this.rows ?? throw new InvalidOperationException("LoadAsync must complete before Rows is accessed.");
+
+    /// <summary>
+    /// The caret and selection. Null until <see cref="LoadAsync"/> has an index to move over.
+    /// Replaced by a wrap-width change (the row index it moves over is), but the caret's own
+    /// position survives it untouched: a caret is a byte offset, and re-wrapping moves rows
+    /// around without moving a single byte.
+    /// </summary>
+    public RawCaretController? Caret
+    {
+        get => this.caret;
+        private set => SetField(ref this.caret, value);
+    }
+
+    /// <summary>
+    /// Whether <see cref="Rows"/> is safe to read yet. A view is attached before
+    /// <see cref="LoadAsync"/> finishes, and it needs to subscribe to the row set's growth
+    /// notifications the moment there is one - so it needs to be able to ask rather than to
+    /// catch the exception the property throws.
+    /// </summary>
+    public bool HasRows => this.rows is not null;
 
     public override object? Toolbar => this.toolbar;
 
@@ -137,6 +158,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
             IndexFailure = failure;
 
         this.rows = new RawRowCollection(session.Index, session.File);
+        Caret = new RawCaretController(session.Index, session.File);
 
         OnPropertyChanged(nameof(Rows));
         OnPropertyChanged(nameof(RowCount));
@@ -174,6 +196,22 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
         var old = this.rows;
         this.rows = new RawRowCollection(this.session.Index, this.session.File);
         old?.Dispose();
+
+        // A byte offset means the same thing at any wrap width, so the caret carries across the
+        // re-index; only the row index it consults is replaced.
+        long caretOffset = Caret?.Caret.Offset ?? 0;
+        var selection = Caret?.Selection ?? default;
+        Caret = new RawCaretController(this.session.Index, this.session.File);
+        if (selection.IsEmpty)
+        {
+            Caret.PlaceAt(caretOffset);
+        }
+        else
+        {
+            // Anchor first, then extend, so a selection made right-to-left keeps its direction.
+            Caret.PlaceAt(selection.Anchor);
+            Caret.ExtendTo(selection.Active);
+        }
 
         OnPropertyChanged(nameof(Rows));
         OnPropertyChanged(nameof(RowCount));

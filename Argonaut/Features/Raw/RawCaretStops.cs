@@ -37,7 +37,7 @@ public static class RawCaretStops
     /// <paramref name="direction"/> if it is not already one. Used when an offset arrives from
     /// outside - a JSON token's offset, or a parse failure's - and may point mid-character.
     /// </summary>
-    public static long Snap(RawSegmentIndex index, IByteSource source, long offset, CaretSnap direction)
+    public static long Snap(IRawRowIndex index, IByteSource source, long offset, CaretSnap direction)
     {
         long clamped = Math.Clamp(offset, 0, source.Length);
         if (!TryDecodeRowAt(index, source, clamped, out var row, out var info))
@@ -54,7 +54,7 @@ public static class RawCaretStops
 
     /// <summary>The next legal caret position after <paramref name="offset"/>, or the end of the
     /// document when there is none.</summary>
-    public static long Next(RawSegmentIndex index, IByteSource source, long offset)
+    public static long Next(IRawRowIndex index, IByteSource source, long offset)
     {
         if (offset >= source.Length)
             return source.Length;
@@ -81,7 +81,7 @@ public static class RawCaretStops
     }
 
     /// <summary>The previous legal caret position before <paramref name="offset"/>, or 0.</summary>
-    public static long Previous(RawSegmentIndex index, IByteSource source, long offset)
+    public static long Previous(IRawRowIndex index, IByteSource source, long offset)
     {
         long from = Math.Min(offset, source.Length);
         if (from <= 0)
@@ -131,7 +131,7 @@ public static class RawCaretStops
     }
 
     private static bool TryDecodeRowAt(
-        RawSegmentIndex index,
+        IRawRowIndex index,
         IByteSource source,
         long offset,
         out RawDecodedRow row,

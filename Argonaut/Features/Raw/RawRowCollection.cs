@@ -14,11 +14,13 @@ namespace Argonaut.Features.Raw;
 /// </summary>
 public sealed class RawVisibleRow
 {
-    public RawVisibleRow(int? lineNumber, string text, bool isSoftWrapped)
+    public RawVisibleRow(int? lineNumber, string text, bool isSoftWrapped, long start, long end)
     {
         LineNumber = lineNumber;
         Text = text;
         IsSoftWrapped = isSoftWrapped;
+        Start = start;
+        End = end;
     }
 
     public int? LineNumber { get; }
@@ -26,6 +28,13 @@ public sealed class RawVisibleRow
     public string Text { get; }
 
     public bool IsSoftWrapped { get; }
+
+    /// <summary>Absolute offset of the row's first byte. The caret and selection live in byte
+    /// offsets, so a realized row has to carry its own range to be drawn against them.</summary>
+    public long Start { get; }
+
+    /// <summary>Exclusive end offset, including any newline bytes the row does not draw.</summary>
+    public long End { get; }
 }
 
 // Backs the ListBox's ItemsSource directly against the whole file: the count is the live
@@ -79,14 +88,16 @@ public sealed class RawRowCollection : MemoryMappedCollectionBase
 
         int rowCount = index.RowCount;
         if (i < 0 || i >= rowCount)
-            return new RawVisibleRow(null, string.Empty, false);
+            return new RawVisibleRow(null, string.Empty, false, 0, 0);
 
         MaterializedRowCount++;
         var info = index.GetRowInfo(i);
         var row = new RawVisibleRow(
             info.LineNumber,
             RawRowReader.ReadRow(mmap, info.Start, info.End, info.IsSoftWrapped),
-            info.IsSoftWrapped);
+            info.IsSoftWrapped,
+            info.Start,
+            info.End);
 
         var newNode = new LinkedListNode<(int, RawVisibleRow)>((i, row));
         cacheOrder.AddFirst(newNode);

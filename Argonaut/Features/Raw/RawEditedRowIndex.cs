@@ -37,7 +37,7 @@ namespace Argonaut.Features.Raw;
 ///
 /// Not thread-safe, and deliberately requires a completed scan (see the constructor).
 /// </summary>
-public sealed class RawEditedRowIndex
+public sealed class RawEditedRowIndex : IRawRowIndex
 {
     /// <summary>
     /// How many rows may be re-derived before a full re-index is the better deal. 64 anchor

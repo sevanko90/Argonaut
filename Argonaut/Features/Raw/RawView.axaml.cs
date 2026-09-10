@@ -92,8 +92,8 @@ public partial class RawView : UserControl
     /// </summary>
     private void RevealSelectedRow(RawViewModel vm)
     {
-        if (vm.SelectedRowIndex is int row && row >= 0 && row < vm.RowCount)
-            Surface.ScrollRowIntoView(row);
+        if (vm.SelectedRowIndex is int row && row >= 0)
+            Surface.RevealRow(row);
     }
 
     private void OnDetachedFromVisualTree(object? sender, VisualTreeAttachmentEventArgs e)

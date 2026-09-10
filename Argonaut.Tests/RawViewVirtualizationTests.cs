@@ -287,7 +287,7 @@ public sealed class RawViewVirtualizationTests : IDisposable
                 int target = 30_000;
                 Assert.True(vm.RowCount < target, $"expected a restarted scan to be short of {target}, was {vm.RowCount}");
 
-                surface.ScrollRowIntoView(target);
+                surface.RevealRow(target);
 
                 await vm.IndexingTask;
                 for (int i = 0; i < 20; i++)
@@ -298,6 +298,99 @@ public sealed class RawViewVirtualizationTests : IDisposable
 
                 Assert.True(vm.RowCount > target, "the file should index to more rows than the target");
                 Assert.InRange(target, surface.RealizedRowRange.First, surface.RealizedRowRange.Last);
+                return true;
+            }
+            finally
+            {
+                window?.Close();
+                vm.Dispose();
+            }
+        }, CancellationToken.None);
+    }
+    /// <summary>
+    /// A reveal centres its row rather than scraping it into the bottom edge: the target of a
+    /// jump wants context on both sides, and the bottom line of a window is where the eye has to
+    /// hunt for it.
+    /// </summary>
+    [Fact]
+    public Task RevealCentresTheRowRatherThanScrollingMinimally()
+    {
+        var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(RawViewVirtualizationTests).Assembly);
+        return session.Dispatch(async () =>
+        {
+            var vm = new RawViewModel();
+            Window? window = null;
+            try
+            {
+                await vm.LoadAsync(WriteBigFile());
+                await vm.IndexingTask;
+
+                var view = new RawView { DataContext = vm };
+                window = new Window { Width = 900, Height = 600, Content = view };
+                window.Show();
+                await PumpAsync();
+                window.UpdateLayout();
+
+                var surface = SurfaceOf(window);
+                int target = 20_000;
+
+                surface.RevealRow(target);
+                await PumpAsync();
+                window.UpdateLayout();
+
+                var range = surface.RealizedRowRange;
+                Assert.InRange(target, range.First, range.Last);
+
+                // Roughly as many rows above the target as below it.
+                int above = target - range.First;
+                int below = range.Last - target;
+                Assert.True(Math.Abs(above - below) <= 2,
+                    $"target sits {above} rows from the top of the viewport and {below} from the bottom");
+                Assert.True(above > 5, "the target is not centred - it is near the top or bottom edge");
+                return true;
+            }
+            finally
+            {
+                window?.Close();
+                vm.Dispose();
+            }
+        }, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Minimal scrolling stays minimal - what caret movement uses. Arrowing off the bottom edge
+    /// must advance by a row, not leap half a screen.
+    /// </summary>
+    [Fact]
+    public Task ScrollRowIntoViewMovesAsLittleAsPossible()
+    {
+        var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(RawViewVirtualizationTests).Assembly);
+        return session.Dispatch(async () =>
+        {
+            var vm = new RawViewModel();
+            Window? window = null;
+            try
+            {
+                await vm.LoadAsync(WriteBigFile());
+                await vm.IndexingTask;
+
+                var view = new RawView { DataContext = vm };
+                window = new Window { Width = 900, Height = 600, Content = view };
+                window.Show();
+                await PumpAsync();
+                window.UpdateLayout();
+
+                var surface = SurfaceOf(window);
+                int justBelow = surface.RealizedRowRange.Last + 1;
+
+                surface.ScrollRowIntoView(justBelow);
+                await PumpAsync();
+                window.UpdateLayout();
+
+                // It comes into view at the bottom, having moved by about one row - so the top
+                // of the viewport is still row 0 or the one after it, not half a screen away.
+                Assert.Equal(justBelow, surface.RealizedRowRange.Last);
+                Assert.InRange(surface.RealizedRowRange.First, 0, 1);
                 return true;
             }
             finally

@@ -399,8 +399,11 @@ public class RawTextSurface : Control, ILogicalScrollable
             return;
         }
 
+        // Ceiling-minus-one rather than a plain truncation: a row whose top sits exactly on the
+        // viewport's bottom edge shows nothing at all, and realizing it is a row of work for no
+        // pixels.
         int firstRow = Math.Clamp((int)(this.offset.Y / RowHeight), 0, rowCount - 1);
-        int lastRow = Math.Clamp((int)((this.offset.Y + height) / RowHeight), firstRow, rowCount - 1);
+        int lastRow = Math.Clamp((int)Math.Ceiling((this.offset.Y + height) / RowHeight) - 1, firstRow, rowCount - 1);
         RealizedRowRange = (firstRow, lastRow);
 
         for (int rowIndex = firstRow; rowIndex <= lastRow; rowIndex++)
@@ -1038,14 +1041,39 @@ public class RawTextSurface : Control, ILogicalScrollable
     }
 
     /// <summary>
-    /// Scrolls <paramref name="rowIndex"/> into view - the reveal a search hit or a
-    /// jump-to-offset needs. Remembered rather than applied once and forgotten: a reveal can be
-    /// asked for while the scan is still short of that row, and the host can clamp the offset
-    /// against an extent that has not caught up, so it is re-tried until the row really is on
-    /// screen. Any input from the user abandons it - being yanked back to a search hit after
-    /// scrolling away would be worse than the reveal never landing.
+    /// Brings <paramref name="rowIndex"/> just inside the viewport, moving as little as possible.
+    /// What caret movement uses: arrowing off the bottom edge should advance by a row, not leap.
     /// </summary>
     public void ScrollRowIntoView(int rowIndex)
+    {
+        if (Bounds.Height <= 0 || (uint)rowIndex >= (uint)RowCount)
+            return;
+
+        double top = rowIndex * RowHeight;
+        double bottom = top + RowHeight;
+
+        if (top < this.offset.Y)
+            SetVerticalOffset(top);
+        else if (bottom > this.offset.Y + Bounds.Height)
+            SetVerticalOffset(bottom - Bounds.Height);
+    }
+
+    /// <summary>
+    /// Reveals <paramref name="rowIndex"/> centred in the viewport - what a jump to a parse
+    /// failure or a search hit uses. Centring rather than scrolling minimally is the difference
+    /// between landing the target on the last line of the window, where it has no following
+    /// context and the eye has to hunt for it, and landing it where the eye already is with
+    /// context either side.
+    ///
+    /// A row already fully on screen is left alone: re-centring something the user can already
+    /// see would move the view for no reason.
+    ///
+    /// Remembered rather than applied once, because a reveal can be asked for while the scan is
+    /// still short of that row, and the host can clamp the offset against an extent that has not
+    /// caught up. Any input from the user abandons it - being yanked back to a search hit after
+    /// scrolling away would be worse than the reveal never landing.
+    /// </summary>
+    public void RevealRow(int rowIndex)
     {
         this.pendingRevealRow = rowIndex;
         ApplyPendingReveal();
@@ -1060,26 +1088,25 @@ public class RawTextSurface : Control, ILogicalScrollable
             return; // the scan has not reached it yet; a later growth tick will re-try
 
         double top = rowIndex * RowHeight;
-        double bottom = top + RowHeight;
-
-        double y = this.offset.Y;
-        if (top < y)
-            y = top;
-        else if (bottom > y + Bounds.Height)
-            y = bottom - Bounds.Height;
-        else
+        if (top >= this.offset.Y && top + RowHeight <= this.offset.Y + Bounds.Height)
         {
             this.pendingRevealRow = null; // already on screen
             return;
         }
 
-        Offset = new Vector(this.offset.X, Math.Max(0, y));
-        RaiseScrollInvalidated(EventArgs.Empty);
+        SetVerticalOffset(top - ((Bounds.Height - RowHeight) / 2));
 
         // Settled only once the row is genuinely realized. If the host clamped the offset short,
         // this stays pending and the next growth tick tries again against a larger extent.
         if (RealizedRowRange.First <= rowIndex && rowIndex <= RealizedRowRange.Last)
             this.pendingRevealRow = null;
+    }
+
+    private void SetVerticalOffset(double y)
+    {
+        double limit = Math.Max(0, Extent.Height - Bounds.Height);
+        Offset = new Vector(this.offset.X, Math.Clamp(y, 0, limit));
+        RaiseScrollInvalidated(EventArgs.Empty);
     }
 
     /// <summary>A reveal in flight belongs to the app, not the user; their first input ends it.</summary>

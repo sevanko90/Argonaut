@@ -103,6 +103,18 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
     public void SelectRow(int rowIndex) => SelectedRowIndex = rowIndex;
 
     /// <summary>
+    /// Reveals a byte offset: centres its row in the viewport and puts the caret on it. Both
+    /// halves matter - scrolling somewhere without moving the caret leaves the next keystroke
+    /// acting on wherever the caret was last, which after a jump across a multi-GB file is
+    /// nowhere near what the user is now looking at.
+    /// </summary>
+    public void RevealOffset(long byteOffset, int rowIndex)
+    {
+        Caret?.PlaceAt(byteOffset);
+        SelectRow(rowIndex);
+    }
+
+    /// <summary>
     /// Resolves <paramref name="byteOffset"/> to a display row - waiting for indexing to reach
     /// it (or finish) if necessary - and reveals it. Used by the "jump to failure location"
     /// link on another document's incompatible/partial-failure display, which switches this
@@ -133,7 +145,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
             }
 
             if (row is int rowIndex)
-                SelectRow(rowIndex);
+                RevealOffset(byteOffset, rowIndex);
         }
         catch (ObjectDisposedException)
         {

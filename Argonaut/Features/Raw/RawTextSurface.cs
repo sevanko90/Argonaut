@@ -994,8 +994,11 @@ public class RawTextSurface : Control, ILogicalScrollable
             return;
         }
 
-        if (TopLevel.GetTopLevel(this)?.Clipboard is { } clipboard)
-            await clipboard.SetTextAsync(text);
+        if (TopLevel.GetTopLevel(this)?.Clipboard is not { } clipboard)
+            return;
+
+        await clipboard.SetTextAsync(text);
+        ToastService.Show($"Copied {selection.Length:N0} {(selection.Length == 1 ? "byte" : "bytes")} to clipboard");
     }
 
     protected override void OnGotFocus(FocusChangedEventArgs e)

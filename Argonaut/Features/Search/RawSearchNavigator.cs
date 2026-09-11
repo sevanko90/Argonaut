@@ -43,6 +43,6 @@ public sealed class RawSearchNavigator : ISearchNavigator
         }
 
         if (row is int rowIndex)
-            viewModel.SelectRow(rowIndex);
+            viewModel.RevealOffset(match.Offset, rowIndex);
     }
 }

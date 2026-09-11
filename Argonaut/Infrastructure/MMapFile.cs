@@ -13,7 +13,7 @@ namespace Argonaut.Infrastructure;
 /// zero-padding must never be exposed as data (see CLAUDE.md). <see cref="GetSpan"/> bounds
 /// every request against the real file length for the same reason.
 /// </summary>
-public sealed unsafe class MMapFile : IDisposable
+public sealed unsafe class MMapFile : IByteSource, IDisposable
 {
     private readonly MemoryMappedFile? mmf;
     private readonly MemoryMappedViewAccessor? accessor;
@@ -76,6 +76,28 @@ public sealed unsafe class MMapFile : IDisposable
                 $"Requested range [{offset}, {offset + length}) extends past the end of the file ({Length} bytes).");
 
         return new ReadOnlySpan<byte>(this.ptr + offset, length);
+    }
+
+    /// <summary>
+    /// See <see cref="IByteSource.GetContiguousSpan"/>. A mapping is one buffer, so this only
+    /// ever truncates at end of file - it never splits a request the way a piece table does.
+    /// </summary>
+    public ReadOnlySpan<byte> GetContiguousSpan(long offset, int maxLength)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (offset < 0 || offset >= Length || maxLength <= 0)
+            return ReadOnlySpan<byte>.Empty;
+
+        return new ReadOnlySpan<byte>(this.ptr + offset, (int)Math.Min(maxLength, Length - offset));
+    }
+
+    /// <summary>See <see cref="IByteSource.CopyTo"/>. One mapping, so this is a single copy.</summary>
+    public int CopyTo(long offset, Span<byte> destination)
+    {
+        var span = GetContiguousSpan(offset, destination.Length);
+        span.CopyTo(destination);
+        return span.Length;
     }
 
     /// <summary>

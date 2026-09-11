@@ -4,68 +4,48 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Media;
-using Avalonia.Media.TextFormatting;
 using Avalonia.Reactive;
 
 namespace Argonaut.Features.Raw;
 
+/// <summary>
+/// Host for <see cref="RawTextSurface"/>. Everything about how a row looks lives in the surface;
+/// what remains here is the chrome around it - the pan scrollbar, the reveal a search hit needs,
+/// and the scroll reset a wrap-width change needs.
+/// </summary>
 public partial class RawView : UserControl
 {
-    // Must mirror the row template's Grid ColumnDefinitions and the ListBox Padding - the pan
-    // range is estimated, not measured from realized rows (a deterministic scrollbar beats an
-    // exact one whose range jumps as rows realize).
-    //
-    // 120px (with the row template's 12px margin, ~108px of text) comfortably fits a
-    // right-aligned line number up to ~12 monospace digits - multi-billion-line files, well
-    // beyond what a multi-GB source file can actually contain (a single-byte-line file would
-    // need well over 100GB to reach that many lines). A fixed width is deliberate here too:
-    // sizing it from realized rows would make the gutter (and the whole visible-text start
-    // position) jump as bigger line numbers scroll into view.
-    private const double LineNumberColumnWidth = 100;
-    private const double WrapGutterColumnWidth = 18;
-    private const double ListBoxHorizontalPadding = 16;
-
-    private readonly TranslateTransform panTransform;
     private readonly IDisposable fontResourceSubscription;
-    private bool suppressSelectionEvents;
     private RawViewModel? subscribedViewModel;
     private FontFamily? contentFontFamily;
 
     public RawView()
     {
         InitializeComponent();
-        panTransform = (TranslateTransform)Resources["PanTransform"]!;
 
         Loaded += OnLoaded;
         DataContextChanged += OnDataContextChanged;
         DetachedFromVisualTree += OnDetachedFromVisualTree;
-        RowsListBox.SelectionChanged += OnSelectionChanged;
-        RowsListBox.SizeChanged += OnListBoxSizeChanged;
-        RowsListBox.PropertyChanged += OnListBoxPropertyChanged;
+        Surface.SizeChanged += OnSurfaceSizeChanged;
+        Surface.PanRequested += OnPanRequested;
         PanScrollBar.ValueChanged += OnPanValueChanged;
         fontResourceSubscription = this.GetResourceObservable("AppContentFontFamily")
             .Subscribe(new AnonymousObserver<object?>(OnContentFontChanged));
     }
 
-    /// <summary>
-    /// A wrap-width change swaps the ItemsSource wholesale (see RawViewModel.SetWrapWidth).
-    /// The old vertical offset is meaningless against the new row geometry - and leaving it
-    /// in place makes the virtualizer reconcile an offset potentially tens of millions of
-    /// pixels deep against a fresh source that starts near-empty and then grows by millions
-    /// of rows a second - so snap back to the top on every source swap.
-    /// </summary>
-    private void OnListBoxPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
-    {
-        if (e.Property == ItemsControl.ItemsSourceProperty && RowsListBox.Scroll is { } scroll)
-            scroll.Offset = default;
-    }
-
     private void OnLoaded(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         if (DataContext is RawViewModel vm)
-            SyncVisualSelection(vm);
+            RevealSelectedRow(vm);
 
         UpdatePanRange();
+
+        // The surface is the document, so it takes focus when the document is shown. Without
+        // this the caret is invisible (it is hidden while unfocused) and arrow keys never reach
+        // the editor - unhandled, they fall through to directional navigation and walk focus off
+        // to the find bar. Safe to do here: nothing else has been focused yet at load time, so
+        // this cannot steal focus from the find box, which is focused later and by the user.
+        Surface.Focus();
     }
 
     private void OnDataContextChanged(object? sender, EventArgs e)
@@ -85,50 +65,48 @@ public partial class RawView : UserControl
         UpdatePanRange();
     }
 
-    /// <summary>
-    /// Mirrors programmatic selection (a search reveal calling SelectRow) into the ListBox -
-    /// user clicks already go the other way via OnSelectionChanged, and SyncVisualSelection
-    /// suppresses the echo. A wrap-width change re-ranges the pan scrollbar.
-    /// </summary>
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (sender is not RawViewModel vm)
             return;
 
         if (e.PropertyName is null or nameof(RawViewModel.SelectedRowIndex))
-            SyncVisualSelection(vm);
+            RevealSelectedRow(vm);
 
         if (e.PropertyName is null or nameof(RawViewModel.WrapWidth))
         {
-            ResetScrollBeforeSourceSwap();
+            // Row geometry is about to change wholesale, so the old vertical offset means
+            // nothing against the new rows - and leaving it in place would have the surface
+            // draw a viewport far past the end of a row set that starts near-empty and then
+            // grows by millions of rows a second.
+            ResetScroll();
             UpdatePanRange();
         }
     }
 
-    /// <summary>
-    /// A wrap-width change swaps the ItemsSource, and SetWrapWidth raises WrapWidth BEFORE
-    /// that swap - deliberately, so this can run first. Resetting the scroll and forcing one
-    /// synchronous layout against the OLD collection is cheap (top-of-file viewport, a
-    /// viewport's worth of rows) and refreshes the virtualizer's remembered viewport, which
-    /// otherwise still spans the old scroll position when the fresh source arrives. Measuring
-    /// a new source against that stale, potentially millions-of-pixels-deep viewport realizes
-    /// every row needed to bridge the gap in one pass - the wrap-change beachball/RAM runaway
-    /// (see RawViewVirtualizationTests).
-    /// </summary>
-    private void ResetScrollBeforeSourceSwap()
+    private void ResetScroll()
     {
-        if (RowsListBox.Scroll is { } scroll && scroll.Offset != default)
-        {
-            scroll.Offset = default;
-            RowsListBox.UpdateLayout();
-        }
+        if (RowsScroller.Offset != default)
+            RowsScroller.Offset = default;
+
+        PanScrollBar.Value = 0;
     }
 
-    private void OnDetachedFromVisualTree(object? sender, Avalonia.VisualTreeAttachmentEventArgs e)
+    /// <summary>
+    /// Scrolls the row a search reveal or a jump-to-offset asked for into view. There is no
+    /// selection to mirror any more - the surface draws a caret and a byte-range selection, and a
+    /// reveal is purely a scroll.
+    /// </summary>
+    private void RevealSelectedRow(RawViewModel vm)
     {
-        RowsListBox.SelectionChanged -= OnSelectionChanged;
-        RowsListBox.SizeChanged -= OnListBoxSizeChanged;
-        RowsListBox.PropertyChanged -= OnListBoxPropertyChanged;
+        if (vm.SelectedRowIndex is int row && row >= 0)
+            Surface.RevealRow(row);
+    }
+
+    private void OnDetachedFromVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
+    {
+        Surface.SizeChanged -= OnSurfaceSizeChanged;
+        Surface.PanRequested -= OnPanRequested;
         PanScrollBar.ValueChanged -= OnPanValueChanged;
         DataContextChanged -= OnDataContextChanged;
         fontResourceSubscription.Dispose();
@@ -139,47 +117,13 @@ public partial class RawView : UserControl
             subscribedViewModel = null;
         }
 
-        // Disposed synchronously here (before the content swap's trailing ItemsSource walk):
-        // RawRowCollection reports empty once disposed, so that walk reads nothing.
+        // Disposed synchronously here as an idempotent safety net for teardown the shell does not
+        // drive (e.g. window close); the shell disposes the outgoing document before the swap.
         if (DataContext is IDisposable d)
             d.Dispose();
     }
 
-    private void OnSelectionChanged(object? sender, SelectionChangedEventArgs e)
-    {
-        if (suppressSelectionEvents)
-            return;
-
-        if (DataContext is not RawViewModel vm)
-            return;
-
-        var selectedIndex = RowsListBox.SelectedIndex;
-        if (selectedIndex < 0)
-            return;
-
-        vm.SelectRow(selectedIndex);
-    }
-
-    private void SyncVisualSelection(RawViewModel vm)
-    {
-        if (vm.SelectedRowIndex is not int row)
-        {
-            RowsListBox.SelectedIndex = -1;
-            return;
-        }
-
-        suppressSelectionEvents = true;
-        try
-        {
-            RowsListBox.SelectedIndex = row >= 0 && row < vm.RowCount ? row : -1;
-        }
-        finally
-        {
-            suppressSelectionEvents = false;
-        }
-    }
-
-    private void OnListBoxSizeChanged(object? sender, SizeChangedEventArgs e) => UpdatePanRange();
+    private void OnSurfaceSizeChanged(object? sender, SizeChangedEventArgs e) => UpdatePanRange();
 
     private void OnContentFontChanged(object? value)
     {
@@ -187,17 +131,32 @@ public partial class RawView : UserControl
         UpdatePanRange();
     }
 
-    private void OnPanValueChanged(object? sender, RangeBaseValueChangedEventArgs e) => panTransform.X = -e.NewValue;
+    private void OnPanValueChanged(object? sender, RangeBaseValueChangedEventArgs e)
+        => Surface.PanOffset = e.NewValue;
+
+    /// <summary>
+    /// The caret moved somewhere the current pan does not show. The surface asks rather than
+    /// setting its own offset, because the pan scrollbar is the thing that owns that value and
+    /// has to stay in step with it.
+    /// </summary>
+    private void OnPanRequested(object? sender, double desiredOffset)
+    {
+        if (!PanScrollBar.IsVisible)
+            return;
+
+        PanScrollBar.Value = Math.Clamp(desiredOffset, PanScrollBar.Minimum, PanScrollBar.Maximum);
+    }
 
     /// <summary>
     /// Sizes the pan scrollbar from a deterministic estimate: wrap-width bytes x one measured
-    /// character advance. Row text never has more chars than bytes (see RawRowReader), and "W"
-    /// is a wide advance in either content font, so this is an upper bound - at the smaller
-    /// wrap widths it collapses to zero and the bar hides entirely.
+    /// character advance. Row text never has more chars than bytes (see RawRowReader), and "W" is
+    /// a wide advance in either content font, so this is an upper bound - at the smaller wrap
+    /// widths it collapses to zero and the bar hides entirely. An estimate is deliberate: a range
+    /// measured from the rows actually on screen would jump as the user scrolled.
     /// </summary>
     private void UpdatePanRange()
     {
-        double viewWidth = RowsListBox.Bounds.Width;
+        double viewWidth = Surface.Bounds.Width;
         if (DataContext is not RawViewModel vm || viewWidth <= 0)
         {
             HidePanBar();
@@ -205,7 +164,10 @@ public partial class RawView : UserControl
         }
 
         double charWidth = MeasureCharWidth();
-        double textViewport = Math.Max(0, viewWidth - ListBoxHorizontalPadding - LineNumberColumnWidth - WrapGutterColumnWidth);
+        double textViewport = Math.Max(
+            0,
+            viewWidth - (2 * RawTextSurface.ContentPaddingX) - RawTextSurface.LineNumberColumnWidth - RawTextSurface.WrapGutterWidth);
+
         double maximum = Math.Max(0, vm.WrapWidth * charWidth - textViewport);
         if (maximum <= 0 || textViewport <= 0)
         {
@@ -226,14 +188,13 @@ public partial class RawView : UserControl
     {
         PanScrollBar.IsVisible = false;
         PanScrollBar.Value = 0;
-        panTransform.X = 0;
+        Surface.PanOffset = 0;
     }
 
     private double MeasureCharWidth()
     {
-        double fontSize = RowsListBox.GetValue(TextBlock.FontSizeProperty);
         var typeface = new Typeface(contentFontFamily ?? FontFamily.Default);
-        var layout = new TextLayout("W", typeface, fontSize, Brushes.Black);
+        var layout = new Avalonia.Media.TextFormatting.TextLayout("W", typeface, Surface.FontSize, Brushes.Black);
         return layout.WidthIncludingTrailingWhitespace;
     }
 }

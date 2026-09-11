@@ -14,11 +14,13 @@ namespace Argonaut.Features.Raw;
 /// </summary>
 public sealed class RawVisibleRow
 {
-    public RawVisibleRow(int? lineNumber, string text, bool isSoftWrapped)
+    public RawVisibleRow(int? lineNumber, string text, bool isSoftWrapped, long start, long end)
     {
         LineNumber = lineNumber;
         Text = text;
         IsSoftWrapped = isSoftWrapped;
+        Start = start;
+        End = end;
     }
 
     public int? LineNumber { get; }
@@ -26,17 +28,32 @@ public sealed class RawVisibleRow
     public string Text { get; }
 
     public bool IsSoftWrapped { get; }
+
+    /// <summary>Absolute offset of the row's first byte. The caret and selection live in byte
+    /// offsets, so a realized row has to carry its own range to be drawn against them.</summary>
+    public long Start { get; }
+
+    /// <summary>Exclusive end offset, including any newline bytes the row does not draw.</summary>
+    public long End { get; }
 }
 
-// Backs the ListBox's ItemsSource directly against the whole file: the count is the live
-// segment count, and the indexer lazily reads a single row from the memory-mapped file on
-// demand. The read-only IList + INotifyCollectionChanged surface and the empty-once-disposed
-// safety live in MemoryMappedCollectionBase; this only supplies the live count, item
-// materialization, and the background growth notifications (structural twin of
-// MemoryMappedFileLineCollection - see the growth-tick note there).
+// Lazily materializes rows against the whole file: the count is the live segment count, and the
+// indexer reads a single row from the memory-mapped file on demand. RawTextSurface reads it by
+// index for the rows it is drawing and subscribes to its growth notifications; the read-only
+// IList + INotifyCollectionChanged surface and the empty-once-disposed safety live in
+// MemoryMappedCollectionBase (structural twin of MemoryMappedFileLineCollection - see the
+// growth-tick note there).
 public sealed class RawRowCollection : MemoryMappedCollectionBase
 {
-    private const int CacheCapacity = 1000;
+    /// <summary>
+    /// Rows kept decoded after they scroll away, so scrolling back does not re-read the mapping.
+    /// The cost is fixed regardless of file size, and was measured full: at 1000 rows it held
+    /// 720KB / 1014KB / 1656KB at wrap widths 80 / 160 / 512; at 200 it holds 154KB / 213KB /
+    /// 346KB. A viewport is around 30 rows, so 200 is still several screens of scroll-back. The
+    /// larger figure was sized for a ListBox realizing and de-realizing item containers as it
+    /// scrolled; the surface draws directly and caches its own text layouts for the viewport.
+    /// </summary>
+    private const int CacheCapacity = 200;
     private static readonly TimeSpan GrowthPollInterval = TimeSpan.FromMilliseconds(120);
 
     private readonly RawSegmentIndex index;
@@ -79,14 +96,16 @@ public sealed class RawRowCollection : MemoryMappedCollectionBase
 
         int rowCount = index.RowCount;
         if (i < 0 || i >= rowCount)
-            return new RawVisibleRow(null, string.Empty, false);
+            return new RawVisibleRow(null, string.Empty, false, 0, 0);
 
         MaterializedRowCount++;
         var info = index.GetRowInfo(i);
         var row = new RawVisibleRow(
             info.LineNumber,
             RawRowReader.ReadRow(mmap, info.Start, info.End, info.IsSoftWrapped),
-            info.IsSoftWrapped);
+            info.IsSoftWrapped,
+            info.Start,
+            info.End);
 
         var newNode = new LinkedListNode<(int, RawVisibleRow)>((i, row));
         cacheOrder.AddFirst(newNode);

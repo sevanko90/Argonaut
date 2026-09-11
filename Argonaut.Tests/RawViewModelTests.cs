@@ -268,6 +268,32 @@ public sealed class RawViewModelTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// A jump moves the caret too, not just the viewport. Scrolling somewhere without moving the
+    /// caret leaves the next keystroke acting on wherever it was last - which, after a jump
+    /// across a multi-GB file, is nowhere near what the user is now looking at.
+    /// </summary>
+    [Fact]
+    public async Task JumpToByteOffsetAsync_PutsTheCaretOnThatOffset()
+    {
+        var vm = new RawViewModel();
+        try
+        {
+            await vm.LoadAsync(WriteNewlinelessFile());
+            await vm.IndexingTask;
+
+            await vm.JumpToByteOffsetAsync(165);
+
+            Assert.NotNull(vm.Caret);
+            Assert.Equal(165, vm.Caret!.Caret.Offset);
+            Assert.True(vm.Caret.Selection.IsEmpty);
+        }
+        finally
+        {
+            vm.Dispose();
+        }
+    }
+
     [Fact]
     public async Task JumpToByteOffsetAsync_AfterDispose_DoesNotThrow()
     {

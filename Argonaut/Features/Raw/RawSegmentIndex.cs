@@ -36,12 +36,12 @@ public readonly record struct RawRowAnchor(long PackedOffset, int LineNumber);
 /// so no dense/sparse switching is ever needed.
 ///
 /// The scan and the on-demand rescan share one boundary implementation
-/// (<see cref="NextRowBoundary"/>), so they cannot disagree. <see cref="RowCount"/> is
+/// (<see cref="RawRowBoundary.Next"/>), so they cannot disagree. <see cref="RowCount"/> is
 /// published at anchor boundaries (and finally at completion), guaranteeing every published
 /// row's bucket anchor is already visible; the base class's item (= anchor) waiter machinery
 /// underpins <see cref="WaitForRowCountAsync"/>.
 /// </summary>
-public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IFileIndexer
+public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IFileIndexer, IRawRowIndex
 {
     /// <summary>Rows per stored anchor. The RAM/rescan trade: 16 bytes per stride rows of
     /// index, at most stride × (WrapWidth + 1) bytes rescanned per row lookup.</summary>
@@ -50,22 +50,18 @@ public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IFileInd
     private const long ContinuationFlag = long.MinValue; // bit 63 - the sign bit
     private const long OffsetMask = long.MaxValue;       // bits 0-62
 
-    // A UTF-8 code point is at most 4 bytes, so at most 3 continuation bytes can precede a
-    // forced break before the break provably isn't splitting a valid character.
-    private const int MaxUtf8Backoff = 3;
-
     private const long ProgressReportStride = 4 * 1024 * 1024;
     private const int CancellationCheckRowStride = 1024;
 
-    private readonly MMapFile file;
+    private readonly IByteSource source;
 
     // Rows whose boundaries are fully determined AND whose bucket anchor is published.
     // Written by the scan thread (release via Volatile.Write), read lock-free by the UI.
     private int publishedRowCount;
 
-    private RawSegmentIndex(MMapFile file, int wrapWidth)
+    private RawSegmentIndex(IByteSource source, int wrapWidth)
     {
-        this.file = file;
+        this.source = source;
         WrapWidth = wrapWidth;
     }
 
@@ -97,7 +93,7 @@ public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IFileInd
 
         for (int row = anchorIndex * AnchorStride; ; row++)
         {
-            var (end, softWrap) = NextRowBoundary(start);
+            var (end, softWrap) = RawRowBoundary.Next(this.source, WrapWidth, start);
             if (row == rowIndex)
                 return new RawRowInfo(start, end, softWrap, atLineStart ? lineNumber : null);
 
@@ -114,6 +110,22 @@ public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IFileInd
             start = end;
         }
     }
+
+    /// <summary>
+    /// The full position state stored at anchor <paramref name="anchorIndex"/>: where its row
+    /// starts, whether that row begins a real line, and the line it sits in.
+    /// <see cref="GetRowInfo"/> cannot answer this - it reports a null line number on a
+    /// continuation row, which is right for a gutter but useless to a caller that needs to keep
+    /// counting lines forward from there (see <see cref="RawEditedRowIndex"/>).
+    /// </summary>
+    internal (long Start, bool AtLineStart, int LineNumber) AnchorAt(int anchorIndex)
+    {
+        var anchor = this.items.ItemRef(anchorIndex);
+        return (anchor.PackedOffset & OffsetMask, anchor.PackedOffset >= 0, anchor.LineNumber);
+    }
+
+    /// <summary>Anchors stored so far. Every published row's anchor is among them.</summary>
+    internal int AnchorCount => (RowCount + AnchorStride - 1) / AnchorStride;
 
     /// <summary>
     /// Maps an absolute byte offset to the display row containing it: binary search over the
@@ -150,7 +162,7 @@ public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IFileInd
         int lastRow = Math.Min(rowCount, (anchorIndex + 1) * AnchorStride) - 1;
         for (int row = anchorIndex * AnchorStride; row <= lastRow; row++)
         {
-            long end = NextRowBoundary(start).End;
+            long end = RawRowBoundary.Next(this.source, WrapWidth, start).End;
             if (offset < end)
                 return row;
             start = end;
@@ -187,16 +199,17 @@ public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IFileInd
     /// <summary>
     /// Start the process of indexing the file and return the index, initially populating in the background.
     /// </summary>
-    /// <param name="file">Memory mapped file to index; must outlive this index (the on-demand
-    /// row rescans read it for the index's whole lifetime - see RawIndexSession).</param>
+    /// <param name="source">Bytes to index; must outlive this index (the on-demand row rescans
+    /// read it for the index's whole lifetime - see RawIndexSession). A plain mapping while the
+    /// document is unedited, a piece table over (mapping, scratch) once it is not.</param>
     /// <param name="wrapWidth">Byte cap per display row; rows are force-broken at this length</param>
     /// <param name="progressReporter">Progress reporter</param>
     /// <param name="cancellationToken">Checked every <see cref="CancellationCheckRowStride"/> rows</param>
-    public static RawSegmentIndex StartIndexing(MMapFile file, int wrapWidth, IProgressReporter? progressReporter = null, CancellationToken cancellationToken = default)
+    public static RawSegmentIndex StartIndexing(IByteSource source, int wrapWidth, IProgressReporter? progressReporter = null, CancellationToken cancellationToken = default)
     {
-        ArgumentOutOfRangeException.ThrowIfLessThan(wrapWidth, MaxUtf8Backoff + 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(wrapWidth, RawRowBoundary.MaxUtf8Backoff + 1);
 
-        var index = new RawSegmentIndex(file, wrapWidth);
+        var index = new RawSegmentIndex(source, wrapWidth);
         index.IndexingTask = index.StartScan(() => index.ProduceRows(progressReporter, cancellationToken));
         return index;
     }
@@ -205,13 +218,13 @@ public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IFileInd
     /// Scans the file row by row, storing an anchor every <see cref="AnchorStride"/> rows.
     /// Per-row rather than chunked like FileOffsetIndex: the newline search is still the
     /// SIMD-vectorized span IndexOf, capped at the wrap width, and sharing
-    /// <see cref="NextRowBoundary"/> with the on-demand rescan is what guarantees the two
+    /// <see cref="RawRowBoundary.Next"/> with the on-demand rescan is what guarantees the two
     /// always agree on where rows fall.
     /// </summary>
     /// <remarks>Invoked in the background via a task</remarks>
     private void ProduceRows(IProgressReporter? progressReporter, CancellationToken cancellationToken)
     {
-        long length = this.file.Length;
+        long length = this.source.Length;
         if (length == 0)
         {
             progressReporter?.Report("Indexing");
@@ -233,7 +246,7 @@ public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IFileInd
                 if (rows % AnchorStride == 0)
                     AppendAnchor(start, atLineStart, lineNumber, rows);
 
-                var (end, softWrap) = NextRowBoundary(start);
+                var (end, softWrap) = RawRowBoundary.Next(this.source, WrapWidth, start);
                 if (softWrap)
                 {
                     atLineStart = false;
@@ -273,46 +286,4 @@ public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IFileInd
         Volatile.Write(ref this.publishedRowCount, rowsSoFar);
         this.OnItemsPublished(this.items.Count);
     }
-
-    /// <summary>
-    /// The single boundary rule shared by the scan and every rescan. From a row start, the
-    /// row ends at: the first '\n' within the cap (kept inside the row, like the NDJSON
-    /// index); end-of-file when it comes at or before the cap; a '\n' sitting exactly at the
-    /// cap (peek-extended in as a real end, so a CRLF straddling the cap can't leave a lone
-    /// linefeed row); otherwise a forced break at the cap, backed off up to 3 bytes so a
-    /// multi-byte UTF-8 character isn't split (binary data just breaks at the cap).
-    /// </summary>
-    private (long End, bool SoftWrap) NextRowBoundary(long start)
-    {
-        long length = this.file.Length;
-        int searchLength = (int)Math.Min(WrapWidth, length - start);
-        int newlineIndex = this.file.GetSpan(start, searchLength).IndexOf((byte)'\n');
-        if (newlineIndex >= 0)
-            return (start + newlineIndex + 1, false);
-
-        if (start + WrapWidth >= length)
-            return (length, false); // EOF at or before the cap: a real end, no ⏎ marker
-
-        return BreakAtCap(start, length);
-    }
-
-    private (long End, bool SoftWrap) BreakAtCap(long segmentStart, long length)
-    {
-        long capEnd = segmentStart + WrapWidth;
-        if (this.file.GetSpan(capEnd, 1)[0] == (byte)'\n')
-            return (capEnd + 1, false);
-
-        long end = capEnd;
-        for (int back = 0; back < MaxUtf8Backoff && end - 1 > segmentStart; back++)
-        {
-            if (!IsUtf8ContinuationByte(this.file.GetSpan(end, 1)[0]))
-                return (end, true);
-
-            end--;
-        }
-
-        return (IsUtf8ContinuationByte(this.file.GetSpan(end, 1)[0]) ? capEnd : end, true);
-    }
-
-    private static bool IsUtf8ContinuationByte(byte b) => (b & 0xC0) == 0x80;
 }

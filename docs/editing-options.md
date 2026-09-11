@@ -253,6 +253,72 @@ Build the byte layer once, in the raw view.
 Stopping after step 3 leaves a genuinely useful tool. That is the main argument for this
 sequencing over the one that starts in the tree.
 
+## What step 1 actually became
+
+Step 1 of the outcome above is built. Three notes where the implementation departed from, or
+sharpened, what this document anticipated:
+
+- **The byte layer is an interface, not just a piece table.** `IByteSource`
+  (`Infrastructure/IByteSource.cs`) is what `RawSegmentIndex`, `RawRowReader` and the new
+  `RawRowDecoder` read through; `MMapFile` and `RawPieceTable` both implement it. The contract that
+  makes a piece table expressible is that `GetContiguousSpan` may return fewer bytes than asked
+  for, truncated at a piece boundary. §1C's "serve replacements at the `GetSpan` chokepoint" idea
+  is therefore still available for the JSON view later, but the raw view did not need it.
+
+- **§3's "anchors after X are valid with a constant delta applied. No rescan" is too optimistic,
+  and the code does not rely on it.** Byte-capped breaks do sit at fixed byte offsets from a line
+  start, so an insert usually leaves later boundaries where they were — but `BreakAtCap` backs off
+  up to 3 bytes to avoid splitting a UTF-8 character, so different bytes at the cap give a
+  different backoff which chains into the next row; and inserted text containing `\n` splits the
+  line outright. `RawEditedRowIndex` therefore walks the original bytes and the edited document
+  forward from the same anchor and stops only when they *provably* re-converge: both past every
+  edit, offsets differing by exactly the total byte delta, and agreeing on whether a line starts
+  there. That last condition is load-bearing rather than belt-and-braces — the byte before a
+  convergence point can be the last byte an edit inserted, so a newline inserted onto a soft-wrap
+  boundary produces two streams at the same offset that disagree about it
+  (`RawEditedRowIndexTests.ConvergenceRequiresAgreementOnWhereLinesStart`).
+
+- **§6's warning about the caret understates one part of it.** The caret's hardest dependency is
+  not rendering but decoding: `RawRowReader` is lossy in four directions at once (multi-byte
+  collapse, one U+FFFD per invalid run, Control Picture substitution, trailing newline stripped),
+  so a character index says nothing about a byte offset. `RawRowDecoder` produces the map, and
+  `RawCaretStops` turns it into legal positions — both of which are byte-layer work with no UI,
+  and both of which would otherwise have surfaced halfway through building the view.
+
+## What step 2 has become so far
+
+The raw view has a caret, a selection and copy-out; nothing is editable yet. Three things are
+worth recording for whoever picks up typing.
+
+**The ListBox is gone.** `RawTextSurface` draws every visible row itself and implements
+`ILogicalScrollable`. §6's warning that the caret is the larger half was right, but the reason is
+not the one it gives: the data structure was never the risk, and neither really was the drawing.
+The cost was in everything the caret *touches* - focus, scroll extents, the order two scroll
+requests arrive in - none of which is caret code.
+
+**Five defects came out of running it on a real multi-GB file, not out of the tests.** They are
+listed in [roadmap.md](roadmap.md) §Editing. The common thread is that each lived in the gap
+between a component being correct and the application wiring being correct, which is precisely
+where a test that constructs its own environment cannot look. The sharpest example: every caret
+input test called `Focus()` during setup, so the whole suite passed against an application in
+which no key did anything.
+
+**Two of the decisions in §6 were revisited in the light of use.** A reveal centres its row rather
+than scrolling minimally, because the target of a jump needs context on both sides; and a reveal
+places the caret as well as scrolling, because otherwise the next keystroke acts on wherever the
+caret was before a jump across a multi-GB file. Caret movement kept the minimal scroll - the two
+are separate operations rather than one with a flag, since centring on every arrow key would leap
+half a screen.
+
+Still to do: typing and deletion against the piece table, edit mode gated on `IsComplete`,
+undo/redo wired to the `RawEditJournal` that is built but unused, paste, and making the window's
+tunnelling Escape handler mode-aware.
+
+Edits are gated on a completed scan. The scan's append log is read lock-free precisely because
+nothing already written ever changes, and a shift log mutated on the UI thread while the scan
+consulted it would end that. The wait is largely notional in the motivating case: revealing a byte
+offset already waits for the scan to cover it.
+
 ## Related
 
 - [json-array-table-options.md](json-array-table-options.md) — the "export a subtree to file"

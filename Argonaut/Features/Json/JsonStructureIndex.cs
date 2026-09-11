@@ -149,6 +149,14 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
     // overflowSync; that's fine because the overflow path is pathological-whitespace-only cold.
     private readonly Dictionary<int, long> nameOffsetOverflow = new();
 
+    /// <summary>
+    /// Where a failed scan decided the trouble starts, worked out while the bytes were still in
+    /// hand. A plain offset rather than a reference to the mapping: <see cref="DescribeFailure"/>
+    /// runs after <see cref="Build"/> has returned, and keeping a second reference to a mapping
+    /// someone else owns is a lifetime question this does not need to have.
+    /// </summary>
+    private long? failureOffset;
+
     // Content hashes (see JsonIndexOptions.ComputeContentHashes / JsonContentHasher):
     // allocated only when the option is set - 8 bytes/token when on, zero when off - and
     // indexed identically to the token log (hashes[i] is token i's hash). A container's
@@ -236,14 +244,15 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
     /// <see cref="JsonException.LineNumber"/>/<see cref="JsonException.BytePositionInLine"/>
     /// are relative to the current <see cref="Utf8JsonReader"/> window, which is the whole
     /// file for the sub-2GiB common case - for larger files that resume across window
-    /// boundaries they may be relative to the window instead, hence "best-effort".
+    /// boundaries they may be relative to the window instead, hence "best-effort". The byte
+    /// offset is derived here instead, so it stays absolute at any file size.
     /// </summary>
     protected override IndexFailure DescribeFailure(Exception ex)
     {
         if (ex is not JsonException jsonEx)
             return base.DescribeFailure(ex);
 
-        long? byteOffset = this.ItemCount > 0 ? GetToken(this.ItemCount - 1).Offset + GetToken(this.ItemCount - 1).Length : 0;
+        long? byteOffset = this.failureOffset ?? 0;
         return new IndexFailure(
             jsonEx.Message,
             byteOffset,
@@ -251,6 +260,74 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
             jsonEx.BytePositionInLine.HasValue ? jsonEx.BytePositionInLine.Value + 1 : null,
             this.ItemCount);
     }
+
+    /// <summary>
+    /// Where the document stops making sense, given the last token that did.
+    ///
+    /// The end of the last good token is not it: between there and the content that actually
+    /// broke sits the punctuation joining the two - a comma before the next element, a colon
+    /// before a value - and the newline and indentation after it. Reporting the token's end
+    /// lands a reader at the tail of the previous line, one or two characters short of the thing
+    /// they were sent to look at. So skip the joining syntax and stop on the first byte that is
+    /// really content.
+    ///
+    /// Bounded rather than unbounded: a document padded with megabytes of whitespace should not
+    /// turn error reporting into a scan, and stopping early only costs the precision this is
+    /// trying to add.
+    /// </summary>
+    private static long StartOfTroubleAfter(MMapFile file, JsonTokenInfo lastGoodToken)
+    {
+        long offset = lastGoodToken.Offset + lastGoodToken.Length;
+        long limit = Math.Min(file.Length, offset + MaxTroubleSkip);
+        while (offset < limit)
+        {
+            byte b = file.GetSpan(offset, 1)[0];
+            bool joining = b is (byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n' or (byte)',' or (byte)':';
+            if (!joining)
+                break;
+
+            offset++;
+        }
+
+        return StartOfLineContaining(file, offset);
+    }
+
+    /// <summary>
+    /// Backs up to the first real character of the line <paramref name="offset"/> is on, so a
+    /// reader is sent to the start of the offending line rather than partway along it - the last
+    /// good token can be the opening brace of the very element that broke, which would otherwise
+    /// land the caret just inside it.
+    ///
+    /// Budgeted, and that budget is doing real work rather than guarding a pathological case:
+    /// minified JSON is a single line that can be the length of the whole file, and snapping to
+    /// its start would send a reader to byte zero of a multi-GB document instead of to the
+    /// problem. When no line break is found nearby, the precise offset is already the best answer
+    /// available and is kept.
+    /// </summary>
+    private static long StartOfLineContaining(MMapFile file, long offset)
+    {
+        long floor = Math.Max(0, offset - MaxTroubleSkip);
+        long lineStart = -1;
+        for (long scan = offset - 1; scan >= floor; scan--)
+        {
+            if (file.GetSpan(scan, 1)[0] == (byte)'\n')
+            {
+                lineStart = scan + 1;
+                break;
+            }
+        }
+
+        if (lineStart < 0)
+            return offset; // one very long line - keep the precise position
+
+        while (lineStart < offset && file.GetSpan(lineStart, 1)[0] is (byte)' ' or (byte)'\t' or (byte)'\r')
+            lineStart++;
+
+        return lineStart;
+    }
+
+    /// <summary>Bytes of joining syntax and whitespace worth stepping over to find the trouble.</summary>
+    private const int MaxTroubleSkip = 4096;
 
     /// <summary>One open container's hash accumulation state, kept in lockstep with the
     /// <c>openContainers</c> stack in <see cref="Build"/>. See <see cref="JsonContentHasher"/>
@@ -281,6 +358,24 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
     }
 
     private void Build(MMapFile file, IProgressReporter? progressReporter, CancellationToken cancellationToken)
+    {
+        try
+        {
+            BuildCore(file, progressReporter, cancellationToken);
+        }
+        catch (JsonException)
+        {
+            // Pin down where the trouble is now, while the bytes are still in scope. DescribeFailure
+            // runs later, from the base class's catch, by which point this method's file argument
+            // is gone - and reaching it from there would mean holding the mapping in a field.
+            if (this.ItemCount > 0)
+                this.failureOffset = StartOfTroubleAfter(file, GetToken(this.ItemCount - 1));
+
+            throw;
+        }
+    }
+
+    private void BuildCore(MMapFile file, IProgressReporter? progressReporter, CancellationToken cancellationToken)
     {
         long offset = 0;
         long length = file.Length;

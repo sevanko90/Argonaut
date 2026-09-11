@@ -199,6 +199,15 @@ chain changes.
 - `Length` always comes from `FileInfo`, never the accessor capacity (see CLAUDE.md).
 - `GetSpan` throws `ObjectDisposedException` if used after `Dispose` — a use-after-free is a
   catchable managed error, never a silent access violation.
+- **`IByteSource` (`Infrastructure/IByteSource.cs`) is the seam the raw editor reads through.**
+  `MMapFile` implements it, and so does `RawPieceTable` — so `RawSegmentIndex`, `RawRowReader`
+  and `RawRowDecoder` read "the document" without knowing whether it is a plain mapping or a
+  piece table over (mapping, scratch). Its one difference from `GetSpan` is the contract that
+  makes a piece table expressible at all: `GetContiguousSpan` may return **fewer** bytes than
+  asked for, truncated at an internal boundary, so a caller wanting a whole range either loops
+  or uses `CopyTo`. It also returns empty past the end rather than throwing, because a scan
+  walking to EOF is the normal case there rather than a bug. Over a single mapping every request
+  is still served whole, so nothing about the read-only path changed.
 - `IndexedFileSession<TIndex>` (`Infrastructure/IndexedFileSession.cs`) owns the trio
   {mapping, background index, CancellationTokenSource} and encodes teardown ordering:
   cancel → join indexing task → join dependent tasks → release mapping. It owns the `MMapFile`
@@ -245,6 +254,24 @@ chain changes.
   `CsvRowCollection`, `JsonArrayRowCollection`. It supplies the read-only `IList` +
   `INotifyCollectionChanged` surface
   Avalonia's `VirtualizingStackPanel` needs.
+- **The raw view is the exception, and deliberately so.** `RawTextSurface`
+  (`Features/Raw/RawTextSurface.cs`) draws every visible row itself rather than templating a
+  control per row, because a caret needs the text layout and a ListBox does not give it up: its
+  selection is whole rows, and moving a caret between rows would mean coordinating dozens of
+  recycled containers around one piece of state. It implements `ILogicalScrollable`, so the
+  hosting `ScrollViewer` still supplies the wheel, scrollbar, page keys and bring-into-view while
+  the surface supplies the viewport arithmetic. `RawRowCollection` survives as the row cache it
+  reads by index and whose growth notifications it follows, but nothing binds it as an
+  `ItemsSource`.
+- **The surface decides its visible range during layout, never during rendering.** Beyond being
+  the more honest place for it, headless has no renderer - so choosing the range inside `Render`
+  would make virtualization, the one guarantee most worth testing, untestable. `RawViewVirtualizationTests`
+  asserts on the surface's realized row range, which says *which* rows are held rather than merely
+  how many.
+- **Scroll extents are computed live, never cached.** A cached extent is stale by however long it
+  has been since the last refresh, and the host clamps any offset it is handed against it. During
+  a full-speed scan one 120ms growth tick is over a million rows, so a reveal deep in a large file
+  clamps short and stays there.
 - Subclasses implement only `GetCount()`, `GetItem(int)`, `DisposeCore()`. The base owns the
   `disposed` flag: `Count` returns 0 and the indexer returns null once disposed, and it
   short-circuits *before* calling the subclass — so a subclass cannot forget the guard.

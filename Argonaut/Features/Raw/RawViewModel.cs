@@ -27,6 +27,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
     private RawToolbarViewModel? toolbar;
     private string? highlightTerm;
     private int? selectedRowIndex;
+    private RawCaretController? caret;
     private int wrapWidth = RawWrapWidthPreference.Default;
 
     protected override IDocumentSession? Session => this.session;
@@ -60,6 +61,26 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
 
     public RawRowCollection Rows => this.rows ?? throw new InvalidOperationException("LoadAsync must complete before Rows is accessed.");
 
+    /// <summary>
+    /// The caret and selection. Null until <see cref="LoadAsync"/> has an index to move over.
+    /// Replaced by a wrap-width change (the row index it moves over is), but the caret's own
+    /// position survives it untouched: a caret is a byte offset, and re-wrapping moves rows
+    /// around without moving a single byte.
+    /// </summary>
+    public RawCaretController? Caret
+    {
+        get => this.caret;
+        private set => SetField(ref this.caret, value);
+    }
+
+    /// <summary>
+    /// Whether <see cref="Rows"/> is safe to read yet. A view is attached before
+    /// <see cref="LoadAsync"/> finishes, and it needs to subscribe to the row set's growth
+    /// notifications the moment there is one - so it needs to be able to ask rather than to
+    /// catch the exception the property throws.
+    /// </summary>
+    public bool HasRows => this.rows is not null;
+
     public override object? Toolbar => this.toolbar;
 
     /// <summary>The active find term, highlighted in every visible row via RawView's
@@ -80,6 +101,23 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
 
     /// <summary>Used by RawSearchNavigator to reveal a search match.</summary>
     public void SelectRow(int rowIndex) => SelectedRowIndex = rowIndex;
+
+    /// <summary>
+    /// Reveals a byte offset: centres its row in the viewport and puts the caret on it. Both
+    /// halves matter - scrolling somewhere without moving the caret leaves the next keystroke
+    /// acting on wherever the caret was last, which after a jump across a multi-GB file is
+    /// nowhere near what the user is now looking at.
+    /// </summary>
+    public void RevealOffset(long byteOffset, int rowIndex)
+    {
+        // Reveal BEFORE placing the caret, and not the other way round. Moving the caret scrolls
+        // it into view by the shortest distance, which parks the row against the bottom edge -
+        // and the centred reveal that follows then finds it already on screen and leaves it
+        // there. Ordering is load-bearing here, which is why the jump is tested end to end
+        // rather than by calling the surface's reveal directly.
+        SelectRow(rowIndex);
+        Caret?.PlaceAt(byteOffset);
+    }
 
     /// <summary>
     /// Resolves <paramref name="byteOffset"/> to a display row - waiting for indexing to reach
@@ -112,7 +150,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
             }
 
             if (row is int rowIndex)
-                SelectRow(rowIndex);
+                RevealOffset(byteOffset, rowIndex);
         }
         catch (ObjectDisposedException)
         {
@@ -137,6 +175,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
             IndexFailure = failure;
 
         this.rows = new RawRowCollection(session.Index, session.File);
+        Caret = new RawCaretController(session.Index, session.File);
 
         OnPropertyChanged(nameof(Rows));
         OnPropertyChanged(nameof(RowCount));
@@ -174,6 +213,22 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
         var old = this.rows;
         this.rows = new RawRowCollection(this.session.Index, this.session.File);
         old?.Dispose();
+
+        // A byte offset means the same thing at any wrap width, so the caret carries across the
+        // re-index; only the row index it consults is replaced.
+        long caretOffset = Caret?.Caret.Offset ?? 0;
+        var selection = Caret?.Selection ?? default;
+        Caret = new RawCaretController(this.session.Index, this.session.File);
+        if (selection.IsEmpty)
+        {
+            Caret.PlaceAt(caretOffset);
+        }
+        else
+        {
+            // Anchor first, then extend, so a selection made right-to-left keeps its direction.
+            Caret.PlaceAt(selection.Anchor);
+            Caret.ExtendTo(selection.Active);
+        }
 
         OnPropertyChanged(nameof(Rows));
         OnPropertyChanged(nameof(RowCount));

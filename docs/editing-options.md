@@ -285,6 +285,35 @@ sharpened, what this document anticipated:
   `RawCaretStops` turns it into legal positions — both of which are byte-layer work with no UI,
   and both of which would otherwise have surfaced halfway through building the view.
 
+## What step 2 has become so far
+
+The raw view has a caret, a selection and copy-out; nothing is editable yet. Three things are
+worth recording for whoever picks up typing.
+
+**The ListBox is gone.** `RawTextSurface` draws every visible row itself and implements
+`ILogicalScrollable`. §6's warning that the caret is the larger half was right, but the reason is
+not the one it gives: the data structure was never the risk, and neither really was the drawing.
+The cost was in everything the caret *touches* - focus, scroll extents, the order two scroll
+requests arrive in - none of which is caret code.
+
+**Five defects came out of running it on a real multi-GB file, not out of the tests.** They are
+listed in [roadmap.md](roadmap.md) §Editing. The common thread is that each lived in the gap
+between a component being correct and the application wiring being correct, which is precisely
+where a test that constructs its own environment cannot look. The sharpest example: every caret
+input test called `Focus()` during setup, so the whole suite passed against an application in
+which no key did anything.
+
+**Two of the decisions in §6 were revisited in the light of use.** A reveal centres its row rather
+than scrolling minimally, because the target of a jump needs context on both sides; and a reveal
+places the caret as well as scrolling, because otherwise the next keystroke acts on wherever the
+caret was before a jump across a multi-GB file. Caret movement kept the minimal scroll - the two
+are separate operations rather than one with a flag, since centring on every arrow key would leap
+half a screen.
+
+Still to do: typing and deletion against the piece table, edit mode gated on `IsComplete`,
+undo/redo wired to the `RawEditJournal` that is built but unused, paste, and making the window's
+tunnelling Escape handler mode-aware.
+
 Edits are gated on a completed scan. The scan's append log is read lock-free precisely because
 nothing already written ever changes, and a shift log mutated on the UI thread while the scan
 consulted it would end that. The wait is largely notional in the motivating case: revealing a byte

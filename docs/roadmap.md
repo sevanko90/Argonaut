@@ -11,8 +11,8 @@ Nothing here is scheduled. Items are grouped by area, and roughly ordered by val
 Options weighed, and the sequencing, are in [editing-options.md](editing-options.md). The decision
 recorded there is to build the byte layer once in the raw view rather than starting in the JSON
 tree, because the raw index is a pure function of the bytes and can be re-derived where the JSON
-index cannot. Step 1 of that sequencing is built; the rest is not, and nothing in the app is
-editable yet.
+index cannot. Step 1 is built and step 2 is part-built: the raw view now has a caret, a selection
+and copy-out. Nothing is editable yet - typing is the next piece of work.
 
 - ~~**Piece table over (original mapping, append-only scratch).**~~ **Built** (`Features/Raw/`:
   `RawPieceTable`, `RawEditedRowIndex`, `RawRowDecoder`, `RawCaretStops`, `RawEditJournal`,
@@ -21,9 +21,27 @@ editable yet.
   its threshold. No UI change — verified headlessly against a from-scratch index of the edited
   bytes. Measured: ~1.6-12.5ns per offset resolution (1 to 1024 pieces, no allocation), ~10us per
   keystroke including re-derivation.
-- **Editing UI in the raw view.** Caret, selection across rows, clipboard, undo/redo. Very likely
-  the larger half of the feature — an estimate that prices the data structure and not the caret
-  is wrong.
+- **Editing UI in the raw view.** *Part-built.* `RawTextSurface` replaced the `ListBox`: it draws
+  every visible row itself, implements `ILogicalScrollable`, and holds the caret
+  (`RawCaretController`, `RawCaret`), selection across rows, and copy. Still to do: **typing and
+  deletion** wired to the piece table, edit mode gated on `RawSegmentIndex.IsComplete`, undo/redo
+  wired to `RawEditJournal` (built, unused), paste, and making `MainWindow`'s tunnelling Escape
+  handler mode-aware. IME/dead-key composition is deferred past v1 — `Avalonia.Headless` posts
+  finished text rather than composition events, so it cannot be tested here.
+
+  The prediction that the caret would be the larger half held. Five defects came out of running
+  it on a real 4GB file rather than out of the test suite, and each is worth remembering because
+  the tests could not have found them:
+  - The surface never took keyboard focus. Every input test called `Focus()` in its own setup, so
+    all of them passed against an app where none of the keyboard worked.
+  - A cached scroll extent went stale between the row count growing and anything refreshing it,
+    so a reveal clamped ~1.6M rows short on a 4GB file. Extents are computed live now.
+  - Placing the caret before revealing let the caret's own minimal scroll park the row on the
+    bottom edge, after which the centred reveal found it "already visible". Two correct behaviours
+    cancelling out; ordering is load-bearing and now tested end to end.
+  - The caret was drawn over the full row height rather than the text's, so it overhung the glyphs.
+  - Find highlighting could not span a soft wrap (pre-existing, inherited from the attached-property
+    version it replaced).
 - **Save as a streaming rewrite.** Temp file beside the original, atomic rename, background
   re-index. One sequential pass; not where the difficulty lives.
 - **Scalar edits in the JSON tree.** An offset-keyed replacement overlay served at

@@ -108,6 +108,24 @@ public sealed class RawCaretController
 
     public void MoveToDocumentEnd(bool extend) => MoveTo(this.source.Length, extend, CaretAffinity.Upstream);
 
+    /// <summary>
+    /// Selects the word around <paramref name="offset"/> - what a double-click does. False when
+    /// <see cref="RawWordStops"/> refused because the run is longer than a word can be; the caret
+    /// and selection are left alone so the caller can say so instead.
+    /// </summary>
+    public bool SelectWordAt(long offset)
+    {
+        if (RawWordStops.WordAt(this.rows, this.source, offset) is not { } word)
+            return false;
+
+        var (start, end) = word;
+
+        // Upstream so a word ending exactly on a wrap boundary keeps the caret on the row the
+        // word is drawn on, rather than jumping to the start of the next one.
+        Apply(new RawCaret(end, CaretAffinity.Upstream), new RawSelection(start, end));
+        return true;
+    }
+
     /// <summary>Selects everything. Two offsets, so the size of the document is irrelevant.</summary>
     public void SelectAll()
         => Apply(new RawCaret(this.source.Length, CaretAffinity.Upstream), new RawSelection(0, this.source.Length));

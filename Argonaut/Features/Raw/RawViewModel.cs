@@ -110,8 +110,13 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
     /// </summary>
     public void RevealOffset(long byteOffset, int rowIndex)
     {
-        Caret?.PlaceAt(byteOffset);
+        // Reveal BEFORE placing the caret, and not the other way round. Moving the caret scrolls
+        // it into view by the shortest distance, which parks the row against the bottom edge -
+        // and the centred reveal that follows then finds it already on screen and leaves it
+        // there. Ordering is load-bearing here, which is why the jump is tested end to end
+        // rather than by calling the surface's reveal directly.
         SelectRow(rowIndex);
+        Caret?.PlaceAt(byteOffset);
     }
 
     /// <summary>

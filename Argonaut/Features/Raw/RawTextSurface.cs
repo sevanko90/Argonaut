@@ -705,6 +705,11 @@ public class RawTextSurface : Control, ILogicalScrollable
 
     private void ScrollCaretIntoView()
     {
+        // A reveal in flight owns the viewport. Without this the caret's minimal scroll would
+        // pre-empt a centred reveal that is still waiting for its row to be indexed.
+        if (this.pendingRevealRow is not null)
+            return;
+
         if (CaretRowIndex() is not int rowIndex)
             return;
 

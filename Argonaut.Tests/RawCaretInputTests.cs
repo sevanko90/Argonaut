@@ -268,4 +268,41 @@ public sealed class RawCaretInputTests : IDisposable
                 $"caret sits {above:F1}px from the top of its row and {below:F1}px from the bottom");
             Assert.True(above > 0, "caret starts at the very top of the row band");
         });
+    /// <summary>
+    /// The whole jump path, as the failure-location link drives it: resolve a byte offset, reveal
+    /// it, place the caret. Exercised end to end rather than by calling the surface's reveal
+    /// directly, because the ordering between placing the caret and revealing the row is itself
+    /// capable of defeating the centring - the caret's own scroll-into-view is a minimal scroll,
+    /// and if it runs first it parks the row at the bottom edge, after which the reveal finds it
+    /// "already visible" and leaves it there.
+    /// </summary>
+    [Fact]
+    public Task JumpingToAnOffsetCentresItsRow()
+    {
+        var content = new StringBuilder();
+        for (int i = 0; i < 400; i++)
+            content.Append($"line {i:D4} of the document\n");
+
+        return WithView(content.ToString(), async (window, vm, surface) =>
+        {
+            // A byte offset well past the first screenful.
+            long offset = vm.Mmap!.Length / 2;
+
+            await vm.JumpToByteOffsetAsync(offset);
+            await PumpAsync();
+            window.UpdateLayout();
+
+            int target = vm.SelectedRowIndex!.Value;
+            var range = surface.RealizedRowRange;
+
+            Assert.InRange(target, range.First, range.Last);
+
+            int above = target - range.First;
+            int below = range.Last - target;
+            Assert.True(above > 3,
+                $"target row {target} sits {above} rows from the top and {below} from the bottom - not centred");
+            Assert.True(Math.Abs(above - below) <= 2,
+                $"target row {target} sits {above} rows from the top and {below} from the bottom");
+        });
+    }
 }

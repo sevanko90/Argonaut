@@ -90,6 +90,37 @@ and [json-array-nesting-options.md](json-array-nesting-options.md).
   deferred for want of a document that exhibits the problem, and finding one is the first task and
   the one that decides whether it gets built at all.
 
+## Input sources
+
+Today a document is always a path: every load site builds an `MMapFile` from one, and the
+`IByteSource` seam it implements stops at the read API — `IndexedFileSession.File` is typed as the
+concrete `MMapFile`, and search, the NDJSON sub-document view and the array table all re-map the
+*path* to get an independent view of a byte range.
+
+- **Paste from clipboard, and load from URL.** Both are the same piece of work: widen the seam from
+  "a mapped file" to a byte-span emitter that does not care where the bytes came from. Rename/extend
+  `IByteSource` into an `IDataProvider` that owns the source's identity as well as its bytes
+  (length, a display name, whether it has a path on disk, and how to derive a sub-range provider for
+  [offset, length) without going back to a path), then implement it three ways: the existing mapped
+  file, a `ClipboardDataProvider` over an in-memory array, and an `HttpDataProvider` that streams the
+  response. The work is mostly in the call sites, not the interface: `IndexedFileSession<TIndex>` and
+  every view model that constructs `new MMapFile(path)` move to taking a provider, and the three
+  places that re-map by path (`FileSearchSession`'s chunk views, `JsonArrayTableSession`,
+  `JsonViewModel`'s sub-document load) must ask the provider for the sub-range instead.
+
+  Two decisions to make when it is picked up, not now:
+  - **Where large non-file payloads live.** A clipboard paste or a download above some threshold
+    should spill to a temp file and be served by the ordinary mapped-file provider, so the multi-GB
+    path stays exactly the one that is already tuned; only small payloads stay as a pinned array.
+    That keeps `Length` OS-reported for everything big (see CLAUDE.md) and costs one copy.
+  - **What the path-shaped features do without a path.** Recent files, save-as, reload and "open
+    containing folder" all assume one exists. The provider needs to say so, and the UI needs to
+    degrade rather than each site guarding on a null path.
+
+  The HTTP provider also wants the download itself on the background with progress reported through
+  `IProgressReporter` and cancellation off `IDocumentSession.TearingDown`, so a slow or wedged URL is
+  no different from a slow index.
+
 ## Memory and performance
 
 Detail: [perf-review-2026-07-17.md](perf-review-2026-07-17.md).

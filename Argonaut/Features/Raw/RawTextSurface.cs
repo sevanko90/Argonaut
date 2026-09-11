@@ -856,6 +856,13 @@ public class RawTextSurface : Control, ILogicalScrollable
         if (OffsetAt(e.GetPosition(this)) is not long offset)
             return;
 
+        if (e.ClickCount == 2)
+        {
+            SelectWordAt(offset);
+            e.Handled = true;
+            return;
+        }
+
         bool extend = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
         if (extend)
             this.caret.ExtendTo(offset);
@@ -866,6 +873,22 @@ public class RawTextSurface : Control, ILogicalScrollable
         this.dragging = true;
         e.Pointer.Capture(this);
         e.Handled = true;
+    }
+
+    /// <summary>
+    /// Double-click word selection. The caret is already sitting where the first click of the
+    /// pair put it, so a refusal needs no repair - it only needs saying, because a double-click
+    /// that silently does nothing reads as a dead surface.
+    /// </summary>
+    internal void SelectWordAt(long offset)
+    {
+        if (this.caret is null)
+            return;
+
+        this.stickyX = null;
+
+        if (!this.caret.SelectWordAt(offset))
+            ToastService.Show("Word too long for selection");
     }
 
     protected override void OnPointerMoved(PointerEventArgs e)

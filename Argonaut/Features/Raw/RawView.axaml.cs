@@ -39,6 +39,13 @@ public partial class RawView : UserControl
             RevealSelectedRow(vm);
 
         UpdatePanRange();
+
+        // The surface is the document, so it takes focus when the document is shown. Without
+        // this the caret is invisible (it is hidden while unfocused) and arrow keys never reach
+        // the editor - unhandled, they fall through to directional navigation and walk focus off
+        // to the find bar. Safe to do here: nothing else has been focused yet at load time, so
+        // this cannot steal focus from the find box, which is focused later and by the user.
+        Surface.Focus();
     }
 
     private void OnDataContextChanged(object? sender, EventArgs e)

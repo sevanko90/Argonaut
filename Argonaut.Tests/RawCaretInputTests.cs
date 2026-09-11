@@ -79,7 +79,6 @@ public sealed class RawCaretInputTests : IDisposable
                 window.UpdateLayout();
 
                 var surface = window.GetVisualDescendants().OfType<RawTextSurface>().First();
-                surface.Focus();
                 await PumpAsync();
 
                 await body(window, vm, surface);
@@ -305,4 +304,23 @@ public sealed class RawCaretInputTests : IDisposable
                 $"target row {target} sits {above} rows from the top and {below} from the bottom");
         });
     }
+    /// <summary>
+    /// The surface must take focus when it is shown. Without it the caret is invisible - it is
+    /// hidden while unfocused - and arrow keys never reach the editor at all: unhandled, they
+    /// fall through to Avalonia's directional navigation and walk focus off to the find bar.
+    ///
+    /// Every other test in this file used to call Focus() itself, which is exactly why none of
+    /// them noticed.
+    /// </summary>
+    [Fact]
+    public Task TheSurfaceTakesFocusWhenShown()
+        => WithView("abcdef\nghijkl\n", async (window, vm, surface) =>
+        {
+            Assert.True(surface.IsFocused, "the raw surface does not have focus when the view is shown");
+
+            // And so the arrows reach it without anything focusing it by hand.
+            Press(window, Key.Right);
+            await PumpAsync();
+            Assert.Equal(1, vm.Caret!.Caret.Offset);
+        });
 }

@@ -446,7 +446,7 @@ public class RawTextSurface : Control, ILogicalScrollable
                 double textTop = CentreInRow(layout, y);
 
                 DrawSelection(context, layout, row, rowIndex, textTop);
-                DrawHighlights(context, layout, row, textTop);
+                DrawHighlights(context, layout, rowIndex, textTop);
                 layout.Draw(context, new Point(TextOriginX - this.panOffset, textTop));
                 DrawCaret(context, layout, rowIndex, textTop);
             }
@@ -484,30 +484,87 @@ public class RawTextSurface : Control, ILogicalScrollable
     }
 
     /// <summary>
-    /// Paints a background behind every occurrence of the find term. Like the attached-property
-    /// version this replaces, matching is re-done against the row's displayed text rather than
-    /// mapped from the search's byte offsets - the row is decoded and substituted, so re-finding
-    /// the term in what is actually on screen is both simpler and lights up every visible
-    /// occurrence rather than only the one the search is sitting on.
+    /// Paints a background behind every occurrence of the find term. Matching is re-done against
+    /// the row's displayed text rather than mapped from the search's byte offsets: the row is
+    /// decoded and substituted, so re-finding the term in what is actually on screen lights up
+    /// every visible occurrence rather than only the one the search is sitting on.
     /// </summary>
-    private void DrawHighlights(DrawingContext context, TextLayout layout, RawVisibleRow row, double y)
+    private void DrawHighlights(DrawingContext context, TextLayout layout, int rowIndex, double y)
     {
         if (HighlightBrush is not { } brush)
             return;
 
-        var segments = SearchTextSplitter.Split(row.Text, this.viewModel?.HighlightTerm);
-        if (segments is null)
-            return;
+        var origin = new Vector(TextOriginX - this.panOffset, y);
+        foreach (var rect in HighlightRectsFor(rowIndex, layout))
+            context.FillRectangle(brush, rect.Translate(origin));
+    }
 
+    /// <summary>
+    /// The highlight rectangles for one row, in layout coordinates.
+    ///
+    /// A match that straddles a soft-wrap boundary is the case worth describing. The row is only
+    /// part of its line, so half the term sits here and half on the row below - and searching
+    /// either row's text alone finds neither half. So the term is looked for in a window that
+    /// reaches one term-length into the neighbouring rows, and each row paints whatever part of a
+    /// match falls inside it. Both halves light up, in their own rows.
+    ///
+    /// The reach only crosses soft-wrap boundaries, never a real line ending: a line break is a
+    /// place a match genuinely cannot span, and reaching across one would highlight text that
+    /// merely happens to adjoin.
+    /// </summary>
+    internal IReadOnlyList<Rect> HighlightRectsFor(int rowIndex, TextLayout layout)
+    {
+        string? term = this.viewModel?.HighlightTerm;
+        if (string.IsNullOrEmpty(term) || RowTextAt(rowIndex) is not { } text)
+            return Array.Empty<Rect>();
+
+        // One less than the term: any more cannot contribute to a match overlapping this row.
+        int reach = term.Length - 1;
+        string prefix = reach > 0 && ContinuesInto(rowIndex) ? Tail(RowTextAt(rowIndex - 1), reach) : string.Empty;
+        string suffix = reach > 0 && IsSoftWrapped(rowIndex) ? Head(RowTextAt(rowIndex + 1), reach) : string.Empty;
+
+        var segments = SearchTextSplitter.Split(prefix + text + suffix, term);
+        if (segments is null)
+            return Array.Empty<Rect>();
+
+        List<Rect>? rects = null;
         foreach (var segment in segments)
         {
             if (!segment.IsMatch)
                 continue;
 
-            foreach (var rect in layout.HitTestTextRange(segment.Start, segment.Length))
-                context.FillRectangle(brush, rect.Translate(new Vector(TextOriginX - this.panOffset, y)));
+            // Back into this row's own coordinates, then clipped to it - a match reaching in from
+            // a neighbour paints only the part that is actually here.
+            int start = Math.Max(segment.Start - prefix.Length, 0);
+            int end = Math.Min(segment.Start - prefix.Length + segment.Length, text.Length);
+            if (end <= start)
+                continue;
+
+            rects ??= new List<Rect>();
+            rects.AddRange(layout.HitTestTextRange(start, end - start));
         }
+
+        return (IReadOnlyList<Rect>?)rects ?? Array.Empty<Rect>();
     }
+
+    private string? RowTextAt(int rowIndex)
+        => this.viewModel is { } vm && vm.HasRows && (uint)rowIndex < (uint)vm.RowCount
+            ? (vm.Rows[rowIndex] as RawVisibleRow)?.Text
+            : null;
+
+    /// <summary>True when the row was force-broken, so its line continues on the next row.</summary>
+    private bool IsSoftWrapped(int rowIndex)
+        => this.viewModel is { } vm && vm.HasRows && (uint)rowIndex < (uint)vm.RowCount
+           && (vm.Rows[rowIndex] as RawVisibleRow)?.IsSoftWrapped == true;
+
+    /// <summary>True when the previous row was force-broken, so this row continues its line.</summary>
+    private bool ContinuesInto(int rowIndex) => rowIndex > 0 && IsSoftWrapped(rowIndex - 1);
+
+    private static string Tail(string? text, int count)
+        => string.IsNullOrEmpty(text) ? string.Empty : text[Math.Max(0, text.Length - count)..];
+
+    private static string Head(string? text, int count)
+        => string.IsNullOrEmpty(text) ? string.Empty : text[..Math.Min(count, text.Length)];
 
     private TextLayout LayoutFor(int rowIndex, RawVisibleRow row, Typeface typeface, double fontSize, IBrush foreground)
         => LayoutFor(rowIndex, typeface, fontSize, foreground, row.Text);

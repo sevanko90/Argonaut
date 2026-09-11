@@ -150,12 +150,12 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
     private readonly Dictionary<int, long> nameOffsetOverflow = new();
 
     /// <summary>
-    /// The bytes being scanned, kept so <see cref="DescribeFailure"/> can look just past the last
-    /// good token to find where the trouble actually starts. Set by <see cref="Build"/>; the
-    /// mapping outlives the index (the session joins the scan before releasing it), so holding
-    /// the reference for the scan's lifetime is safe.
+    /// Where a failed scan decided the trouble starts, worked out while the bytes were still in
+    /// hand. A plain offset rather than a reference to the mapping: <see cref="DescribeFailure"/>
+    /// runs after <see cref="Build"/> has returned, and keeping a second reference to a mapping
+    /// someone else owns is a lifetime question this does not need to have.
     /// </summary>
-    private MMapFile? scannedFile;
+    private long? failureOffset;
 
     // Content hashes (see JsonIndexOptions.ComputeContentHashes / JsonContentHasher):
     // allocated only when the option is set - 8 bytes/token when on, zero when off - and
@@ -252,7 +252,7 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
         if (ex is not JsonException jsonEx)
             return base.DescribeFailure(ex);
 
-        long? byteOffset = this.ItemCount > 0 ? StartOfTroubleAfter(GetToken(this.ItemCount - 1)) : 0;
+        long? byteOffset = this.failureOffset ?? 0;
         return new IndexFailure(
             jsonEx.Message,
             byteOffset,
@@ -275,12 +275,9 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
     /// turn error reporting into a scan, and stopping early only costs the precision this is
     /// trying to add.
     /// </summary>
-    private long StartOfTroubleAfter(JsonTokenInfo lastGoodToken)
+    private static long StartOfTroubleAfter(MMapFile file, JsonTokenInfo lastGoodToken)
     {
         long offset = lastGoodToken.Offset + lastGoodToken.Length;
-        if (this.scannedFile is not { } file)
-            return offset;
-
         long limit = Math.Min(file.Length, offset + MaxTroubleSkip);
         while (offset < limit)
         {
@@ -362,8 +359,24 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
 
     private void Build(MMapFile file, IProgressReporter? progressReporter, CancellationToken cancellationToken)
     {
-        this.scannedFile = file;
+        try
+        {
+            BuildCore(file, progressReporter, cancellationToken);
+        }
+        catch (JsonException)
+        {
+            // Pin down where the trouble is now, while the bytes are still in scope. DescribeFailure
+            // runs later, from the base class's catch, by which point this method's file argument
+            // is gone - and reaching it from there would mean holding the mapping in a field.
+            if (this.ItemCount > 0)
+                this.failureOffset = StartOfTroubleAfter(file, GetToken(this.ItemCount - 1));
 
+            throw;
+        }
+    }
+
+    private void BuildCore(MMapFile file, IProgressReporter? progressReporter, CancellationToken cancellationToken)
+    {
         long offset = 0;
         long length = file.Length;
 

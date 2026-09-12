@@ -280,7 +280,8 @@ sharpened, what this document anticipated:
 
 - **§6's warning about the caret understates one part of it.** The caret's hardest dependency is
   not rendering but decoding: `RawRowReader` is lossy in four directions at once (multi-byte
-  collapse, one U+FFFD per invalid run, Control Picture substitution, trailing newline stripped),
+  collapse, one U+FFFD per invalid run, glyph substitution for controls and for the Unicode
+  separators that are not `\n`, trailing newline stripped),
   so a character index says nothing about a byte offset. `RawRowDecoder` produces the map, and
   `RawCaretStops` turns it into legal positions — both of which are byte-layer work with no UI,
   and both of which would otherwise have surfaced halfway through building the view.
@@ -313,6 +314,53 @@ half a screen.
 Still to do: typing and deletion against the piece table, edit mode gated on `IsComplete`,
 undo/redo wired to the `RawEditJournal` that is built but unused, paste, and making the window's
 tunnelling Escape handler mode-aware.
+
+**Done: a caret position readout.** The caret knew three things the user could not see —
+the byte offset into the file, the row and column, and the size of the selection — and on a
+multi-GB file the byte offset is the one that matters, because it is what every other tool
+(`dd`, a hex editor, a stack trace from a parser) speaks. Both numbers have to be shown rather
+than one: a column is a character count over a row's decoded text, a byte offset is a byte count
+over the document, and `RawRowDecoder` exists precisely because neither derives from the other.
+Selection size should report bytes for the same reason the copy toast does, with the character
+count alongside it.
+
+It went in as a status gutter along the bottom of the raw view rather than in the app's status
+bar, which is already tight and has no per-view injectable region: a view cannot contribute fields
+to it without every view knowing about every other view's fields. `RawCaretReadout` answers the
+questions and `RawViewModel` formats them; the gutter borrows the JSON diff view's context-bar
+chrome so it reads as the view talking about its selection rather than as part of the document.
+
+The character is named from the file's bytes, not from the row's display text — naming the
+substitution glyph instead of the character it stands for would defeat the point of showing it at
+all. The name comes from `UnicodeNames`, a table generated from the Unicode Character Database,
+because .NET carries categories but no names.
+
+Measured (Apple M5, Release, `RawCaretReadoutBenchmarks`): 448ns and 144B per readout on an
+ordinary line, where the allocation is the two strings the gutter displays; 25us at the 1MB column
+cap over ASCII and 1.0ms when every rune must be decoded, neither allocating anything further;
+21ns and 56B for a name lookup. Through the view model, with all three gutter strings formatted, a
+caret move costs ~760B. The name table is 1.6MB resident after its one-time inflate, and a session
+that never shows a caret never pays it.
+
+Two numbers are bounded rather than exact, and say so in the gutter. A column is a character count
+from the start of the line, and a line here can be a multi-GB minified document, so the scan back
+to the line start is capped (`ColumnScanBytes`, 1MB); a selection's character count is capped the
+same way (`SelectionScanBytes`), since select-all is one keystroke. A character offset into the
+file was dropped outright: it cannot be answered without decoding from byte 0, and the scan that
+finds rows never decodes at all, so the number would cost either a full decode per caret move or a
+permanently slower index.
+
+The line number is deliberately *not* among the bounded ones. The first cut found the line start by
+walking rows back from the caret and gave up at the cap, which lost the line number along with the
+column: the gutter showed a column up to 65,537, then "Col —", then nothing at all. Both halves of
+that were wrong. `RawSegmentIndex.GetRowInfo` already computes the line number while walking from a
+row's anchor and discards it on continuation rows - which is right for a gutter that should leave a
+wrapped line unnumbered, and useless to a caret readout - so `IRawRowIndex.LineContaining` reports
+it instead, storing nothing and costing one anchor walk. The column then became a byte question
+rather than a row question: scan back for a newline with a vectorized `LastIndexOf`, and count
+characters with an ASCII fast path over the result. That is what let the cap move from 64KB to 1MB
+while getting cheaper - 0.028ms at the cap over ASCII, against a row walk that was giving up
+sixteen times sooner.
 
 Edits are gated on a completed scan. The scan's append log is read lock-free precisely because
 nothing already written ever changes, and a shift log mutated on the UI thread while the scan

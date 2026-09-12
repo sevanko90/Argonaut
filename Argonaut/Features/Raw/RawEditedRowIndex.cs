@@ -169,6 +169,38 @@ public sealed class RawEditedRowIndex : IRawRowIndex
         return originalRow is null ? null : originalRow.Value + this.rowDelta;
     }
 
+    /// <summary>
+    /// See <see cref="IRawRowIndex.LineContaining"/>. Three cases, the same three
+    /// <see cref="GetRowInfo"/> has: rows the edit never reached come straight from the original
+    /// index; rows inside the re-derived span carry their own line numbers, so the answer is the
+    /// nearest line start at or before the row, falling back to the row before the span; and rows
+    /// past it are the original's answer shifted by the line delta the edit introduced.
+    /// </summary>
+    public int? LineContaining(int rowIndex)
+    {
+        if ((uint)rowIndex >= (uint)RowCount)
+            return null;
+
+        if (!this.hasEdits || rowIndex < DirtyStartRow)
+            return this.original.LineContaining(rowIndex);
+
+        int withinDirty = rowIndex - DirtyStartRow;
+        if (withinDirty < this.derived.Count)
+        {
+            for (int row = withinDirty; row >= 0; row--)
+            {
+                if (this.derived[row].LineNumber is int line)
+                    return line;
+            }
+
+            return DirtyStartRow > 0 ? this.original.LineContaining(DirtyStartRow - 1) : 1;
+        }
+
+        return this.original.LineContaining(rowIndex - this.rowDelta) is int original
+            ? original + this.lineDelta
+            : null;
+    }
+
     /// <summary>Where <paramref name="currentOffset"/> sits in the original bytes. Only called
     /// for offsets outside the dirty span, where the two spaces differ by a constant.</summary>
     private long OriginalOffsetOf(long currentOffset)

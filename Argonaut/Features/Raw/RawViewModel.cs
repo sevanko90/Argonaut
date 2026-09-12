@@ -28,6 +28,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
     private string? highlightTerm;
     private int? selectedRowIndex;
     private RawCaretController? caret;
+    private RawCaretReadout? caretReadout;
     private int wrapWidth = RawWrapWidthPreference.Default;
 
     protected override IDocumentSession? Session => this.session;
@@ -70,7 +71,87 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
     public RawCaretController? Caret
     {
         get => this.caret;
-        private set => SetField(ref this.caret, value);
+        private set
+        {
+            if (this.caret is not null)
+                this.caret.Moved -= OnCaretMoved;
+
+            SetField(ref this.caret, value);
+
+            if (this.caret is not null)
+                this.caret.Moved += OnCaretMoved;
+
+            RefreshCaretReadout();
+        }
+    }
+
+    /// <summary>
+    /// What the status gutter shows: the character under the caret, where it is, and how much is
+    /// selected. Null before there is a document, and while the caret sits on a byte the scan has
+    /// not reached yet.
+    /// </summary>
+    public RawCaretReadout? CaretReadout
+    {
+        get => this.caretReadout;
+        private set => SetField(ref this.caretReadout, value);
+    }
+
+    /// <summary>The character under the caret, e.g. "U+2028 LINE SEPARATOR".</summary>
+    public string CaretCharacterText => CaretReadout?.Character ?? string.Empty;
+
+    /// <summary>Byte offset and line/column, the latter omitted when it could not be answered
+    /// cheaply - see <see cref="RawCaretReadout.ColumnScanBytes"/>.</summary>
+    public string CaretPositionText
+    {
+        get
+        {
+            if (CaretReadout is not { } readout)
+                return string.Empty;
+
+            string position = $"Byte {readout.ByteOffset:N0}";
+            if (readout.LineNumber is int line)
+            {
+                position += readout.Column is int column
+                    ? $"    Ln {line:N0}, Col {column:N0}"
+                    : $"    Ln {line:N0}, Col —";
+            }
+
+            return position;
+        }
+    }
+
+    /// <summary>Selection size, empty when nothing is selected. Bytes always; characters when the
+    /// selection is small enough to decode (<see cref="RawCaretReadout.SelectionScanBytes"/>).</summary>
+    public string CaretSelectionText
+    {
+        get
+        {
+            if (CaretReadout is not { SelectionBytes: > 0 } readout)
+                return string.Empty;
+
+            string bytes = $"{readout.SelectionBytes:N0} {(readout.SelectionBytes == 1 ? "byte" : "bytes")}";
+            return readout.SelectionCharacters is long characters
+                ? $"Selected {bytes} ({characters:N0} {(characters == 1 ? "char" : "chars")})"
+                : $"Selected {bytes}";
+        }
+    }
+
+    private void OnCaretMoved(object? sender, EventArgs e) => RefreshCaretReadout();
+
+    /// <summary>
+    /// Re-reads the document around the caret. Called on every caret move, which is why
+    /// <see cref="RawCaretReadout.Describe"/> is bounded rather than exact.
+    /// </summary>
+    private void RefreshCaretReadout()
+    {
+        CaretReadout = this.caret is null || this.session is null
+            ? null
+            : RawCaretReadout.Describe(
+                this.session.Index, this.session.File, this.caret.Caret, this.caret.Selection);
+
+        OnPropertyChanged(nameof(CaretCharacterText));
+        OnPropertyChanged(nameof(CaretPositionText));
+        OnPropertyChanged(nameof(CaretSelectionText));
     }
 
     /// <summary>

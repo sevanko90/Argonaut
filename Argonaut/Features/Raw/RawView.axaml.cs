@@ -28,6 +28,7 @@ public partial class RawView : UserControl
         DetachedFromVisualTree += OnDetachedFromVisualTree;
         Surface.SizeChanged += OnSurfaceSizeChanged;
         Surface.PanRequested += OnPanRequested;
+        Surface.WidestRowWidthChanged += OnWidestRowWidthChanged;
         PanScrollBar.ValueChanged += OnPanValueChanged;
         fontResourceSubscription = this.GetResourceObservable("AppContentFontFamily")
             .Subscribe(new AnonymousObserver<object?>(OnContentFontChanged));
@@ -107,6 +108,7 @@ public partial class RawView : UserControl
     {
         Surface.SizeChanged -= OnSurfaceSizeChanged;
         Surface.PanRequested -= OnPanRequested;
+        Surface.WidestRowWidthChanged -= OnWidestRowWidthChanged;
         PanScrollBar.ValueChanged -= OnPanValueChanged;
         DataContextChanged -= OnDataContextChanged;
         fontResourceSubscription.Dispose();
@@ -124,6 +126,12 @@ public partial class RawView : UserControl
     }
 
     private void OnSurfaceSizeChanged(object? sender, SizeChangedEventArgs e) => UpdatePanRange();
+
+    /// <summary>
+    /// A row wider than anything measured so far came into view. Raised from the surface's layout
+    /// pass, so the pan range is only ever resized by rows that have actually been laid out.
+    /// </summary>
+    private void OnWidestRowWidthChanged(object? sender, EventArgs e) => UpdatePanRange();
 
     private void OnContentFontChanged(object? value)
     {
@@ -148,16 +156,22 @@ public partial class RawView : UserControl
     }
 
     /// <summary>
-    /// Sizes the pan scrollbar from a deterministic estimate: wrap-width bytes x one measured
-    /// character advance. Row text never has more chars than bytes (see RawRowReader), and "W" is
-    /// a wide advance in either content font, so this is an upper bound - at the smaller wrap
-    /// widths it collapses to zero and the bar hides entirely. An estimate is deliberate: a range
-    /// measured from the rows actually on screen would jump as the user scrolled.
+    /// Sizes the pan scrollbar from the widest row the surface has actually laid out
+    /// (<see cref="RawTextSurface.WidestRowWidth"/>), which is a high-water mark and so never
+    /// shrinks under the user mid-scroll.
+    ///
+    /// It used to be an estimate - wrap-width bytes x the advance of "W" - and that was wrong by
+    /// a large factor in the common case, which is what this replaced. Two overestimates
+    /// compounded: a row's text has far fewer characters than bytes wherever the content is not
+    /// ASCII (multi-byte characters collapse, and an invalid run collapses to one U+FFFD), and
+    /// "W" is the widest glyph in a proportional font while real text averages closer to half of
+    /// it. At wrap 160 the bar therefore claimed roughly twice the width the text ever occupied,
+    /// and panning right ran into empty space.
     /// </summary>
     private void UpdatePanRange()
     {
         double viewWidth = Surface.Bounds.Width;
-        if (DataContext is not RawViewModel vm || viewWidth <= 0)
+        if (DataContext is not RawViewModel || viewWidth <= 0)
         {
             HidePanBar();
             return;
@@ -168,7 +182,7 @@ public partial class RawView : UserControl
             0,
             viewWidth - (2 * RawTextSurface.ContentPaddingX) - RawTextSurface.LineNumberColumnWidth - RawTextSurface.WrapGutterWidth);
 
-        double maximum = Math.Max(0, vm.WrapWidth * charWidth - textViewport);
+        double maximum = Math.Max(0, Surface.WidestRowWidth - textViewport);
         if (maximum <= 0 || textViewport <= 0)
         {
             HidePanBar();

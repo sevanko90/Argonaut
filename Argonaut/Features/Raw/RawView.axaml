@@ -10,7 +10,7 @@
             CornerRadius="8"
             Background="{DynamicResource AppWindowBackgroundBrush}"
             ClipToBounds="True">
-        <Grid RowDefinitions="*,Auto">
+        <Grid RowDefinitions="*,Auto,Auto">
             <!-- The surface draws every visible row itself and implements ILogicalScrollable, so
                  the ScrollViewer supplies the wheel, the scrollbar and page keys while the
                  surface supplies only the viewport arithmetic. Horizontal scrolling stays
@@ -37,6 +37,49 @@
                        AllowAutoHide="False"
                        IsVisible="False"
                        Minimum="0" />
+
+            <!-- Status gutter: the character under the caret on the left, where the caret is on
+                 the right, split by a rule. Same chrome as the JSON diff view's context bar - a
+                 panel-coloured strip under a top border - so a reader recognises it as the view
+                 talking about its selection rather than as part of the document. -->
+            <Border Grid.Row="2"
+                    BorderBrush="{DynamicResource AppBorderBrush}"
+                    BorderThickness="0,1,0,0"
+                    Background="{DynamicResource AppPanelBackgroundBrush}"
+                    Padding="8,4">
+                <Grid ColumnDefinitions="*,Auto,Auto">
+                    <TextBlock Grid.Column="0"
+                               x:Name="CaretCharacterText"
+                               Text="{Binding CaretCharacterText}"
+                               FontSize="11"
+                               FontFamily="{DynamicResource AppContentFontFamily}"
+                               TextWrapping="NoWrap"
+                               TextTrimming="CharacterEllipsis"
+                               VerticalAlignment="Center" />
+
+                    <Border Grid.Column="1"
+                            Width="1"
+                            Margin="12,1"
+                            Background="{DynamicResource AppBorderBrush}" />
+
+                    <StackPanel Grid.Column="2"
+                                Orientation="Horizontal"
+                                Spacing="16"
+                                VerticalAlignment="Center">
+                        <TextBlock x:Name="CaretSelectionText"
+                                   Text="{Binding CaretSelectionText}"
+                                   FontSize="11"
+                                   FontFamily="{DynamicResource AppContentFontFamily}"
+                                   Foreground="{DynamicResource AppMutedTextBrush}"
+                                   VerticalAlignment="Center" />
+                        <TextBlock x:Name="CaretPositionText"
+                                   Text="{Binding CaretPositionText}"
+                                   FontSize="11"
+                                   FontFamily="{DynamicResource AppContentFontFamily}"
+                                   VerticalAlignment="Center" />
+                    </StackPanel>
+                </Grid>
+            </Border>
         </Grid>
     </Border>
 </UserControl>

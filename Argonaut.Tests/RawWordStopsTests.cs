@@ -112,6 +112,19 @@ public class RawWordStopsTests
         Assert.Equal((1, 2), RawWordStops.WordAt(index, source, 1));
     }
 
+    /// <summary>
+    /// The separator substitutions are opaque for the same reason a Control Picture is: the glyph
+    /// stands for bytes the row does not otherwise show, so it selects alone rather than joining
+    /// the text either side of it. LS here is three bytes, at offsets 1 to 4.
+    /// </summary>
+    [Fact]
+    public void UnicodeSeparator_SelectsOnlyItself()
+    {
+        var (index, source) = Indexed("a\u2028b");
+
+        Assert.Equal((1, 4), RawWordStops.WordAt(index, source, 1));
+    }
+
     [Fact]
     public void RunLongerThanTheCap_IsRefused()
     {

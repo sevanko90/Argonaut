@@ -103,6 +103,12 @@ public class RawTextSurface : Control, ILogicalScrollable
     private double panOffset;
     private EventHandler? scrollInvalidated;
 
+    /// <summary>Widest row laid out since the last <see cref="DropLayouts"/>, in pixels.</summary>
+    private double widestRowWidth;
+
+    /// <summary>The realized range <see cref="widestRowWidth"/> was last measured over.</summary>
+    private (int First, int Last) measuredRange = (0, -1);
+
     static RawTextSurface()
     {
         FocusableProperty.OverrideDefaultValue<RawTextSurface>(true);
@@ -228,6 +234,27 @@ public class RawTextSurface : Control, ILogicalScrollable
 
     /// <summary>First and last row currently realized, for tests. Empty is (0, -1).</summary>
     internal (int First, int Last) RealizedRowRange { get; private set; } = (0, -1);
+
+    /// <summary>
+    /// Text layouts currently held, for tests. The pair of caches here is the only thing in the
+    /// surface that could grow with distance travelled rather than with what is on screen, so a
+    /// soak test asserts on this directly rather than inferring it from the heap.
+    /// </summary>
+    internal int CachedLayoutCount => this.layouts.Count;
+
+    /// <summary>
+    /// How wide the text column has actually needed to be, in pixels: the widest row measured
+    /// since the last time the layouts were dropped. This is what the pan range is sized from.
+    ///
+    /// It is a high-water mark rather than the widest row on screen, because a range measured
+    /// from the current viewport would shrink and grow as the user scrolled, moving the thumb
+    /// under their hand. It resets whenever the layouts do - a new document, a new wrap width, a
+    /// new font - which is exactly when the old measurement stops meaning anything.
+    /// </summary>
+    public double WidestRowWidth => this.widestRowWidth;
+
+    /// <summary>Raised when <see cref="WidestRowWidth"/> grows, so the host can resize the pan range.</summary>
+    public event EventHandler? WidestRowWidthChanged;
 
     private int RowCount => this.viewModel?.RowCount ?? 0;
 
@@ -355,6 +382,16 @@ public class RawTextSurface : Control, ILogicalScrollable
     {
         this.layouts.Clear();
         this.decoded.Clear();
+
+        // The rows themselves are about to be laid out differently, so what was measured over
+        // them means nothing - including which range it was measured over.
+        this.measuredRange = (0, -1);
+
+        if (this.widestRowWidth == 0)
+            return;
+
+        this.widestRowWidth = 0;
+        NotifyWidestRowWidthChanged();
     }
 
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
@@ -377,7 +414,11 @@ public class RawTextSurface : Control, ILogicalScrollable
     protected override Size ArrangeOverride(Size finalSize)
     {
         UpdateRealizedRows(finalSize.Height);
+
+        // After the reveal, not before: a reveal scrolls, which realizes a different set of rows,
+        // and measuring the set it replaced would report a width for rows nobody is looking at.
         ApplyPendingReveal();
+        MeasureRealizedRows();
         return finalSize;
     }
 
@@ -415,6 +456,57 @@ public class RawTextSurface : Control, ILogicalScrollable
         PruneLayouts(firstRow, lastRow);
     }
 
+    /// <summary>
+    /// Lays out every realized row and keeps the widest.
+    ///
+    /// Called from both the layout pass and <see cref="Render"/>, and does nothing unless the
+    /// realized range has moved since it last ran. Drawing is where a row's layout is needed
+    /// anyway, so measuring there is free - but headless has no renderer, and a width only ever
+    /// measured while drawing could not be tested, which is what the layout-pass call is for.
+    /// Scroll invalidations are deliberately NOT a call site: a scan in flight raises one per
+    /// growth notification, many per second, and after a wrap change (which drops every layout)
+    /// each would lay out a fresh viewport of text on the input path.
+    /// </summary>
+    private void MeasureRealizedRows()
+    {
+        if (this.realized.Count == 0 || this.measuredRange == RealizedRowRange)
+            return;
+
+        this.measuredRange = RealizedRowRange;
+
+        var typeface = new Typeface(FontFamily);
+        double fontSize = FontSize;
+        var foreground = Foreground ?? Brushes.Black;
+
+        double widest = this.widestRowWidth;
+        foreach (var (rowIndex, row) in this.realized)
+        {
+            var layout = LayoutFor(rowIndex, row, typeface, fontSize, foreground);
+            widest = Math.Max(widest, layout.WidthIncludingTrailingWhitespace);
+        }
+
+        if (widest <= this.widestRowWidth)
+            return;
+
+        this.widestRowWidth = widest;
+        NotifyWidestRowWidthChanged();
+    }
+
+    /// <summary>
+    /// Raises <see cref="WidestRowWidthChanged"/> a dispatcher turn later. One of the call sites
+    /// is the render pass, and the host reacts by resizing the pan scrollbar - a visual change,
+    /// which Avalonia refuses mid-render ("Visual was invalidated during the render pass"). The
+    /// deferral is the same re-entrancy tool the selection setters use (see CLAUDE.md), for the
+    /// same reason: decide synchronously, act after the pass that asked has unwound.
+    /// </summary>
+    private void NotifyWidestRowWidthChanged()
+    {
+        if (WidestRowWidthChanged is null)
+            return;
+
+        UiDeferral.AfterCurrentInput(() => WidestRowWidthChanged?.Invoke(this, EventArgs.Empty));
+    }
+
     public override void Render(DrawingContext context)
     {
         base.Render(context);
@@ -424,6 +516,8 @@ public class RawTextSurface : Control, ILogicalScrollable
 
         if (this.viewModel is null || this.realized.Count == 0)
             return;
+
+        MeasureRealizedRows();
 
         var typeface = new Typeface(FontFamily);
         double fontSize = FontSize;

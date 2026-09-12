@@ -155,10 +155,12 @@ same origin rather than re-materialising it.
   byte range and can never grow, so the in-flight source cannot be an `MMapFile` - it is either
   in-memory chunks or a pre-sized mapping whose written extent is tracked separately (and whose
   unwritten tail must never be reported as data - see CLAUDE.md).
-- **Still path-shaped.** Recent files, save, reload and "open containing folder" all consult
-  `IByteOrigin.Path` and skip when it is null; the schema catalog takes a null document path and
-  offers the user folder's schemas without a sidecar or a remembered binding. What is left is
-  driving the toolbar/menu enabled state off `Path is not null` in one place rather than per site.
+- **Path-keyed features already degrade.** The three that exist - recent files, the
+  `<file>.schema.json` sidecar and the remembered schema binding - consult `IByteOrigin.Path` and
+  skip when it is null; `JsonSchemaCatalog.GatherForDocument` takes a null path and offers the
+  user folder's schemas with no sidecar and nothing preselected. There is no save, reload or
+  "open containing folder" in the app yet, so there is no enabled state to drive; whenever one of
+  those arrives it reads `Path` and disables itself when there is none.
 - **One accepted edge case.** Disposing a temp-file-backed origin while a search is still scanning
   it deletes the file under that scan. `SearchSession.Scan` already catches every exception into
   `OpenFailure` ("an unreadable/vanished target is an outcome rather than a fault"), so it

@@ -33,8 +33,9 @@ public sealed class MemoryByteOrigin : IByteOrigin
 
     public string DisplayName { get; }
 
-    /// <summary>Always null: these bytes are not a file, and pretending otherwise is what makes
-    /// save, reload and "open containing folder" act on something that isn't there.</summary>
+    /// <summary>Always null: these bytes are not a file, so anything keyed by path has to skip
+    /// this document rather than key itself by a name that is not one. Today that is recent
+    /// files, the <c>&lt;file&gt;.schema.json</c> sidecar and the remembered schema binding.</summary>
     public string? Path => null;
 
     public long AvailableLength => this.bytes.Length;

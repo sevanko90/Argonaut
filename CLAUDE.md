@@ -104,10 +104,10 @@ Other rules that fall out of the split:
   document source. A mapping is a fixed snapshot of a byte range and can never grow, so an
   in-flight streamed source is never an `MMapFile`.
 - **`Path` is null for a document that is not a file**, and that is the single thing the
-  path-shaped features consult - recent files, the `<file>.schema.json` sidecar, the remembered
-  schema binding, save, reveal in folder. Degrade off `Path is not null`; never key anything by
-  `DisplayName` (two pastes would collide) and never write a path-keyed preference for a document
-  that has no path.
+  path-keyed features consult - today recent files, the `<file>.schema.json` sidecar, and the
+  remembered schema binding. Degrade off `Path is not null`; never key anything by `DisplayName`
+  (two pastes would collide) and never write a path-keyed preference for a document that has no
+  path. Anything added later that touches the file system belongs on this list.
 - **`FilePath` on a view model is display text** (`Path ?? DisplayName`). Anything that touches the
   file system reads `Origin.Path` instead.
 

@@ -34,10 +34,10 @@ public interface IByteOrigin : IDisposable
 
     /// <summary>
     /// The file on disk these bytes are, or null when there is none - a paste, or a download
-    /// served from memory. This is the one thing the path-shaped features consult (recent files,
-    /// the <c>&lt;file&gt;.schema.json</c> sidecar, the remembered schema binding, save, reveal
-    /// in folder), and the toolbar drives their enabled state off it once rather than each site
-    /// null-checking.
+    /// served from memory. This is the one thing the path-keyed features consult: recent files,
+    /// the <c>&lt;file&gt;.schema.json</c> sidecar, and the remembered schema binding. Each of
+    /// those skips a document with no path rather than substituting <see cref="DisplayName"/> -
+    /// two pastes would collide in a path-keyed store.
     /// </summary>
     string? Path { get; }
 
@@ -66,6 +66,7 @@ public interface IByteOrigin : IDisposable
     /// so opening a second source for a view swap costs a mapping, not a download.
     /// </summary>
     IByteSource Open();
+
     /// <summary>
     /// A source over just [<paramref name="offset"/>, <paramref name="offset"/> +
     /// <paramref name="length"/>), zero-based, independent of any other source over this origin -

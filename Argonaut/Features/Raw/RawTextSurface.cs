@@ -236,6 +236,13 @@ public class RawTextSurface : Control, ILogicalScrollable
     internal (int First, int Last) RealizedRowRange { get; private set; } = (0, -1);
 
     /// <summary>
+    /// Text layouts currently held, for tests. The pair of caches here is the only thing in the
+    /// surface that could grow with distance travelled rather than with what is on screen, so a
+    /// soak test asserts on this directly rather than inferring it from the heap.
+    /// </summary>
+    internal int CachedLayoutCount => this.layouts.Count;
+
+    /// <summary>
     /// How wide the text column has actually needed to be, in pixels: the widest row measured
     /// since the last time the layouts were dropped. This is what the pan range is sized from.
     ///

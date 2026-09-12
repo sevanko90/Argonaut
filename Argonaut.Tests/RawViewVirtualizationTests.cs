@@ -400,4 +400,113 @@ public sealed class RawViewVirtualizationTests : IDisposable
             }
         }, CancellationToken.None);
     }
+
+    /// <summary>
+    /// The question a user actually has: does moving around a huge document for a long time cost
+    /// memory that is never given back? Everything the raw view holds while scrolling is supposed
+    /// to be either bounded or transient - the row collection's LRU, the surface's layout and
+    /// decode caches, and the strings the status gutter formats per caret move - so travelling a
+    /// long way must leave the heap where it started.
+    ///
+    /// Phrased as identical repeated phases rather than "warm up, then measure once". A session
+    /// pays a one-off cost on first use that has nothing to do with distance travelled - the
+    /// Unicode name table inflates, pools fill, the text stack builds its caches - and a single
+    /// before/after around that reads as a leak. A leak climbs phase after phase; this must not.
+    ///
+    /// The two assertions do different jobs, and the cache one is the sharper of them. Cache sizes
+    /// are deterministic: they are the thing that would grow with distance travelled, and they are
+    /// checked exactly. The heap figure wanders by a few MB between runs whatever the code does,
+    /// so its threshold is set to catch the failure that matters - retaining something per row
+    /// visited, which over 16,000 distinct rows would be tens of MB - rather than to police the
+    /// noise floor.
+    /// </summary>
+    [Fact]
+    public Task ScrollingAndMovingTheCaretAcrossTheDocument_DoNotGrowTheHeap()
+    {
+        var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(RawViewVirtualizationTests).Assembly);
+        return session.Dispatch(async () =>
+        {
+            const int VisitsPerPhase = 4_000;
+
+            var vm = new RawViewModel();
+            Window? window = null;
+            try
+            {
+                await vm.LoadAsync(WriteBigFile());
+                await vm.IndexingTask;
+
+                var view = new RawView { DataContext = vm };
+                window = new Window { Width = 900, Height = 600, Content = view };
+                window.Show();
+                await PumpAsync();
+                window.UpdateLayout();
+
+                var surface = SurfaceOf(window);
+                var scroller = window.GetVisualDescendants().OfType<ScrollViewer>().First();
+                int rowCount = vm.RowCount;
+
+                void Visit(int row)
+                {
+                    scroller.Offset = new Vector(0, row * RawTextSurface.RowHeight);
+                    window.UpdateLayout();
+
+                    // What the gutter does on every caret move: read the document around the caret
+                    // and format the three strings it shows.
+                    vm.Caret!.PlaceAt(vm.Index!.GetRowInfo(row).Start);
+                    _ = vm.CaretCharacterText;
+                    _ = vm.CaretPositionText;
+                    _ = vm.CaretSelectionText;
+                    Dispatcher.UIThread.RunJobs();
+                }
+
+                static long LiveHeap()
+                {
+                    for (int i = 0; i < 3; i++)
+                    {
+                        GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+                        GC.WaitForPendingFinalizers();
+                    }
+
+                    return GC.GetTotalMemory(forceFullCollection: true);
+                }
+
+                long settled = long.MaxValue;
+                var phases = new List<string>();
+                for (int phase = 0; phase < 4; phase++)
+                {
+                    // Rows spread right across the document, so no cache stays warm by locality
+                    // and each phase visits a different set.
+                    for (int i = 0; i < VisitsPerPhase; i++)
+                        Visit((i * 1_013 + phase * 37) % rowCount);
+
+                    long heap = LiveHeap();
+                    phases.Add($"phase {phase}: {heap / 1024.0 / 1024.0:F2}MB, layouts {surface.CachedLayoutCount}");
+
+                    // The caches are sized by the viewport, not by how far the user has travelled.
+                    // Exact, and the assertion a genuine retention bug would trip first.
+                    Assert.InRange(surface.CachedLayoutCount, 1, ViewportRows * 4);
+                    Assert.InRange(surface.RealizedRowCount, 1, ViewportRows);
+
+                    // Phase 0 pays the session's one-off costs and is not a baseline. Afterwards,
+                    // measured against the lowest settled reading, so one noisy phase cannot make
+                    // the next one look like growth.
+                    if (phase >= 1)
+                    {
+                        if (phase > 1)
+                            Assert.True(heap < settled + 12_000_000,
+                                $"heap climbed with distance travelled - {string.Join(" | ", phases)}");
+
+                        settled = Math.Min(settled, heap);
+                    }
+                }
+
+                return true;
+            }
+            finally
+            {
+                window?.Close();
+                vm.Dispose();
+            }
+        }, CancellationToken.None);
+    }
 }

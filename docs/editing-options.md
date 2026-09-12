@@ -314,6 +314,20 @@ Still to do: typing and deletion against the piece table, edit mode gated on `Is
 undo/redo wired to the `RawEditJournal` that is built but unused, paste, and making the window's
 tunnelling Escape handler mode-aware.
 
+**To do: a caret position readout.** The caret knows three things the user currently cannot see —
+the byte offset into the file, the row and column, and the size of the selection — and on a
+multi-GB file the byte offset is the one that matters, because it is what every other tool
+(`dd`, a hex editor, a stack trace from a parser) speaks. Both numbers have to be shown rather
+than one: a column is a character count over a row's decoded text, a byte offset is a byte count
+over the document, and `RawRowDecoder` exists precisely because neither derives from the other.
+Selection size should report bytes for the same reason the copy toast does, with the character
+count alongside it.
+
+Where it goes is unsettled. The status bar is already tight and has no per-view injectable region,
+so a view can't contribute fields to it without every view knowing about every other view's
+fields. The likely shape is a status panel owned by the toolbar that a view fills in, which is a
+small piece of chrome plumbing rather than caret work — the caret already has every number.
+
 Edits are gated on a completed scan. The scan's append log is read lock-free precisely because
 nothing already written ever changes, and a shift log mutated on the UI thread while the scan
 consulted it would end that. The wait is largely notional in the motivating case: revealing a byte

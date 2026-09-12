@@ -42,6 +42,11 @@ and copy-out. Nothing is editable yet - typing is the next piece of work.
   - The caret was drawn over the full row height rather than the text's, so it overhung the glyphs.
   - Find highlighting could not span a soft wrap (pre-existing, inherited from the attached-property
     version it replaced).
+- **Caret position readout.** Byte offset into the file, row/column, and selection size, shown
+  while the raw view has a caret. Detail in [editing-options.md](editing-options.md) §"What step 2
+  has become so far". The caret already holds every number; the open question is where they go —
+  the status bar is tight and has no per-view injectable region, so the likely shape is a status
+  panel owned by the toolbar that the active view fills in.
 - **Save as a streaming rewrite.** Temp file beside the original, atomic rename, background
   re-index. One sequential pass; not where the difficulty lives.
 - **Scalar edits in the JSON tree.** An offset-keyed replacement overlay served at

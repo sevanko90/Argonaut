@@ -98,18 +98,47 @@ public class RawCaretReadoutTests
     }
 
     /// <summary>
-    /// Past the cap the answer is "not from here" rather than a walk back through gigabytes. Both
-    /// halves go: without reaching the line start there is no line number to report either.
+    /// A column far past the old 64KB walk limit. The regression this covers showed the column
+    /// stopping at 65,537 on a long line, because finding the line start walked rows and gave up.
     /// </summary>
     [Fact]
-    public void LineAndColumn_AreRefusedPastTheScanCap()
+    public void Column_CountsDeepIntoALongLine()
     {
-        byte[] content = Encoding.UTF8.GetBytes(new string('x', RawCaretReadout.ColumnScanBytes + 5_000));
+        byte[] content = Encoding.UTF8.GetBytes(new string('x', 400_000));
+        var readout = Describe(content, 300_000);
+
+        Assert.Equal(1, readout.LineNumber);
+        Assert.Equal(300_001, readout.Column);
+    }
+
+    /// <summary>
+    /// Past the cap only the column gives up. The line number comes from the row index, which
+    /// computes it walking from the row's anchor whatever happens, so it is never the thing that
+    /// disappears - the gutter shows "Ln 1, Col —" rather than dropping both.
+    /// </summary>
+    [Fact]
+    public void Column_IsRefusedPastTheScanCap_ButTheLineNumberSurvives()
+    {
+        byte[] content = Encoding.UTF8.GetBytes(new string('x', RawCaretReadout.ColumnScanBytes + 200_000));
         var readout = Describe(content, content.Length - 1);
 
-        Assert.Null(readout.LineNumber);
+        Assert.Equal(1, readout.LineNumber);
         Assert.Null(readout.Column);
         Assert.Equal(content.Length - 1, readout.ByteOffset);
+    }
+
+    /// <summary>
+    /// The same, on a line that starts partway through the file: the line number counts lines from
+    /// the beginning, which the row index knows, while the column cannot reach the line start.
+    /// </summary>
+    [Fact]
+    public void LineNumber_SurvivesOnALaterLineThatIsTooLongForAColumn()
+    {
+        string content = "short\n" + new string('x', RawCaretReadout.ColumnScanBytes + 200_000);
+        var readout = Describe(content, content.Length - 1);
+
+        Assert.Equal(2, readout.LineNumber);
+        Assert.Null(readout.Column);
     }
 
     [Fact]

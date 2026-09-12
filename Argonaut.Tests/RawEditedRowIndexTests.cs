@@ -69,6 +69,12 @@ public class RawEditedRowIndexTests
                 var expected = fresh.GetRowInfo(row);
                 var actual = Rows.GetRowInfo(row);
                 Assert.True(expected == actual, $"{because}: row {row} is {actual}, fresh index says {expected}");
+
+                // The line a row sits in, which a continuation row does not report through
+                // RawRowInfo. The caret readout asks for it, so an edit must not disturb it.
+                Assert.True(fresh.LineContaining(row) == Rows.LineContaining(row),
+                    $"{because}: row {row} is in line {Rows.LineContaining(row)}, "
+                    + $"fresh index says {fresh.LineContaining(row)}");
             }
 
             for (long offset = 0; offset < edited.Length; offset++)

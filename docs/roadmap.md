@@ -51,8 +51,9 @@ and copy-out. Nothing is editable yet - typing is the next piece of work.
   Deliberately **not** included: a character offset into the file. It cannot be answered without
   decoding from byte 0, and the row scan finds breaks with a vectorized newline search that never
   decodes — so the number would cost either a full decode per caret move or a permanently slower
-  index. Column and selection-character counts are capped for the same reason
-  (`ColumnScanBytes`, `SelectionScanBytes`) and report "—" past the cap.
+  index. The column and the selection's character count are capped for the same reason
+  (`ColumnScanBytes` 1MB, `SelectionScanBytes`) and report "—" past it; the line number is not
+  capped, since `IRawRowIndex.LineContaining` gets it from the anchor walk the index already does.
 - **Unicode descriptors elsewhere.** The name lookup is not raw-specific; the JSON views could
   identify a character under the cursor the same way.
 - **Save as a streaming rewrite.** Temp file beside the original, atomic rename, background

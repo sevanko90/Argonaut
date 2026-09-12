@@ -387,4 +387,36 @@ public class RawSegmentIndexTests
             File.Delete(path);
         }
     }
+
+    /// <summary>
+    /// The line a row sits in, which <see cref="RawRowInfo.LineNumber"/> deliberately does not
+    /// report on a continuation row - a wrapped line should leave the gutter blank, but the caret
+    /// readout still has to say "Ln 54". The line falls out of the anchor walk either way, so
+    /// nothing is stored for it; this checks the two agree wherever both have an answer, and that
+    /// a continuation row inherits the line of the row that started it.
+    /// </summary>
+    [Fact]
+    public void LineContaining_ReportsTheLineForContinuationRowsToo()
+    {
+        // Lines of 200 x's at wrap 80: every line is one start row plus two continuation rows.
+        var content = new StringBuilder();
+        for (int line = 0; line < LinesBeyondOneAnchorBucket; line++)
+            content.Append(new string('x', 200)).Append('\n');
+
+        WithIndex(Encoding.UTF8.GetBytes(content.ToString()), 80, (index, _) =>
+        {
+            int expectedLine = 0;
+            for (int row = 0; row < index.RowCount; row++)
+            {
+                var info = index.GetRowInfo(row);
+                if (info.LineNumber is int startsLine)
+                    expectedLine = startsLine;
+
+                Assert.Equal(expectedLine, index.LineContaining(row));
+            }
+
+            Assert.Equal(LinesBeyondOneAnchorBucket, expectedLine);
+            Assert.Null(index.LineContaining(index.RowCount));
+        });
+    }
 }

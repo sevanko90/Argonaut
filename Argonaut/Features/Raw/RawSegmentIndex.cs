@@ -112,6 +112,33 @@ public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IFileInd
     }
 
     /// <summary>
+    /// See <see cref="IRawRowIndex.LineContaining"/>. The same walk <see cref="GetRowInfo"/> does,
+    /// reporting the line number it tracks on the way rather than dropping it on a continuation
+    /// row: at most <see cref="AnchorStride"/> boundary computations, and nothing stored per row.
+    /// </summary>
+    public int? LineContaining(int rowIndex)
+    {
+        if ((uint)rowIndex >= (uint)RowCount)
+            return null;
+
+        int anchorIndex = rowIndex / AnchorStride;
+        var anchor = this.items.ItemRef(anchorIndex);
+        long start = anchor.PackedOffset & OffsetMask;
+        int lineNumber = anchor.LineNumber;
+
+        for (int row = anchorIndex * AnchorStride; row < rowIndex; row++)
+        {
+            var (end, softWrap) = RawRowBoundary.Next(this.source, WrapWidth, start);
+            if (!softWrap)
+                lineNumber++;
+
+            start = end;
+        }
+
+        return lineNumber;
+    }
+
+    /// <summary>
     /// The full position state stored at anchor <paramref name="anchorIndex"/>: where its row
     /// starts, whether that row begins a real line, and the line it sits in.
     /// <see cref="GetRowInfo"/> cannot answer this - it reports a null line number on a

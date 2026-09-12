@@ -336,12 +336,24 @@ all. The name comes from `UnicodeNames`, a table generated from the Unicode Char
 because .NET carries categories but no names.
 
 Two numbers are bounded rather than exact, and say so in the gutter. A column is a character count
-from the start of the line, and a line here can be a multi-GB minified document, so the walk back
-is capped (`ColumnScanBytes`); a selection's character count is capped the same way
-(`SelectionScanBytes`), since select-all is one keystroke. A character offset into the file was
-dropped outright: it cannot be answered without decoding from byte 0, and the scan that finds rows
-never decodes at all, so the number would cost either a full decode per caret move or a
+from the start of the line, and a line here can be a multi-GB minified document, so the scan back
+to the line start is capped (`ColumnScanBytes`, 1MB); a selection's character count is capped the
+same way (`SelectionScanBytes`), since select-all is one keystroke. A character offset into the
+file was dropped outright: it cannot be answered without decoding from byte 0, and the scan that
+finds rows never decodes at all, so the number would cost either a full decode per caret move or a
 permanently slower index.
+
+The line number is deliberately *not* among the bounded ones. The first cut found the line start by
+walking rows back from the caret and gave up at the cap, which lost the line number along with the
+column: the gutter showed a column up to 65,537, then "Col —", then nothing at all. Both halves of
+that were wrong. `RawSegmentIndex.GetRowInfo` already computes the line number while walking from a
+row's anchor and discards it on continuation rows - which is right for a gutter that should leave a
+wrapped line unnumbered, and useless to a caret readout - so `IRawRowIndex.LineContaining` reports
+it instead, storing nothing and costing one anchor walk. The column then became a byte question
+rather than a row question: scan back for a newline with a vectorized `LastIndexOf`, and count
+characters with an ASCII fast path over the result. That is what let the cap move from 64KB to 1MB
+while getting cheaper - 0.028ms at the cap over ASCII, against a row walk that was giving up
+sixteen times sooner.
 
 Edits are gated on a completed scan. The scan's append log is read lock-free precisely because
 nothing already written ever changes, and a shift log mutated on the UI thread while the scan

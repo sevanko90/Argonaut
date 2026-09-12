@@ -19,4 +19,16 @@ public interface IRawRowIndex
 
     /// <summary>The row containing <paramref name="offset"/>, or null when it is not covered.</summary>
     int? RowForOffset(long offset);
+
+    /// <summary>
+    /// The line <paramref name="rowIndex"/> sits in, counting from 1 - including for a
+    /// continuation row, where <see cref="GetRowInfo"/> reports null because a blank gutter is
+    /// what a wrapped line should look like.
+    ///
+    /// Separate from <see cref="RawRowInfo.LineNumber"/> precisely because the two want opposite
+    /// answers for the same row: the gutter wants "nothing to draw here", a caret readout wants
+    /// "line 54". Nothing is stored for this - the line number falls out of the walk
+    /// <see cref="GetRowInfo"/> already does from the row's anchor.
+    /// </summary>
+    int? LineContaining(int rowIndex);
 }

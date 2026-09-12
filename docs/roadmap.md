@@ -104,6 +104,27 @@ and [json-array-nesting-options.md](json-array-nesting-options.md).
   deferred for want of a document that exhibits the problem, and finding one is the first task and
   the one that decides whether it gets built at all.
 
+## Markdown
+
+Options weighed in [markdown-options.md](markdown-options.md). "Render markdown" is two features:
+highlighting the source in the raw view, which fits the existing surface and needs no package, and
+a rendered preview, which cannot live in the raw view because fixed-height rows, byte-offset carets
+and virtualization-by-arithmetic are exactly what rendering gives up.
+
+- **Markdown highlighting in the raw view.** Fence state carried on the index's existing anchors
+  (one bit per 64 rows), span classification per visible row, styled runs in `RawTextSurface`.
+  No dependency, no new view.
+- **Markdown detection.** `.md`/`.markdown` by extension, plus a corroborated content heuristic —
+  a lone `#` means shell, YAML or C, so a strong signal (ATX heading with a space, code fence,
+  setext underline, link, table) plus a second distinct one. Worth having even with nothing to
+  render yet.
+- **A markdown preview view.** Markdig for the AST, our own block renderer over the virtualized
+  list pattern, behind a size gate. `Markdown.Avalonia` is the shortcut if a non-virtualized tree
+  is acceptable at small sizes.
+- **Windowed rendering of large markdown.** Explicitly not committed to. Link reference definitions
+  and footnotes are document-global, so rendering the visible window still needs a whole-file
+  pre-pass - two indexes, not one - and giant markdown is not the common artefact giant JSON is.
+
 ## Input sources
 
 Today a document is always a path: every load site builds an `MMapFile` from one, and the

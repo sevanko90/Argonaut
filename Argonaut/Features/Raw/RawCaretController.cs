@@ -106,7 +106,7 @@ public sealed class RawCaretController
 
     public void MoveToDocumentStart(bool extend) => MoveTo(0, extend, CaretAffinity.Downstream);
 
-    public void MoveToDocumentEnd(bool extend) => MoveTo(this.source.Length, extend, CaretAffinity.Upstream);
+    public void MoveToDocumentEnd(bool extend) => MoveTo(this.source.AvailableLength, extend, CaretAffinity.Upstream);
 
     /// <summary>
     /// Selects the word around <paramref name="offset"/> - what a double-click does. False when
@@ -128,7 +128,7 @@ public sealed class RawCaretController
 
     /// <summary>Selects everything. Two offsets, so the size of the document is irrelevant.</summary>
     public void SelectAll()
-        => Apply(new RawCaret(this.source.Length, CaretAffinity.Upstream), new RawSelection(0, this.source.Length));
+        => Apply(new RawCaret(this.source.AvailableLength, CaretAffinity.Upstream), new RawSelection(0, this.source.AvailableLength));
 
     /// <summary>Drops the selection, leaving the caret where it is.</summary>
     public void ClearSelection()
@@ -178,7 +178,7 @@ public sealed class RawCaretController
         // position away because the replacement scan had not published yet is a race that only
         // shows up under load.
         if (this.rows.RowCount == 0)
-            return Math.Clamp(offset, 0, this.source.Length);
+            return Math.Clamp(offset, 0, this.source.AvailableLength);
 
         return RawCaretStops.Snap(this.rows, this.source, offset, CaretSnap.Backward);
     }

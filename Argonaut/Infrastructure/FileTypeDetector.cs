@@ -44,14 +44,25 @@ public static class FileTypeDetector
     /// <summary>
     /// Detect whether a file is structurally JSON or NDJson
     /// </summary>
-    /// <param name="path">Path to file</param>
+    /// <param name="origin">The document to inspect.</param>
     /// <returns>The detected type of the file</returns>
     /// <remarks>Should handle multi-gb file by scanning bytes rather than trying to parse data</remarks>
-    public static FileKind DetectFileType(string path)
+    public static FileKind DetectFileType(IByteOrigin origin)
     {
-        using var mmap = new MMapFile(path);
+        var mmap = origin.Open();
+        try
+        {
+            return Detect(mmap);
+        }
+        finally
+        {
+            mmap.Release();
+        }
+    }
 
-        long length = mmap.Length;
+    private static FileKind Detect(IByteSource mmap)
+    {
+        long length = mmap.AvailableLength;
         if (length == 0)
             return FileKind.Unidentified;
 
@@ -62,7 +73,7 @@ public static class FileTypeDetector
 
         // 2. JSON Starts with { or [. If it's not that, check for CSV/TSV, or default to unidentified. 
         // fast early-out, before bothering to read for the json/ndjson distinction.
-        byte firstChar = mmap.GetSpan(firstCharOffset, 1)[0];
+        byte firstChar = mmap.ByteAt(firstCharOffset);
         if (firstChar is not (byte)'{' and not (byte)'[')
             return DetectDelimitedOrUnknown(mmap, length);
 
@@ -78,7 +89,7 @@ public static class FileTypeDetector
         if (secondLineStart < 0)
             return FileKind.Json;
 
-        byte secondFirstChar = mmap.GetSpan(secondLineStart, 1)[0];
+        byte secondFirstChar = mmap.ByteAt(secondLineStart);
 
         // 5. NDJSON rule: first line ends with } and the second line starts with {.
         return lastCharFirstLine == (byte)'}' && secondFirstChar == (byte)'{'
@@ -94,12 +105,24 @@ public static class FileTypeDetector
     /// fail partway through.
     /// </summary>
     /// <param name="kind">The view the user is forcing.</param>
-    /// <param name="path">Path to the file.</param>
+    /// <param name="origin">The document to inspect.</param>
     /// <param name="reason">Set to a human-readable explanation when this returns false.</param>
-    public static bool IsPlausibleFor(FileKind kind, string path, out string reason)
+    public static bool IsPlausibleFor(FileKind kind, IByteOrigin origin, out string reason)
     {
-        using var mmap = new MMapFile(path);
-        long length = mmap.Length;
+        var mmap = origin.Open();
+        try
+        {
+            return IsPlausible(kind, mmap, out reason);
+        }
+        finally
+        {
+            mmap.Release();
+        }
+    }
+
+    private static bool IsPlausible(FileKind kind, IByteSource mmap, out string reason)
+    {
+        long length = mmap.AvailableLength;
 
         switch (kind)
         {
@@ -118,7 +141,7 @@ public static class FileTypeDetector
                     return false;
                 }
 
-                byte firstChar = mmap.GetSpan(firstCharOffset, 1)[0];
+                byte firstChar = mmap.ByteAt(firstCharOffset);
                 if (firstChar is (byte)'{' or (byte)'[')
                 {
                     reason = "";
@@ -140,7 +163,7 @@ public static class FileTypeDetector
                 // delimiter is all this check looks for.
                 long firstLineEnd = FindNewline(mmap, 0, Math.Min(length, PreflightScanLimit));
                 long firstLineLength = firstLineEnd < 0 ? Math.Min(length, PreflightScanLimit) : firstLineEnd;
-                var firstLine = mmap.GetSpan(0, checked((int)firstLineLength));
+                var firstLine = mmap.RequireContiguous(0, checked((int)firstLineLength));
 
                 byte delimiter = kind == FileKind.Csv ? (byte)',' : (byte)'\t';
                 if (CountUnquotedDelimiter(firstLine, delimiter) > 0)
@@ -166,7 +189,7 @@ public static class FileTypeDetector
     /// count of unquoted commas (or, failing that, unquoted tabs). Comma is checked first as
     /// the tie-break for the rare file where both counts happen to match.
     /// </summary>
-    private static FileKind DetectDelimitedOrUnknown(MMapFile file, long length)
+    private static FileKind DetectDelimitedOrUnknown(IByteSource file, long length)
     {
         long firstLineEnd = FindNewline(file, 0, length);
         if (firstLineEnd < 0)
@@ -180,8 +203,8 @@ public static class FileTypeDetector
         if (secondLineEnd < 0)
             secondLineEnd = length;
 
-        var line1 = file.GetSpan(0, checked((int)firstLineEnd));
-        var line2 = file.GetSpan(secondLineStart, checked((int)(secondLineEnd - secondLineStart)));
+        var line1 = file.RequireContiguous(0, checked((int)firstLineEnd));
+        var line2 = file.RequireContiguous(secondLineStart, checked((int)(secondLineEnd - secondLineStart)));
 
         int commas1 = CountUnquotedDelimiter(line1, (byte)',');
         int commas2 = CountUnquotedDelimiter(line2, (byte)',');
@@ -216,50 +239,79 @@ public static class FileTypeDetector
         return count;
     }
 
-    // The chunked-scan loops in these three helpers (and in FileOffsetIndex/FileSearchSession)
+    // The chunked-scan loops in these three helpers (and in FileOffsetIndex/SearchSession)
     // are deliberately duplicated, not abstracted: they're hot paths, and the indirection an
     // abstraction would add costs more than the ~15 shared lines save.
-    private static long FindNonWhitespace(MMapFile file, long start, long end)
+    private static long FindNonWhitespace(IByteSource file, long start, long end)
     {
         for (long offset = start; offset < end;)
         {
-            int size = (int)Math.Min(ChunkSize, end - offset);
-            int i = file.GetSpan(offset, size).IndexOfAnyExcept(Whitespace);
+            var chunk = file.GetContiguousSpan(offset, (int)Math.Min(ChunkSize, end - offset));
+            if (chunk.IsEmpty)
+                break;
+
+            int i = chunk.IndexOfAnyExcept(Whitespace);
             if (i >= 0)
                 return offset + i;
 
-            offset += size;
+            offset += chunk.Length;
         }
 
         return -1;
     }
 
-    private static long FindNewline(MMapFile file, long start, long end)
+    private static long FindNewline(IByteSource file, long start, long end)
     {
         for (long offset = start; offset < end;)
         {
-            int size = (int)Math.Min(ChunkSize, end - offset);
-            int i = file.GetSpan(offset, size).IndexOf((byte)'\n');
+            var chunk = file.GetContiguousSpan(offset, (int)Math.Min(ChunkSize, end - offset));
+            if (chunk.IsEmpty)
+                break;
+
+            int i = chunk.IndexOf((byte)'\n');
             if (i >= 0)
                 return offset + i;
 
-            offset += size;
+            offset += chunk.Length;
         }
 
         return -1;
     }
 
-    private static byte LastNonWhitespaceBefore(MMapFile file, long start, long endExclusive)
+    /// <summary>
+    /// Scans backwards, so unlike the forward loops it cannot simply take whatever the source
+    /// serves: a short return would leave the tail of the chunk unexamined and the answer would
+    /// be the wrong byte. It walks forward within each chunk window instead, which is correct
+    /// whatever the source hands back.
+    /// </summary>
+    private static byte LastNonWhitespaceBefore(IByteSource file, long start, long endExclusive)
     {
         for (long offset = endExclusive; offset > start;)
         {
-            int size = (int)Math.Min(ChunkSize, offset - start);
-            var span = file.GetSpan(offset - size, size);
-            int i = span.LastIndexOfAnyExcept(Whitespace);
-            if (i >= 0)
-                return span[i];
+            long windowStart = offset - Math.Min(ChunkSize, offset - start);
+            byte found = 0;
+            bool any = false;
 
-            offset -= size;
+            for (long at = windowStart; at < offset;)
+            {
+                var chunk = file.GetContiguousSpan(at, (int)(offset - at));
+                if (chunk.IsEmpty)
+                    break;
+
+                int i = chunk.LastIndexOfAnyExcept(Whitespace);
+                if (i >= 0)
+                {
+                    found = chunk[i];
+                    any = true;
+                }
+
+                at += chunk.Length;
+            }
+
+            if (any)
+                return found;
+
+            offset = windowStart;
         }
 
         return 0;

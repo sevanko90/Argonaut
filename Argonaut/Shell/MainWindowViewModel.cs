@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using Argonaut.Features.Json;
 using Argonaut.Features.Json.Diff;
@@ -36,15 +37,35 @@ public sealed class MainWindowViewModel : ObservableObject
     /// supply lightweight fakes in place of the real memory-mapping/indexing view models.
     /// </summary>
     public delegate Task<IDocumentViewModel> DocumentLoader(
-        FileTypeDetector.FileKind fileType, string path, IProgressReporter reporter);
+        FileTypeDetector.FileKind fileType, IByteOrigin origin, IProgressReporter reporter);
 
     private const string DefaultTitle = AppInfo.Name;
 
+    /// <summary>What a pasted document is called, since it has no file name.</summary>
+    private const string PastedDocumentName = "Pasted text";
+
+    /// <summary>
+    /// Largest paste opened rather than declined. Not a clipboard limit - a clipboard will happily
+    /// hold far more, and people do copy megabytes out of terminals and query grids. It is a
+    /// sanity bound on what is worth holding as one managed array, given that the alternative
+    /// (spilling to disk) is not available: see <see cref="PasteAsync"/>.
+    /// </summary>
+    internal const long MaxPasteBytes = 64L * 1024 * 1024;
+
     private readonly Func<string, Task<bool>> confirmReplace;
+    private readonly Func<Task<byte[]?>>? readClipboardBytes;
     private readonly DocumentLoader documentLoader;
     private readonly FindController findController;
 
     private IDocumentViewModel? currentDocument;
+
+    // The origins behind the document on screen - one, or two when diffing. Owned here rather
+    // than by the document because an origin's lifetime is the open INPUT, not the view: a view
+    // swap re-opens a source over the same origin, which is what stops switching from JSON to
+    // Raw re-downloading a URL or re-materialising a paste. Released by AdoptOrigins when the
+    // input actually changes; see IByteOrigin.
+    private readonly List<IByteOrigin> ownedOrigins = new();
+
     private string? currentFilePath;
     private FileTypeDetector.FileKind currentKind;
     private string statusText = "No file loaded";
@@ -76,9 +97,11 @@ public sealed class MainWindowViewModel : ObservableObject
     /// Overrides how documents are built (defaults to the real memory-mapped view models);
     /// tests inject fakes to exercise the lifecycle without real files or indexing.
     /// </param>
-    public MainWindowViewModel(Func<string, Task<bool>> confirmReplace, DocumentLoader? documentLoader = null)
+    public MainWindowViewModel(Func<string, Task<bool>> confirmReplace,
+        Func<Task<byte[]?>>? readClipboardBytes = null, DocumentLoader? documentLoader = null)
     {
         this.confirmReplace = confirmReplace;
+        this.readClipboardBytes = readClipboardBytes;
         this.documentLoader = documentLoader ?? DocumentViewCatalog.LoadAsync;
 
         themeMode = ThemePreference.Load();
@@ -111,6 +134,10 @@ public sealed class MainWindowViewModel : ObservableObject
 
     /// <summary>True when a document is loaded; drives the toolbar's visibility.</summary>
     public bool IsFileOpen => currentFilePath is not null;
+
+    /// <summary>Whether <see cref="PasteAsync"/> can do anything - false when the view model was
+    /// built without a clipboard reader.</summary>
+    public bool CanPaste => this.readClipboardBytes is not null;
 
     /// <summary>The current file's name, shown in the toolbar.</summary>
     public string FileName
@@ -211,14 +238,16 @@ public sealed class MainWindowViewModel : ObservableObject
     /// </summary>
     public async Task CompareWithAsync(string rightPath)
     {
-        if (currentFilePath is null || string.IsNullOrWhiteSpace(rightPath))
+        if (this.ownedOrigins.Count == 0 || string.IsNullOrWhiteSpace(rightPath))
             return;
 
         var normalizedRight = Path.GetFullPath(rightPath);
         if (!File.Exists(normalizedRight))
             return;
 
-        await OpenDiffAsync(currentFilePath, normalizedRight);
+        // The left side is the origin already open, not a fresh one over the same path: the
+        // diff then shares the current document's materialisation instead of duplicating it.
+        await OpenDiffAsync(this.ownedOrigins[0], new FileByteOrigin(normalizedRight));
     }
 
     /// <summary>
@@ -232,9 +261,11 @@ public sealed class MainWindowViewModel : ObservableObject
     /// (which requires a document already open) and <see cref="OpenPathsAsync"/> (the
     /// command-line startup path, which has none yet).
     /// </summary>
-    public async Task OpenDiffAsync(string leftPath, string rightPath)
+    public async Task OpenDiffAsync(IByteOrigin leftOrigin, IByteOrigin rightOrigin)
     {
         var requestId = openRequest.Begin();
+        string leftPath = leftOrigin.Path ?? leftOrigin.DisplayName;
+        string rightPath = rightOrigin.Path ?? rightOrigin.DisplayName;
 
         // UI hygiene: clears the highlight term and the find-bar status before the swap. NOT
         // crash safety - that comes from each search scan owning its own chunk mappings, so a
@@ -248,12 +279,14 @@ public sealed class MainWindowViewModel : ObservableObject
         var document = new JsonDiffViewModel();
         try
         {
-            await document.LoadAsync(leftPath, rightPath);
+            await document.LoadAsync(leftOrigin, rightOrigin);
         }
         catch (Exception ex)
         {
             OpenDebugLog.Write($"OpenDiff: load threw: {ex}");
             document.Dispose();
+            if (rightOrigin != this.ownedOrigins.FirstOrDefault())
+                rightOrigin.Dispose();
             if (openRequest.IsCurrent(requestId))
                 StatusText = $"{leftPath} — failed to open comparison";
             return;
@@ -262,10 +295,12 @@ public sealed class MainWindowViewModel : ObservableObject
         if (!openRequest.IsCurrent(requestId))
         {
             document.Dispose();
+            rightOrigin.Dispose();
             return;
         }
 
-        PublishDocument(document, leftPath, FileTypeDetector.FileKind.Unknown, addToRecents: false);
+        PublishDocument(document, leftPath, FileTypeDetector.FileKind.Unknown, addToRecents: false,
+            origins: new[] { leftOrigin, rightOrigin });
     }
 
     /// <summary>
@@ -292,12 +327,13 @@ public sealed class MainWindowViewModel : ObservableObject
         DetachFind();
         FindBarResetRequested?.Invoke();
         indexProgressReporter?.Stop();
-        StatusText = $"Opening {request.OriginPath} as a table…";
+        string sourceName = request.Origin.Path ?? request.Origin.DisplayName;
+        StatusText = $"Opening {request.ArrayPath} as a table…";
 
         var document = new JsonArrayTableViewModel();
         try
         {
-            await document.LoadAsync(request.Path, request.Offset, request.Length, request.OriginPath,
+            await document.LoadAsync(request.Origin, request.Offset, request.Length, request.ArrayPath,
                 navigateBack: NavigateBackToJsonAsync);
         }
         catch (Exception ex)
@@ -305,7 +341,7 @@ public sealed class MainWindowViewModel : ObservableObject
             OpenDebugLog.Write($"OpenArrayTable: load threw: {ex}");
             document.Dispose();
             if (openRequest.IsCurrent(requestId))
-                StatusText = $"{request.Path} — failed to open as a table";
+                StatusText = $"{sourceName} — failed to open as a table";
             return;
         }
 
@@ -315,7 +351,10 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
-        PublishDocument(document, request.Path, FileTypeDetector.FileKind.Unknown, addToRecents: false);
+        // The table is a byte range of the document it came from, so it re-adopts that same
+        // origin - nothing new is materialised, and Back re-opens the JSON view over it.
+        PublishDocument(document, sourceName, FileTypeDetector.FileKind.Unknown, addToRecents: false,
+            origins: new[] { request.Origin });
     }
 
     /// <summary>
@@ -363,12 +402,16 @@ public sealed class MainWindowViewModel : ObservableObject
         var normalizedSecond = Path.GetFullPath(second);
 
         bool bothJson = false;
+        IByteOrigin? firstOrigin = null;
+        IByteOrigin? secondOrigin = null;
         if (normalizedFirst is not null && File.Exists(normalizedFirst) && File.Exists(normalizedSecond))
         {
             try
             {
-                bothJson = FileTypeDetector.DetectFileType(normalizedFirst) == FileTypeDetector.FileKind.Json
-                    && FileTypeDetector.DetectFileType(normalizedSecond) == FileTypeDetector.FileKind.Json;
+                firstOrigin = new FileByteOrigin(normalizedFirst);
+                secondOrigin = new FileByteOrigin(normalizedSecond);
+                bothJson = FileTypeDetector.DetectFileType(firstOrigin) == FileTypeDetector.FileKind.Json
+                    && FileTypeDetector.DetectFileType(secondOrigin) == FileTypeDetector.FileKind.Json;
             }
             catch (Exception ex)
             {
@@ -378,9 +421,12 @@ public sealed class MainWindowViewModel : ObservableObject
 
         if (bothJson)
         {
-            await OpenDiffAsync(normalizedFirst!, normalizedSecond);
+            await OpenDiffAsync(firstOrigin!, secondOrigin!);
             return;
         }
+
+        firstOrigin?.Dispose();
+        secondOrigin?.Dispose();
 
         await OpenPathAsync(first);
         if (currentFilePath is not null)
@@ -465,29 +511,100 @@ public sealed class MainWindowViewModel : ObservableObject
                 return;
         }
 
+        await OpenOriginAsync(new FileByteOrigin(normalizedPath), addToRecents: true);
+    }
+
+    /// <summary>
+    /// Reads the clipboard as text and opens it as a document in its own right - no file
+    /// involved, so <see cref="IByteOrigin.Path"/> is null and every path-keyed feature skips it.
+    /// No-op when no clipboard reader was supplied (the view model can be constructed without
+    /// one, and tests usually are).
+    ///
+    /// Deliberately does NOT spill to a temp file at any size, and cannot: Avalonia's clipboard
+    /// API has no streaming read - the whole payload arrives as one array (or one string) before
+    /// anything here can look at it, and there is no way to ask the size first. So the process is
+    /// holding those bytes either way, and the only thing a spill would change is whether they
+    /// stay in managed memory - paid for with a temp file's lifetime, its deletion ordering, and
+    /// the Windows "cannot delete a mapped file" hazard. Not worth it; the bytes go straight into
+    /// a <see cref="MemoryByteOrigin"/>, and a paste past <see cref="MaxPasteBytes"/> is declined
+    /// with a message pointing at the thing the app is actually built for: a file.
+    /// </summary>
+    public async Task PasteAsync()
+    {
+        if (this.readClipboardBytes is null)
+            return;
+
+        byte[]? bytes;
+        try
+        {
+            bytes = await this.readClipboardBytes();
+        }
+        catch (Exception ex)
+        {
+            OpenDebugLog.Write($"Paste: reading the clipboard threw: {ex}");
+            ToastService.Show("Couldn't read the clipboard.");
+            return;
+        }
+
+        if (bytes is null || bytes.Length == 0)
+        {
+            ToastService.Show("The clipboard has no text to open.");
+            return;
+        }
+
+        if (bytes.Length > MaxPasteBytes)
+        {
+            ToastService.Show($"That's {bytes.Length / (1024 * 1024):N0} MB of text — save it to a file and open that instead.");
+            return;
+        }
+
+        if (IsFileOpen)
+        {
+            var confirmed = await confirmReplace("Replace the currently loaded file with the clipboard contents?");
+            if (!confirmed)
+                return;
+        }
+
+        await OpenOriginAsync(new MemoryByteOrigin(bytes, PastedDocumentName), addToRecents: false);
+    }
+
+    /// <summary>
+    /// Detects and opens <paramref name="origin"/>, replacing any current document. Shared tail of
+    /// <see cref="OpenPathAsync"/> and <see cref="PasteAsync"/>: everything from detection onwards
+    /// is the same whether the bytes came from a file or not. <see cref="openRequest"/> guards
+    /// against a newer open superseding this one mid-load; the loser is disposed here (never
+    /// published), so its source is released.
+    ///
+    /// Takes ownership of <paramref name="origin"/>: it is disposed here if detection fails, and
+    /// otherwise passes to the shell's own ownership (see <see cref="AdoptOrigins"/>).
+    /// </summary>
+    private async Task OpenOriginAsync(IByteOrigin origin, bool addToRecents)
+    {
         var requestId = openRequest.Begin();
+        string name = origin.Path ?? origin.DisplayName;
 
         FileTypeDetector.FileKind fileType;
         try
         {
-            fileType = FileTypeDetector.DetectFileType(normalizedPath);
+            fileType = FileTypeDetector.DetectFileType(origin);
         }
         catch (Exception ex)
         {
-            OpenDebugLog.Write($"OpenPath: DetectFileType threw: {ex}");
+            OpenDebugLog.Write($"OpenOrigin: DetectFileType threw: {ex}");
+            origin.Dispose();
             return;
         }
 
-        OpenDebugLog.Write($"OpenPath: normalizedPath='{normalizedPath}', fileType={fileType}");
+        OpenDebugLog.Write($"OpenOrigin: name='{name}', fileType={fileType}");
 
         // UI hygiene and defence in depth (see the remark in OpenDiffAsync) - the outgoing
-        // document's own mapping scope is what actually stops a live search before the
-        // content swap tears its MMapFile down.
+        // document's own source scope is what actually stops a live search before the content
+        // swap releases it.
         DetachFind();
         FindBarResetRequested?.Invoke();
-        StatusText = $"Indexing {normalizedPath}… 0%";
+        StatusText = $"Indexing {name}… 0%";
 
-        await LoadAndPublishAsync(fileType, normalizedPath, requestId, addToRecents: true);
+        await LoadAndPublishAsync(fileType, origin, requestId, addToRecents);
     }
 
     /// <summary>
@@ -498,10 +615,13 @@ public sealed class MainWindowViewModel : ObservableObject
     /// </summary>
     public async Task SwitchViewAsync(FileTypeDetector.FileKind kind)
     {
-        if (currentFilePath is null || kind == currentKind)
+        if (this.ownedOrigins.Count == 0 || kind == currentKind)
             return;
 
-        string path = currentFilePath;
+        // Deliberately the origin already open, not a new one: re-indexing the same input as a
+        // different kind must not re-materialise it.
+        var origin = this.ownedOrigins[0];
+        string path = origin.Path ?? origin.DisplayName;
         var requestId = openRequest.Begin();
 
         // UI hygiene and defence in depth (see the remark in OpenDiffAsync) - the outgoing
@@ -510,7 +630,7 @@ public sealed class MainWindowViewModel : ObservableObject
         FindBarResetRequested?.Invoke();
         StatusText = $"Indexing {path}… 0%";
 
-        await LoadAndPublishAsync(kind, path, requestId, addToRecents: false);
+        await LoadAndPublishAsync(kind, origin, requestId, addToRecents: false);
     }
 
     /// <summary>
@@ -521,15 +641,16 @@ public sealed class MainWindowViewModel : ObservableObject
     /// <see cref="IncompatibleViewModel"/>; a failure with some items indexed publishes the
     /// partial document with the warning banner.
     /// </summary>
-    private async Task LoadAndPublishAsync(FileTypeDetector.FileKind kind, string path, long requestId, bool addToRecents)
+    private async Task LoadAndPublishAsync(FileTypeDetector.FileKind kind, IByteOrigin origin, long requestId, bool addToRecents)
     {
         string attemptedViewName = DisplayNameFor(kind);
+        string path = origin.Path ?? origin.DisplayName;
 
         bool isPlausible;
         string reason;
         try
         {
-            isPlausible = FileTypeDetector.IsPlausibleFor(kind, path, out reason);
+            isPlausible = FileTypeDetector.IsPlausibleFor(kind, origin, out reason);
         }
         catch (Exception ex)
         {
@@ -542,7 +663,7 @@ public sealed class MainWindowViewModel : ObservableObject
         if (!isPlausible)
         {
             if (openRequest.IsCurrent(requestId))
-                ShowIncompatible(path, kind, attemptedViewName, new IndexFailure(reason, null, null, null, 0));
+                ShowIncompatible(origin, kind, attemptedViewName, new IndexFailure(reason, null, null, null, 0));
             return;
         }
 
@@ -555,7 +676,7 @@ public sealed class MainWindowViewModel : ObservableObject
         IDocumentViewModel document;
         try
         {
-            document = await documentLoader(kind, path, reporter);
+            document = await documentLoader(kind, origin, reporter);
         }
         catch (Exception ex)
         {
@@ -576,11 +697,11 @@ public sealed class MainWindowViewModel : ObservableObject
         if (document.IndexFailure is { ItemsIndexed: 0 } failure)
         {
             document.Dispose();
-            ShowIncompatible(path, kind, attemptedViewName, failure);
+            ShowIncompatible(origin, kind, attemptedViewName, failure);
             return;
         }
 
-        PublishDocument(document, path, kind, addToRecents);
+        PublishDocument(document, path, kind, addToRecents, origins: new[] { origin });
         _ = StopProgressWhenIndexedAsync(document, reporter);
     }
 
@@ -619,27 +740,40 @@ public sealed class MainWindowViewModel : ObservableObject
     /// - the caller already detached it before attempting the load, and the placeholder has
     /// nothing searchable anyway.
     /// </summary>
-    private void ShowIncompatible(string path, FileTypeDetector.FileKind kind, string attemptedViewName, IndexFailure failure)
+    private void ShowIncompatible(IByteOrigin origin, FileTypeDetector.FileKind kind, string attemptedViewName, IndexFailure failure)
     {
         // The placeholder's text is final - no scan is still running that could add to it.
         indexProgressReporter?.Stop();
 
-        var incompatible = new IncompatibleViewModel(path, attemptedViewName, failure,
+        string path = origin.Path ?? origin.DisplayName;
+        var incompatible = new IncompatibleViewModel(origin, path, attemptedViewName, failure,
             openAsRawText: () => _ = SwitchViewAsync(FileTypeDetector.FileKind.Unidentified),
             jumpToFailureLocation: () => _ = JumpToRawOffsetAsync(failure.ByteOffset ?? 0));
         SetCurrentDocument(incompatible, path, kind);
+
+        // The placeholder still stands for this input - "open as raw text" re-indexes the same
+        // origin - so it is re-adopted rather than released.
+        AdoptOrigins(origin);
     }
 
-    private void PublishDocument(IDocumentViewModel document, string path, FileTypeDetector.FileKind kind, bool addToRecents)
+    private void PublishDocument(IDocumentViewModel document, string path, FileTypeDetector.FileKind kind,
+        bool addToRecents, IByteOrigin[] origins)
     {
         var navigator = document.CreateSearchNavigator();
         SetCurrentDocument(document, path, kind);
+
+        // After SetCurrentDocument, which disposed the outgoing document and so released its
+        // sources - a temp-file-backed origin cannot be deleted while a mapping over it is open.
+        AdoptOrigins(origins);
+
         findController.Attach(navigator);
         IsFindAvailable = navigator is not null;
 
-        if (addToRecents)
+        // Only a document that is a file on disk is reopenable, so a paste or a download adds
+        // nothing here rather than recording a path that does not exist.
+        if (addToRecents && origins.Length > 0 && origins[0].Path is { } diskPath)
         {
-            RecentFileHistory.Add(path);
+            RecentFileHistory.Add(diskPath);
             ReloadRecentFiles();
         }
     }
@@ -660,6 +794,29 @@ public sealed class MainWindowViewModel : ObservableObject
     /// safety no longer depends on it), and the view's own
     /// DetachedFromVisualTree dispose stays as an idempotent safety net (e.g. window close).
     /// </summary>
+    /// <summary>
+    /// Takes ownership of the origins behind the incoming document and disposes any previously
+    /// owned origin that is not among them. Instance identity is the test, deliberately: a view
+    /// swap and the array table both re-adopt the very origin already held, and disposing it
+    /// would pull a temp-file spill out from under the document being built. Call this only
+    /// after the outgoing document has been disposed, so its sources are released first - on
+    /// Windows a temp file cannot be deleted while a mapping over it is open.
+    /// </summary>
+    private void AdoptOrigins(params IByteOrigin[] origins)
+    {
+        foreach (var owned in this.ownedOrigins)
+        {
+            if (Array.IndexOf(origins, owned) >= 0)
+                continue;
+
+            try { owned.Dispose(); }
+            catch (Exception ex) { OpenDebugLog.Write($"AdoptOrigins: dispose threw: {ex}"); }
+        }
+
+        this.ownedOrigins.Clear();
+        this.ownedOrigins.AddRange(origins);
+    }
+
     private void SetCurrentDocument(IDocumentViewModel? document, string? path, FileTypeDetector.FileKind kind = FileTypeDetector.FileKind.Unknown)
     {
         if (currentDocument is not null)
@@ -725,7 +882,7 @@ public sealed class MainWindowViewModel : ObservableObject
         if (e.PropertyName is (null or nameof(IDocumentViewModel.IndexFailure)) && currentDocument!.IndexFailure is { } failure)
         {
             if (failure.ItemsIndexed == 0)
-                ShowIncompatible(currentFilePath!, currentKind, DisplayNameFor(currentKind), failure);
+                ShowIncompatible(this.ownedOrigins[0], currentKind, DisplayNameFor(currentKind), failure);
             else
                 NotifyFailurePropertiesChanged();
         }
@@ -743,6 +900,7 @@ public sealed class MainWindowViewModel : ObservableObject
         FindBarResetRequested?.Invoke();
 
         SetCurrentDocument(null, null);
+        AdoptOrigins();
         ReloadRecentFiles();
     }
 

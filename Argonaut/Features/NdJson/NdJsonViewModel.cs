@@ -17,8 +17,8 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel
 {
     private const int InitialIndexedLineTarget = 250;
 
-    private IndexedFileSession<FileOffsetIndex>? session;
-    private MemoryMappedFileLineCollection? lines;
+    private IndexedSourceSession<FileOffsetIndex>? session;
+    private NdJsonLineCollection? lines;
     private NdJsonSelectedLine? selectedLine;
     private JsonViewModel? selectedLineJsonViewModel;
     private string? highlightTerm;
@@ -28,7 +28,7 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel
 
     protected override IDisposable? MappedRows => this.lines;
 
-    internal MMapFile? Mmap => this.session?.File;
+    internal IByteSource? Bytes => this.session?.Bytes;
 
     internal FileOffsetIndex? Index => this.session?.Index;
 
@@ -39,7 +39,7 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel
 
     public int LineCount => this.session?.Index.LineCount ?? 0;
 
-    public MemoryMappedFileLineCollection Lines => lines ?? throw new InvalidOperationException("LoadAsync must complete before Lines is accessed.");
+    public NdJsonLineCollection Lines => lines ?? throw new InvalidOperationException("LoadAsync must complete before Lines is accessed.");
 
     public NdJsonSelectedLine? SelectedLine
     {
@@ -119,11 +119,16 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel
         => selectedLineJsonViewModel?.SchemaSettings.SetDocument(SchemaSettings.Document);
 
     /// <summary>Persists the schema choice against the NDJSON file itself, so reopening it
-    /// restores the binding for every line.</summary>
+    /// restores the binding for every line. The preference store is keyed by path, so a document
+    /// with no path (a paste) simply does not remember its choice - keying it by display name
+    /// would let two different pastes overwrite each other's binding.</summary>
     private void OnMasterSchemaSettingsPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (Origin?.Path is not { } documentPath)
+            return;
+
         if (e.PropertyName is null or nameof(JsonSchemaSettings.SelectedEntry) or nameof(JsonSchemaSettings.SelectedRootName))
-            SchemaSelectionPreference.Save(FilePath, SchemaSettings.SelectedEntry?.FilePath, SchemaSettings.IsRootExplicitlyChosen ? SchemaSettings.SelectedRootName : null);
+            SchemaSelectionPreference.Save(documentPath, SchemaSettings.SelectedEntry?.FilePath, SchemaSettings.IsRootExplicitlyChosen ? SchemaSettings.SelectedRootName : null);
     }
 
     /// <summary>Lifts the open line's schema-type match scores into the shared toolbar - see the
@@ -181,17 +186,18 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel
         selectedLineJsonViewModel?.SetDefaultExpandDepth(depth);
     }
 
-    public async Task LoadAsync(string path, IProgressReporter? progressReporter = null)
+    public async Task LoadAsync(IByteOrigin origin, IProgressReporter? progressReporter = null)
     {
-        FilePath = path;
+        Origin = origin;
+        FilePath = origin.Path ?? origin.DisplayName;
         DefaultExpandDepth = ExpandDepthPreference.Load();
         toolbar = new JsonToolbarViewModel(HintSettings, SchemaSettings, DefaultExpandDepth, SetDefaultExpandDepth,
-            refreshSchemaEntries: () => RefreshSchemaEntriesAsync(path));
+            refreshSchemaEntries: () => RefreshSchemaEntriesAsync(origin.Path));
 
         // Alongside indexing, not blocking it - see JsonViewModel.ApplyInitialSchemaAsync.
-        _ = ApplyInitialSchemaAsync(path);
+        _ = ApplyInitialSchemaAsync(origin.Path);
 
-        var session = IndexedFileSession<FileOffsetIndex>.Start(new MMapFile(path), FileOffsetIndex.StartIndexing, progressReporter);
+        var session = IndexedSourceSession<FileOffsetIndex>.Start(origin.Open(), FileOffsetIndex.StartIndexing, progressReporter);
         this.session = session;
 
         // Await a small initial batch so the first paint isn't a totally empty scrollbar;
@@ -202,7 +208,7 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel
             IndexFailure = failure;
 
         SelectedLine = null;
-        lines = new MemoryMappedFileLineCollection(session.Index, session.File);
+        lines = new NdJsonLineCollection(session.Index, session.Bytes);
         OnPropertyChanged(nameof(Lines));
 
         UpdateStatusText();
@@ -211,7 +217,7 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel
 
     /// <summary>Populates the schema catalog and applies any sidecar/remembered binding for the
     /// NDJSON file - see <see cref="JsonSchemaCatalog.GatherForDocument"/>.</summary>
-    private async Task ApplyInitialSchemaAsync(string documentPath)
+    private async Task ApplyInitialSchemaAsync(string? documentPath)
     {
         var (entries, preselected, rootName) = await Task.Run(() => JsonSchemaCatalog.GatherForDocument(documentPath));
         if (IsDisposed)
@@ -225,7 +231,7 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel
 
     /// <summary>Re-lists the schema catalog without touching the current selection - see
     /// <see cref="JsonViewModel.RefreshSchemaEntriesAsync"/>.</summary>
-    private async Task RefreshSchemaEntriesAsync(string documentPath)
+    private async Task RefreshSchemaEntriesAsync(string? documentPath)
     {
         var (entries, _, _) = await Task.Run(() => JsonSchemaCatalog.GatherForDocument(documentPath));
         if (!IsDisposed)
@@ -265,14 +271,14 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel
 
     public string GetLineText(int lineIndex)
     {
-        return NdJsonLineReader.ReadLine(this.Mmap!, this.Index!.GetLineSpan(lineIndex));
+        return NdJsonLineReader.ReadLine(this.Bytes!, this.Index!.GetLineSpan(lineIndex));
     }
 
     public void LoadSelectedLine(int lineIndex)
     {
         var lineSpan = this.Index!.GetLineSpan(lineIndex);
         // Display text only - the JSON tree below is parsed from lineSpan itself, uncapped.
-        SelectedLine = new NdJsonSelectedLine(lineIndex + 1, NdJsonLineReader.ReadDisplayLine(this.Mmap!, lineSpan));
+        SelectedLine = new NdJsonSelectedLine(lineIndex + 1, NdJsonLineReader.ReadDisplayLine(this.Bytes!, lineSpan));
 
         var requestId = selectionRequest.Begin();
         var previous = SelectedLineJsonViewModel;
@@ -290,11 +296,11 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel
 
     private async Task LoadSelectedLineJsonAsync(long requestId, FileLineSpan lineSpan)
     {
-        var trimmed = NdJsonLineReader.TrimTrailingNewline(this.Mmap!, lineSpan);
+        var trimmed = NdJsonLineReader.TrimTrailingNewline(this.Bytes!, lineSpan);
         var jsonViewModel = new JsonViewModel { DefaultExpandDepth = DefaultExpandDepth };
         try
         {
-            await jsonViewModel.LoadAsync(FilePath, trimmed.Offset, trimmed.Length);
+            await jsonViewModel.LoadAsync(Origin!, trimmed.Offset, trimmed.Length);
         }
         catch
         {
@@ -333,7 +339,7 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel
     }
 
     /// <summary>The nested per-line JsonViewModel and its settings-handler subscriptions - run
-    /// between rows disposal and the session join, same slot MemoryMappedCollectionBase's
+    /// between rows disposal and the session join, same slot VirtualizingItemsSourceBase's
     /// subclasses use for their own teardown.</summary>
     protected override void DisposeCore()
     {

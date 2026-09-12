@@ -24,7 +24,7 @@ public enum JsonTokenKind
 /// A structural (non-decoding) record of one JSON value/container token, decoded on demand
 /// from the compact <see cref="JsonStructureIndex.PackedToken"/> representation actually held
 /// in memory (see <see cref="JsonStructureIndex.GetToken"/>). Text is never materialized here -
-/// callers re-read (Offset, Length) from the backing MMapFile on demand, the same way
+/// callers re-read (Offset, Length) from the backing IByteSource on demand, the same way
 /// FileOffsetIndex/FileLineSpan works for NDJSON.
 /// </summary>
 /// <param name="Kind">StartObject/EndObject/StartArray/EndArray, or the scalar kind (String/Number/True/False/Null).</param>
@@ -63,7 +63,7 @@ public record struct JsonTokenInfo(
 /// documents; <see cref="GetToken"/> unpacks back to the friendly <see cref="JsonTokenInfo"/>
 /// shape so callers never see the packed representation.
 /// </summary>
-public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.PackedToken>, IFileIndexer
+public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.PackedToken>, IBackgroundIndex
 {
     // Sentinel NameLength stored in the packed word when a token has no property name
     // (array element or root value). One value out of the 16-bit range is reserved for
@@ -173,7 +173,7 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
     public Task IndexingTask { get; private set; } = Task.CompletedTask;
 
     /// <summary>
-    /// Number of tokens indexed so far (may grow until <see cref="AppendLogIndexBase{T}.IsComplete"/> is true).
+    /// Number of tokens indexed so far (may grow until <see cref="AppendLogIndexBase{T}.AllItemsPublished"/> is true).
     /// </summary>
     public int TokenCount => this.ItemCount;
 
@@ -200,14 +200,14 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
     // measurable against the per-token budget.
     private const int CancellationCheckMask = 0xFFFF;
 
-    // The no-options overload keeps the exact (MMapFile, IProgressReporter?, CancellationToken)
-    // shape IndexedFileSession.Start's factory delegate expects, so existing call sites keep
+    // The no-options overload keeps the exact (IByteSource, IProgressReporter?, CancellationToken)
+    // shape IndexedSourceSession.Start's factory delegate expects, so existing call sites keep
     // passing the bare method group - optional parameters don't participate in method-group
     // conversion, which is why this is an overload and not a defaulted parameter.
-    public static JsonStructureIndex StartIndexing(MMapFile file, IProgressReporter? progressReporter = null, CancellationToken cancellationToken = default)
+    public static JsonStructureIndex StartIndexing(IByteSource file, IProgressReporter? progressReporter = null, CancellationToken cancellationToken = default)
         => StartIndexing(file, default, progressReporter, cancellationToken);
 
-    public static JsonStructureIndex StartIndexing(MMapFile file, JsonIndexOptions options, IProgressReporter? progressReporter = null, CancellationToken cancellationToken = default)
+    public static JsonStructureIndex StartIndexing(IByteSource file, JsonIndexOptions options, IProgressReporter? progressReporter = null, CancellationToken cancellationToken = default)
     {
         var index = new JsonStructureIndex();
         if (options.ComputeContentHashes)
@@ -275,13 +275,13 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
     /// turn error reporting into a scan, and stopping early only costs the precision this is
     /// trying to add.
     /// </summary>
-    private static long StartOfTroubleAfter(MMapFile file, JsonTokenInfo lastGoodToken)
+    private static long StartOfTroubleAfter(IByteSource file, JsonTokenInfo lastGoodToken)
     {
         long offset = lastGoodToken.Offset + lastGoodToken.Length;
-        long limit = Math.Min(file.Length, offset + MaxTroubleSkip);
+        long limit = Math.Min(file.AvailableLength, offset + MaxTroubleSkip);
         while (offset < limit)
         {
-            byte b = file.GetSpan(offset, 1)[0];
+            byte b = file.ByteAt(offset);
             bool joining = b is (byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n' or (byte)',' or (byte)':';
             if (!joining)
                 break;
@@ -304,13 +304,13 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
     /// problem. When no line break is found nearby, the precise offset is already the best answer
     /// available and is kept.
     /// </summary>
-    private static long StartOfLineContaining(MMapFile file, long offset)
+    private static long StartOfLineContaining(IByteSource file, long offset)
     {
         long floor = Math.Max(0, offset - MaxTroubleSkip);
         long lineStart = -1;
         for (long scan = offset - 1; scan >= floor; scan--)
         {
-            if (file.GetSpan(scan, 1)[0] == (byte)'\n')
+            if (file.ByteAt(scan) == (byte)'\n')
             {
                 lineStart = scan + 1;
                 break;
@@ -320,7 +320,7 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
         if (lineStart < 0)
             return offset; // one very long line - keep the precise position
 
-        while (lineStart < offset && file.GetSpan(lineStart, 1)[0] is (byte)' ' or (byte)'\t' or (byte)'\r')
+        while (lineStart < offset && file.ByteAt(lineStart) is (byte)' ' or (byte)'\t' or (byte)'\r')
             lineStart++;
 
         return lineStart;
@@ -357,7 +357,7 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
             parent.State = JsonContentHasher.MixOrdered(parent.State, valueHash);
     }
 
-    private void Build(MMapFile file, IProgressReporter? progressReporter, CancellationToken cancellationToken)
+    private void Build(IByteSource file, IProgressReporter? progressReporter, CancellationToken cancellationToken)
     {
         try
         {
@@ -375,10 +375,9 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
         }
     }
 
-    private void BuildCore(MMapFile file, IProgressReporter? progressReporter, CancellationToken cancellationToken)
+    private void BuildCore(IByteSource file, IProgressReporter? progressReporter, CancellationToken cancellationToken)
     {
         long offset = 0;
-        long length = file.Length;
 
         var state = new JsonReaderState(new JsonReaderOptions
         {
@@ -399,18 +398,39 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
         // Progress is reported from inside the token loop in ~5% steps: parsing runs over a
         // handful of giant windows (usually exactly one), so the outer loop no longer
         // iterates often enough to hang reporting off it.
-        long reportStep = Math.Max(1, length / 20);
+        long reportStep = Math.Max(1, file.AvailableLength / 20);
         long nextReport = reportStep;
 
-        while (offset < length)
+        while (true)
         {
-            // Parse directly over the mapped bytes - zero copies. A span is capped at
+            // AvailableLength is re-read every turn, never snapshotted - for a streamed source
+            // it is only the end so far (see IByteSource.AvailableLength).
+            long available = file.AvailableLength;
+            if (offset >= available)
+            {
+                if (file.LengthSettled)
+                    break;
+
+                file.WaitForLength(offset + 1, cancellationToken);
+                continue;
+            }
+
+            // Parse directly over the source's own bytes - zero copies. A span is capped at
             // int.MaxValue bytes, so a sub-2GiB file (the common case) is parsed in one
             // pass with no reader-state resumption; larger files resume across window
-            // boundaries the same way the old copied chunks did.
-            int size = (int)Math.Min(int.MaxValue, length - offset);
-            bool isFinalBlock = offset + size >= length;
-            var reader = new Utf8JsonReader(file.GetSpan(offset, size), isFinalBlock, state);
+            // boundaries the same way the old copied chunks did. A source that serves less
+            // than the whole window just resumes more often - the JsonReaderState carry-over
+            // below is exactly the machinery for it, so neither a split source nor a still
+            // arriving one needs anything gathered here.
+            var window = file.GetContiguousSpan(offset, (int)Math.Min(int.MaxValue, available - offset));
+            if (window.IsEmpty)
+                continue;
+
+            // Only the end of *settled* data is a final block. Telling the reader a window is
+            // final when more bytes are still to come would make it reject the truncated token
+            // at the end rather than wait for the rest of it.
+            bool isFinalBlock = file.LengthSettled && offset + window.Length >= available;
+            var reader = new Utf8JsonReader(window, isFinalBlock, state);
 
             while (reader.Read())
             {
@@ -425,12 +445,25 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
                     ? (int)reader.ValueSequence.Length
                     : reader.ValueSpan.Length;
 
+                // Hash input, when hashing is on: exactly the bytes the reader is already
+                // holding, so take them from it rather than re-reading the source at
+                // rawTokenOffset - same bytes by construction (both are derived from
+                // ValueSpan above), one fewer bounds-checked read per hashed token. A
+                // ValueSequence means the token straddles a parse window, which only happens
+                // above the 2GiB window and is the one case needing them gathered into one
+                // span; that path is unchanged from re-reading the source directly.
+                ReadOnlySpan<byte> rawToken = hashLog is null
+                    ? default
+                    : reader.HasValueSequence
+                        ? file.RequireContiguous(rawTokenOffset, rawTokenLength)
+                        : reader.ValueSpan;
+
                 if (tokenType == JsonTokenType.PropertyName)
                 {
                     pendingNameOffset = rawTokenOffset;
                     pendingNameLength = rawTokenLength;
                     if (hashLog is not null)
-                        pendingNameHash = JsonContentHasher.HashStringToken(ref reader, file.GetSpan(rawTokenOffset, rawTokenLength));
+                        pendingNameHash = JsonContentHasher.HashStringToken(ref reader, rawToken);
                     continue;
                 }
 
@@ -502,8 +535,8 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
                         {
                             ulong scalarHash = tokenType switch
                             {
-                                JsonTokenType.String => JsonContentHasher.HashStringToken(ref reader, file.GetSpan(rawTokenOffset, rawTokenLength)),
-                                JsonTokenType.Number => JsonContentHasher.HashNumber(file.GetSpan(rawTokenOffset, rawTokenLength)),
+                                JsonTokenType.String => JsonContentHasher.HashStringToken(ref reader, rawToken),
+                                JsonTokenType.Number => JsonContentHasher.HashNumber(rawToken),
                                 JsonTokenType.True => JsonContentHasher.TrueHash,
                                 JsonTokenType.False => JsonContentHasher.FalseHash,
                                 _ => JsonContentHasher.NullHash
@@ -544,7 +577,7 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
                 long consumedSoFar = offset + reader.BytesConsumed;
                 if (consumedSoFar >= nextReport)
                 {
-                    progressReporter?.Report("Indexing", consumedSoFar, length);
+                    progressReporter?.Report("Indexing", consumedSoFar, available);
                     while (nextReport <= consumedSoFar)
                         nextReport += reportStep;
                 }
@@ -554,12 +587,24 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
             state = reader.CurrentState;
 
             if (consumed == 0 && !isFinalBlock)
-                throw new NotSupportedException("A single JSON token larger than 2 GiB is not supported.");
+            {
+                // No progress on a non-final window means the window ends mid-token. Either the
+                // rest of that token has not arrived yet - wait for it - or the data is all here
+                // and one token genuinely exceeds a full window, which is unsupported.
+                if (!file.LengthSettled && offset + window.Length >= available)
+                {
+                    file.WaitForLength(available + 1, cancellationToken);
+                    continue;
+                }
+
+                throw new NotSupportedException(
+                    $"A single JSON token larger than this parse window ({window.Length} bytes) is not supported.");
+            }
 
             offset += consumed;
         }
 
-        progressReporter?.Report("Indexing", length, length);
+        progressReporter?.Report("Indexing", offset, offset);
     }
 
     /// <summary>

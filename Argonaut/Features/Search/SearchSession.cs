@@ -19,30 +19,31 @@ public readonly record struct SearchMatch(long Offset, int Length);
 /// bare path instead would silently scan the whole parent file and report offsets the
 /// sub-document's index cannot resolve.
 /// </summary>
-public readonly record struct ScanTarget(string Path, long Offset = 0, long Length = -1);
+public readonly record struct ScanTarget(IByteOrigin Origin, long Offset = 0, long Length = -1);
 
 /// <summary>
-/// One background scan of a file for a search term. Matches stream into a lock-free append log
-/// as they're found, so the UI can step through results ("find next") while the scan is still
-/// running, exactly the way the file indexers publish their tokens/lines - same
+/// One background scan of a document for a search term. Matches stream into a lock-free append
+/// log as they're found, so the UI can step through results ("find next") while the scan is
+/// still running, exactly the way the document indexers publish their tokens/lines - same
 /// single-writer/multi-reader machinery via AppendLogIndexBase.
 ///
-/// Unlike the file indexers, a search session is deliberately independent: it owns its own
+/// Unlike those indexers, a search session is deliberately independent: it owns its own
 /// CancellationTokenSource (exposed as <see cref="RequestStop"/>) rather than taking a caller's
-/// token, because searches may be started and stopped freely while the file's indexing is
-/// still running. For the same reason its IsComplete means "the scan has stopped" - finished,
-/// cancelled, capped, or unable to read the file (see <see cref="WasCancelled"/>/
-/// <see cref="HitMatchCap"/>/<see cref="OpenFailure"/>) - which is why it does not implement
-/// IFileIndexer.
+/// token, because searches may be started and stopped freely while the document's indexing is
+/// still running. It is also not an index OF the document, and stopping early at the match cap
+/// is a normal outcome rather than a partial result - so it does not implement
+/// <see cref="IBackgroundIndex"/>, and callers read <see cref="WasCancelled"/>/
+/// <see cref="HitMatchCap"/>/<see cref="OpenFailure"/> to tell its stop reasons apart.
 ///
 /// Knows nothing about JSON structure or the display: it reports byte offsets only. Mapping
 /// an offset to a token/line and revealing it is the navigators' job.
 ///
-/// The scan opens its OWN mapping of the target, one chunk at a time. Nothing outside this
-/// class owns memory it reads, so a document can be torn down while a scan over the same path
-/// runs, and stopping a scan is never a precondition for releasing anything.
+/// The scan opens its OWN source over the target, one chunk at a time, from the
+/// <see cref="IByteOrigin"/> in its <see cref="ScanTarget"/>. Nothing outside this class owns
+/// memory it reads, so a document can be torn down while a scan over the same origin runs, and
+/// stopping a scan is never a precondition for releasing anything.
 /// </summary>
-public sealed class FileSearchSession : AppendLogIndexBase<SearchMatch>, IMatchSource, IDisposable
+public sealed class SearchSession : AppendLogIndexBase<SearchMatch>, IMatchSource, IDisposable
 {
     private const int DefaultChunkSize = 4 * 1024 * 1024;
     private const int DefaultMaxMatches = 1_000_000;
@@ -52,20 +53,20 @@ public sealed class FileSearchSession : AppendLogIndexBase<SearchMatch>, IMatchS
 
     private readonly CancellationTokenSource stopSource = new();
 
-    // volatile: read lock-free after IsComplete is observed true; written by the scan thread
-    // BEFORE MarkComplete's volatile store of the completion flag, so any reader seeing
-    // IsComplete also sees these.
+    // volatile: read lock-free after AllItemsPublished is observed true; written by the scan thread
+    // BEFORE MarkAllItemsPublished's volatile store of the completion flag, so any reader seeing
+    // AllItemsPublished also sees these.
     private volatile bool cancelled;
     private volatile bool hitMatchCap;
     private volatile string? openFailure;
 
-    private FileSearchSession()
+    private SearchSession()
     {
     }
 
     public Task ScanTask { get; private set; } = Task.CompletedTask;
 
-    /// <summary>Matches found so far (grows until <see cref="AppendLogIndexBase{T}.IsComplete"/> is true).</summary>
+    /// <summary>Matches found so far (grows until <see cref="AppendLogIndexBase{T}.AllItemsPublished"/> is true).</summary>
     public int MatchCount => this.ItemCount;
 
     /// <summary>True if the scan stopped because <see cref="RequestStop"/> was called.</summary>
@@ -94,11 +95,11 @@ public sealed class FileSearchSession : AppendLogIndexBase<SearchMatch>, IMatchS
     /// Starts scanning <paramref name="target"/> in the background and returns immediately.
     /// Never throws for an unreadable target - see <see cref="OpenFailure"/>.
     /// </summary>
-    public static FileSearchSession Start(ScanTarget target, ISearchMatcher matcher,
+    public static SearchSession Start(ScanTarget target, ISearchMatcher matcher,
         IProgressReporter? progressReporter = null,
         int chunkSize = DefaultChunkSize, int maxMatches = DefaultMaxMatches)
     {
-        var session = new FileSearchSession();
+        var session = new SearchSession();
         session.ScanTask = Task.Run(() => session.Scan(target, matcher, progressReporter, chunkSize, maxMatches));
         return session;
     }
@@ -124,9 +125,9 @@ public sealed class FileSearchSession : AppendLogIndexBase<SearchMatch>, IMatchS
 
         try
         {
-            // The real data length, from the OS, before anything is mapped - never an
+            // The real data length, from the origin, before anything is opened - never an
             // accessor capacity (see CLAUDE.md).
-            length = target.Length < 0 ? new FileInfo(target.Path).Length : target.Length;
+            length = target.Length < 0 ? target.Origin.AvailableLength : target.Length;
             if (length == 0)
                 return;
 
@@ -151,15 +152,27 @@ public sealed class FileSearchSession : AppendLogIndexBase<SearchMatch>, IMatchS
 
                 int size = (int)Math.Min(effectiveChunk, length - chunkStart);
 
-                // A mapping per iteration is deliberate, not an oversight. Mapping the whole
-                // file (what the indexers do) would leave every page this scan touches resident
-                // in a SECOND mapping beside the document's own: double-counted in RSS, and a
-                // multi-GB unmap at the end contending for the process-wide address-space lock
-                // with the document's own unmap on the UI thread at close. One chunk caps both,
-                // for tens of microseconds against ~1ms of scanning per chunk.
-                using (var view = new MMapFile(target.Path, target.Offset + chunkStart, size))
+                // A source per iteration is deliberate, not an oversight, and it is also why
+                // search needs an IByteOrigin rather than being handed the document's own
+                // source. Two reasons, and they pull the same way:
+                //
+                // Lifetime: this scan runs on a background thread that FindController cancels
+                // and forgets - it is never joined - so reading the document's source would let
+                // the session release it mid-scan, which for a mapping is a native
+                // use-after-free rather than an exception. Owning every chunk makes that
+                // impossible by construction.
+                //
+                // Footprint: opening the whole document (what the indexers do) would leave every
+                // page this scan touches resident in a SECOND mapping beside the document's own -
+                // double-counted in RSS, with a multi-GB unmap at the end contending for the
+                // process-wide address-space lock against the document's own unmap on the UI
+                // thread at close. One chunk caps both, for tens of microseconds against ~1ms of
+                // scanning per chunk. Over an in-memory origin a chunk is just a window, so the
+                // same loop costs nothing there.
+                var view = target.Origin.OpenRange(target.Offset + chunkStart, size);
+                try
                 {
-                    var chunk = view.GetSpan(0, size);
+                    var chunk = view.RequireContiguous(0, size);
 
                     int from = (int)(searchFrom - chunkStart);
                     while (matcher.TryFindNext(chunk, from, out int matchIndex, out int matchLength))
@@ -180,6 +193,10 @@ public sealed class FileSearchSession : AppendLogIndexBase<SearchMatch>, IMatchS
                             return;
                     }
                 }
+                finally
+                {
+                    view.Release();
+                }
 
                 if (chunkStart + size >= length)
                     return;
@@ -191,8 +208,10 @@ public sealed class FileSearchSession : AppendLogIndexBase<SearchMatch>, IMatchS
         }
         catch (Exception ex)
         {
-            // The scan opens the file itself, so an unreadable/vanished/locked target is an
-            // outcome rather than a fault. Caught wholesale so ScanTask NEVER faults: nothing
+            // The scan opens its own sources, so an unreadable/vanished/locked target is an
+            // outcome rather than a fault - including a temp-file-backed origin disposed by a
+            // document close while this scan was still running, which reports as a failed search
+            // rather than taking the process with it. Caught wholesale so ScanTask NEVER faults: nothing
             // joins it any more (FindController cancels and forgets), and an unobserved
             // faulted task would surface at finalization as an UnobservedTaskException.
             openFailure = ex.Message;
@@ -202,7 +221,7 @@ public sealed class FileSearchSession : AppendLogIndexBase<SearchMatch>, IMatchS
             if (ct.IsCancellationRequested)
                 cancelled = true;
 
-            this.MarkComplete();
+            this.MarkAllItemsPublished();
             progressReporter?.Report("Searching", length, length);
         }
     }

@@ -31,7 +31,7 @@ public sealed class JsonDiffSearchNavigator : ISearchNavigator
     {
         this.viewModel = viewModel;
         this.session = session;
-        this.scanTargets = new[] { new ScanTarget(session.LeftPath), new ScanTarget(session.RightPath) };
+        this.scanTargets = new[] { new ScanTarget(session.LeftOrigin), new ScanTarget(session.RightOrigin) };
     }
 
     /// <summary>Index into <see cref="ScanTargets"/> of the left (source) document.</summary>

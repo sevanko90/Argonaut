@@ -20,10 +20,10 @@ public class JsonArrayRowCollectionTests
         File.WriteAllBytes(path, Encoding.UTF8.GetBytes(json));
         try
         {
-            using var session = JsonArrayTableSession.Start(path, 0, new FileInfo(path).Length);
+            using var session = LoadFromPath.StartArrayTable(path, 0, new FileInfo(path).Length);
             await session.IndexingTask;
 
-            using var rows = new JsonArrayRowCollection(session.Elements, session.Inner.Index, session.Inner.File,
+            using var rows = new JsonArrayRowCollection(session.Elements, session.Inner.Index, session.Inner.Bytes,
                 structure, RoutesFor(structure, mode), mode);
             assert(rows);
         }
@@ -52,10 +52,10 @@ public class JsonArrayRowCollectionTests
         File.WriteAllBytes(path, Encoding.UTF8.GetBytes(json));
         try
         {
-            using var session = JsonArrayTableSession.Start(path, 0, new FileInfo(path).Length);
+            using var session = LoadFromPath.StartArrayTable(path, 0, new FileInfo(path).Length);
             await session.IndexingTask;
 
-            using var rows = new JsonArrayRowCollection(session.Elements, session.Inner.Index, session.Inner.File,
+            using var rows = new JsonArrayRowCollection(session.Elements, session.Inner.Index, session.Inner.Bytes,
                 structure, routes, JsonArrayColumnMode.ByProperty);
             assert(rows);
         }

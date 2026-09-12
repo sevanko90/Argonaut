@@ -6,7 +6,7 @@ namespace Argonaut.Features.Json;
 
 /// <summary>
 /// Owns the lifetime pair behind one array-as-table document: an
-/// <see cref="IndexedFileSession{TIndex}"/> over the array's own byte range, plus the
+/// <see cref="IndexedSourceSession{TIndex}"/> over the array's own byte range, plus the
 /// <see cref="JsonArrayElementIndex"/> that reads that session's token index for as long as it
 /// runs. Same job <see cref="Diff.JsonDiffSession"/> does for a diff, with one file session
 /// instead of two.
@@ -41,7 +41,7 @@ public sealed class JsonArrayTableSession : IDocumentSession
 
     /// <summary>The sub-range mapping and its token scan. The element index reads this index for
     /// its whole lifetime, which is what fixes the disposal order below.</summary>
-    public IndexedFileSession<JsonStructureIndex> Inner { get; }
+    public IndexedSourceSession<JsonStructureIndex> Inner { get; }
 
     /// <summary>Ordinal addressing over the array's direct children - the table's row source.</summary>
     public JsonArrayElementIndex Elements { get; }
@@ -66,7 +66,7 @@ public sealed class JsonArrayTableSession : IDocumentSession
     /// </summary>
     public IndexFailure? Failure => this.Inner.Failure ?? this.Elements.Failure;
 
-    private JsonArrayTableSession(IndexedFileSession<JsonStructureIndex> inner, JsonArrayElementIndex elements, CancellationTokenSource elementCts)
+    private JsonArrayTableSession(IndexedSourceSession<JsonStructureIndex> inner, JsonArrayElementIndex elements, CancellationTokenSource elementCts)
     {
         this.Inner = inner;
         this.Elements = elements;
@@ -74,21 +74,21 @@ public sealed class JsonArrayTableSession : IDocumentSession
     }
 
     /// <summary>
-    /// Maps <paramref name="length"/> bytes of <paramref name="path"/> starting at
+    /// Takes <paramref name="length"/> bytes of <paramref name="origin"/> starting at
     /// <paramref name="offset"/> - which must be exactly the array's <c>[</c>…<c>]</c> range -
     /// indexes it as a JSON document in its own right, and starts walking its elements.
     /// Ownership of everything started transfers to the returned session; a failure partway
     /// disposes what was already started before rethrowing.
     /// </summary>
-    public static JsonArrayTableSession Start(string path, long offset, long length, IProgressReporter? progressReporter = null)
+    public static JsonArrayTableSession Start(IByteOrigin origin, long offset, long length, IProgressReporter? progressReporter = null)
     {
-        var inner = IndexedFileSession<JsonStructureIndex>.Start(
-            new MMapFile(path, offset, length), JsonStructureIndex.StartIndexing, progressReporter);
+        var inner = IndexedSourceSession<JsonStructureIndex>.Start(
+            origin.OpenRange(offset, length), JsonStructureIndex.StartIndexing, progressReporter);
 
         var elementCts = CancellationTokenSource.CreateLinkedTokenSource(inner.TearingDown);
         try
         {
-            // Token 0: the mapping IS the array, so its root value is the array itself.
+            // Token 0: the sub-range IS the array, so its root value is the array itself.
             var elements = JsonArrayElementIndex.Start(inner.Index, 0, elementCts.Token);
             return new JsonArrayTableSession(inner, elements, elementCts);
         }

@@ -7,7 +7,7 @@ namespace Argonaut.Features.Search;
 /// <summary>
 /// Display-side strategy for one open document: hands the search engine its scan target(s) and
 /// turns an engine result (a byte offset) into a visible, highlighted selection. This is
-/// the seam that keeps FileSearchSession fully decoupled from the viewers - targets in,
+/// the seam that keeps SearchSession fully decoupled from the viewers - targets in,
 /// reveals out. Note it hands over a <see cref="ScanTarget"/> (path, and range for a
 /// sub-document), never a mapping: the engine opens what it reads, so nothing here couples
 /// the document's mapping lifetime to a scan's.

@@ -37,7 +37,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
 
     internal RawSegmentIndex? Index => this.session?.Index;
 
-    internal MMapFile? Mmap => this.session?.File;
+    internal IByteSource? Bytes => this.session?.Bytes;
 
     /// <summary>Fires when this document begins tearing down, for
     /// <see cref="ISearchNavigator.DocumentTearingDown"/>. Deliberately the mapping-lifetime
@@ -147,7 +147,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
         CaretReadout = this.caret is null || this.session is null
             ? null
             : RawCaretReadout.Describe(
-                this.session.Index, this.session.File, this.caret.Caret, this.caret.Selection);
+                this.session.Index, this.session.Bytes, this.caret.Caret, this.caret.Selection);
 
         OnPropertyChanged(nameof(CaretCharacterText));
         OnPropertyChanged(nameof(CaretPositionText));
@@ -239,13 +239,14 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
         }
     }
 
-    public async Task LoadAsync(string path, IProgressReporter? progressReporter = null)
+    public async Task LoadAsync(IByteOrigin origin, IProgressReporter? progressReporter = null)
     {
-        this.FilePath = path;
+        this.Origin = origin;
+        this.FilePath = origin.Path ?? origin.DisplayName;
         this.wrapWidth = RawWrapWidthPreference.Load();
         this.toolbar = new RawToolbarViewModel(this.wrapWidth, SetWrapWidth);
 
-        var session = RawIndexSession.Start(new MMapFile(path), this.wrapWidth, progressReporter);
+        var session = RawIndexSession.Start(origin.Open(), this.wrapWidth, progressReporter);
         this.session = session;
 
         // Await a small initial batch so the first paint isn't an empty list; RowCount then
@@ -255,13 +256,13 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
         if (session.Index.Failure is { } failure)
             IndexFailure = failure;
 
-        this.rows = new RawRowCollection(session.Index, session.File);
-        Caret = new RawCaretController(session.Index, session.File);
+        this.rows = new RawRowCollection(session.Index, session.Bytes);
+        Caret = new RawCaretController(session.Index, session.Bytes);
 
         OnPropertyChanged(nameof(Rows));
         OnPropertyChanged(nameof(RowCount));
 
-        StatusText = $"{path} — {RowCount:N0} rows indexed so far";
+        StatusText = $"{FilePath} — {RowCount:N0} rows indexed so far";
         MonitorIndexing();
     }
 
@@ -292,14 +293,14 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
         this.session.RestartIndex(bytes);
 
         var old = this.rows;
-        this.rows = new RawRowCollection(this.session.Index, this.session.File);
+        this.rows = new RawRowCollection(this.session.Index, this.session.Bytes);
         old?.Dispose();
 
         // A byte offset means the same thing at any wrap width, so the caret carries across the
         // re-index; only the row index it consults is replaced.
         long caretOffset = Caret?.Caret.Offset ?? 0;
         var selection = Caret?.Selection ?? default;
-        Caret = new RawCaretController(this.session.Index, this.session.File);
+        Caret = new RawCaretController(this.session.Index, this.session.Bytes);
         if (selection.IsEmpty)
         {
             Caret.PlaceAt(caretOffset);

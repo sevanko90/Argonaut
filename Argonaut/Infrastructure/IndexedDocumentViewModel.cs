@@ -25,7 +25,7 @@ namespace Argonaut.Infrastructure;
 /// replaces its field and needs no re-registration.
 ///
 /// Cost is nil at this layer: one instance per open document, at most one live at a time.
-/// The per-element hot path (<see cref="MemoryMappedCollectionBase.GetItem"/>) is untouched.
+/// The per-element hot path (<see cref="VirtualizingItemsSourceBase.GetItem"/>) is untouched.
 /// </summary>
 public abstract class IndexedDocumentViewModel : ObservableObject, IDocumentViewModel
 {
@@ -48,6 +48,9 @@ public abstract class IndexedDocumentViewModel : ObservableObject, IDocumentView
     /// the same guarantee for free.
     /// </summary>
     protected bool IsDisposed => disposed;
+
+    /// <summary>See <see cref="IDocumentViewModel.Origin"/>. Set once, by the load.</summary>
+    public IByteOrigin? Origin { get; protected set; }
 
     public string FilePath
     {

@@ -7,11 +7,11 @@ using Argonaut.Infrastructure;
 namespace Argonaut.Tests;
 
 /// <summary>
-/// Verifies both file indexers behave identically when seen through <see cref="IFileIndexer"/>:
+/// Verifies both indexers behave identically when seen through <see cref="IBackgroundIndex"/>:
 /// the interface members mirror the indexer-specific ones, so generic consumers (the
-/// completion monitor, IndexedFileSession) can rely on either implementation.
+/// completion monitor, IndexedSourceSession) can rely on either implementation.
 /// </summary>
-public class FileIndexerInterfaceTests
+public class BackgroundIndexInterfaceTests
 {
     private static void WithFile(string content, Action<MMapFile> assert)
     {
@@ -34,10 +34,10 @@ public class FileIndexerInterfaceTests
         WithFile("one\ntwo\nthree\n", file =>
         {
             var index = FileOffsetIndex.StartIndexing(file);
-            IFileIndexer indexer = index;
+            IBackgroundIndex indexer = index;
             indexer.IndexingTask.GetAwaiter().GetResult();
 
-            Assert.True(indexer.IsComplete);
+            Assert.True(indexer.AllItemsPublished);
             Assert.Equal(index.LineCount, indexer.ItemCount);
             Assert.Equal(3, indexer.ItemCount);
             Assert.Same(index.IndexingTask, indexer.IndexingTask);
@@ -50,10 +50,10 @@ public class FileIndexerInterfaceTests
         WithFile("""{"a":1,"b":[true,null]}""", file =>
         {
             var index = JsonStructureIndex.StartIndexing(file);
-            IFileIndexer indexer = index;
+            IBackgroundIndex indexer = index;
             indexer.IndexingTask.GetAwaiter().GetResult();
 
-            Assert.True(indexer.IsComplete);
+            Assert.True(indexer.AllItemsPublished);
             Assert.Equal(index.TokenCount, indexer.ItemCount);
             Assert.Same(index.IndexingTask, indexer.IndexingTask);
         });
@@ -65,10 +65,10 @@ public class FileIndexerInterfaceTests
         WithFile("one\ntwo\nthree\n", file =>
         {
             var index = RawSegmentIndex.StartIndexing(file, 80);
-            IFileIndexer indexer = index;
+            IBackgroundIndex indexer = index;
             indexer.IndexingTask.GetAwaiter().GetResult();
 
-            Assert.True(indexer.IsComplete);
+            Assert.True(indexer.AllItemsPublished);
             Assert.Equal(3, index.RowCount);
             Assert.Equal(1, indexer.ItemCount); // sparse: one anchor covers the first 64 rows
             Assert.Same(index.IndexingTask, indexer.IndexingTask);
@@ -80,9 +80,9 @@ public class FileIndexerInterfaceTests
     {
         WithFile("{ not json", file =>
         {
-            IFileIndexer indexer = JsonStructureIndex.StartIndexing(file);
+            IBackgroundIndex indexer = JsonStructureIndex.StartIndexing(file);
             Assert.ThrowsAnyAsync<Exception>(() => indexer.IndexingTask).GetAwaiter().GetResult();
-            Assert.True(indexer.IsComplete);
+            Assert.True(indexer.AllItemsPublished);
 
             var failure = Assert.IsType<JsonStructureIndex>(indexer).Failure;
             Assert.NotNull(failure);

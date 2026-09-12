@@ -283,7 +283,7 @@ public sealed class JsonDiffViewModel : IndexedDocumentViewModel
             // A genuine right-side row (Added, or the destination side of a Moved record) -
             // its own token gives the real path directly.
             if (row.Right is { } right && !ReferenceEquals(row.Right, row.Left))
-                return JsonPathBuilder.Build(s.Right.Index, s.Right.File, right.TokenIndex);
+                return JsonPathBuilder.Build(s.Right.Index, s.Right.Bytes, right.TokenIndex);
 
             // A mirrored row (unchanged content walked off the left document into both
             // panes): the left path is NOT valid here whenever an ancestor moved - e.g.
@@ -294,8 +294,8 @@ public sealed class JsonDiffViewModel : IndexedDocumentViewModel
             if (row.Left is { } mirrored && row.MirrorLeftContainerToken is { } leftContainer
                 && row.MirrorRightContainerToken is { } rightContainer)
             {
-                string basePath = JsonPathBuilder.Build(s.Right.Index, s.Right.File, rightContainer);
-                var suffix = JsonPathBuilder.BuildRelativeSegments(s.Left.Index, s.Left.File, mirrored.TokenIndex, leftContainer);
+                string basePath = JsonPathBuilder.Build(s.Right.Index, s.Right.Bytes, rightContainer);
+                var suffix = JsonPathBuilder.BuildRelativeSegments(s.Left.Index, s.Left.Bytes, mirrored.TokenIndex, leftContainer);
                 var sb = new System.Text.StringBuilder(basePath);
                 foreach (var segment in suffix)
                     sb.Append(segment.Label);
@@ -303,8 +303,8 @@ public sealed class JsonDiffViewModel : IndexedDocumentViewModel
             }
         }
 
-        return row.Left is { } left ? JsonPathBuilder.Build(s.Left.Index, s.Left.File, left.TokenIndex)
-            : row.Right is { } r ? JsonPathBuilder.Build(s.Right.Index, s.Right.File, r.TokenIndex)
+        return row.Left is { } left ? JsonPathBuilder.Build(s.Left.Index, s.Left.Bytes, left.TokenIndex)
+            : row.Right is { } r ? JsonPathBuilder.Build(s.Right.Index, s.Right.Bytes, r.TokenIndex)
             : null;
     }
 
@@ -340,14 +340,15 @@ public sealed class JsonDiffViewModel : IndexedDocumentViewModel
     /// (it renders the left-document preview immediately); indexing and the diff continue
     /// in the background, monitored for status/failure updates.
     /// </summary>
-    public async Task LoadAsync(string leftPath, string rightPath)
+    public async Task LoadAsync(IByteOrigin leftOrigin, IByteOrigin rightOrigin)
     {
-        FilePath = leftPath;
-        RightFilePath = rightPath;
+        Origin = leftOrigin;
+        FilePath = leftOrigin.Path ?? leftOrigin.DisplayName;
+        RightFilePath = rightOrigin.Path ?? rightOrigin.DisplayName;
 
-        var session = JsonDiffSession.Start(leftPath, rightPath,
-            leftProgress: new ProgressToStatus(this, "Indexing " + Path.GetFileName(leftPath)),
-            rightProgress: new ProgressToStatus(this, "Indexing " + Path.GetFileName(rightPath)),
+        var session = JsonDiffSession.Start(leftOrigin, rightOrigin,
+            leftProgress: new ProgressToStatus(this, "Indexing " + leftOrigin.DisplayName),
+            rightProgress: new ProgressToStatus(this, "Indexing " + rightOrigin.DisplayName),
             diffProgress: new ProgressToStatus(this, "Comparing"));
         this.session = session;
 
@@ -357,7 +358,7 @@ public sealed class JsonDiffViewModel : IndexedDocumentViewModel
             goToNextDiff: GoToNextDiff);
 
         // A small initial batch so the preview's first paint isn't empty (mirrors
-        // JsonViewModel.LoadCore); a tiny file completes the wait via MarkComplete instead.
+        // JsonViewModel.LoadCore); a tiny file completes the wait via MarkAllItemsPublished instead.
         await session.Left.Index.WaitForTokenCountAsync(250);
         if (IsDisposed)
             return;
@@ -403,7 +404,7 @@ public sealed class JsonDiffViewModel : IndexedDocumentViewModel
             return;
         }
 
-        if (!current.Diff.IsComplete)
+        if (!current.Diff.AllItemsPublished)
             return;
 
         StatusText = Summarize(current.Diff);

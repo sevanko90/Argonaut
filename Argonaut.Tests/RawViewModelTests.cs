@@ -104,7 +104,7 @@ public sealed class RawViewModelTests : IDisposable
             await vm.LoadAsync(WriteNewlinelessFile());
             await vm.IndexingTask;
 
-            var mmapBefore = vm.Mmap;
+            var mmapBefore = vm.Bytes;
             var rowsBefore = vm.Rows;
             var indexBefore = vm.Index;
             int generationBefore = vm.IndexGeneration;
@@ -112,7 +112,7 @@ public sealed class RawViewModelTests : IDisposable
             vm.SetWrapWidth(80);
             await vm.IndexingTask;
 
-            Assert.Same(mmapBefore, vm.Mmap);          // the mapping must survive (live search safety)
+            Assert.Same(mmapBefore, vm.Bytes);          // the mapping must survive (live search safety)
             Assert.NotSame(rowsBefore, vm.Rows);       // fresh ItemsSource instance
             Assert.NotSame(indexBefore, vm.Index);
             Assert.Equal(generationBefore + 1, vm.IndexGeneration);
@@ -130,7 +130,7 @@ public sealed class RawViewModelTests : IDisposable
         }
     }
 
-    /// <summary>Blocks a search scan mid-window until released - see FileSearchSessionTests'
+    /// <summary>Blocks a search scan mid-window until released - see SearchSessionTests'
     /// identical BlockingMatcher for why this makes the interleaving deterministic.</summary>
     private sealed class BlockingMatcher : ISearchMatcher
     {
@@ -165,7 +165,7 @@ public sealed class RawViewModelTests : IDisposable
             await vm.LoadAsync(WriteNewlinelessFile());
             await vm.IndexingTask;
 
-            var session = FileSearchSession.Start(new ScanTarget(vm.FilePath), matcher);
+            var session = SearchSession.Start(LoadFromPath.ScanTargetFor(vm.FilePath), matcher);
 
             matcher.Entered.Wait(); // the scan is now provably mid-chunk
 

@@ -27,7 +27,7 @@ internal static class RawRowBoundary
     /// </summary>
     internal static (long End, bool SoftWrap) Next(IByteSource source, int wrapWidth, long start)
     {
-        long length = source.Length;
+        long length = source.AvailableLength;
         int searchLength = (int)Math.Min(wrapWidth, length - start);
         if (IndexOfNewline(source, start, searchLength) is long newlineOffset)
             return (newlineOffset + 1, false);

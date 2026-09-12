@@ -4,7 +4,7 @@ namespace Argonaut.Features.Search;
 
 /// <summary>
 /// Strategy for locating matches inside one chunk of raw file bytes. Implementations are
-/// stateless with respect to file position - <see cref="FileSearchSession"/> owns the chunked
+/// stateless with respect to file position - <see cref="SearchSession"/> owns the chunked
 /// walk over the file and hands each chunk here. This is the extension point for future
 /// match kinds (e.g. regex, or a decoded-text matcher that understands JSON string escapes).
 /// </summary>

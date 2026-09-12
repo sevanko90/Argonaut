@@ -54,7 +54,7 @@ public static class RawWordStops
         ArgumentNullException.ThrowIfNull(rows);
         ArgumentNullException.ThrowIfNull(source);
 
-        long clamped = Math.Clamp(offset, 0, source.Length);
+        long clamped = Math.Clamp(offset, 0, source.AvailableLength);
         var empty = (clamped, clamped);
 
         if (rows.RowCount == 0)

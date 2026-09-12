@@ -1,6 +1,7 @@
 using System;
 using System.ComponentModel;
 using System.Linq;
+using System.Text;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -41,7 +42,8 @@ public partial class MainWindow : Window
         InitializeComponent();
 
         viewModel = new MainWindowViewModel(
-            message => ConfirmDialog.Show(this, message));
+            message => ConfirmDialog.Show(this, message),
+            readClipboardBytes: ReadClipboardBytesAsync);
         DataContext = viewModel;
         viewModel.PropertyChanged += OnViewModelPropertyChanged;
         viewModel.FindStatusChanged += status => FindBarControl.SetStatus(status);
@@ -52,6 +54,8 @@ public partial class MainWindow : Window
         ArrayTableService.Requested += request => _ = viewModel.OpenArrayTableAsync(request);
 
         EmptyState.ChooseFileRequested += async (_, _) => await BrowseForFile();
+        EmptyState.PasteRequested += async (_, _) => await viewModel.PasteAsync();
+        EmptyState.SetPasteAvailable(viewModel.CanPaste);
         EmptyState.OpenRecentFileRequested += (_, path) => viewModel.OpenRecentFile(path);
         EmptyState.ClearRecentFilesRequested += (_, _) => viewModel.ClearRecentFiles();
         EmptyState.SetRecentFiles(viewModel.RecentFiles);
@@ -68,6 +72,69 @@ public partial class MainWindow : Window
         AddHandler(KeyDownEvent, OnGlobalKeyDown, Avalonia.Interactivity.RoutingStrategies.Tunnel);
 
         _ = CheckForUpdatesOnStartupAsync();
+    }
+
+    /// <summary>
+    /// Platform formats that hand text over as UTF-8 bytes, in preference order. Taking one of
+    /// these skips a whole representation: Avalonia's TryGetTextAsync yields a
+    /// <see cref="string"/>, so a paste would arrive as UTF-16 (two bytes per ASCII character,
+    /// on the large object heap at any size worth worrying about) and then be transcoded to the
+    /// UTF-8 the indexers read. Asking for the bytes directly does neither.
+    ///
+    /// macOS requires a Uniform Type Identifier; X11 and Wayland use mime types. Windows has no
+    /// standard UTF-8 clipboard format, so it falls through to the string path - which is why
+    /// this is a preference rather than a requirement.
+    /// </summary>
+    private static readonly string[] Utf8ClipboardFormats =
+    {
+        "public.utf8-plain-text",        // macOS
+        "text/plain;charset=utf-8",      // X11 / Wayland
+    };
+
+    /// <summary>
+    /// The clipboard's text as UTF-8 bytes, or null when there is none (or no clipboard at all).
+    /// Passed to the view model as a delegate so it stays free of Avalonia's TopLevel, and so
+    /// tests can supply clipboard contents without one.
+    ///
+    /// There is no way to ask how large the contents are first, and no way to read them
+    /// incrementally: every path here returns the whole payload in one allocation. That is a
+    /// limit of the clipboard APIs rather than of this method - the platform ones that could do
+    /// better (Windows can report an HGLOBAL's size before copying it; X11's INCR protocol and
+    /// Wayland's file descriptor are genuinely incremental) disagree with each other enough that
+    /// three native backends would be needed to exploit it, for a case the size cap already
+    /// bounds. See MainWindowViewModel.PasteAsync.
+    /// </summary>
+    private async Task<byte[]?> ReadClipboardBytesAsync()
+    {
+        var clipboard = GetTopLevel(this)?.Clipboard;
+        if (clipboard is null)
+            return null;
+
+        var transfer = await clipboard.TryGetDataAsync();
+        if (transfer is null)
+            return null;
+
+        try
+        {
+            // Formats can be inspected without fetching anything, so preferring a UTF-8 format
+            // costs nothing when the clipboard does not offer one.
+            foreach (var identifier in Utf8ClipboardFormats)
+            {
+                var format = DataFormat.CreateBytesPlatformFormat(identifier);
+                if (!transfer.Contains(format))
+                    continue;
+
+                if (await transfer.TryGetValueAsync(format) is { Length: > 0 } utf8)
+                    return utf8;
+            }
+
+            string? text = await transfer.TryGetTextAsync();
+            return text is null ? null : Encoding.UTF8.GetBytes(text);
+        }
+        finally
+        {
+            (transfer as IDisposable)?.Dispose();
+        }
     }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -115,6 +182,17 @@ public partial class MainWindow : Window
                 e.Handled = true;
             }
 
+            return;
+        }
+
+        // Only while nothing is open. Once the raw view's editing lands, plain Ctrl+V inside it
+        // has to mean "paste into the document", not "replace the document" - so this shortcut
+        // deliberately does not exist when there is a document to paste into. The empty state's
+        // button is the affordance that always works.
+        if (e.Key == Key.V && cmdOrCtrl && !viewModel.IsFileOpen && viewModel.CanPaste)
+        {
+            _ = viewModel.PasteAsync();
+            e.Handled = true;
             return;
         }
 

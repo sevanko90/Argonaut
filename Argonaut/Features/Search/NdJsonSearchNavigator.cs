@@ -26,7 +26,7 @@ public sealed class NdJsonSearchNavigator : ISearchNavigator
         this.viewModel = viewModel;
     }
 
-    public ScanTarget ScanTarget => new ScanTarget(viewModel.FilePath);
+    public ScanTarget ScanTarget => new ScanTarget(viewModel.Origin!);
 
     public void SetHighlightTerm(string? term) => viewModel.HighlightTerm = term;
 
@@ -59,7 +59,7 @@ public sealed class NdJsonSearchNavigator : ISearchNavigator
         // sub-range origin.
         var lineSpan = viewModel.Index!.GetLineSpan(lineIndex);
         long relativeOffset = match.Offset - lineSpan.Offset;
-        if (relativeOffset < 0 || relativeOffset >= nested.Mmap!.Length)
+        if (relativeOffset < 0 || relativeOffset >= nested.Bytes!.AvailableLength)
             return; // hit landed on the line's trailing newline bytes - the line selection is enough
 
         var tokenIndex = await JsonOffsetTokenResolver.ResolveWhenCoveredAsync(nested.Index!, relativeOffset, ct);

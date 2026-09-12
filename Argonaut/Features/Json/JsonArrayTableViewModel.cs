@@ -129,7 +129,7 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
             return;
 
         string path = column < this.headers.Count ? this.headers[column].Display : this.structure.Columns[column].Name;
-        CellDetail = JsonArrayCellDetail.ForToken(current.Inner.Index, current.Inner.File, token,
+        CellDetail = JsonArrayCellDetail.ForToken(current.Inner.Index, current.Inner.Bytes, token,
             $"{path} — row {row + 1:N0}");
     }
 
@@ -203,25 +203,26 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
     /// <summary>
     /// Opens the byte range [<paramref name="arrayOffset"/>, + <paramref name="arrayLength"/>) of
     /// <paramref name="filePath"/> - which must be exactly one array's <c>[</c>…<c>]</c> - as its
-    /// own document, and renders its elements as a table. <paramref name="originPath"/> is the
+    /// own document, and renders its elements as a table. <paramref name="arrayPath"/> is the
     /// JSONPath the array sits at in the origin document, carried for the banner and for Back.
     ///
     /// Returns once the row collection exists; indexing and the element walk continue in the
     /// background, monitored for status and failure by the base class.
     /// </summary>
-    public async Task LoadAsync(string filePath, long arrayOffset, long arrayLength, string originPath, Func<string, Task>? navigateBack = null)
+    public async Task LoadAsync(IByteOrigin origin, long arrayOffset, long arrayLength, string arrayPath, Func<string, Task>? navigateBack = null)
     {
-        FilePath = filePath;
+        Origin = origin;
+        FilePath = origin.Path ?? origin.DisplayName;
 
         // Progress is reported by this document rather than through the shell's own reporter,
         // the way a diff does it - the entry point publishes directly and only silences the
         // outgoing load's reporter.
-        var session = JsonArrayTableSession.Start(filePath, arrayOffset, arrayLength,
-            new ProgressToStatus(this, $"Indexing {Path.GetFileName(filePath)}"));
+        var session = JsonArrayTableSession.Start(origin, arrayOffset, arrayLength,
+            new ProgressToStatus(this, $"Indexing {origin.DisplayName}"));
         this.session = session;
 
         // A small initial batch so the first paint isn't an empty grid, and so there is a real
-        // sample to width the columns from; a short array completes the wait via MarkComplete.
+        // sample to width the columns from; a short array completes the wait via MarkAllItemsPublished.
         await session.Elements.WaitForElementCountAsync(InitialElementTarget);
         if (IsDisposed)
             return;
@@ -231,23 +232,23 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
 
         // The same builder the row collection renders cells with, so column widths are measured
         // from the text that will actually be shown.
-        this.cellText = new JsonRowFactory(session.Inner.Index, session.Inner.File, hintProviders: null);
+        this.cellText = new JsonRowFactory(session.Inner.Index, session.Inner.Bytes, hintProviders: null);
 
         var discovered = Discover(session);
         Adopt(discovered);
         bool elementsAreObjects = discovered.SawObject;
 
-        this.rows = new JsonArrayRowCollection(session.Elements, session.Inner.Index, session.Inner.File,
+        this.rows = new JsonArrayRowCollection(session.Elements, session.Inner.Index, session.Inner.Bytes,
             discovered.Structure, this.routes, this.mode);
 
         // Built here rather than before the wait because it takes the answer discovery just
         // produced: an array of objects is already columned by its property names, so it is
         // offered no reshape widths and shows no picker.
-        this.toolbar = new JsonArrayTableToolbarViewModel(originPath,
+        this.toolbar = new JsonArrayTableToolbarViewModel(arrayPath,
             canReshape: !elementsAreObjects,
             setColumnMode: ApplyColumnMode,
             setArrayColumns: columns => ArrayColumns = columns,
-            back: () => navigateBack?.Invoke(originPath) ?? Task.CompletedTask);
+            back: () => navigateBack?.Invoke(arrayPath) ?? Task.CompletedTask);
 
         this.toolbar.ShowArrayColumns(HasArrayColumns);
 
@@ -324,7 +325,7 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
     }
 
     private DiscoveredColumns Discover(JsonArrayTableSession current)
-        => JsonArrayColumnDiscovery.FromSample(current.Inner.Index, current.Inner.File, current.Elements,
+        => JsonArrayColumnDiscovery.FromSample(current.Inner.Index, current.Inner.Bytes, current.Elements,
             Math.Min(current.Elements.ElementCount, InitialElementTarget),
             this.cellText ?? throw new InvalidOperationException("The cell-text builder must exist before discovery."),
             this.openColumns, this.arrayColumns);

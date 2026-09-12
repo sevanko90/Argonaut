@@ -18,7 +18,7 @@ public class RawCaretStopsTests
 {
     private static (RawSegmentIndex Index, IByteSource Source) Indexed(byte[] content, int wrapWidth = 80)
     {
-        var source = new ArrayByteSource(content);
+        var source = new MemoryByteSource(content);
         var index = RawSegmentIndex.StartIndexing(source, wrapWidth);
         index.IndexingTask.GetAwaiter().GetResult();
         return (index, source);
@@ -31,7 +31,7 @@ public class RawCaretStopsTests
     {
         var stops = new List<long> { 0 };
         long offset = 0;
-        while (offset < source.Length)
+        while (offset < source.AvailableLength)
         {
             long next = RawCaretStops.Next(index, source, offset);
             Assert.True(next > offset, $"Next stalled at {offset}");
@@ -186,7 +186,7 @@ public class RawCaretStopsTests
 
         long offset = 0;
         long previousStop = -1;
-        while (offset < source.Length)
+        while (offset < source.AvailableLength)
         {
             int rowIndex = index.RowForOffset(offset)!.Value;
             var info = index.GetRowInfo(rowIndex);

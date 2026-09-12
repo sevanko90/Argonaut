@@ -8,7 +8,7 @@ using Xunit;
 //   * The headless UI tests (RawViewVirtualizationTests, StatusProgressHandoffTests) start a
 //     HeadlessUnitTestSession, whose application setup calls Dispatcher.VerifyAccess().
 //   * The mmap-backed row collections construct a DispatcherTimer for their growth monitor
-//     (see MemoryMappedFileLineCollection / CsvRowCollection / RawRowCollection /
+//     (see NdJsonLineCollection / CsvRowCollection / RawRowCollection /
 //     JsonVisibleRowCollection), so every test that builds one touches Dispatcher.UIThread -
 //     on whatever pool thread xUnit happened to run it on.
 //

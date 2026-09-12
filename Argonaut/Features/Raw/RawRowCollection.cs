@@ -41,9 +41,9 @@ public sealed class RawVisibleRow
 // indexer reads a single row from the memory-mapped file on demand. RawTextSurface reads it by
 // index for the rows it is drawing and subscribes to its growth notifications; the read-only
 // IList + INotifyCollectionChanged surface and the empty-once-disposed safety live in
-// MemoryMappedCollectionBase (structural twin of MemoryMappedFileLineCollection - see the
+// VirtualizingItemsSourceBase (structural twin of NdJsonLineCollection - see the
 // growth-tick note there).
-public sealed class RawRowCollection : MemoryMappedCollectionBase
+public sealed class RawRowCollection : VirtualizingItemsSourceBase
 {
     /// <summary>
     /// Rows kept decoded after they scroll away, so scrolling back does not re-read the mapping.
@@ -57,7 +57,7 @@ public sealed class RawRowCollection : MemoryMappedCollectionBase
     private static readonly TimeSpan GrowthPollInterval = TimeSpan.FromMilliseconds(120);
 
     private readonly RawSegmentIndex index;
-    private readonly MMapFile mmap;
+    private readonly IByteSource bytes;
     private readonly Dictionary<int, LinkedListNode<(int Index, RawVisibleRow Row)>> cache = new();
     private readonly LinkedList<(int Index, RawVisibleRow Row)> cacheOrder = new();
 
@@ -71,13 +71,13 @@ public sealed class RawRowCollection : MemoryMappedCollectionBase
     /// </summary>
     internal int MaterializedRowCount;
 
-    public RawRowCollection(RawSegmentIndex index, MMapFile mmap)
+    public RawRowCollection(RawSegmentIndex index, IByteSource bytes)
     {
         this.index = index;
-        this.mmap = mmap;
+        this.bytes = bytes;
         notifiedCount = index.RowCount;
 
-        if (!index.IsComplete)
+        if (!index.AllItemsPublished)
             StartGrowthMonitor();
     }
 
@@ -102,7 +102,7 @@ public sealed class RawRowCollection : MemoryMappedCollectionBase
         var info = index.GetRowInfo(i);
         var row = new RawVisibleRow(
             info.LineNumber,
-            RawRowReader.ReadRow(mmap, info.Start, info.End, info.IsSoftWrapped),
+            RawRowReader.ReadRow(bytes, info.Start, info.End, info.IsSoftWrapped),
             info.IsSoftWrapped,
             info.Start,
             info.End);
@@ -131,7 +131,7 @@ public sealed class RawRowCollection : MemoryMappedCollectionBase
     private void OnGrowthTick(object? sender, EventArgs e)
     {
         int current = index.RowCount;
-        bool complete = index.IsComplete;
+        bool complete = index.AllItemsPublished;
 
         if (current > notifiedCount)
         {
@@ -139,7 +139,7 @@ public sealed class RawRowCollection : MemoryMappedCollectionBase
             int startingIndex = notifiedCount;
             notifiedCount = current;
             // Placeholder entries only - the panel re-queries realized rows through the
-            // indexer (see MemoryMappedFileLineCollection.OnGrowthTick). Backed by a countful
+            // indexer (see NdJsonLineCollection.OnGrowthTick). Backed by a countful
             // stand-in rather than a real array: mid-scan deltas run to millions of rows, and
             // a real object?[] per tick is a large-object-heap allocation 8x/second for the
             // whole scan - GBs of garbage on a multi-GB file.

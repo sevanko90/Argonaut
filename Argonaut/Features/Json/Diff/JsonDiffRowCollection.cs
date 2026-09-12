@@ -24,7 +24,7 @@ namespace Argonaut.Features.Json.Diff;
 /// renders a live left-document preview so the view is never an empty pane with a
 /// spinner; the right pane fills in when the diff starts streaming.
 /// </summary>
-public sealed class JsonDiffRowCollection : MemoryMappedCollectionBase
+public sealed class JsonDiffRowCollection : VirtualizingItemsSourceBase
 {
     private const int ChildCap = 10_000;
 
@@ -101,8 +101,8 @@ public sealed class JsonDiffRowCollection : MemoryMappedCollectionBase
     public JsonDiffRowCollection(JsonDiffSession session)
     {
         this.session = session;
-        this.leftFactory = new JsonRowFactory(session.Left.Index, session.Left.File, hintProviders: null);
-        this.rightFactory = new JsonRowFactory(session.Right.Index, session.Right.File, hintProviders: null);
+        this.leftFactory = new JsonRowFactory(session.Left.Index, session.Left.Bytes, hintProviders: null);
+        this.rightFactory = new JsonRowFactory(session.Right.Index, session.Right.Bytes, hintProviders: null);
 
         // Sampled BEFORE the walk, not after: a diff that completes while Rebuild is running
         // would otherwise be seen as "already complete, no monitor needed" by a check made
@@ -110,14 +110,14 @@ public sealed class JsonDiffRowCollection : MemoryMappedCollectionBase
         // document for the rest of its life, with nothing left to rebuild it. Attaching a
         // monitor to an already-finished task costs one immediate final refresh, which is
         // exactly the refresh that window loses.
-        bool diffWasRunning = !session.Diff.IsComplete;
+        bool diffWasRunning = !session.Diff.AllItemsPublished;
 
         Rebuild();
 
         if (diffWasRunning)
         {
             growthMonitor = new IndexGrowthMonitor(GrowthPollInterval, session.Diff.IndexingTask,
-                isComplete: () => session.Diff.IsComplete,
+                isComplete: () => session.Diff.AllItemsPublished,
                 refresh: RefreshIfGrown);
         }
     }
@@ -152,11 +152,11 @@ public sealed class JsonDiffRowCollection : MemoryMappedCollectionBase
         var counts = (session.Diff.RecordCount, session.Left.Index.TokenCount);
         // The move-reconciliation pass mutates records without growing the log, so the
         // completion refresh must rebuild once even when the counts are unchanged.
-        bool completionPass = session.Diff.IsComplete && !finalRebuildDone;
+        bool completionPass = session.Diff.AllItemsPublished && !finalRebuildDone;
         if (counts == lastRebuildCounts && !completionPass)
             return;
 
-        if (session.Diff.IsComplete)
+        if (session.Diff.AllItemsPublished)
             finalRebuildDone = true;
         Rebuild();
     }
@@ -283,7 +283,7 @@ public sealed class JsonDiffRowCollection : MemoryMappedCollectionBase
         {
             WalkRecordSubtree(0, newVisible);
         }
-        else if (!diff.IsComplete && session.Left.Index.TokenCount > 0)
+        else if (!diff.AllItemsPublished && session.Left.Index.TokenCount > 0)
         {
             // Preview: the left document streams into the left pane while both sides index.
             WalkTokenSubtree(RowKind.SubLeft, leftTokenOverrides, 0, 0, -1, DiffStatus.Unchanged, newVisible);
@@ -912,8 +912,8 @@ public sealed class JsonDiffRowCollection : MemoryMappedCollectionBase
             if (record.MovePartnerRecord >= 0)
             {
                 moveBadge = record.IsMoveSource
-                    ? $"moved to {JsonPathBuilder.Build(session.Right.Index, session.Right.File, record.RightToken)} →"
-                    : $"↕ moved from {JsonPathBuilder.Build(session.Left.Index, session.Left.File, record.LeftToken)}";
+                    ? $"moved to {JsonPathBuilder.Build(session.Right.Index, session.Right.Bytes, record.RightToken)} →"
+                    : $"↕ moved from {JsonPathBuilder.Build(session.Left.Index, session.Left.Bytes, record.LeftToken)}";
             }
             else
             {

@@ -104,7 +104,7 @@ public class RawSegmentIndexTests
         WithIndex(content, wrapWidth, (index, _) =>
         {
             var expected = NaiveScan(content, wrapWidth);
-            Assert.True(index.IsComplete);
+            Assert.True(index.AllItemsPublished);
             Assert.Equal(expected.Count, index.RowCount);
             for (int i = 0; i < expected.Count; i++)
             {
@@ -304,7 +304,7 @@ public class RawSegmentIndexTests
     {
         WithIndex(Array.Empty<byte>(), 80, (index, _) =>
         {
-            Assert.True(index.IsComplete);
+            Assert.True(index.AllItemsPublished);
             Assert.Equal(0, index.RowCount);
         });
     }
@@ -372,7 +372,7 @@ public class RawSegmentIndexTests
             try { await index.IndexingTask; }
             catch (OperationCanceledException) { /* expected clean cancellation */ }
 
-            Assert.True(index.IsComplete);
+            Assert.True(index.AllItemsPublished);
             Assert.Null(index.Failure); // cancellation is never reported as a failure
             Assert.True(index.RowCount > 0);
             Assert.True(index.RowCount < content.Length / 512, "cancellation should leave the tail un-indexed");

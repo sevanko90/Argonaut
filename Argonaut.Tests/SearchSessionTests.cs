@@ -10,16 +10,16 @@ namespace Argonaut.Tests;
 /// match semantics, terms longer than the chunk size, the match cap, waiter completion when
 /// the scan ends short of the target, and cooperative cancellation.
 /// </summary>
-public class FileSearchSessionTests
+public class SearchSessionTests
 {
     private static void WithSession(string content, string term, int chunkSize,
-        Action<FileSearchSession> assert, int maxMatches = 1_000_000)
+        Action<SearchSession> assert, int maxMatches = 1_000_000)
     {
         string path = Path.GetTempFileName();
         try
         {
             File.WriteAllBytes(path, Encoding.UTF8.GetBytes(content));
-            var session = FileSearchSession.Start(new ScanTarget(path), new LiteralSearchMatcher(term),
+            var session = SearchSession.Start(LoadFromPath.ScanTargetFor(path), new LiteralSearchMatcher(term),
                 chunkSize: chunkSize, maxMatches: maxMatches);
             session.ScanTask.GetAwaiter().GetResult();
             assert(session);
@@ -30,7 +30,7 @@ public class FileSearchSessionTests
         }
     }
 
-    private static long[] Offsets(FileSearchSession session)
+    private static long[] Offsets(SearchSession session)
     {
         var offsets = new long[session.MatchCount];
         for (int i = 0; i < offsets.Length; i++)
@@ -46,7 +46,7 @@ public class FileSearchSessionTests
 
         WithSession(content, "needle", chunkSize: 32, session =>
         {
-            Assert.True(session.IsComplete);
+            Assert.True(session.AllItemsPublished);
             Assert.Equal(new long[] { 30 }, Offsets(session));
         });
     }
@@ -89,7 +89,7 @@ public class FileSearchSessionTests
     {
         WithSession(string.Empty, "anything", chunkSize: 32, session =>
         {
-            Assert.True(session.IsComplete);
+            Assert.True(session.AllItemsPublished);
             Assert.Equal(0, session.MatchCount);
             Assert.False(session.WasCancelled);
         });
@@ -103,7 +103,7 @@ public class FileSearchSessionTests
         WithSession(content, "ab", chunkSize: 1024, session =>
         {
             Assert.True(session.HitMatchCap);
-            Assert.True(session.IsComplete);
+            Assert.True(session.AllItemsPublished);
             Assert.Equal(10, session.MatchCount);
         }, maxMatches: 10);
     }
@@ -124,11 +124,11 @@ public class FileSearchSessionTests
         try
         {
             File.WriteAllBytes(path, Encoding.UTF8.GetBytes("no hits here"));
-            var session = FileSearchSession.Start(new ScanTarget(path), new LiteralSearchMatcher("absent"));
+            var session = SearchSession.Start(LoadFromPath.ScanTargetFor(path), new LiteralSearchMatcher("absent"));
 
             await session.WaitForMatchCountAsync(5);
 
-            Assert.True(session.IsComplete);
+            Assert.True(session.AllItemsPublished);
             Assert.Equal(0, session.MatchCount);
         }
         finally
@@ -166,14 +166,14 @@ public class FileSearchSessionTests
         {
             File.WriteAllBytes(path, new byte[256]);
             var matcher = new BlockingMatcher();
-            var session = FileSearchSession.Start(new ScanTarget(path), matcher, chunkSize: 64);
+            var session = SearchSession.Start(LoadFromPath.ScanTargetFor(path), matcher, chunkSize: 64);
 
             matcher.Entered.Wait();
             session.RequestStop();
             matcher.Release.Set();
 
             await session.ScanTask; // must not throw
-            Assert.True(session.IsComplete);
+            Assert.True(session.AllItemsPublished);
             Assert.True(session.WasCancelled);
 
             // A waiter registered against a cancelled scan must still be released.
@@ -197,7 +197,7 @@ public class FileSearchSessionTests
         string path = Path.GetTempFileName();
         File.WriteAllBytes(path, Encoding.UTF8.GetBytes("abc needle abc"));
 
-        var session = FileSearchSession.Start(new ScanTarget(path), new LiteralSearchMatcher("needle"));
+        var session = SearchSession.Start(LoadFromPath.ScanTargetFor(path), new LiteralSearchMatcher("needle"));
         await session.ScanTask;
 
         Assert.Equal(1, session.MatchCount);
@@ -215,11 +215,11 @@ public class FileSearchSessionTests
     {
         string path = Path.Combine(Path.GetTempPath(), $"argonaut-missing-{Guid.NewGuid():N}.json");
 
-        var session = FileSearchSession.Start(new ScanTarget(path), new LiteralSearchMatcher("needle"));
+        var session = SearchSession.Start(LoadFromPath.ScanTargetFor(path), new LiteralSearchMatcher("needle"));
         await session.ScanTask; // must not throw
 
         Assert.True(session.ScanTask.IsCompletedSuccessfully);
-        Assert.True(session.IsComplete);
+        Assert.True(session.AllItemsPublished);
         Assert.Equal(0, session.MatchCount);
         Assert.NotNull(session.OpenFailure);
     }
@@ -242,7 +242,7 @@ public class FileSearchSessionTests
             int lineStart = Encoding.UTF8.GetByteCount("abc needle abc\n");
             int lineLength = Encoding.UTF8.GetByteCount("xyz needle xyz");
 
-            var session = FileSearchSession.Start(new ScanTarget(path, lineStart, lineLength),
+            var session = SearchSession.Start(LoadFromPath.ScanTargetFor(path, lineStart, lineLength),
                 new LiteralSearchMatcher("needle"));
             await session.ScanTask;
 
@@ -270,7 +270,7 @@ public class FileSearchSessionTests
             var sw = System.Diagnostics.Stopwatch.StartNew();
             for (int i = 0; i < 200; i++)
             {
-                var session = FileSearchSession.Start(new ScanTarget(path), new LiteralSearchMatcher("absent"));
+                var session = SearchSession.Start(LoadFromPath.ScanTargetFor(path), new LiteralSearchMatcher("absent"));
                 await session.ScanTask;
             }
             sw.Stop();

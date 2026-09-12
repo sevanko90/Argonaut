@@ -21,7 +21,7 @@ public class DependentReadContextTests
             SynchronizationContext.SetSynchronizationContext(uiContext);
             try
             {
-                using var session = IndexedFileSession<JsonStructureIndex>.Start(new MMapFile(path), JsonStructureIndex.StartIndexing);
+                using var session = IndexedSourceSession<JsonStructureIndex>.Start(new MMapFile(path), JsonStructureIndex.StartIndexing);
                 session.IndexingTask.GetAwaiter().GetResult();
                 reading = session.StartDependentRead(async tearingDown =>
                 {
@@ -31,7 +31,7 @@ public class DependentReadContextTests
                     await session.IndexingTask;
                     // Resolving after an await must still run away from the UI thread.
                     Assert.Null(SynchronizationContext.Current);
-                    return (await JsonPathResolver.ResolveAsync(session.Index, session.File, "$[0]")).TokenIndex!.Value;
+                    return (await JsonPathResolver.ResolveAsync(session.Index, session.Bytes, "$[0]")).TokenIndex!.Value;
                 });
                 // Model a UI-originated flow awaiting the reader separately.
                 _ = ApplyOnUiAsync(reading);

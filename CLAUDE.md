@@ -14,14 +14,102 @@ allocation granularity (this rounding differs between Windows and macOS), so it 
 size and expose trailing zero-padding bytes as if they were real content.
 
 Always source the true length from the file itself (e.g. `new FileInfo(path).Length`) and use that explicit value
-everywhere data bounds matter (indexing loops, readers, length reported to callers). Only use the accessor/view
-capacity for the mechanics of the mapping itself, never as a stand-in for "how much real data is here."
+everywhere data bounds matter (indexing loops, readers, length reported to callers — `MMapFile.AvailableLength`).
+Only use the accessor/view capacity for the mechanics of the mapping itself, never as a stand-in for "how much real
+data is here."
 
 This has caused a real bug before: `JsonStructureIndex.Build` read past the real end of file on Windows (using
 `MMapFile.Length` which returned `_accessor.Capacity`), fed trailing `0x00` padding into `Utf8JsonReader`, and
 threw `JsonReaderException: '0x00' is invalid after a single JSON value`. It did not repro on macOS because the
 padding rounding happened to align differently there. Fixed by storing `Length` from `FileInfo(path).Length` in
 `MMapFile`'s constructor instead of deriving it from the accessor.
+
+## Reading bytes: `IByteSource`, and why a whole range needs asking for
+
+Every consumer of a document's bytes is typed to `IByteSource`, never to `MMapFile`. The concrete
+mapping is named only by the sites that construct one; readers, indexes and row collections take
+the interface, which is what lets a clipboard array or a downloaded payload be substituted without
+touching them.
+
+Two of its members do not promise what a caller naively expects, and both traps are silent.
+
+`GetContiguousSpan(offset, maxLength)` returns **up to** what was asked for, truncated at an
+internal boundary, because a span is a pointer and a length - it can only describe one contiguous
+run of memory, and a piece table's logical range may live in two buffers.
+
+`AvailableLength` is how much is readable **right now**, not a total: a streamed source is still
+receiving, and `LengthSettled` is what says the value is final. It is named `AvailableLength`
+rather than `Length` precisely because four scan loops had snapshotted it once at entry, which
+over a growing source stops at whatever had arrived and then publishes a *complete* index over a
+partial document. So:
+
+- **Scan loops advance by the length returned, not the length requested**, and treat an empty
+  return as the termination signal (`FileOffsetIndex.ProduceOffsets`, `FileTypeDetector`'s three
+  finders, `FileSearchSession.Scan`). A loop that assumes it got its whole chunk silently skips
+  bytes over a split source.
+- **Never snapshot `AvailableLength`.** Re-read it each turn, and when the scan reaches it, ask
+  `LengthSettled` whether that was the end or only the end so far - if not, block in
+  `WaitForLength` and carry on. `WaitForLength` is blocking by design: its callers are the
+  background scan bodies, which already run off the UI thread, so waiting there keeps those parse
+  loops synchronous. Never call it from the UI thread. Anything a scan finalises at the end of the
+  data - `FileOffsetIndex`'s trailing newline-less line, `RawSegmentIndex`'s last row, the JSON
+  reader's `isFinalBlock` - is conditional on `LengthSettled`, or it freezes a partial answer into
+  an append-only index. `GrowingByteSource` in the tests is the only source that exercises this;
+  every other one is settled from birth, so a regression here is invisible without it.
+- **A whole range comes from `ByteSourceReading.RequireContiguous`**, which returns exactly the
+  range or throws - the contract the old `MMapFile.GetSpan` had, and over any single-buffer source
+  the identical zero-copy span. `ByteAt` is the single-byte peek (one byte can never straddle),
+  and `GetUtf8String` is the one decode-on-demand idiom.
+- **There is deliberately no pooled-gather helper.** Only `RawPieceTable` can split a range, and
+  the raw viewer gathers inline at the four places it needs to (`RawRowReader.ReadRow` is the
+  pattern: try contiguous, else `ArrayPool` + `CopyTo`) because only it knows each range's display
+  cap. Everything else reads whole ranges of unbounded size - a whole NDJSON line, the JSON parse
+  window - where renting would cost more memory than the read saves. If editing ever reaches those
+  views, `RequireContiguous`'s call sites are the worklist.
+- **`Release()` is for the one owner of a source**, the document session, and only after its
+  cancel → join → release ordering (see `IndexedFileSession`). It is a no-op for a source holding
+  no OS resource, which is why `IByteSource` does not extend `IDisposable`. Sub-range readers and
+  search own their own sources and release those; nobody releases a source handed to them.
+
+Where the parser already holds the bytes, take them from it rather than re-reading the source by
+absolute offset - `JsonStructureIndex` hashes `reader.ValueSpan`, and only falls back to the
+source when `HasValueSequence` says the token straddles a parse window.
+
+## Origins own where bytes came from; sources own reading them
+
+Two types, deliberately not one, because they have different lifetimes:
+
+- **`IByteOrigin`** lives as long as the open **input** - across view swaps included. The shell
+  owns one per input (two when diffing) plus the materialised backing (the file, a temp-file
+  spill, a pinned array), and releases it only when the input changes (`AdoptOrigins`). That is
+  what stops switching from JSON to Raw re-downloading a URL or re-materialising a paste.
+- **`IByteSource`** lives as long as one **session**, which releases it. Unchanged, and what keeps
+  teardown safe: a session joins its scans before releasing what it owns.
+
+So a caller that needs bytes asks the origin for **its own** source and releases it; nobody
+releases a source handed to them. Do not collapse these into one type, and do not hand sessions a
+shared source - that turns the release ordering into a reference count, and a reference count got
+wrong here is a native use-after-free rather than an exception.
+
+`SearchSession` is the call site that proves it: its scan runs on a background thread that
+`FindController` cancels and forgets, never joins, so it must own every chunk it reads - which
+means it needs a factory, not a source. `OpenRange` is also why it keeps one source per chunk
+rather than opening the whole document (RSS double-counting, and a multi-GB unmap contending with
+the document's own on the UI thread at close).
+
+Other rules that fall out of the split:
+
+- **A sub-range is always settled.** `OpenRange` is only legal for bytes that have already
+  arrived, so growth (`AvailableLength`/`LengthSettled`) lives on the origin and on the whole
+  document source. A mapping is a fixed snapshot of a byte range and can never grow, so an
+  in-flight streamed source is never an `MMapFile`.
+- **`Path` is null for a document that is not a file**, and that is the single thing the
+  path-keyed features consult - today recent files, the `<file>.schema.json` sidecar, and the
+  remembered schema binding. Degrade off `Path is not null`; never key anything by `DisplayName`
+  (two pastes would collide) and never write a path-keyed preference for a document that has no
+  path. Anything added later that touches the file system belongs on this list.
+- **`FilePath` on a view model is display text** (`Path ?? DisplayName`). Anything that touches the
+  file system reads `Origin.Path` instead.
 
 ## UI-threading convention: rely on the dispatcher's SynchronizationContext
 

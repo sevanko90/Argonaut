@@ -114,7 +114,7 @@ public class NewlinelessFileDisplayCapTests
         {
             File.WriteAllBytes(path, Encoding.UTF8.GetBytes(content));
 
-            Assert.False(FileTypeDetector.IsPlausibleFor(FileTypeDetector.FileKind.Csv, path, out string reason));
+            Assert.False(LoadFromPath.IsPlausibleFor(FileTypeDetector.FileKind.Csv, path, out string reason));
             Assert.Contains("delimiter", reason);
         }
         finally
@@ -130,7 +130,7 @@ public class NewlinelessFileDisplayCapTests
         try
         {
             File.WriteAllBytes(path, "name,age\nalice,30\n"u8.ToArray());
-            Assert.True(FileTypeDetector.IsPlausibleFor(FileTypeDetector.FileKind.Csv, path, out _));
+            Assert.True(LoadFromPath.IsPlausibleFor(FileTypeDetector.FileKind.Csv, path, out _));
         }
         finally
         {

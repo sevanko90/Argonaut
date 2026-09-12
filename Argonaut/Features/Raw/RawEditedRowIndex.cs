@@ -72,14 +72,14 @@ public sealed class RawEditedRowIndex : IRawRowIndex
         ArgumentNullException.ThrowIfNull(original);
         ArgumentNullException.ThrowIfNull(originalBytes);
         ArgumentNullException.ThrowIfNull(document);
-        if (!original.IsComplete)
+        if (!original.AllItemsPublished)
             throw new ArgumentException("The scan must have finished before edits are layered on it.", nameof(original));
 
         this.original = original;
         this.originalBytes = originalBytes;
         this.document = document;
         this.wrapWidth = original.WrapWidth;
-        this.originalLength = originalBytes.Length;
+        this.originalLength = originalBytes.AvailableLength;
     }
 
     /// <summary>Rows in the edited document.</summary>
@@ -96,7 +96,7 @@ public sealed class RawEditedRowIndex : IRawRowIndex
     internal int DerivedRowCount => this.derived.Count;
 
     /// <summary>Total byte difference between the edited document and the original bytes.</summary>
-    private long ByteDelta => this.document.Length - this.originalLength;
+    private long ByteDelta => this.document.AvailableLength - this.originalLength;
 
     /// <summary>First row of the dirty span, in edited-document row space.</summary>
     private int DirtyStartRow => this.hasEdits ? this.dirtyAnchor * RawSegmentIndex.AnchorStride : this.original.RowCount;
@@ -143,7 +143,7 @@ public sealed class RawEditedRowIndex : IRawRowIndex
     /// </summary>
     public int? RowForOffset(long offset)
     {
-        if (offset < 0 || offset >= this.document.Length)
+        if (offset < 0 || offset >= this.document.AvailableLength)
             return null;
 
         if (!this.hasEdits || offset < this.dirtyStartOffset)
@@ -236,7 +236,7 @@ public sealed class RawEditedRowIndex : IRawRowIndex
         this.dirtyStartOffset = anchor.Start;
 
         long byteDelta = ByteDelta;
-        long documentLength = this.document.Length;
+        long documentLength = this.document.AvailableLength;
 
         // The edited stream, which is what we keep.
         long currentStart = anchor.Start;

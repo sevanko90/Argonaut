@@ -128,34 +128,71 @@ and virtualization-by-arithmetic are exactly what rendering gives up.
 
 ## Input sources
 
-Today a document is always a path: every load site builds an `MMapFile` from one, and the
-`IByteSource` seam it implements stops at the read API — `IndexedFileSession.File` is typed as the
-concrete `MMapFile`, and search, the NDJSON sub-document view and the array table all re-map the
-*path* to get an independent view of a byte range.
+Both halves of the seam are now in place.
 
-- **Paste from clipboard, and load from URL.** Both are the same piece of work: widen the seam from
-  "a mapped file" to a byte-span emitter that does not care where the bytes came from. Rename/extend
-  `IByteSource` into an `IDataProvider` that owns the source's identity as well as its bytes
-  (length, a display name, whether it has a path on disk, and how to derive a sub-range provider for
-  [offset, length) without going back to a path), then implement it three ways: the existing mapped
-  file, a `ClipboardDataProvider` over an in-memory array, and an `HttpDataProvider` that streams the
-  response. The work is mostly in the call sites, not the interface: `IndexedFileSession<TIndex>` and
-  every view model that constructs `new MMapFile(path)` move to taking a provider, and the three
-  places that re-map by path (`FileSearchSession`'s chunk views, `JsonArrayTableSession`,
-  `JsonViewModel`'s sub-document load) must ask the provider for the sub-range instead.
+**Reading** goes through `IByteSource`: every consumer is typed to it, the whole-range read is
+`ByteSourceReading.RequireContiguous`, and `AvailableLength`/`LengthSettled`/`WaitForLength` let a
+scan index bytes that are still arriving. `MMapFile` survives only as the file-backed
+implementation.
 
-  Two decisions to make when it is picked up, not now:
-  - **Where large non-file payloads live.** A clipboard paste or a download above some threshold
-    should spill to a temp file and be served by the ordinary mapped-file provider, so the multi-GB
-    path stays exactly the one that is already tuned; only small payloads stay as a pinned array.
-    That keeps `Length` OS-reported for everything big (see CLAUDE.md) and costs one copy.
-  - **What the path-shaped features do without a path.** Recent files, save-as, reload and "open
-    containing folder" all assume one exists. The provider needs to say so, and the UI needs to
-    degrade rather than each site guarding on a null path.
+**Creation and identity** go through `IByteOrigin`: it owns where the bytes came from (a display
+name, a path on disk or null) and hands out `IByteSource`s over them - `Open()` for the whole
+document, `OpenRange()` for a sub-document, one search chunk, or an NDJSON line. Implemented by
+`FileByteOrigin` and `MemoryByteOrigin`. The shell owns one per open input (two when diffing) and
+an origin's lifetime is the **input**, not the view, so a view swap re-opens a source over the
+same origin rather than re-materialising it.
 
-  The HTTP provider also wants the download itself on the background with progress reported through
-  `IProgressReporter` and cancellation off `IDocumentSession.TearingDown`, so a slow or wedged URL is
-  no different from a slow index.
+- **Paste from clipboard — done.** `MainWindowViewModel.PasteAsync` reads the clipboard through
+  an injected delegate, builds a `MemoryByteOrigin`, and runs it through the same
+  `OpenOriginAsync` a file takes, so detection is on the bytes (a paste has no extension) and
+  every path-keyed feature skips it. Reachable from the empty state's "Paste data" button and
+  Ctrl+V — the shortcut deliberately only while nothing is open, so that plain Ctrl+V inside the
+  raw editor can mean "paste into the document" once editing is wired up. Ctrl+Shift+V as a
+  paste-as-new-document that works with a document open is the obvious extension.
+
+  **No spill to a temp file, at any size** - and not because of a threshold judgement, because
+  the clipboard cannot be read any other way. Avalonia's API has no incremental read and no way
+  to ask the size first: `IAsyncDataTransferItem.TryGetRawAsync` hands over the whole payload in
+  one allocation. So the process is holding those bytes regardless, and a spill would only change
+  whether they sit in managed memory - paid for with a temp file's lifetime, its deletion
+  ordering, and the Windows "cannot delete a mapped file" hazard. `MaxPasteBytes` (64 MB) is a
+  sanity bound, not a spill threshold; past it the paste is declined with a message pointing at a
+  file. A clipboard will hold far more than 64 MB.
+
+  What *is* worth doing, and is done: `MainWindow` inspects `IAsyncDataTransfer.Formats` (which
+  needs no fetch) and prefers a platform format that yields UTF-8 bytes -
+  `public.utf8-plain-text` on macOS, `text/plain;charset=utf-8` on X11/Wayland - falling back to
+  `TryGetTextAsync` otherwise. That skips a whole representation on those platforms: no UTF-16
+  string (two bytes per ASCII character, on the large object heap at any size worth worrying
+  about) and no transcode to the UTF-8 the indexers read. Windows has no standard UTF-8 clipboard
+  format, so it takes the string path.
+
+  **If the doubled copy on Windows ever matters**, the native APIs can do better and disagree
+  about how: Windows can report an `HGLOBAL`'s size with `GlobalSize` before copying anything and
+  lets you transcode from the locked pointer in chunks; X11's INCR protocol and Wayland's file
+  descriptor are genuinely incremental but tell you nothing about the size up front; macOS gives
+  you an `NSData` whole. Exploiting that means three native backends plus the clipboard-locking
+  and delayed-rendering edge cases, for a case the cap already bounds - so it is deliberately not
+  done.
+- **Load from URL.** Needs an `HttpByteOrigin`: the download on the background with progress
+  through `IProgressReporter` and cancellation, reporting `AvailableLength` as bytes land and
+  `LengthSettled` when the response completes. The indexers already consume growth, and
+  `Utf8JsonReader`'s `isFinalBlock`/`JsonReaderState` resumption is the streaming primitive, so
+  the work is in the origin rather than in the readers. Note a mapping is a fixed snapshot of a
+  byte range and can never grow, so the in-flight source cannot be an `MMapFile` - it is either
+  in-memory chunks or a pre-sized mapping whose written extent is tracked separately (and whose
+  unwritten tail must never be reported as data - see CLAUDE.md).
+- **Path-keyed features already degrade.** The three that exist - recent files, the
+  `<file>.schema.json` sidecar and the remembered schema binding - consult `IByteOrigin.Path` and
+  skip when it is null; `JsonSchemaCatalog.GatherForDocument` takes a null path and offers the
+  user folder's schemas with no sidecar and nothing preselected. There is no save, reload or
+  "open containing folder" in the app yet, so there is no enabled state to drive; whenever one of
+  those arrives it reads `Path` and disables itself when there is none.
+- **One accepted edge case.** Disposing a temp-file-backed origin while a search is still scanning
+  it deletes the file under that scan. `SearchSession.Scan` already catches every exception into
+  `OpenFailure` ("an unreadable/vanished target is an outcome rather than a fault"), so it
+  degrades to a failed search rather than a crash. `FileOptions.DeleteOnClose` on the spill would
+  remove even that.
 
 ## Memory and performance
 

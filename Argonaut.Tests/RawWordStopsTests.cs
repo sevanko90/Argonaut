@@ -13,7 +13,7 @@ public class RawWordStopsTests
 {
     private static (RawSegmentIndex Index, IByteSource Source) Indexed(byte[] content, int wrapWidth = 80)
     {
-        var source = new ArrayByteSource(content);
+        var source = new MemoryByteSource(content);
         var index = RawSegmentIndex.StartIndexing(source, wrapWidth);
         index.IndexingTask.GetAwaiter().GetResult();
         return (index, source);
@@ -131,7 +131,7 @@ public class RawWordStopsTests
         var (index, source) = Indexed(new string('a', RawWordStops.MaxWordBytes + 1000));
 
         Assert.Null(RawWordStops.WordAt(index, source, 0));
-        Assert.Null(RawWordStops.WordAt(index, source, source.Length / 2));
+        Assert.Null(RawWordStops.WordAt(index, source, source.AvailableLength / 2));
     }
 
     [Fact]

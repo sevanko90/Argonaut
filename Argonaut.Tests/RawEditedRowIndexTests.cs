@@ -25,7 +25,7 @@ public class RawEditedRowIndexTests
             this.originalBytes = original;
             this.wrapWidth = wrapWidth;
 
-            OriginalSource = new ArrayByteSource(original);
+            OriginalSource = new MemoryByteSource(original);
             var index = RawSegmentIndex.StartIndexing(OriginalSource, wrapWidth);
             index.IndexingTask.GetAwaiter().GetResult();
 
@@ -34,7 +34,7 @@ public class RawEditedRowIndexTests
             Oracle = new List<byte>(original);
         }
 
-        public ArrayByteSource OriginalSource { get; }
+        public MemoryByteSource OriginalSource { get; }
         public RawPieceTable Table { get; }
         public RawEditedRowIndex Rows { get; }
         public List<byte> Oracle { get; }
@@ -55,9 +55,9 @@ public class RawEditedRowIndexTests
         public void AssertMatchesAFreshIndex(string because)
         {
             byte[] edited = Oracle.ToArray();
-            Assert.Equal(edited.Length, Table.Length);
+            Assert.Equal(edited.Length, Table.AvailableLength);
 
-            var freshSource = new ArrayByteSource(edited);
+            var freshSource = new MemoryByteSource(edited);
             var fresh = RawSegmentIndex.StartIndexing(freshSource, this.wrapWidth);
             fresh.IndexingTask.GetAwaiter().GetResult();
 
@@ -143,7 +143,7 @@ public class RawEditedRowIndexTests
     {
         var document = Document("alpha\nbeta\n");
 
-        document.Insert(document.Table.Length, Bytes("omega"));
+        document.Insert(document.Table.AvailableLength, Bytes("omega"));
 
         document.AssertMatchesAFreshIndex("append at end of document");
     }
@@ -165,7 +165,7 @@ public class RawEditedRowIndexTests
     {
         var document = Document("alpha\nbeta\n");
 
-        document.Delete(0, (int)document.Table.Length);
+        document.Delete(0, (int)document.Table.AvailableLength);
 
         Assert.Equal(0, document.Rows.RowCount);
         Assert.Null(document.Rows.RowForOffset(0));
@@ -227,7 +227,7 @@ public class RawEditedRowIndexTests
         var document = new EditedDocument(Bytes(text.ToString()), wrapWidth: 80);
         Assert.False(document.Rows.NeedsRebuild);
 
-        document.Insert(document.Table.Length - 1, Bytes("z"));
+        document.Insert(document.Table.AvailableLength - 1, Bytes("z"));
         Assert.False(document.Rows.NeedsRebuild);
 
         document.Insert(0, Bytes("z"));
@@ -242,13 +242,13 @@ public class RawEditedRowIndexTests
     [Fact]
     public void ScanMustBeCompleteBeforeEditsAreLayeredOn()
     {
-        var source = new ArrayByteSource(Bytes("alpha\n"));
+        var source = new MemoryByteSource(Bytes("alpha\n"));
         var index = RawSegmentIndex.StartIndexing(source, 80);
         index.IndexingTask.GetAwaiter().GetResult();
 
         // The guard itself: an index that has not finished is refused.
-        var unfinished = RawSegmentIndex.StartIndexing(new ArrayByteSource(new byte[8 * 1024 * 1024]), 80);
-        if (!unfinished.IsComplete)
+        var unfinished = RawSegmentIndex.StartIndexing(new MemoryByteSource(new byte[8 * 1024 * 1024]), 80);
+        if (!unfinished.AllItemsPublished)
         {
             Assert.Throws<ArgumentException>(() =>
                 new RawEditedRowIndex(unfinished, source, new RawPieceTable(source)));
@@ -278,7 +278,7 @@ public class RawEditedRowIndexTests
 
         for (int step = 0; step < 40; step++)
         {
-            long length = document.Table.Length;
+            long length = document.Table.AvailableLength;
             if (length > 0 && random.Next(100) < 40)
             {
                 int offset = random.Next((int)length);
@@ -331,7 +331,7 @@ public class RawEditedRowIndexTests
 
         for (int step = 0; step < 60; step++)
         {
-            long length = document.Table.Length;
+            long length = document.Table.AvailableLength;
             if (length > 0 && random.Next(100) < 45)
             {
                 int offset = random.Next((int)length);

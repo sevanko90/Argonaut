@@ -6,15 +6,16 @@ using System.Threading.Tasks;
 namespace Argonaut.Infrastructure;
 
 /// <summary>
-/// Owns the lifetime trio behind one open file: the <see cref="MMapFile"/> mapping, the
+/// Owns the lifetime trio behind one open document: the <see cref="IByteSource"/> its bytes
+/// come from (a mapping, an in-memory payload, a streamed download), the
 /// background <typeparamref name="TIndex"/> scanning it, and the CancellationTokenSource
 /// that stops that scan. Its whole purpose is to encode the teardown ordering in exactly
 /// one place:
 ///
 ///   cancel -> join the indexing task -> join dependent tasks -> release the mapping
 ///
-/// The join steps are what make the release safe: the scans dereference the mapping via
-/// cached pointers, and disposing it out from under a still-running scan is a native
+/// The join steps are what make the release safe: the scans dereference the source via
+/// cached pointers, and releasing a mapping out from under a still-running scan is a native
 /// use-after-free, not a catchable .NET exception (see CLAUDE.md / MMapFile). The scans
 /// check cancellation every ~65536 tokens / 4MB chunk, so the joins resolve in low
 /// single-digit milliseconds even on multi-GB files.
@@ -26,13 +27,13 @@ namespace Argonaut.Infrastructure;
 /// Not thread-safe: create, register and dispose from one thread (the UI thread in this
 /// app). The indexing/dependent tasks themselves of course run in the background.
 /// </summary>
-public sealed class IndexedFileSession<TIndex> : IDocumentSession where TIndex : class, IFileIndexer
+public sealed class IndexedSourceSession<TIndex> : IDocumentSession where TIndex : class, IBackgroundIndex
 {
     private readonly CancellationTokenSource cts;
     private readonly List<Task> dependentTasks = new();
     private bool disposed;
 
-    public MMapFile File { get; }
+    public IByteSource Bytes { get; }
 
     public TIndex Index { get; }
 
@@ -44,39 +45,39 @@ public sealed class IndexedFileSession<TIndex> : IDocumentSession where TIndex :
     /// <summary>See <see cref="IDocumentSession.TearingDown"/>.</summary>
     public CancellationToken TearingDown => this.cts.Token;
 
-    private IndexedFileSession(MMapFile file, TIndex index, CancellationTokenSource cts)
+    private IndexedSourceSession(IByteSource bytes, TIndex index, CancellationTokenSource cts)
     {
-        this.File = file;
+        this.Bytes = bytes;
         this.Index = index;
         this.cts = cts;
     }
 
     /// <summary>
-    /// Starts indexing <paramref name="file"/> and returns the session that now owns it.
-    /// Takes ownership of <paramref name="file"/> immediately: if the factory throws, the
-    /// file is disposed here and the exception propagates.
+    /// Starts indexing <paramref name="bytes"/> and returns the session that now owns it.
+    /// Takes ownership of <paramref name="bytes"/> immediately: if the factory throws, the
+    /// source is released here and the exception propagates.
     /// </summary>
-    /// <param name="file">The mapping to index; owned by the returned session from this point on.</param>
+    /// <param name="bytes">The bytes to index; owned by the returned session from this point on.</param>
     /// <param name="startIndexing">
     /// Indexer factory - both real indexers' StartIndexing methods match this shape, so
     /// call sites pass a method group (e.g. <c>JsonStructureIndex.StartIndexing</c>).
     /// </param>
     /// <param name="progressReporter">Optional progress reporter forwarded to the factory.</param>
-    public static IndexedFileSession<TIndex> Start(
-        MMapFile file,
-        Func<MMapFile, IProgressReporter?, CancellationToken, TIndex> startIndexing,
+    public static IndexedSourceSession<TIndex> Start(
+        IByteSource bytes,
+        Func<IByteSource, IProgressReporter?, CancellationToken, TIndex> startIndexing,
         IProgressReporter? progressReporter = null)
     {
         var cts = new CancellationTokenSource();
         try
         {
-            var index = startIndexing(file, progressReporter, cts.Token);
-            return new IndexedFileSession<TIndex>(file, index, cts);
+            var index = startIndexing(bytes, progressReporter, cts.Token);
+            return new IndexedSourceSession<TIndex>(bytes, index, cts);
         }
         catch
         {
             cts.Dispose();
-            file.Dispose();
+            bytes.Release();
             throw;
         }
     }
@@ -94,16 +95,16 @@ public sealed class IndexedFileSession<TIndex> : IDocumentSession where TIndex :
     }
 
     /// <summary>
-    /// Registers a background-only task (never a UI-context continuation) that dereferences <see cref="File"/> (date-hint inference,
+    /// Registers a background-only task (never a UI-context continuation) that dereferences <see cref="Bytes"/> (date-hint inference,
     /// JSON path resolution) so <see cref="Dispose"/> joins it before releasing the mapping.
     /// No-op if the session is already disposed - <see cref="TearingDown"/> is cancelled by
-    /// then, so such a task dies immediately without touching the file.
+    /// then, so such a task dies immediately without touching the source.
     ///
     /// Prunes already-completed entries first (O(n) with n in single digits, on the UI
     /// thread) so a long session with many search-term changes doesn't accumulate one Task
     /// reference per search forever. A completed entry's exception is observed before it is
     /// dropped - a registered task racing an <see cref="ObjectDisposedException"/> out of
-    /// <see cref="MMapFile.GetSpan"/> faults; dropping that unobserved would raise
+    /// <see cref="MMapFile.GetContiguousSpan"/> faults; dropping that unobserved would raise
     /// <see cref="System.Threading.Tasks.TaskScheduler.UnobservedTaskException"/> at
     /// finalization instead.
     /// </summary>
@@ -151,7 +152,7 @@ public sealed class IndexedFileSession<TIndex> : IDocumentSession where TIndex :
             try { task.Wait(); } catch { /* same */ }
         }
 
-        this.File.Dispose();
+        this.Bytes.Release();
         this.cts.Dispose();
     }
 }

@@ -1,4 +1,5 @@
 using System.Text;
+using Argonaut.Infrastructure;
 using Argonaut.Features.Raw;
 using BenchmarkDotNet.Attributes;
 
@@ -38,16 +39,16 @@ public class RawPieceTableBenchmarks
 
         // A document fragmented by inserting single bytes at intervals, which is the shape a long
         // editing session produces.
-        this.fragmented = new RawPieceTable(new ArrayByteSource(Encoding.UTF8.GetBytes(text.ToString())));
-        long stride = Math.Max(1, this.fragmented.Length / Math.Max(PieceCount, 1));
+        this.fragmented = new RawPieceTable(new MemoryByteSource(Encoding.UTF8.GetBytes(text.ToString())));
+        long stride = Math.Max(1, this.fragmented.AvailableLength / Math.Max(PieceCount, 1));
         for (int i = 1; i < PieceCount; i++)
-            this.fragmented.Insert(Math.Min(i * stride, this.fragmented.Length), "x"u8);
+            this.fragmented.Insert(Math.Min(i * stride, this.fragmented.AvailableLength), "x"u8);
 
         // Spread the probes, so the binary search is exercised rather than one hot piece being
         // measured over and over.
         this.probeOffsets = new long[ProbeCount];
         for (int i = 0; i < ProbeCount; i++)
-            this.probeOffsets[i] = this.fragmented.Length * i / ProbeCount;
+            this.probeOffsets[i] = this.fragmented.AvailableLength * i / ProbeCount;
     }
 
     [Benchmark(OperationsPerInvoke = ProbeCount)]

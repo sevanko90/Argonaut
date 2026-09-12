@@ -1,4 +1,5 @@
 using System.Text;
+using Argonaut.Infrastructure;
 using Argonaut.Features.Raw;
 
 namespace Argonaut.Tests;
@@ -13,7 +14,7 @@ public class RawTextExtractorTests
 {
     private const char ReplacementChar = (char)0xFFFD;
 
-    private static ArrayByteSource Source(string text) => new(Encoding.UTF8.GetBytes(text));
+    private static MemoryByteSource Source(string text) => new(Encoding.UTF8.GetBytes(text));
 
     [Fact]
     public void ExtractsTheRequestedRange()
@@ -28,7 +29,7 @@ public class RawTextExtractorTests
     {
         // A row drops its trailing newline and substitutes Control Pictures for display; copied
         // text must do neither, or pasting it into another program is silently wrong.
-        var source = new ArrayByteSource([(byte)'a', (byte)'\n', 0x07, (byte)'b']);
+        var source = new MemoryByteSource([(byte)'a', (byte)'\n', 0x07, (byte)'b']);
 
         Assert.True(RawTextExtractor.TryExtract(source, 0, 4, out string text));
 
@@ -42,7 +43,7 @@ public class RawTextExtractorTests
     [Fact]
     public void InvalidBytesBecomeReplacementCharacters()
     {
-        var source = new ArrayByteSource([(byte)'a', 0xC3, (byte)'b']);
+        var source = new MemoryByteSource([(byte)'a', 0xC3, (byte)'b']);
 
         Assert.True(RawTextExtractor.TryExtract(source, 0, 3, out string text));
 
@@ -75,7 +76,7 @@ public class RawTextExtractorTests
         var table = new RawPieceTable(Source("hello world"));
         table.Insert(5, Encoding.UTF8.GetBytes(" big"));
 
-        Assert.True(RawTextExtractor.TryExtract(table, 0, table.Length, out string text));
+        Assert.True(RawTextExtractor.TryExtract(table, 0, table.AvailableLength, out string text));
 
         Assert.Equal("hello big world", text);
     }
@@ -87,7 +88,7 @@ public class RawTextExtractorTests
         // a string that looks complete and is not.
         var huge = new OversizedSource(RawTextExtractor.MaxExtractBytes + 1);
 
-        Assert.False(RawTextExtractor.TryExtract(huge, 0, huge.Length, out string text));
+        Assert.False(RawTextExtractor.TryExtract(huge, 0, huge.AvailableLength, out string text));
         Assert.Equal(string.Empty, text);
 
         // A range inside the cap over the same document still works.
@@ -102,14 +103,14 @@ public class RawTextExtractorTests
 
         public OversizedSource(long length)
         {
-            Length = length;
+            AvailableLength = length;
             Array.Fill(this.window, (byte)'x');
         }
 
-        public long Length { get; }
+        public long AvailableLength { get; }
 
         public ReadOnlySpan<byte> GetContiguousSpan(long offset, int maxLength)
-            => offset < 0 || offset >= Length || maxLength <= 0
+            => offset < 0 || offset >= AvailableLength || maxLength <= 0
                 ? ReadOnlySpan<byte>.Empty
                 : this.window.AsSpan(0, (int)Math.Min(maxLength, this.window.Length));
 

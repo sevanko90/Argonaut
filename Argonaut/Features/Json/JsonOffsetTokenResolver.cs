@@ -98,7 +98,7 @@ public static class JsonOffsetTokenResolver
             ct.ThrowIfCancellationRequested();
 
             int count = index.TokenCount;
-            if (index.IsComplete || (count > 0 && index.GetToken(count - 1).Offset >= offset))
+            if (index.AllItemsPublished || (count > 0 && index.GetToken(count - 1).Offset >= offset))
                 return ResolveTokenForOffset(index, offset);
 
             // Not cancellable directly, but resolves quickly while indexing is alive (and

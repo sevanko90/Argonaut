@@ -125,7 +125,7 @@ public static class JsonArrayColumnDiscovery
     /// so a container column is widthed from the summary it will actually show rather than from
     /// its one-byte brace token.
     /// </summary>
-    internal static DiscoveredColumns FromSample(JsonStructureIndex index, MMapFile file,
+    internal static DiscoveredColumns FromSample(JsonStructureIndex index, IByteSource file,
         JsonArrayElementIndex elements, int sample, JsonRowFactory cellText, OpenColumns open, int arrayColumns)
     {
         var walk = new Walk(index, file, cellText, open, Math.Clamp(arrayColumns, 1, MaxArrayColumns));
@@ -151,7 +151,7 @@ public static class JsonArrayColumnDiscovery
     private sealed class Walk
     {
         private readonly JsonStructureIndex index;
-        private readonly MMapFile file;
+        private readonly IByteSource file;
         private readonly JsonRowFactory cellText;
         private readonly OpenColumns open;
         private readonly int arrayColumns;
@@ -173,7 +173,7 @@ public static class JsonArrayColumnDiscovery
         private bool truncated;
         private int valueChars;
 
-        public Walk(JsonStructureIndex index, MMapFile file, JsonRowFactory cellText, OpenColumns open, int arrayColumns)
+        public Walk(JsonStructureIndex index, IByteSource file, JsonRowFactory cellText, OpenColumns open, int arrayColumns)
         {
             this.index = index;
             this.file = file;

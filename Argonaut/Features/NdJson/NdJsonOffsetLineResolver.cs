@@ -60,7 +60,7 @@ public static class NdJsonOffsetLineResolver
             ct.ThrowIfCancellationRequested();
 
             int count = index.LineCount;
-            if (index.IsComplete)
+            if (index.AllItemsPublished)
                 return ResolveLineForOffset(index, offset);
 
             if (count > 0)

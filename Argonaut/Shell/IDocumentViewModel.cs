@@ -21,7 +21,7 @@ namespace Argonaut.Shell;
 /// Disposing before the swap matters because setting CurrentDocument makes Avalonia tear down
 /// the outgoing view, and that teardown enumerates the old ListBox's whole-file, mmap-backed
 /// ItemsSource once. The collections report themselves empty once disposed (see
-/// MemoryMappedFileLineCollection / JsonVisibleRowCollection / CsvRowCollection), so an
+/// NdJsonLineCollection / JsonVisibleRowCollection / CsvRowCollection), so an
 /// already-disposed document turns that walk into a no-op instead of a multi-second, whole-file
 /// materialization that also read freed memory and crashed. The hosting view's
 /// DetachedFromVisualTree handler also disposes its DataContext, as an idempotent safety net
@@ -30,7 +30,16 @@ namespace Argonaut.Shell;
 /// </summary>
 public interface IDocumentViewModel : INotifyPropertyChanged, IDisposable
 {
-    /// <summary>Full path of the loaded file.</summary>
+    /// <summary>
+    /// Where this document's bytes came from - the one thing that knows whether it has a path on
+    /// disk at all. Null only before a load has begun. The shell owns its lifetime (it outlives
+    /// this view model, across a view swap), so a document reads it and never disposes it.
+    /// </summary>
+    IByteOrigin? Origin { get; }
+
+    /// <summary>Full path of the loaded file, or its display name when it has no path (a paste,
+    /// a download). Shown to the user; use <see cref="Origin"/>'s Path for anything that has to
+    /// touch the file system.</summary>
     string FilePath { get; }
 
     /// <summary>

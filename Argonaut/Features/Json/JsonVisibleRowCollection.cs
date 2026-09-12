@@ -124,7 +124,7 @@ public sealed class JsonRow
 /// actually realized, and only currently-expanded subtrees (capped per container) are
 /// ever materialized into the visible list - the rest of a huge document is never touched.
 /// </summary>
-public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
+public sealed class JsonVisibleRowCollection : VirtualizingItemsSourceBase
 {
     internal const int ChildCap = 10_000;
     // Alias kept for callers/tests; the cap itself lives with the row-text machinery in
@@ -149,7 +149,7 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
     private static readonly TimeSpan GrowthPollInterval = TimeSpan.FromMilliseconds(1500);
 
     private readonly JsonStructureIndex index;
-    private readonly MMapFile mmap;
+    private readonly IByteSource bytes;
     private readonly int rootTokenIndex;
 
     /// <summary>The scoped root's own depth, subtracted everywhere a depth is compared or shown -
@@ -202,15 +202,15 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
     /// for every view of a whole file; the array table's cell pane passes the token of the cell
     /// it is showing, so the same machinery renders one subtree without the file around it.
     /// Depths are reported relative to it, so a scoped tree indents from zero.</param>
-    public JsonVisibleRowCollection(JsonStructureIndex index, MMapFile mmap, IReadOnlyList<IValueHintProvider>? hintProviders = null, int defaultExpandDepth = 1, int rootTokenIndex = 0)
+    public JsonVisibleRowCollection(JsonStructureIndex index, IByteSource bytes, IReadOnlyList<IValueHintProvider>? hintProviders = null, int defaultExpandDepth = 1, int rootTokenIndex = 0)
     {
         this.index = index;
-        this.mmap = mmap;
+        this.bytes = bytes;
         this.rootTokenIndex = rootTokenIndex;
         this.depthOffset = rootTokenIndex > 0 ? index.GetToken(rootTokenIndex).Depth : 0;
         this.defaultExpandDepth = Math.Max(0, defaultExpandDepth);
         this.hintProviders = hintProviders;
-        this.rowFactory = new JsonRowFactory(index, mmap, hintProviders) { DepthOffset = this.depthOffset };
+        this.rowFactory = new JsonRowFactory(index, bytes, hintProviders) { DepthOffset = this.depthOffset };
 
         if (hintProviders is not null)
         {
@@ -222,7 +222,7 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
         // leave this collection with no monitor and no final refresh, showing whatever part of
         // the tree the index had reached. Monitoring an already-finished scan just spends one
         // immediate final refresh.
-        bool scanWasRunning = !index.IsComplete;
+        bool scanWasRunning = !index.AllItemsPublished;
 
         Rebuild();
 
@@ -723,7 +723,7 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
                 : token.Kind == JsonTokenKind.StartArray
                     ? schema.ResolveElement(schemaNodeId, shown)
                     : child.NameLength >= 0
-                        ? schema.ResolveMember(schemaNodeId, mmap.GetSpan(child.NameOffset, child.NameLength))
+                        ? schema.ResolveMember(schemaNodeId, bytes.RequireContiguous(child.NameOffset, child.NameLength))
                         : -1;
 
             AppendSubtree(childIndex, into, arrayIndex: token.Kind == JsonTokenKind.StartArray ? shown : -1, schemaNodeId: childSchemaId);
@@ -795,7 +795,7 @@ public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
     private void StartGrowthMonitor()
     {
         growthMonitor = new IndexGrowthMonitor(GrowthPollInterval, index.IndexingTask,
-            isComplete: () => index.IsComplete,
+            isComplete: () => index.AllItemsPublished,
             refresh: () =>
             {
                 if (!IsDisposed && !visibleTreeSettled && index.TokenCount != lastRebuildTokenCount)

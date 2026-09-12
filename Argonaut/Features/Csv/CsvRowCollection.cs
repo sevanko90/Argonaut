@@ -23,19 +23,19 @@ public sealed class CsvVisibleRow
     public IReadOnlyList<CsvCell> Cells { get; }
 }
 
-// Adapted from Argonaut.Features.NdJson.MemoryMappedFileLineCollection: same
-// MemoryMappedCollectionBase (read-only IList + INotifyCollectionChanged + empty-once-disposed)
+// Adapted from Argonaut.Features.NdJson.NdJsonLineCollection: same
+// VirtualizingItemsSourceBase (read-only IList + INotifyCollectionChanged + empty-once-disposed)
 // plus an LRU-cache + growth-timer, so VirtualizingStackPanel only touches realized rows while
 // FileOffsetIndex keeps indexing in the background. The one addition is dataStartIndex, which
 // lets the "first row is header" tickbox shift which absolute line each virtual row index maps
 // to without re-indexing the file.
-public sealed class CsvRowCollection : MemoryMappedCollectionBase, IColumnFitSource
+public sealed class CsvRowCollection : VirtualizingItemsSourceBase, IColumnFitSource
 {
     private const int CacheCapacity = 1000;
     private static readonly TimeSpan GrowthPollInterval = TimeSpan.FromMilliseconds(120);
 
     private readonly FileOffsetIndex index;
-    private readonly MMapFile mmap;
+    private readonly IByteSource bytes;
     private readonly byte delimiter;
     private readonly Dictionary<int, LinkedListNode<(int Index, CsvVisibleRow Row)>> cache = new();
     private readonly LinkedList<(int Index, CsvVisibleRow Row)> cacheOrder = new();
@@ -44,15 +44,15 @@ public sealed class CsvRowCollection : MemoryMappedCollectionBase, IColumnFitSou
     private DispatcherTimer? growthTimer;
     private int notifiedCount;
 
-    public CsvRowCollection(FileOffsetIndex index, MMapFile mmap, byte delimiter, int dataStartIndex)
+    public CsvRowCollection(FileOffsetIndex index, IByteSource bytes, byte delimiter, int dataStartIndex)
     {
         this.index = index;
-        this.mmap = mmap;
+        this.bytes = bytes;
         this.delimiter = delimiter;
         this.dataStartIndex = dataStartIndex;
         notifiedCount = GetCount();
 
-        if (!index.IsComplete)
+        if (!index.AllItemsPublished)
             StartGrowthMonitor();
     }
 
@@ -74,7 +74,7 @@ public sealed class CsvRowCollection : MemoryMappedCollectionBase, IColumnFitSou
             return new CsvVisibleRow(i + 1, Array.Empty<CsvCell>());
 
         var lineSpan = index.GetLineSpan(i + dataStartIndex);
-        var fields = CsvFieldReader.ReadFields(mmap, lineSpan, delimiter);
+        var fields = CsvFieldReader.ReadFields(bytes, lineSpan, delimiter);
         var cells = new CsvCell[fields.Length];
         for (int c = 0; c < fields.Length; c++)
             cells[c] = new CsvCell(fields[c]);
@@ -144,7 +144,7 @@ public sealed class CsvRowCollection : MemoryMappedCollectionBase, IColumnFitSou
     private void OnGrowthTick(object? sender, EventArgs e)
     {
         int current = GetCount();
-        bool complete = index.IsComplete;
+        bool complete = index.AllItemsPublished;
 
         if (current > notifiedCount)
         {

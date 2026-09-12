@@ -58,7 +58,7 @@ public class FileOffsetIndexTests
         WithIndex(content, (index, _) =>
         {
             var expected = NaiveScan(content);
-            Assert.True(index.IsComplete);
+            Assert.True(index.AllItemsPublished);
             Assert.Equal(expected.Count, index.LineCount);
             for (int i = 0; i < expected.Count; i++)
                 Assert.Equal(expected[i], index.GetLineSpan(i));
@@ -232,7 +232,7 @@ public class FileOffsetIndexTests
     {
         WithIndex(Array.Empty<byte>(), (index, _) =>
         {
-            Assert.True(index.IsComplete);
+            Assert.True(index.AllItemsPublished);
             Assert.Equal(0, index.LineCount);
         });
     }

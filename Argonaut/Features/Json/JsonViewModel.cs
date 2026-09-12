@@ -16,7 +16,7 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
 {
     private const int InitialTokenTarget = 250;
 
-    private IndexedFileSession<JsonStructureIndex>? session;
+    private IndexedSourceSession<JsonStructureIndex>? session;
     private JsonVisibleRowCollection? rows;
     private int? selectedTokenIndex;
     private string? selectedPath;
@@ -27,7 +27,7 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
 
     protected override IDisposable? MappedRows => rows;
 
-    internal MMapFile? Mmap => session?.File;
+    internal IByteSource? Bytes => session?.Bytes;
 
     internal JsonStructureIndex? Index => session?.Index;
 
@@ -136,7 +136,7 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
         if (SchemaSettings.Document is not { } schema || schema.NamedRoots.Count == 0 || session is not { } current)
             return;
 
-        var keys = JsonDocumentKeySampler.ReadRootKeys(current.Index, current.File, out bool fromArrayElement);
+        var keys = JsonDocumentKeySampler.ReadRootKeys(current.Index, current.Bytes, out bool fromArrayElement);
         if (keys.Count == 0)
             return;
 
@@ -159,7 +159,10 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
         if (e.PropertyName is not (null or nameof(JsonSchemaSettings.SelectedEntry) or nameof(JsonSchemaSettings.SelectedRootName)) || Toolbar is null)
             return;
 
-        SchemaSelectionPreference.Save(FilePath, SchemaSettings.SelectedEntry?.FilePath, SchemaSettings.IsRootExplicitlyChosen ? SchemaSettings.SelectedRootName : null);
+        // Keyed by path, so a document without one (a paste) does not remember its choice -
+        // keying it by display name would let two different pastes overwrite each other.
+        if (Origin?.Path is { } documentPath)
+            SchemaSelectionPreference.Save(documentPath, SchemaSettings.SelectedEntry?.FilePath, SchemaSettings.IsRootExplicitlyChosen ? SchemaSettings.SelectedRootName : null);
     }
 
     /// <summary>
@@ -174,8 +177,8 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
     public void SelectToken(int tokenIndex)
     {
         SelectedTokenIndex = tokenIndex;
-        SelectedPath = JsonPathBuilder.Build(Index!, Mmap!, tokenIndex);
-        SelectedPathSegments = JsonPathBuilder.BuildSegments(Index!, Mmap!, tokenIndex);
+        SelectedPath = JsonPathBuilder.Build(Index!, Bytes!, tokenIndex);
+        SelectedPathSegments = JsonPathBuilder.BuildSegments(Index!, Bytes!, tokenIndex);
         rows?.EnsureVisible(tokenIndex);
     }
 
@@ -198,7 +201,7 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
 
         var current = session;
         var resolveTask = current.StartDependentRead(tearingDown =>
-            JsonPathResolver.ResolveAsync(current.Index, current.File, path, tearingDown));
+            JsonPathResolver.ResolveAsync(current.Index, current.Bytes, path, tearingDown));
 
         JsonPathResolveResult result;
         try
@@ -278,7 +281,7 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
         long length = end.Offset + end.Length - offset;
 
         ArrayTableService.Request(new ArrayTableRequest(
-            FilePath, offset, length, JsonPathBuilder.Build(current.Index, current.File, tokenIndex)));
+            Origin!, offset, length, JsonPathBuilder.Build(current.Index, current.Bytes, tokenIndex)));
     }
 
     /// <summary>
@@ -291,20 +294,21 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
         rows?.SetDefaultExpandDepth(depth);
     }
 
-    public Task LoadAsync(string path, IProgressReporter? progressReporter = null)
+    public Task LoadAsync(IByteOrigin origin, IProgressReporter? progressReporter = null)
     {
-        FilePath = path;
-        ScanTarget = new ScanTarget(path);
+        Origin = origin;
+        FilePath = origin.Path ?? origin.DisplayName;
+        ScanTarget = new ScanTarget(origin);
         DefaultExpandDepth = ExpandDepthPreference.Load();
         toolbar = new JsonToolbarViewModel(HintSettings, SchemaSettings, DefaultExpandDepth, SetDefaultExpandDepth, NavigateToPathAsync,
-            refreshSchemaEntries: () => RefreshSchemaEntriesAsync(path));
+            refreshSchemaEntries: () => RefreshSchemaEntriesAsync(origin.Path));
 
-        var loadTask = LoadCore(new MMapFile(path), progressReporter);
+        var loadTask = LoadCore(origin.Open(), progressReporter);
 
         // Runs alongside indexing rather than blocking the open: whichever finishes first, the
         // other side picks the schema up (LoadCore applies whatever is current when it creates
         // the rows; OnSchemaChanged handles the reverse order).
-        _ = ApplyInitialSchemaAsync(path);
+        _ = ApplyInitialSchemaAsync(origin.Path);
 
         return loadTask;
     }
@@ -315,7 +319,7 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
     /// (see <see cref="SchemaSelectionPreference"/>). Nothing here is ever an error - a missing
     /// sidecar and an unreadable schema folder both just mean "no schema".
     /// </summary>
-    private async Task ApplyInitialSchemaAsync(string documentPath)
+    private async Task ApplyInitialSchemaAsync(string? documentPath)
     {
         var (entries, preselected, rootName) = await Task.Run(() => JsonSchemaCatalog.GatherForDocument(documentPath));
         if (IsDisposed)
@@ -330,7 +334,7 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
     /// <summary>Re-lists the schema catalog without touching the current selection - so a
     /// schema dropped into the user folder mid-session shows up next time the combo opens,
     /// rather than requiring a restart. See <see cref="JsonToolbarViewModel.IsSchemaFlyoutOpen"/>.</summary>
-    private async Task RefreshSchemaEntriesAsync(string documentPath)
+    private async Task RefreshSchemaEntriesAsync(string? documentPath)
     {
         var (entries, _, _) = await Task.Run(() => JsonSchemaCatalog.GatherForDocument(documentPath));
         if (!IsDisposed)
@@ -338,21 +342,22 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
     }
 
     /// <summary>
-    /// Loads the sub-document occupying the byte range [offset, offset + length) of the file
-    /// at <paramref name="path"/> - e.g. one line of a larger NDJSON file. Creates and owns
-    /// its own independent sub-range mapping (disposed with this view model), so a caller
-    /// never allocates a mapping this view model is then responsible for freeing.
+    /// Loads the sub-document occupying the byte range [offset, offset + length) of
+    /// <paramref name="origin"/> - e.g. one line of a larger NDJSON document. Asks the origin
+    /// for its own independent sub-range source (released with this view model), so a caller
+    /// never allocates a source this view model is then responsible for freeing.
     /// </summary>
-    public Task LoadAsync(string path, long offset, long length, IProgressReporter? progressReporter = null)
+    public Task LoadAsync(IByteOrigin origin, long offset, long length, IProgressReporter? progressReporter = null)
     {
-        FilePath = path;
-        ScanTarget = new ScanTarget(path, offset, length);
-        return LoadCore(new MMapFile(path, offset, length), progressReporter);
+        Origin = origin;
+        FilePath = origin.Path ?? origin.DisplayName;
+        ScanTarget = new ScanTarget(origin, offset, length);
+        return LoadCore(origin.OpenRange(offset, length), progressReporter);
     }
 
-    private async Task LoadCore(MMapFile mmap, IProgressReporter? progressReporter)
+    private async Task LoadCore(IByteSource bytes, IProgressReporter? progressReporter)
     {
-        var session = IndexedFileSession<JsonStructureIndex>.Start(mmap, JsonStructureIndex.StartIndexing, progressReporter);
+        var session = IndexedSourceSession<JsonStructureIndex>.Start(bytes, JsonStructureIndex.StartIndexing, progressReporter);
         this.session = session;
 
         // Await a small initial batch so the first paint isn't empty; the row collection
@@ -362,7 +367,7 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
         if (session.Index.Failure is { } failure)
             IndexFailure = failure;
 
-        rows = new JsonVisibleRowCollection(session.Index, session.File,
+        rows = new JsonVisibleRowCollection(session.Index, session.Bytes,
             new IValueHintProvider[] { new DateHintProvider(HintSettings) }, DefaultExpandDepth);
 
         // A schema may already have been selected (sidecar/remembered, or pushed down by
@@ -414,7 +419,7 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
     /// background for the first classifiable date value, and sets it as the file default if
     /// found. Never a full-file scan. No-ops if the user has already picked a scheme.
     /// </summary>
-    private async Task InferDefaultDateSchemeAsync(IndexedFileSession<JsonStructureIndex> current)
+    private async Task InferDefaultDateSchemeAsync(IndexedSourceSession<JsonStructureIndex> current)
     {
         try
         {
@@ -422,7 +427,7 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
             {
                 await current.Index.WaitForTokenCountAsync(DateHintInference.MaxTokensToScan);
                 tearingDown.ThrowIfCancellationRequested();
-                return DateHintInference.FindFirstScheme(current.Index, current.File, DateHintInference.MaxTokensToScan);
+                return DateHintInference.FindFirstScheme(current.Index, current.Bytes, DateHintInference.MaxTokensToScan);
             });
             if (!IsDisposed && scheme is { } inferred)
                 HintSettings.TrySetInferredDefault(inferred);

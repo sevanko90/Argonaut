@@ -16,7 +16,7 @@ public readonly record struct FileLineSpan(long Offset, int Length);
 /// A class that scans, calculates, and holds line offset and length values
 /// for a large memory-mapped file to allow fast seeking and loading of arbitrary lines
 /// </summary>
-public sealed class FileOffsetIndex : AppendLogIndexBase<FileLineSpan>, IFileIndexer
+public sealed class FileOffsetIndex : AppendLogIndexBase<FileLineSpan>, IBackgroundIndex
 {
     // Size of the chunk scanned per outer-loop pass. Scanning is zero-copy (spans over the
     // mapped file), so this only bounds progress-reporting granularity and span length —
@@ -33,7 +33,7 @@ public sealed class FileOffsetIndex : AppendLogIndexBase<FileLineSpan>, IFileInd
     public Task IndexingTask { get; private set; } = Task.CompletedTask;
 
     /// <summary>
-    /// Returns the number of lines in the index (may be less than the actual number of lines until <see cref="AppendLogIndexBase{T}.IsComplete"/> is true).
+    /// Returns the number of lines in the index (may be less than the actual number of lines until <see cref="AppendLogIndexBase{T}.AllItemsPublished"/> is true).
     /// </summary>
     public int LineCount => this.ItemCount;
 
@@ -60,7 +60,7 @@ public sealed class FileOffsetIndex : AppendLogIndexBase<FileLineSpan>, IFileInd
     /// <param name="file">Memory mapped file to index</param>
     /// <param name="progressReporter">Progress reporter</param>
     /// <returns>The index class, initially running in the background</returns>
-    public static FileOffsetIndex StartIndexing(MMapFile file, IProgressReporter? progressReporter = null, CancellationToken cancellationToken = default)
+    public static FileOffsetIndex StartIndexing(IByteSource file, IProgressReporter? progressReporter = null, CancellationToken cancellationToken = default)
     {
         var index = new FileOffsetIndex();
         index.IndexingTask = index.StartScan(() => index.ProduceOffsets(file, progressReporter, cancellationToken));
@@ -81,35 +81,48 @@ public sealed class FileOffsetIndex : AppendLogIndexBase<FileLineSpan>, IFileInd
     /// <param name="file">Memory-mapped file to index</param>
     /// <param name="progressReporter">Allows callers to be notified of progress</param>
     /// <param name="cancellationToken">
-    /// Checked once per scan chunk so a caller tearing down the owning <see cref="MMapFile"/>
-    /// (e.g. window close mid-scan) can stop this loop before it dereferences memory the OS
-    /// has unmapped - see CLAUDE.md / MMapFile for why touching the mapping after disposal is
-    /// a native use-after-free, not a catchable .NET exception.
+    /// Checked once per scan chunk so a caller tearing down the owning source (e.g. window
+    /// close mid-scan) can stop this loop before it dereferences memory the OS has unmapped -
+    /// see CLAUDE.md / <see cref="MMapFile"/> for why touching a mapping after disposal is a
+    /// native use-after-free, not a catchable .NET exception.
     /// </param>
     /// <remarks>Invoked in the background via a task</remarks>
-    private void ProduceOffsets(MMapFile file, IProgressReporter? progressReporter, CancellationToken cancellationToken)
+    private void ProduceOffsets(IByteSource file, IProgressReporter? progressReporter, CancellationToken cancellationToken)
     {
-        long length = file.Length;
-        if (length == 0)
-        {
-            progressReporter?.Report("Indexing");
-            return;
-        }
-
         long offset = 0;
         long currentLineStart = 0;
         try
         {
-            // Chunked-scan loop deliberately duplicated (see also FileSearchSession.Scan,
+            // Chunked-scan loop deliberately duplicated (see also SearchSession.Scan,
             // FileTypeDetector): hot path, indirection would cost more than the shared lines.
-            while (offset < length)
+            while (true)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                // Scan the mapped bytes directly - no buffer, no copy. IndexOf over a byte
+                // AvailableLength is re-read every turn, never snapshotted: for a streamed
+                // source it is only the end *so far*, and a loop that bounded itself by the
+                // value it saw at entry would stop there and then publish a complete index over
+                // a partial document (see IByteSource.AvailableLength).
+                long available = file.AvailableLength;
+                if (offset >= available)
+                {
+                    if (file.LengthSettled)
+                        break;
+
+                    file.WaitForLength(offset + 1, cancellationToken);
+                    continue;
+                }
+
+                // Scan the source's own bytes directly - no buffer, no copy. IndexOf over a byte
                 // span is SIMD-vectorized, which is what makes this loop fast on multi-GB files.
-                int size = (int)Math.Min(ScanChunkSize, length - offset);
-                var chunk = file.GetSpan(offset, size);
+                // Whatever length comes back is what this iteration covers: a single-buffer
+                // source always serves the whole chunk, and a split one just makes the loop take
+                // an extra turn (see IByteSource.GetContiguousSpan).
+                var chunk = file.GetContiguousSpan(offset, (int)Math.Min(ScanChunkSize, available - offset));
+                if (chunk.IsEmpty)
+                    continue;
+
+                int size = chunk.Length;
 
                 int pos = 0;
                 while (pos < size)
@@ -126,21 +139,23 @@ public sealed class FileOffsetIndex : AppendLogIndexBase<FileLineSpan>, IFileInd
                 }
 
                 offset += size;
-                progressReporter?.Report("Indexing", offset, length);
+                progressReporter?.Report("Indexing", offset, available);
             }
         }
         finally
         {
-            // Only on a genuine end-of-file is there a trailing (newline-less) line to record.
-            // On cancellation (close/teardown mid-scan) currentLineStart is wherever the scan
-            // stopped, so length - currentLineStart is the entire un-scanned remainder - which
-            // on a multi-GB file exceeds int.MaxValue and overflows the checked cast. Skip it.
-            if (!cancellationToken.IsCancellationRequested && currentLineStart < length)
+            // Only on a genuine end of data is there a trailing (newline-less) line to record -
+            // and only once the length has settled, since a line with no newline yet may simply
+            // be one whose newline has not arrived. On cancellation (close/teardown mid-scan)
+            // currentLineStart is wherever the scan stopped, so the remainder is the entire
+            // un-scanned tail - which on a multi-GB file exceeds int.MaxValue and overflows the
+            // checked cast. Skip it in both cases.
+            if (!cancellationToken.IsCancellationRequested && file.LengthSettled && currentLineStart < offset)
             {
-                this.AddLineSpan(new FileLineSpan(currentLineStart, checked((int)(length - currentLineStart))));
+                this.AddLineSpan(new FileLineSpan(currentLineStart, checked((int)(offset - currentLineStart))));
             }
 
-            progressReporter?.Report("Indexing", length, length);
+            progressReporter?.Report("Indexing", offset, offset);
         }
     }
 

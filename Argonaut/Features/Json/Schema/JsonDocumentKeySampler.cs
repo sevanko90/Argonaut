@@ -39,10 +39,10 @@ public static class JsonDocumentKeySampler
     /// The caller is responsible for knowing the match then applies to the array's items rather
     /// than to its root - see <paramref name="matchedElementOfArray"/>.
     /// </summary>
-    public static IReadOnlyList<byte[]> ReadRootKeys(JsonStructureIndex index, MMapFile mmap, out bool matchedElementOfArray)
+    public static IReadOnlyList<byte[]> ReadRootKeys(JsonStructureIndex index, IByteSource bytes, out bool matchedElementOfArray)
     {
         ArgumentNullException.ThrowIfNull(index);
-        ArgumentNullException.ThrowIfNull(mmap);
+        ArgumentNullException.ThrowIfNull(bytes);
 
         matchedElementOfArray = false;
 
@@ -70,7 +70,7 @@ public static class JsonDocumentKeySampler
             return Array.Empty<byte[]>();
         }
 
-        return ReadMemberNames(index, mmap, containerIndex);
+        return ReadMemberNames(index, bytes, containerIndex);
     }
 
     /// <summary>
@@ -78,10 +78,10 @@ public static class JsonDocumentKeySampler
     /// Public so the per-node match affordance can score any container the user points at, not
     /// only the document root.
     /// </summary>
-    public static IReadOnlyList<byte[]> ReadMemberNames(JsonStructureIndex index, MMapFile mmap, int containerIndex)
+    public static IReadOnlyList<byte[]> ReadMemberNames(JsonStructureIndex index, IByteSource bytes, int containerIndex)
     {
         ArgumentNullException.ThrowIfNull(index);
-        ArgumentNullException.ThrowIfNull(mmap);
+        ArgumentNullException.ThrowIfNull(bytes);
 
         if ((uint)containerIndex >= (uint)index.TokenCount)
             return Array.Empty<byte[]>();
@@ -105,7 +105,7 @@ public static class JsonDocumentKeySampler
 
             var child = index.GetToken(childIndex);
             if (child.NameLength > 0)
-                keys.Add(mmap.GetSpan(child.NameOffset, child.NameLength).ToArray());
+                keys.Add(bytes.RequireContiguous(child.NameOffset, child.NameLength).ToArray());
 
             if (child.Kind is JsonTokenKind.StartObject or JsonTokenKind.StartArray)
             {

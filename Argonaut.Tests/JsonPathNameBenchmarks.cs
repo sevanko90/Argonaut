@@ -54,7 +54,7 @@ public class JsonPathNameBenchmarks
         for (int i = 1; i < index.TokenCount - 1; i++)
         {
             var child = index.GetToken(i);
-            if (JsonUnescape.EqualsDecodedUtf8(mmap.GetSpan(child.NameOffset, child.NameLength), decodedTarget)) return i;
+            if (JsonUnescape.EqualsDecodedUtf8(mmap.RequireContiguous(child.NameOffset, child.NameLength), decodedTarget)) return i;
         }
         return -1;
     }

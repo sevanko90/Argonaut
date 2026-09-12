@@ -14,7 +14,7 @@ public class RawCaretReadoutTests
     private static RawCaretReadout Describe(byte[] content, long caretOffset,
         RawSelection selection = default, int wrapWidth = 80)
     {
-        var source = new ArrayByteSource(content);
+        var source = new MemoryByteSource(content);
         var index = RawSegmentIndex.StartIndexing(source, wrapWidth);
         index.IndexingTask.GetAwaiter().GetResult();
 

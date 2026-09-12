@@ -31,7 +31,7 @@ public static class DisplayText
     /// as UTF-8, truncated to <paramref name="maxLength"/> bytes plus a trailing ellipsis.
     /// </summary>
     /// <param name="truncated">True when the range was longer than the cap.</param>
-    public static string Read(MMapFile file, long offset, int length, out bool truncated, int maxLength = MaxLength)
+    public static string Read(IByteSource file, long offset, int length, out bool truncated, int maxLength = MaxLength)
     {
         if (length <= 0)
         {
@@ -50,7 +50,7 @@ public static class DisplayText
         // Cut on a UTF-8 character boundary: read one byte past the cap and back the cut off
         // while the first excluded byte is a continuation byte (0b10xxxxxx), so a multi-byte
         // character is never split into a replacement glyph.
-        var span = file.GetSpan(offset, maxLength + 1);
+        var span = file.RequireContiguous(offset, maxLength + 1);
         int cut = maxLength;
         while (cut > 0 && (span[cut] & 0xC0) == 0x80)
             cut--;

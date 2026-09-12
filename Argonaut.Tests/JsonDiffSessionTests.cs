@@ -10,7 +10,7 @@ namespace Argonaut.Tests;
 /// either mapping is released, in every interleaving - mid-diff, mid-index on one or both
 /// sides - a failed side never starts the diff but still tears down cleanly, double
 /// dispose is a no-op, and cancellation mid-build leaves no partially-final container hash
-/// observable. Precedent: IndexedFileSessionTests / StatusProgressHandoffTests.
+/// observable. Precedent: IndexedSourceSessionTests / StatusProgressHandoffTests.
 /// </summary>
 public class JsonDiffSessionTests
 {
@@ -22,7 +22,7 @@ public class JsonDiffSessionTests
     }
 
     /// <summary>A file big enough that indexing it takes real time, so an immediate dispose
-    /// lands mid-scan - the same technique IndexedFileSessionTests uses.</summary>
+    /// lands mid-scan - the same technique IndexedSourceSessionTests uses.</summary>
     private static string WriteLargeTempJson(int elements = 400_000)
     {
         var sb = new StringBuilder("[");
@@ -44,16 +44,16 @@ public class JsonDiffSessionTests
         string rightPath = WriteTempJson("""{"a":2}""");
         try
         {
-            var session = JsonDiffSession.Start(leftPath, rightPath);
+            var session = LoadFromPath.StartDiff(leftPath, rightPath);
             await session.Diff.IndexingTask;
             Assert.True(session.Diff.RecordCount > 0);
 
-            var leftFile = session.Left.File;
-            var rightFile = session.Right.File;
+            var leftFile = session.Left.Bytes;
+            var rightFile = session.Right.Bytes;
             session.Dispose();
 
-            Assert.Throws<ObjectDisposedException>(() => leftFile.GetSpan(0, 1));
-            Assert.Throws<ObjectDisposedException>(() => rightFile.GetSpan(0, 1));
+            Assert.Throws<ObjectDisposedException>(() => leftFile.RequireContiguous(0, 1));
+            Assert.Throws<ObjectDisposedException>(() => rightFile.RequireContiguous(0, 1));
         }
         finally
         {
@@ -69,10 +69,10 @@ public class JsonDiffSessionTests
         string rightPath = WriteTempJson("""{"a":[1,2,4]}""");
         try
         {
-            using var session = JsonDiffSession.Start(leftPath, rightPath);
+            using var session = LoadFromPath.StartDiff(leftPath, rightPath);
             await session.HashReleaseTask;
 
-            Assert.True(session.Diff.IsComplete);
+            Assert.True(session.Diff.AllItemsPublished);
             Assert.False(session.Left.Index.HasContentHashes);
             Assert.False(session.Right.Index.HasContentHashes);
             Assert.Throws<InvalidOperationException>(() => session.Left.Index.GetContentHash(0));
@@ -93,7 +93,7 @@ public class JsonDiffSessionTests
         string rightPath = WriteLargeTempJson();
         try
         {
-            var session = JsonDiffSession.Start(leftPath, rightPath);
+            var session = LoadFromPath.StartDiff(leftPath, rightPath);
             var diffTask = session.Diff.IndexingTask;
 
             // Dispose immediately - the diff task is still waiting on both indexes. It must
@@ -105,8 +105,8 @@ public class JsonDiffSessionTests
             Assert.True(session.Right.IndexingTask.IsCompleted);
             Assert.False(session.Left.Index.HasContentHashes);
             Assert.False(session.Right.Index.HasContentHashes);
-            Assert.Throws<ObjectDisposedException>(() => session.Left.File.GetSpan(0, 1));
-            Assert.Throws<ObjectDisposedException>(() => session.Right.File.GetSpan(0, 1));
+            Assert.Throws<ObjectDisposedException>(() => session.Left.Bytes.RequireContiguous(0, 1));
+            Assert.Throws<ObjectDisposedException>(() => session.Right.Bytes.RequireContiguous(0, 1));
         }
         finally
         {
@@ -122,7 +122,7 @@ public class JsonDiffSessionTests
         string rightPath = WriteLargeTempJson();
         try
         {
-            var session = JsonDiffSession.Start(leftPath, rightPath);
+            var session = LoadFromPath.StartDiff(leftPath, rightPath);
             await session.Left.IndexingTask; // the small side finishes fast
 
             session.Dispose();
@@ -147,7 +147,7 @@ public class JsonDiffSessionTests
         string rightPath = WriteLargeTempJson();
         try
         {
-            var session = JsonDiffSession.Start(leftPath, rightPath);
+            var session = LoadFromPath.StartDiff(leftPath, rightPath);
             await Task.Delay(50);
             session.Dispose();
 
@@ -167,20 +167,20 @@ public class JsonDiffSessionTests
         string rightPath = WriteTempJson("{\"broken\": tru"); // invalid JSON
         try
         {
-            var session = JsonDiffSession.Start(leftPath, rightPath);
+            var session = LoadFromPath.StartDiff(leftPath, rightPath);
             await session.Diff.IndexingTask; // completes (empty) despite the side failure
             await session.HashReleaseTask;
 
             Assert.Null(session.Left.Index.Failure);
             Assert.NotNull(session.Right.Index.Failure);
             Assert.Equal(0, session.Diff.RecordCount);
-            Assert.True(session.Diff.IsComplete);
+            Assert.True(session.Diff.AllItemsPublished);
             Assert.False(session.Left.Index.HasContentHashes);
             Assert.False(session.Right.Index.HasContentHashes);
 
-            var leftFile = session.Left.File;
+            var leftFile = session.Left.Bytes;
             session.Dispose();
-            Assert.Throws<ObjectDisposedException>(() => leftFile.GetSpan(0, 1));
+            Assert.Throws<ObjectDisposedException>(() => leftFile.RequireContiguous(0, 1));
         }
         finally
         {
@@ -192,7 +192,7 @@ public class JsonDiffSessionTests
     /// <summary>
     /// RequestStop() cancels both sides (and the diff), is idempotent, and is a no-op once
     /// Dispose has already run - the same contract
-    /// IndexedFileSession.RequestStop and RawIndexSession.RequestStop already state.
+    /// IndexedSourceSession.RequestStop and RawIndexSession.RequestStop already state.
     /// </summary>
     [Fact]
     public void RequestStop_StopsBothSides_IsIdempotent_AndNoOpAfterDispose()
@@ -201,7 +201,7 @@ public class JsonDiffSessionTests
         string rightPath = WriteLargeTempJson();
         try
         {
-            var session = JsonDiffSession.Start(leftPath, rightPath);
+            var session = LoadFromPath.StartDiff(leftPath, rightPath);
 
             session.RequestStop();
             session.RequestStop(); // idempotent before Dispose
@@ -226,7 +226,7 @@ public class JsonDiffSessionTests
         string rightPath = WriteTempJson("[2]");
         try
         {
-            var session = JsonDiffSession.Start(leftPath, rightPath);
+            var session = LoadFromPath.StartDiff(leftPath, rightPath);
             session.Dispose();
             session.Dispose(); // view model and view detach handler both call it
         }

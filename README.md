@@ -1,10 +1,11 @@
 # Argonaut
 
-A cross-platform file viewer built for large files — multi-gigabyte JSON and NDJSON documents open and navigate smoothly, not just small ones.
+A cross-platform file viewer built for large files — multi-gigabyte files (including JSON and NDJSON) open and navigate smoothly.
 
 ## Features
 
-- Instantly view any file contents - if the file type can't be auto-detected, the file is shown in a basic text view.
+- Instantly view any file contents - anything Argonaut can't identify opens in the text view, and you can try any view on any file from the status bar if the auto detection fails. 
+- Paste data straight in - the clipboard opens as a document, no file needed
 - Specialised views for different file types
 - Files of any size are navigable almost instantly, no "loading..." spinner here! Argonaut never loads the whole file before starting to display it.
 - Fast search and highlighting across multi-gb files
@@ -12,15 +13,32 @@ A cross-platform file viewer built for large files — multi-gigabyte JSON and N
 - Recent files list
 - Light/dark theming, following the OS by default with an in-app override
 
+### Pasting data
+
+Copied a chunk of JSON out of a log, an API response or a query result? Paste it straight in - hit
+the **Paste data** button on the start screen, or Ctrl/Cmd+V before you've opened anything. It gets
+the same treatment a file does: detected by its *content* rather than a file name it doesn't have,
+so pasted JSON, NDJSON and CSV all land in the right view, with search, the JSON tree and
+everything else working as normal.
+
+A few things differ, because a pasted document isn't a file:
+
+- It won't appear in your recent files - there'd be nothing to reopen.
+- The per-file schema conveniences don't apply (no `<file>.schema.json` sidecar, and your schema
+  choice isn't remembered for next time). You can still pick a schema from the toolbar by hand.
+- There's a 64 MB ceiling. Clipboards will happily hold more, but at that point you're better off
+  saving it to a file and opening that - which is what Argonaut is built for anyway.
+
 ### Specialised file type support
 
 #### JSON 
 
-Argonaut was originally conceived as a viewer for large JSON files and it has first-class JSON support:
+Argonaut was originally conceived as a viewer for large JSON files (hence the name!) and it has first-class JSON support:
 
 - Displays documentation from JSON Schema files
 - Semantic JSON Diff
 - Collapsible nodes
+- Open JSON Arrays in a grid view for slicing them by different dimensions
 - JSONPath display of selected node and go to JSONPath node option
 - Inline decoding of JS dates to readable form
 - Copy property value or JSONPath to clipboard
@@ -32,6 +50,25 @@ Argonaut was originally conceived as a viewer for large JSON files and it has fi
 #### CSV
 
 - Comma and tab delimited files are shown in a column viewer
+
+#### Text view
+
+The fallback view - but not the poor relation that sounds like. It's built the same windowed way as
+everything else, so a multi-gigabyte log scrolls smoothly from the moment it opens. The index behind it is deliberately sparse (one anchor per 64 display rows), so unlike the JSON view it costs very little memory no matter how big the file is.
+
+- Smooth scrolling and immediate display at any file size
+- Force-wraps pathologically long lines (eg several GB of minified JSON) for a useful display
+- Choose your wrap width, with a marker in the gutter showing where a long line was *broken* rather
+  than where it actually *ended*
+  - Explicit wrap widths rather than word-wrap to the window is a deliberate performance-based choice. Window-width soft wrapping of unicode documents requires accounting for monitor DPI and font metrics, then re-building the underlying index that drives the document view on every window resize. That cripples display performance, and Argonaut is all about speed!
+- The status gutter tracks the caret: byte offset, line, column, and how much is selected. On a
+  pathological line the column gives up and
+  shows a dash rather than stalling the UI to count characters; the line number is always right.
+- **The character under the caret is named, not just shown** - `U+2028 LINE SEPARATOR`,
+  `U+00A0 NO-BREAK SPACE`, `U+200B ZERO WIDTH SPACE`. This is how you find the invisible thing
+  that's breaking your file. Names come from the Unicode Character Database 16.0.0, since .NET
+  exposes character categories but no names.
+- Double-click to select a word
 
 ### JSON Schema support for documentation
 
@@ -81,7 +118,8 @@ This works well for line-based files like raw text and CSV - the index is a rela
 For JSON though, things get a bit more interesting. The index needs to hold a lot more than just line start, it needs to hold the position of every token (array, property, etc) so the index size is related to the depth and complexity of the JSON rather than the file size. 
 
 It is possible (even likely) that the index for a complex JSON file could be bigger than the file itself! Argonaut may take more RAM to load a large file than other, slower viewers. This is the tradeoff for fast viewing of large files. I think it's worth it, but YMMV.
-
+ 
+Pasted data is the one exception to the windowing: there's no file on disk to window into, so the pasted bytes are held in memory for as long as the document is open (plus its index, as above). That's the reason for the size ceiling on pasting - and why a genuinely big payload is better saved to a file first.
 
 ## Running the code
 

@@ -28,7 +28,7 @@ public enum JsonArrayColumnMode
 /// The table's ItemsSource: <see cref="CsvVisibleRow"/>s produced on demand from a JSON array,
 /// so the CSV grid's presentation layer renders them unchanged.
 ///
-/// It keeps no walk state of its own. <see cref="MemoryMappedCollectionBase.Count"/> derives from
+/// It keeps no walk state of its own. <see cref="VirtualizingItemsSourceBase.Count"/> derives from
 /// <see cref="JsonArrayElementIndex.ElementCount"/>, and realizing a row is a
 /// <see cref="JsonArrayElementIndex.TokenForElement"/> lookup per element the row covers - one in
 /// <see cref="JsonArrayColumnMode.ByProperty"/> mode (plus a bounded read of that element's
@@ -41,7 +41,7 @@ public enum JsonArrayColumnMode
 /// say where each of them lives inside an element both arrive finished, from whoever discovered
 /// the property names or chose the reshape width.
 /// </summary>
-public sealed class JsonArrayRowCollection : MemoryMappedCollectionBase, IColumnFitSource
+public sealed class JsonArrayRowCollection : VirtualizingItemsSourceBase, IColumnFitSource
 {
     private const int CacheCapacity = 1000;
 
@@ -51,7 +51,7 @@ public sealed class JsonArrayRowCollection : MemoryMappedCollectionBase, IColumn
 
     private readonly JsonArrayElementIndex elements;
     private readonly JsonStructureIndex index;
-    private readonly MMapFile mmap;
+    private readonly IByteSource bytes;
     private readonly JsonRowFactory rowFactory;
     private readonly LruCache<int, CsvVisibleRow> cache = new(CacheCapacity);
 
@@ -67,13 +67,13 @@ public sealed class JsonArrayRowCollection : MemoryMappedCollectionBase, IColumn
     private IndexGrowthMonitor? growthMonitor;
     private int notifiedCount;
 
-    public JsonArrayRowCollection(JsonArrayElementIndex elements, JsonStructureIndex index, MMapFile mmap,
+    public JsonArrayRowCollection(JsonArrayElementIndex elements, JsonStructureIndex index, IByteSource bytes,
         CsvStructure structure, ExpandedRoutes routes, JsonArrayColumnMode mode)
     {
         this.elements = elements;
         this.index = index;
-        this.mmap = mmap;
-        this.rowFactory = new JsonRowFactory(index, mmap, hintProviders: null);
+        this.bytes = bytes;
+        this.rowFactory = new JsonRowFactory(index, bytes, hintProviders: null);
         this.structure = structure;
         this.routes = routes;
         this.mode = mode;
@@ -81,7 +81,7 @@ public sealed class JsonArrayRowCollection : MemoryMappedCollectionBase, IColumn
         // states: a walk that finishes in the window between the snapshot and a check made
         // after it would leave this collection with no monitor, permanently reporting the
         // element count it happened to see here.
-        bool walkWasRunning = !elements.IsComplete;
+        bool walkWasRunning = !elements.AllItemsPublished;
 
         this.notifiedCount = GetCount();
 
@@ -101,7 +101,7 @@ public sealed class JsonArrayRowCollection : MemoryMappedCollectionBase, IColumn
         // tick - and a row that changes rather than appears cannot be published as an Add.
         // Publishing only whole rows until the walk completes keeps growth a pure append; the
         // final refresh (which the growth monitor guarantees) brings the last partial row in.
-        return elements.IsComplete ? (count + columns - 1) / columns : count / columns;
+        return elements.AllItemsPublished ? (count + columns - 1) / columns : count / columns;
     }
 
     protected override object GetItem(int index) => GetRow(index);
@@ -204,7 +204,7 @@ public sealed class JsonArrayRowCollection : MemoryMappedCollectionBase, IColumn
             bool isContainer = IsContainer(info.Kind);
 
             bool matched = info.NameLength >= 0
-                ? level.TryMatchName(mmap.GetSpan(info.NameOffset, info.NameLength), out int column, out var inner)
+                ? level.TryMatchName(bytes.RequireContiguous(info.NameOffset, info.NameLength), out int column, out var inner)
                 : level.TryMatchIndex(ordinal, out column, out inner);
 
             if (matched)
@@ -258,7 +258,7 @@ public sealed class JsonArrayRowCollection : MemoryMappedCollectionBase, IColumn
             bool isContainer = IsContainer(info.Kind);
 
             bool matched = info.NameLength >= 0
-                ? level.TryMatchName(mmap.GetSpan(info.NameOffset, info.NameLength), out int column, out var inner)
+                ? level.TryMatchName(bytes.RequireContiguous(info.NameOffset, info.NameLength), out int column, out var inner)
                 : level.TryMatchIndex(ordinal, out column, out inner);
 
             if (matched)
@@ -309,7 +309,7 @@ public sealed class JsonArrayRowCollection : MemoryMappedCollectionBase, IColumn
     private void StartGrowthMonitor()
     {
         growthMonitor = new IndexGrowthMonitor(GrowthPollInterval, elements.IndexingTask,
-            isComplete: () => elements.IsComplete,
+            isComplete: () => elements.AllItemsPublished,
             refresh: NotifyGrowth);
     }
 

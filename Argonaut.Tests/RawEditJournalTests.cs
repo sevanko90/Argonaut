@@ -1,4 +1,5 @@
 using System.Text;
+using Argonaut.Infrastructure;
 using Argonaut.Features.Raw;
 
 namespace Argonaut.Tests;
@@ -13,7 +14,7 @@ public class RawEditJournalTests
     {
         public Editor(string original)
         {
-            Table = new RawPieceTable(new ArrayByteSource(Encoding.UTF8.GetBytes(original)));
+            Table = new RawPieceTable(new MemoryByteSource(Encoding.UTF8.GetBytes(original)));
             Journal = new RawEditJournal(Table);
         }
 
@@ -24,7 +25,7 @@ public class RawEditJournalTests
         {
             get
             {
-                var destination = new byte[Table.Length];
+                var destination = new byte[Table.AvailableLength];
                 Table.CopyTo(0, destination);
                 return Encoding.UTF8.GetString(destination);
             }

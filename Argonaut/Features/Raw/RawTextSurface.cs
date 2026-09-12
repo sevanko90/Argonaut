@@ -700,7 +700,7 @@ public class RawTextSurface : Control, ILogicalScrollable
     /// to the view, so the surface requests rather than sets.</summary>
     public event EventHandler<double>? PanRequested;
 
-    private IByteSource? Source => this.viewModel?.Mmap;
+    private IByteSource? Source => this.viewModel?.Bytes;
 
     private IRawRowIndex? RowIndex => this.viewModel?.Index;
 

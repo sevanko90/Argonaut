@@ -16,7 +16,7 @@ public class RawRowDecoderTests
     private const int ReplacementChar = 0xFFFD;
 
     private static RawDecodedRow DecodeBytes(byte[] content, bool isSoftWrapped = false)
-        => RawRowDecoder.Decode(new ArrayByteSource(content), 0, content.Length, isSoftWrapped);
+        => RawRowDecoder.Decode(new MemoryByteSource(content), 0, content.Length, isSoftWrapped);
 
     private static RawDecodedRow Decode(string text, bool isSoftWrapped = false)
         => DecodeBytes(Encoding.UTF8.GetBytes(text), isSoftWrapped);
@@ -215,12 +215,12 @@ public class RawRowDecoderTests
         // The gather path: a piece table splits the row, so Decode must stitch it back before
         // decoding - a multi-byte character split across the seam is the case that would break.
         byte[] content = Encoding.UTF8.GetBytes("aé😀b");
-        var table = new RawPieceTable(new ArrayByteSource([]));
+        var table = new RawPieceTable(new MemoryByteSource([]));
         table.Insert(0, content.AsSpan(0, 3));
         table.Insert(3, content.AsSpan(3));
         Assert.True(table.PieceCount > 1);
 
-        var split = RawRowDecoder.Decode(table, 0, table.Length, isSoftWrapped: true);
+        var split = RawRowDecoder.Decode(table, 0, table.AvailableLength, isSoftWrapped: true);
         var whole = DecodeBytes(content, isSoftWrapped: true);
 
         Assert.Equal(whole.Text, split.Text);

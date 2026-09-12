@@ -78,8 +78,8 @@ public class JsonDiffViewModelTests
             var navigator = Assert.IsType<JsonDiffSearchNavigator>(vm.CreateSearchNavigator());
             Assert.Equal(2, navigator.ScanTargets.Count);
             Assert.Equal(navigator.ScanTarget, navigator.ScanTargets[0]);
-            Assert.Equal(leftPath, navigator.ScanTargets[0].Path);
-            Assert.Equal(rightPath, navigator.ScanTargets[1].Path);
+            Assert.Equal(leftPath, navigator.ScanTargets[0].Origin.Path);
+            Assert.Equal(rightPath, navigator.ScanTargets[1].Origin.Path);
 
             foreach (FileTypeDetector.FileKind kind in Enum.GetValues<FileTypeDetector.FileKind>())
                 Assert.False(vm.CanHandleFileType(kind));

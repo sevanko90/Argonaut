@@ -13,7 +13,7 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
 {
     private const int InitialIndexedRowTarget = 250;
 
-    private IndexedFileSession<FileOffsetIndex>? session;
+    private IndexedSourceSession<FileOffsetIndex>? session;
     private CsvRowCollection? rows;
     private CsvStructure? structure;
     private string[] headerFields = [];
@@ -29,7 +29,7 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
 
     internal FileOffsetIndex? Index => this.session?.Index;
 
-    internal MMapFile? Mmap => this.session?.File;
+    internal IByteSource? Bytes => this.session?.Bytes;
 
     /// <summary>Fires when this document begins tearing down, for
     /// <see cref="ISearchNavigator.DocumentTearingDown"/> - a find reveal links it so it stops
@@ -105,12 +105,13 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
         OnPropertyChanged(nameof(SelectedColumnIndex));
     }
 
-    public async Task LoadAsync(string path, byte delimiter, IProgressReporter? progressReporter = null)
+    public async Task LoadAsync(IByteOrigin origin, byte delimiter, IProgressReporter? progressReporter = null)
     {
-        this.FilePath = path;
+        this.Origin = origin;
+        this.FilePath = origin.Path ?? origin.DisplayName;
         this.delimiter = delimiter;
 
-        var session = IndexedFileSession<FileOffsetIndex>.Start(new MMapFile(path), FileOffsetIndex.StartIndexing, progressReporter);
+        var session = IndexedSourceSession<FileOffsetIndex>.Start(origin.Open(), FileOffsetIndex.StartIndexing, progressReporter);
         this.session = session;
 
         // Await a small initial batch so the first paint isn't a totally empty grid, and so
@@ -125,18 +126,18 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
         // sampled row is measured from its field SPANS (see MeasureColumns), which is what lets
         // the sample be the whole initial batch instead of a token two rows.
         this.headerFields = session.Index.LineCount > 0
-            ? CsvFieldReader.ReadFields(session.File, session.Index.GetLineSpan(0), delimiter)
+            ? CsvFieldReader.ReadFields(session.Bytes, session.Index.GetLineSpan(0), delimiter)
             : [];
 
         this.structure = CsvStructure.FromMaxChars(ColumnNames(), MeasureColumns(session));
-        this.rows = new CsvRowCollection(session.Index, session.File, delimiter, this.isHeaderRow ? 1 : 0);
+        this.rows = new CsvRowCollection(session.Index, session.Bytes, delimiter, this.isHeaderRow ? 1 : 0);
 
         OnPropertyChanged(nameof(Rows));
         OnPropertyChanged(nameof(Structure));
         OnPropertyChanged(nameof(ColumnCount));
         OnPropertyChanged(nameof(RowCount));
 
-        StatusText = $"{path} — {RowCount:N0} rows indexed so far";
+        StatusText = $"{FilePath} — {RowCount:N0} rows indexed so far";
         MonitorIndexing();
     }
 
@@ -174,7 +175,7 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
     /// "" escapes, so it over-counts slightly against the decoded text. Harmless: the width
     /// formula clamps, and saturates well before the difference could matter.
     /// </summary>
-    private int[] MeasureColumns(IndexedFileSession<FileOffsetIndex> session)
+    private int[] MeasureColumns(IndexedSourceSession<FileOffsetIndex> session)
     {
         var maxChars = new int[this.headerFields.Length];
         for (int c = 0; c < maxChars.Length; c++)
@@ -183,7 +184,7 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
         int sampleCount = Math.Min(session.Index.LineCount, InitialIndexedRowTarget);
         for (int i = 1; i < sampleCount; i++)
         {
-            var spans = CsvFieldReader.SplitToSpans(session.File, session.Index.GetLineSpan(i), delimiter, CsvFieldReader.MaxDisplayFields);
+            var spans = CsvFieldReader.SplitToSpans(session.Bytes, session.Index.GetLineSpan(i), delimiter, CsvFieldReader.MaxDisplayFields);
             int columns = Math.Min(spans.Length, maxChars.Length);
             for (int c = 0; c < columns; c++)
             {

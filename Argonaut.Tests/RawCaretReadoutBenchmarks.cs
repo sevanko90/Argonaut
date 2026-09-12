@@ -1,4 +1,5 @@
 using System.Text;
+using Argonaut.Infrastructure;
 using Argonaut.Features.Raw;
 using Argonaut.Infrastructure.Unicode;
 using BenchmarkDotNet.Attributes;
@@ -20,13 +21,13 @@ public class RawCaretReadoutBenchmarks
 {
     private const int WrapWidth = 160;
 
-    private ArrayByteSource shortLines = null!;
+    private MemoryByteSource shortLines = null!;
     private RawSegmentIndex shortLineRows = null!;
 
-    private ArrayByteSource oneLongAsciiLine = null!;
+    private MemoryByteSource oneLongAsciiLine = null!;
     private RawSegmentIndex longLineRows = null!;
 
-    private ArrayByteSource oneLongMixedLine = null!;
+    private MemoryByteSource oneLongMixedLine = null!;
     private RawSegmentIndex mixedLineRows = null!;
 
     [GlobalSetup]
@@ -36,13 +37,13 @@ public class RawCaretReadoutBenchmarks
         for (int i = 0; i < 20_000; i++)
             text.Append($"line {i}: the quick brown fox jumps over the lazy dog\n");
 
-        this.shortLines = new ArrayByteSource(Encoding.UTF8.GetBytes(text.ToString()));
+        this.shortLines = new MemoryByteSource(Encoding.UTF8.GetBytes(text.ToString()));
         this.shortLineRows = Index(this.shortLines);
 
-        this.oneLongAsciiLine = new ArrayByteSource(Encoding.UTF8.GetBytes(new string('x', 4_000_000)));
+        this.oneLongAsciiLine = new MemoryByteSource(Encoding.UTF8.GetBytes(new string('x', 4_000_000)));
         this.longLineRows = Index(this.oneLongAsciiLine);
 
-        this.oneLongMixedLine = new ArrayByteSource(
+        this.oneLongMixedLine = new MemoryByteSource(
             Encoding.UTF8.GetBytes(string.Concat(Enumerable.Repeat("héllo wörld ", 340_000))));
         this.mixedLineRows = Index(this.oneLongMixedLine);
 
@@ -51,7 +52,7 @@ public class RawCaretReadoutBenchmarks
         UnicodeNames.NameOf('x');
     }
 
-    private static RawSegmentIndex Index(ArrayByteSource source)
+    private static RawSegmentIndex Index(MemoryByteSource source)
     {
         var index = RawSegmentIndex.StartIndexing(source, WrapWidth);
         index.IndexingTask.GetAwaiter().GetResult();

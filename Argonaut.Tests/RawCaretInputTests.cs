@@ -173,7 +173,7 @@ public sealed class RawCaretInputTests : IDisposable
             await PumpAsync();
 
             Assert.Equal(0, vm.Caret!.Selection.Start);
-            Assert.Equal(vm.Mmap!.Length, vm.Caret.Selection.End);
+            Assert.Equal(vm.Bytes!.AvailableLength, vm.Caret.Selection.End);
         });
 
     [Fact]
@@ -285,7 +285,7 @@ public sealed class RawCaretInputTests : IDisposable
         return WithView(content.ToString(), async (window, vm, surface) =>
         {
             // A byte offset well past the first screenful.
-            long offset = vm.Mmap!.Length / 2;
+            long offset = vm.Bytes!.AvailableLength / 2;
 
             await vm.JumpToByteOffsetAsync(offset);
             await PumpAsync();

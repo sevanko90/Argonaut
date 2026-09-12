@@ -32,6 +32,14 @@
             <Setter Property="Foreground" Value="White" />
         </Style>
 
+        <!-- A lesser action sitting beside a .primary one: same metrics so the pair lines up
+             (Fluent's default padding is visibly shorter), only the emphasis differs. Keep the
+             padding here in step with .primary above. -->
+        <Style Selector="Button.secondary">
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Padding" Value="22,12" />
+        </Style>
+
 
         <!-- Rounded form controls everywhere (toolbars, dialogs) instead of Fluent's square-ish
              defaults - matches the app's other rounded surfaces (panels, iconbuttons, rows).

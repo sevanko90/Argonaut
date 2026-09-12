@@ -9,7 +9,7 @@ namespace Argonaut.Features.NdJson;
 /// </summary>
 public static class NdJsonLineReader
 {
-    public static string ReadLine(MMapFile file, FileLineSpan lineSpan)
+    public static string ReadLine(IByteSource file, FileLineSpan lineSpan)
     {
         var trimmed = TrimTrailingNewline(file, lineSpan);
         return file.GetUtf8String(trimmed.Offset, trimmed.Length);
@@ -21,7 +21,7 @@ public static class NdJsonLineReader
     /// spanning the whole file, so the uncapped <see cref="ReadLine"/> must never back a
     /// realized row.
     /// </summary>
-    public static string ReadDisplayLine(MMapFile file, FileLineSpan lineSpan)
+    public static string ReadDisplayLine(IByteSource file, FileLineSpan lineSpan)
     {
         var trimmed = TrimTrailingNewline(file, lineSpan);
         return DisplayText.Read(file, trimmed.Offset, trimmed.Length, out _);
@@ -31,9 +31,9 @@ public static class NdJsonLineReader
     /// Returns <paramref name="lineSpan"/> with any trailing '\n'/'\r' bytes excluded, so the
     /// range can be handed to something (e.g. a JSON parser) that must not see them.
     /// </summary>
-    public static FileLineSpan TrimTrailingNewline(MMapFile file, FileLineSpan lineSpan)
+    public static FileLineSpan TrimTrailingNewline(IByteSource file, FileLineSpan lineSpan)
     {
-        var span = file.GetSpan(lineSpan.Offset, lineSpan.Length);
+        var span = file.RequireContiguous(lineSpan.Offset, lineSpan.Length);
         int length = span.Length;
         while (length > 0 && span[length - 1] is (byte)'\n' or (byte)'\r')
             length--;

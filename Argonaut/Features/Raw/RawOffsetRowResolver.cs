@@ -35,7 +35,7 @@ public static class RawOffsetRowResolver
             ct.ThrowIfCancellationRequested();
 
             int count = index.RowCount;
-            if (index.IsComplete)
+            if (index.AllItemsPublished)
                 return index.RowForOffset(offset);
 
             if (count > 0 && offset < index.PublishedEndOffset)

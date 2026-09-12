@@ -61,16 +61,16 @@ public sealed class RawPieceTable : IByteSource
     public RawPieceTable(IByteSource original)
     {
         this.original = original;
-        if (original.Length > 0)
-            this.pieces.Add(new RawPiece(OriginalChunk, 0, original.Length, 0));
+        if (original.AvailableLength > 0)
+            this.pieces.Add(new RawPiece(OriginalChunk, 0, original.AvailableLength, 0));
 
-        Length = original.Length;
+        AvailableLength = original.AvailableLength;
     }
 
-    public long Length { get; private set; }
+    public long AvailableLength { get; private set; }
 
     /// <summary>True while the document still reads exactly as the file on disk does.</summary>
-    public bool IsUnedited => this.pieces.Count <= 1 && Length == this.original.Length;
+    public bool IsUnedited => this.pieces.Count <= 1 && AvailableLength == this.original.AvailableLength;
 
     /// <summary>
     /// Number of pieces. The row index watches this to decide when a full re-index is cheaper
@@ -86,9 +86,9 @@ public sealed class RawPieceTable : IByteSource
     public void RepointOriginal(IByteSource replacement)
     {
         ArgumentNullException.ThrowIfNull(replacement);
-        if (replacement.Length != this.original.Length)
+        if (replacement.AvailableLength != this.original.AvailableLength)
             throw new ArgumentException(
-                $"Replacement is {replacement.Length} bytes; the original was {this.original.Length}. " +
+                $"Replacement is {replacement.AvailableLength} bytes; the original was {this.original.AvailableLength}. " +
                 "Piece offsets are only meaningful against bytes of the same length.",
                 nameof(replacement));
 
@@ -97,7 +97,7 @@ public sealed class RawPieceTable : IByteSource
 
     public ReadOnlySpan<byte> GetContiguousSpan(long offset, int maxLength)
     {
-        if (offset < 0 || offset >= Length || maxLength <= 0)
+        if (offset < 0 || offset >= AvailableLength || maxLength <= 0)
             return ReadOnlySpan<byte>.Empty;
 
         int pieceIndex = FindPiece(offset);
@@ -130,14 +130,14 @@ public sealed class RawPieceTable : IByteSource
     public RawEditExtent Insert(long offset, ReadOnlySpan<byte> bytes)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(offset);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(offset, Length);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(offset, AvailableLength);
 
         if (bytes.IsEmpty)
             return new RawEditExtent(offset, 0, 0);
 
         int at = SplitAt(offset);
         this.pieces.InsertRange(at, AppendToScratch(bytes));
-        Length += bytes.Length;
+        AvailableLength += bytes.Length;
         RenumberFrom(at);
 
         return new RawEditExtent(offset, 0, bytes.Length);
@@ -148,7 +148,7 @@ public sealed class RawPieceTable : IByteSource
     {
         ArgumentOutOfRangeException.ThrowIfNegative(offset);
         ArgumentOutOfRangeException.ThrowIfNegative(length);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(offset + length, Length);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(offset + length, AvailableLength);
 
         if (length == 0)
             return new RawEditExtent(offset, 0, 0);
@@ -156,7 +156,7 @@ public sealed class RawPieceTable : IByteSource
         int from = SplitAt(offset);
         int to = SplitAt(offset + length);
         this.pieces.RemoveRange(from, to - from);
-        Length -= length;
+        AvailableLength -= length;
         RenumberFrom(from);
 
         return new RawEditExtent(offset, length, 0);
@@ -181,7 +181,7 @@ public sealed class RawPieceTable : IByteSource
     /// have to keep all of it alive to be undoable. Scratch is append-only and never reclaimed,
     /// so bytes an undone edit referenced are still there when redo needs them.
     /// </summary>
-    internal object Snapshot() => new SnapshotState(this.pieces.ToArray(), Length);
+    internal object Snapshot() => new SnapshotState(this.pieces.ToArray(), AvailableLength);
 
     /// <summary>Restores a <see cref="Snapshot"/>.</summary>
     internal void Restore(object snapshot)
@@ -189,7 +189,7 @@ public sealed class RawPieceTable : IByteSource
         var state = (SnapshotState)snapshot;
         this.pieces.Clear();
         this.pieces.AddRange(state.Pieces);
-        Length = state.Length;
+        AvailableLength = state.Length;
     }
 
     private sealed record SnapshotState(RawPiece[] Pieces, long Length);
@@ -220,7 +220,7 @@ public sealed class RawPieceTable : IByteSource
     /// </summary>
     private int SplitAt(long offset)
     {
-        if (offset == Length)
+        if (offset == AvailableLength)
             return this.pieces.Count;
 
         int index = FindPiece(offset);

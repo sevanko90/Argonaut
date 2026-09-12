@@ -18,7 +18,7 @@ public class FindControllerTests
     {
         private readonly CancellationTokenSource tearingDown = new();
 
-        public ScanTarget ScanTarget { get; } = new ScanTarget(path);
+        public ScanTarget ScanTarget { get; } = LoadFromPath.ScanTargetFor(path);
         public List<string?> HighlightTerms { get; } = new();
         public List<SearchMatch> Revealed { get; } = new();
 

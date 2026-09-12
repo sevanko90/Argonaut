@@ -1,5 +1,6 @@
 using System.Text;
 using Argonaut.Features.Json;
+using Argonaut.Infrastructure;
 
 namespace Argonaut.Tests;
 
@@ -19,7 +20,7 @@ public class JsonArrayTableSessionTests
     }
 
     /// <summary>A file big enough that indexing takes real time, so an immediate dispose lands
-    /// mid-scan - the technique IndexedFileSessionTests and JsonDiffSessionTests both use.</summary>
+    /// mid-scan - the technique IndexedSourceSessionTests and JsonDiffSessionTests both use.</summary>
     private static string WriteLargeTempJson(int elements = 400_000)
     {
         var sb = new StringBuilder("[");
@@ -42,7 +43,7 @@ public class JsonArrayTableSessionTests
         string path = WriteTempJson("[1,2,3]");
         try
         {
-            using var session = JsonArrayTableSession.Start(path, 0, new FileInfo(path).Length);
+            using var session = LoadFromPath.StartArrayTable(path, 0, new FileInfo(path).Length);
 
             Assert.Same(session.Elements.IndexingTask, session.IndexingTask);
 
@@ -61,13 +62,13 @@ public class JsonArrayTableSessionTests
         string path = WriteTempJson("""[{"a":1},{"a":2}]""");
         try
         {
-            var session = JsonArrayTableSession.Start(path, 0, new FileInfo(path).Length);
+            var session = LoadFromPath.StartArrayTable(path, 0, new FileInfo(path).Length);
             await session.IndexingTask;
 
-            var file = session.Inner.File;
+            var file = session.Inner.Bytes;
             session.Dispose();
 
-            Assert.Throws<ObjectDisposedException>(() => file.GetSpan(0, 1));
+            Assert.Throws<ObjectDisposedException>(() => file.RequireContiguous(0, 1));
         }
         finally
         {
@@ -84,7 +85,7 @@ public class JsonArrayTableSessionTests
         string path = WriteLargeTempJson();
         try
         {
-            var session = JsonArrayTableSession.Start(path, 0, new FileInfo(path).Length);
+            var session = LoadFromPath.StartArrayTable(path, 0, new FileInfo(path).Length);
             var walk = session.IndexingTask;
 
             session.Dispose();
@@ -103,7 +104,7 @@ public class JsonArrayTableSessionTests
         string path = WriteTempJson("[1,2,3]");
         try
         {
-            var session = JsonArrayTableSession.Start(path, 0, new FileInfo(path).Length);
+            var session = LoadFromPath.StartArrayTable(path, 0, new FileInfo(path).Length);
 
             session.Dispose();
             session.Dispose();
@@ -120,7 +121,7 @@ public class JsonArrayTableSessionTests
         string path = WriteTempJson("[1,2,3]");
         try
         {
-            var session = JsonArrayTableSession.Start(path, 0, new FileInfo(path).Length);
+            var session = LoadFromPath.StartArrayTable(path, 0, new FileInfo(path).Length);
 
             session.RequestStop();
             session.RequestStop();
@@ -139,7 +140,7 @@ public class JsonArrayTableSessionTests
         string path = WriteLargeTempJson();
         try
         {
-            using var session = JsonArrayTableSession.Start(path, 0, new FileInfo(path).Length);
+            using var session = LoadFromPath.StartArrayTable(path, 0, new FileInfo(path).Length);
             Assert.False(session.TearingDown.IsCancellationRequested);
 
             session.RequestStop();
@@ -160,7 +161,7 @@ public class JsonArrayTableSessionTests
         string path = WriteLargeTempJson();
         try
         {
-            using var session = JsonArrayTableSession.Start(path, 0, new FileInfo(path).Length);
+            using var session = LoadFromPath.StartArrayTable(path, 0, new FileInfo(path).Length);
 
             session.Inner.RequestStop();
 
@@ -184,7 +185,7 @@ public class JsonArrayTableSessionTests
             int offset = json.IndexOf("[10", StringComparison.Ordinal);
             int length = json.IndexOf(']', offset) + 1 - offset;
 
-            using var session = JsonArrayTableSession.Start(path, offset, length);
+            using var session = LoadFromPath.StartArrayTable(path, offset, length);
             await session.IndexingTask;
 
             Assert.Equal(3, session.Elements.ElementCount);
@@ -204,7 +205,7 @@ public class JsonArrayTableSessionTests
         string path = WriteTempJson("[1,2,3]");
         try
         {
-            using var session = JsonArrayTableSession.Start(path, 0, 4); // "[1,2"
+            using var session = LoadFromPath.StartArrayTable(path, 0, 4); // "[1,2"
             try
             {
                 await session.IndexingTask;

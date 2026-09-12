@@ -8,7 +8,7 @@ namespace Argonaut.Features.Search;
 
 /// <summary>
 /// UI-side orchestration of find / find next for the currently open document: the scans'
-/// lifetime (one <see cref="FileSearchSession"/> per target), waiting for more results, the
+/// lifetime (one <see cref="SearchSession"/> per target), waiting for more results, the
 /// reveal, and the press queue. Where the stops are ordered and stepped is
 /// <see cref="FindCursor"/>; the status line is <see cref="FindStatusText"/>.
 ///
@@ -27,7 +27,7 @@ public sealed class FindController
     private readonly Func<IProgressReporter?> progressReporterFactory;
 
     private ISearchNavigator? navigator;
-    private FileSearchSession[] sessions = Array.Empty<FileSearchSession>();
+    private SearchSession[] sessions = Array.Empty<SearchSession>();
     private string? sessionTerm;
 
     private readonly FindCursor cursor = new();
@@ -109,11 +109,11 @@ public sealed class FindController
 
             var scanTargets = navigator.ScanTargets;
             sessionTerm = term;
-            sessions = new FileSearchSession[scanTargets.Count];
+            sessions = new SearchSession[scanTargets.Count];
             cursor.Reset(scanTargets.Count);
             for (int i = 0; i < scanTargets.Count; i++)
             {
-                sessions[i] = FileSearchSession.Start(scanTargets[i], new LiteralSearchMatcher(term),
+                sessions[i] = SearchSession.Start(scanTargets[i], new LiteralSearchMatcher(term),
                     progressReporterFactory());
             }
 
@@ -184,7 +184,7 @@ public sealed class FindController
             var waits = new List<Task>(sessions.Length);
             foreach (var session in sessions)
             {
-                if (!session.IsComplete)
+                if (!session.AllItemsPublished)
                     waits.Add(session.WaitForMatchCountAsync(session.MatchCount + 1));
             }
 
@@ -219,7 +219,7 @@ public sealed class FindController
     {
         foreach (var session in sessions)
         {
-            if (!session.IsComplete)
+            if (!session.AllItemsPublished)
                 return false;
         }
 
@@ -258,7 +258,7 @@ public sealed class FindController
     /// <summary>
     /// Retires the current scans: clears the result state and asks each scan to stop. Nothing
     /// is joined - a retired scan holds only its own 4MB chunk mapping and lets go of it within
-    /// one chunk's work, and FileSearchSession.ScanTask never faults, so there is no exception
+    /// one chunk's work, and SearchSession.ScanTask never faults, so there is no exception
     /// to observe either.
     /// </summary>
     private void StopSessions()
@@ -266,7 +266,7 @@ public sealed class FindController
         // UI thread only, like every other mutation of `sessions` - the one background toucher
         // (RefreshStatusOnCompletionAsync) reads the array it captured at start, never this field.
         var old = sessions;
-        sessions = Array.Empty<FileSearchSession>();
+        sessions = Array.Empty<SearchSession>();
         sessionTerm = null;
         cursor.Reset(0);
 
@@ -279,7 +279,7 @@ public sealed class FindController
     /// advertising an in-progress search that already ended - and settles on the final stop
     /// count, which only the completed scans can give.
     /// </summary>
-    private async Task RefreshStatusOnCompletionAsync(FileSearchSession[] tracked, long request)
+    private async Task RefreshStatusOnCompletionAsync(SearchSession[] tracked, long request)
     {
         foreach (var session in tracked)
         {

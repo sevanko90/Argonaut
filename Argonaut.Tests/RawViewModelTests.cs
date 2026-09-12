@@ -404,4 +404,91 @@ public sealed class RawViewModelTests : IDisposable
             vm.Dispose();
         }
     }
+
+    /// <summary>
+    /// The status gutter's text comes from the view model, and follows the caret: moving it is
+    /// what the gutter exists to report on.
+    /// </summary>
+    [Fact]
+    public async Task CaretReadout_FollowsTheCaret()
+    {
+        string path = WriteFile(Encoding.UTF8.GetBytes("abc\ndef\u2028ghi\n"));
+        var vm = new RawViewModel();
+        try
+        {
+            await vm.LoadAsync(path);
+            await vm.IndexingTask;
+
+            Assert.NotNull(vm.Caret);
+            vm.Caret!.PlaceAt(0);
+
+            Assert.Equal("U+0061 LATIN SMALL LETTER A", vm.CaretCharacterText);
+            Assert.Equal("Byte 0    Ln 1, Col 1", vm.CaretPositionText);
+            Assert.Equal(string.Empty, vm.CaretSelectionText);
+
+            // Onto the separator: three bytes into line 2, and named from the file rather than
+            // from the glyph the row draws for it.
+            vm.Caret.PlaceAt(7);
+
+            Assert.Equal("U+2028 LINE SEPARATOR", vm.CaretCharacterText);
+            Assert.Equal("Byte 7    Ln 2, Col 4", vm.CaretPositionText);
+        }
+        finally
+        {
+            vm.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task CaretReadout_ReportsSelectionInBytesAndCharacters()
+    {
+        string path = WriteFile(Encoding.UTF8.GetBytes("a\u65e5\u672c\u8a9eb\n"));
+        var vm = new RawViewModel();
+        try
+        {
+            await vm.LoadAsync(path);
+            await vm.IndexingTask;
+
+            Assert.NotNull(vm.Caret);
+            vm.Caret!.PlaceAt(1);
+            vm.Caret.ExtendTo(10);
+
+            Assert.Equal("Selected 9 bytes (3 chars)", vm.CaretSelectionText);
+
+            vm.Caret.ClearSelection();
+            Assert.Equal(string.Empty, vm.CaretSelectionText);
+        }
+        finally
+        {
+            vm.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// A wrap-width change replaces the caret controller. The gutter has to end up subscribed to
+    /// the new one, or it freezes on whatever it last said.
+    /// </summary>
+    [Fact]
+    public async Task CaretReadout_SurvivesAWrapWidthChange()
+    {
+        var vm = new RawViewModel();
+        try
+        {
+            await vm.LoadAsync(WriteNewlinelessFile());
+            await vm.IndexingTask;
+
+            vm.SetWrapWidth(80);
+            await vm.IndexingTask;
+
+            Assert.NotNull(vm.Caret);
+            vm.Caret!.PlaceAt(100);
+
+            Assert.Equal("U+0078 LATIN SMALL LETTER X", vm.CaretCharacterText);
+            Assert.Equal("Byte 100    Ln 1, Col 101", vm.CaretPositionText);
+        }
+        finally
+        {
+            vm.Dispose();
+        }
+    }
 }

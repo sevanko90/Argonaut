@@ -42,11 +42,19 @@ and copy-out. Nothing is editable yet - typing is the next piece of work.
   - The caret was drawn over the full row height rather than the text's, so it overhung the glyphs.
   - Find highlighting could not span a soft wrap (pre-existing, inherited from the attached-property
     version it replaced).
-- **Caret position readout.** Byte offset into the file, row/column, and selection size, shown
-  while the raw view has a caret. Detail in [editing-options.md](editing-options.md) §"What step 2
-  has become so far". The caret already holds every number; the open question is where they go —
-  the status bar is tight and has no per-view injectable region, so the likely shape is a status
-  panel owned by the toolbar that the active view fills in.
+- ~~**Caret position readout.**~~ **Built** as a status gutter along the bottom of the raw view
+  (`RawCaretReadout`, `RawView.axaml`): the character under the caret named in full on the left
+  (`UnicodeNames`, a generated Unicode Character Database table), and byte offset, line/column and
+  selection size on the right. It went in the view rather than the app's status bar, which is tight
+  and has no per-view injectable region.
+
+  Deliberately **not** included: a character offset into the file. It cannot be answered without
+  decoding from byte 0, and the row scan finds breaks with a vectorized newline search that never
+  decodes — so the number would cost either a full decode per caret move or a permanently slower
+  index. Column and selection-character counts are capped for the same reason
+  (`ColumnScanBytes`, `SelectionScanBytes`) and report "—" past the cap.
+- **Unicode descriptors elsewhere.** The name lookup is not raw-specific; the JSON views could
+  identify a character under the cursor the same way.
 - **Save as a streaming rewrite.** Temp file beside the original, atomic rename, background
   re-index. One sequential pass; not where the difficulty lives.
 - **Scalar edits in the JSON tree.** An offset-keyed replacement overlay served at

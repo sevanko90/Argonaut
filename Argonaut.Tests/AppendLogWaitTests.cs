@@ -11,7 +11,7 @@ namespace Argonaut.Tests;
 /// The regression: one shared slot held the only TaskCompletionSource, so a later wait for a
 /// larger target overwrote a smaller one's and nothing ever completed the stranded task. That is
 /// a hang rather than a delay, and it lands where the tasks are joined -
-/// <see cref="IndexedFileSession{T}.Dispose"/> - so closing a still-indexing document froze the
+/// <see cref="IndexedSourceSession{T}.Dispose"/> - so closing a still-indexing document froze the
 /// UI thread for good. Seen as a testhost stuck at 0% CPU after
 /// JsonArrayTableEntryPointTests.LargeStillIndexingArray_WaitsForTheArrayToCloseBeforeResolving.
 /// </summary>

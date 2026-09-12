@@ -16,7 +16,7 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
 {
     private const int InitialTokenTarget = 250;
 
-    private IndexedFileSession<JsonStructureIndex>? session;
+    private IndexedSourceSession<JsonStructureIndex>? session;
     private JsonVisibleRowCollection? rows;
     private int? selectedTokenIndex;
     private string? selectedPath;
@@ -27,7 +27,7 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
 
     protected override IDisposable? MappedRows => rows;
 
-    internal IByteSource? Bytes => session?.File;
+    internal IByteSource? Bytes => session?.Bytes;
 
     internal JsonStructureIndex? Index => session?.Index;
 
@@ -136,7 +136,7 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
         if (SchemaSettings.Document is not { } schema || schema.NamedRoots.Count == 0 || session is not { } current)
             return;
 
-        var keys = JsonDocumentKeySampler.ReadRootKeys(current.Index, current.File, out bool fromArrayElement);
+        var keys = JsonDocumentKeySampler.ReadRootKeys(current.Index, current.Bytes, out bool fromArrayElement);
         if (keys.Count == 0)
             return;
 
@@ -198,7 +198,7 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
 
         var current = session;
         var resolveTask = current.StartDependentRead(tearingDown =>
-            JsonPathResolver.ResolveAsync(current.Index, current.File, path, tearingDown));
+            JsonPathResolver.ResolveAsync(current.Index, current.Bytes, path, tearingDown));
 
         JsonPathResolveResult result;
         try
@@ -278,7 +278,7 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
         long length = end.Offset + end.Length - offset;
 
         ArrayTableService.Request(new ArrayTableRequest(
-            FilePath, offset, length, JsonPathBuilder.Build(current.Index, current.File, tokenIndex)));
+            FilePath, offset, length, JsonPathBuilder.Build(current.Index, current.Bytes, tokenIndex)));
     }
 
     /// <summary>
@@ -352,7 +352,7 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
 
     private async Task LoadCore(IByteSource bytes, IProgressReporter? progressReporter)
     {
-        var session = IndexedFileSession<JsonStructureIndex>.Start(bytes, JsonStructureIndex.StartIndexing, progressReporter);
+        var session = IndexedSourceSession<JsonStructureIndex>.Start(bytes, JsonStructureIndex.StartIndexing, progressReporter);
         this.session = session;
 
         // Await a small initial batch so the first paint isn't empty; the row collection
@@ -362,7 +362,7 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
         if (session.Index.Failure is { } failure)
             IndexFailure = failure;
 
-        rows = new JsonVisibleRowCollection(session.Index, session.File,
+        rows = new JsonVisibleRowCollection(session.Index, session.Bytes,
             new IValueHintProvider[] { new DateHintProvider(HintSettings) }, DefaultExpandDepth);
 
         // A schema may already have been selected (sidecar/remembered, or pushed down by
@@ -414,7 +414,7 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
     /// background for the first classifiable date value, and sets it as the file default if
     /// found. Never a full-file scan. No-ops if the user has already picked a scheme.
     /// </summary>
-    private async Task InferDefaultDateSchemeAsync(IndexedFileSession<JsonStructureIndex> current)
+    private async Task InferDefaultDateSchemeAsync(IndexedSourceSession<JsonStructureIndex> current)
     {
         try
         {
@@ -422,7 +422,7 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
             {
                 await current.Index.WaitForTokenCountAsync(DateHintInference.MaxTokensToScan);
                 tearingDown.ThrowIfCancellationRequested();
-                return DateHintInference.FindFirstScheme(current.Index, current.File, DateHintInference.MaxTokensToScan);
+                return DateHintInference.FindFirstScheme(current.Index, current.Bytes, DateHintInference.MaxTokensToScan);
             });
             if (!IsDisposed && scheme is { } inferred)
                 HintSettings.TrySetInferredDefault(inferred);

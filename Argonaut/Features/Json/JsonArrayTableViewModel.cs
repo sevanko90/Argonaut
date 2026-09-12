@@ -129,7 +129,7 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
             return;
 
         string path = column < this.headers.Count ? this.headers[column].Display : this.structure.Columns[column].Name;
-        CellDetail = JsonArrayCellDetail.ForToken(current.Inner.Index, current.Inner.File, token,
+        CellDetail = JsonArrayCellDetail.ForToken(current.Inner.Index, current.Inner.Bytes, token,
             $"{path} — row {row + 1:N0}");
     }
 
@@ -231,13 +231,13 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
 
         // The same builder the row collection renders cells with, so column widths are measured
         // from the text that will actually be shown.
-        this.cellText = new JsonRowFactory(session.Inner.Index, session.Inner.File, hintProviders: null);
+        this.cellText = new JsonRowFactory(session.Inner.Index, session.Inner.Bytes, hintProviders: null);
 
         var discovered = Discover(session);
         Adopt(discovered);
         bool elementsAreObjects = discovered.SawObject;
 
-        this.rows = new JsonArrayRowCollection(session.Elements, session.Inner.Index, session.Inner.File,
+        this.rows = new JsonArrayRowCollection(session.Elements, session.Inner.Index, session.Inner.Bytes,
             discovered.Structure, this.routes, this.mode);
 
         // Built here rather than before the wait because it takes the answer discovery just
@@ -324,7 +324,7 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
     }
 
     private DiscoveredColumns Discover(JsonArrayTableSession current)
-        => JsonArrayColumnDiscovery.FromSample(current.Inner.Index, current.Inner.File, current.Elements,
+        => JsonArrayColumnDiscovery.FromSample(current.Inner.Index, current.Inner.Bytes, current.Elements,
             Math.Min(current.Elements.ElementCount, InitialElementTarget),
             this.cellText ?? throw new InvalidOperationException("The cell-text builder must exist before discovery."),
             this.openColumns, this.arrayColumns);

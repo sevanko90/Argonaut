@@ -10,7 +10,7 @@ namespace Argonaut.Tests;
 /// registered dependent task before releasing the mapping, ownership of the file transfers
 /// on Start (even when the factory throws), and Cancel/Dispose are idempotent.
 /// </summary>
-public class IndexedFileSessionTests
+public class IndexedSourceSessionTests
 {
     /// <summary>
     /// Controllable indexer stub: its IndexingTask completes only when the session's token
@@ -37,7 +37,7 @@ public class IndexedFileSessionTests
         string path = WriteTempFile(string.Join('\n', Enumerable.Range(0, 10_000)));
         try
         {
-            var session = IndexedFileSession<FileOffsetIndex>.Start(
+            var session = IndexedSourceSession<FileOffsetIndex>.Start(
                 new MMapFile(path), FileOffsetIndex.StartIndexing);
             var indexingTask = session.IndexingTask;
 
@@ -59,7 +59,7 @@ public class IndexedFileSessionTests
         string path = WriteTempFile("line\n");
         try
         {
-            var session = IndexedFileSession<FileOffsetIndex>.Start(
+            var session = IndexedSourceSession<FileOffsetIndex>.Start(
                 new MMapFile(path), FileOffsetIndex.StartIndexing);
 
             bool dependentRan = false;
@@ -90,7 +90,7 @@ public class IndexedFileSessionTests
         string path = WriteTempFile("line\n");
         try
         {
-            var session = IndexedFileSession<FileOffsetIndex>.Start(
+            var session = IndexedSourceSession<FileOffsetIndex>.Start(
                 new MMapFile(path), FileOffsetIndex.StartIndexing);
             session.Dispose();
             session.Dispose();
@@ -113,7 +113,7 @@ public class IndexedFileSessionTests
         string path = WriteTempFile("line\n");
         try
         {
-            var session = IndexedFileSession<FileOffsetIndex>.Start(
+            var session = IndexedSourceSession<FileOffsetIndex>.Start(
                 new MMapFile(path), FileOffsetIndex.StartIndexing);
             session.Dispose();
             session.RequestStop();
@@ -133,7 +133,7 @@ public class IndexedFileSessionTests
             var file = new MMapFile(path);
 
             Assert.Throws<InvalidOperationException>(() =>
-                IndexedFileSession<StubIndexer>.Start(file,
+                IndexedSourceSession<StubIndexer>.Start(file,
                     (_, _, _) => throw new InvalidOperationException("factory failed")));
 
             // MMapFile exposes no disposed-state API (by design - nothing should care at
@@ -153,7 +153,7 @@ public class IndexedFileSessionTests
         string path = WriteTempFile("line\n");
         try
         {
-            using var session = IndexedFileSession<FileOffsetIndex>.Start(
+            using var session = IndexedSourceSession<FileOffsetIndex>.Start(
                 new MMapFile(path), FileOffsetIndex.StartIndexing);
 
             Assert.False(session.TearingDown.IsCancellationRequested);
@@ -173,7 +173,7 @@ public class IndexedFileSessionTests
         string path = WriteTempFile("line\n");
         try
         {
-            var session = IndexedFileSession<FileOffsetIndex>.Start(
+            var session = IndexedSourceSession<FileOffsetIndex>.Start(
                 new MMapFile(path), FileOffsetIndex.StartIndexing);
             session.Dispose();
 
@@ -190,9 +190,9 @@ public class IndexedFileSessionTests
     /// <summary>Reads the private dependentTasks list's Count via reflection - same technique
     /// this file already uses for MMapFile.disposed - to observe RegisterDependentTask's
     /// pruning, which has no other externally observable signal.</summary>
-    private static int DependentTaskCount(IndexedFileSession<FileOffsetIndex> session)
+    private static int DependentTaskCount(IndexedSourceSession<FileOffsetIndex> session)
     {
-        var field = typeof(IndexedFileSession<FileOffsetIndex>).GetField("dependentTasks", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var field = typeof(IndexedSourceSession<FileOffsetIndex>).GetField("dependentTasks", BindingFlags.NonPublic | BindingFlags.Instance)!;
         var list = (System.Collections.IList)field.GetValue(session)!;
         return list.Count;
     }
@@ -208,7 +208,7 @@ public class IndexedFileSessionTests
         string path = WriteTempFile("line\n");
         try
         {
-            var session = IndexedFileSession<FileOffsetIndex>.Start(
+            var session = IndexedSourceSession<FileOffsetIndex>.Start(
                 new MMapFile(path), FileOffsetIndex.StartIndexing);
 
             for (int i = 0; i < 10; i++)
@@ -249,7 +249,7 @@ public class IndexedFileSessionTests
         string path = WriteTempFile("line\n");
         try
         {
-            var session = IndexedFileSession<FileOffsetIndex>.Start(
+            var session = IndexedSourceSession<FileOffsetIndex>.Start(
                 new MMapFile(path), FileOffsetIndex.StartIndexing);
 
             var faulting = Task.Run(() => throw new InvalidOperationException("simulated scan fault"));
@@ -298,7 +298,7 @@ public class IndexedFileSessionTests
         try
         {
             var file = new MMapFile(path);
-            var session = IndexedFileSession<FileOffsetIndex>.Start(file, FileOffsetIndex.StartIndexing);
+            var session = IndexedSourceSession<FileOffsetIndex>.Start(file, FileOffsetIndex.StartIndexing);
 
             bool sawUseAfterFree = false;
             var task = Task.Run(() =>

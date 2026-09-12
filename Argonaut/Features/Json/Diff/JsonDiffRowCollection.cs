@@ -101,8 +101,8 @@ public sealed class JsonDiffRowCollection : VirtualizingItemsSourceBase
     public JsonDiffRowCollection(JsonDiffSession session)
     {
         this.session = session;
-        this.leftFactory = new JsonRowFactory(session.Left.Index, session.Left.File, hintProviders: null);
-        this.rightFactory = new JsonRowFactory(session.Right.Index, session.Right.File, hintProviders: null);
+        this.leftFactory = new JsonRowFactory(session.Left.Index, session.Left.Bytes, hintProviders: null);
+        this.rightFactory = new JsonRowFactory(session.Right.Index, session.Right.Bytes, hintProviders: null);
 
         // Sampled BEFORE the walk, not after: a diff that completes while Rebuild is running
         // would otherwise be seen as "already complete, no monitor needed" by a check made
@@ -912,8 +912,8 @@ public sealed class JsonDiffRowCollection : VirtualizingItemsSourceBase
             if (record.MovePartnerRecord >= 0)
             {
                 moveBadge = record.IsMoveSource
-                    ? $"moved to {JsonPathBuilder.Build(session.Right.Index, session.Right.File, record.RightToken)} →"
-                    : $"↕ moved from {JsonPathBuilder.Build(session.Left.Index, session.Left.File, record.LeftToken)}";
+                    ? $"moved to {JsonPathBuilder.Build(session.Right.Index, session.Right.Bytes, record.RightToken)} →"
+                    : $"↕ moved from {JsonPathBuilder.Build(session.Left.Index, session.Left.Bytes, record.LeftToken)}";
             }
             else
             {

@@ -6,7 +6,7 @@ namespace Argonaut.Infrastructure;
 /// A background indexer started via a StartIndexing(IByteSource, IProgressReporter?,
 /// CancellationToken) factory: it scans the whole source once and publishes fixed-size
 /// records as it goes. Implemented by FileOffsetIndex (lines) and JsonStructureIndex
-/// (tokens). Lets generic consumers - the completion monitor, IndexedFileSession - work
+/// (tokens). Lets generic consumers - the completion monitor, IndexedSourceSession - work
 /// with either indexer without knowing which one they have.
 ///
 /// FileSearchSession shares the same publishing machinery (AppendLogIndexBase) but is

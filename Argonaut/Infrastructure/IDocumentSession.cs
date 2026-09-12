@@ -8,7 +8,7 @@ namespace Argonaut.Infrastructure;
 /// Everything <see cref="IndexedDocumentViewModel"/> needs from the thing a document is reading:
 /// the half of a session's lifetime the teardown ordering is written in terms of (stop the
 /// background work, then release what it was reading), plus the completion signal and outcome
-/// the status line is driven from. Implemented by <see cref="IndexedFileSession{TIndex}"/>,
+/// the status line is driven from. Implemented by <see cref="IndexedSourceSession{TIndex}"/>,
 /// <see cref="Argonaut.Features.Raw.RawIndexSession"/> and
 /// <see cref="Argonaut.Features.Json.Diff.JsonDiffSession"/>.
 ///

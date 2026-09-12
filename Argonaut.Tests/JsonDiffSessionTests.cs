@@ -10,7 +10,7 @@ namespace Argonaut.Tests;
 /// either mapping is released, in every interleaving - mid-diff, mid-index on one or both
 /// sides - a failed side never starts the diff but still tears down cleanly, double
 /// dispose is a no-op, and cancellation mid-build leaves no partially-final container hash
-/// observable. Precedent: IndexedFileSessionTests / StatusProgressHandoffTests.
+/// observable. Precedent: IndexedSourceSessionTests / StatusProgressHandoffTests.
 /// </summary>
 public class JsonDiffSessionTests
 {
@@ -22,7 +22,7 @@ public class JsonDiffSessionTests
     }
 
     /// <summary>A file big enough that indexing it takes real time, so an immediate dispose
-    /// lands mid-scan - the same technique IndexedFileSessionTests uses.</summary>
+    /// lands mid-scan - the same technique IndexedSourceSessionTests uses.</summary>
     private static string WriteLargeTempJson(int elements = 400_000)
     {
         var sb = new StringBuilder("[");
@@ -48,8 +48,8 @@ public class JsonDiffSessionTests
             await session.Diff.IndexingTask;
             Assert.True(session.Diff.RecordCount > 0);
 
-            var leftFile = session.Left.File;
-            var rightFile = session.Right.File;
+            var leftFile = session.Left.Bytes;
+            var rightFile = session.Right.Bytes;
             session.Dispose();
 
             Assert.Throws<ObjectDisposedException>(() => leftFile.RequireContiguous(0, 1));
@@ -105,8 +105,8 @@ public class JsonDiffSessionTests
             Assert.True(session.Right.IndexingTask.IsCompleted);
             Assert.False(session.Left.Index.HasContentHashes);
             Assert.False(session.Right.Index.HasContentHashes);
-            Assert.Throws<ObjectDisposedException>(() => session.Left.File.RequireContiguous(0, 1));
-            Assert.Throws<ObjectDisposedException>(() => session.Right.File.RequireContiguous(0, 1));
+            Assert.Throws<ObjectDisposedException>(() => session.Left.Bytes.RequireContiguous(0, 1));
+            Assert.Throws<ObjectDisposedException>(() => session.Right.Bytes.RequireContiguous(0, 1));
         }
         finally
         {
@@ -178,7 +178,7 @@ public class JsonDiffSessionTests
             Assert.False(session.Left.Index.HasContentHashes);
             Assert.False(session.Right.Index.HasContentHashes);
 
-            var leftFile = session.Left.File;
+            var leftFile = session.Left.Bytes;
             session.Dispose();
             Assert.Throws<ObjectDisposedException>(() => leftFile.RequireContiguous(0, 1));
         }
@@ -192,7 +192,7 @@ public class JsonDiffSessionTests
     /// <summary>
     /// RequestStop() cancels both sides (and the diff), is idempotent, and is a no-op once
     /// Dispose has already run - the same contract
-    /// IndexedFileSession.RequestStop and RawIndexSession.RequestStop already state.
+    /// IndexedSourceSession.RequestStop and RawIndexSession.RequestStop already state.
     /// </summary>
     [Fact]
     public void RequestStop_StopsBothSides_IsIdempotent_AndNoOpAfterDispose()

@@ -201,7 +201,7 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
     private const int CancellationCheckMask = 0xFFFF;
 
     // The no-options overload keeps the exact (IByteSource, IProgressReporter?, CancellationToken)
-    // shape IndexedFileSession.Start's factory delegate expects, so existing call sites keep
+    // shape IndexedSourceSession.Start's factory delegate expects, so existing call sites keep
     // passing the bare method group - optional parameters don't participate in method-group
     // conversion, which is why this is an overload and not a defaulted parameter.
     public static JsonStructureIndex StartIndexing(IByteSource file, IProgressReporter? progressReporter = null, CancellationToken cancellationToken = default)

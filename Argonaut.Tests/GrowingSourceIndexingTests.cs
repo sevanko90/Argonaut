@@ -219,7 +219,7 @@ public class GrowingSourceIndexingTests
 
         stopping.Cancel();
 
-        // The join is what IndexedFileSession.Dispose does before releasing the source, so a
+        // The join is what IndexedSourceSession.Dispose does before releasing the source, so a
         // scan parked in WaitForLength must come back promptly or closing a streamed document
         // would hang the UI thread.
         var stopped = await Task.WhenAny(index.IndexingTask, Task.Delay(TimeSpan.FromSeconds(5)));

@@ -26,7 +26,7 @@ namespace Argonaut.Features.Json;
 ///  - <b>Derived, not scanned, from <see cref="Diff.JsonDiffIndex"/></b>: it consumes another
 ///    index rather than a file, so it has its own <see cref="IndexingTask"/> and is deliberately
 ///    NOT an <see cref="IFileIndexer"/> - it must never be the thing an
-///    <see cref="IndexedFileSession{TIndex}"/> starts.
+///    <see cref="IndexedSourceSession{TIndex}"/> starts.
 ///
 /// It differs from the diff in one way that matters: the diff waits for its sources to COMPLETE
 /// (a half-scanned diff is meaningless), whereas a half-scanned array is a perfectly good table

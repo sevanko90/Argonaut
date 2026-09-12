@@ -17,7 +17,7 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel
 {
     private const int InitialIndexedLineTarget = 250;
 
-    private IndexedFileSession<FileOffsetIndex>? session;
+    private IndexedSourceSession<FileOffsetIndex>? session;
     private NdJsonLineCollection? lines;
     private NdJsonSelectedLine? selectedLine;
     private JsonViewModel? selectedLineJsonViewModel;
@@ -28,7 +28,7 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel
 
     protected override IDisposable? MappedRows => this.lines;
 
-    internal IByteSource? Bytes => this.session?.File;
+    internal IByteSource? Bytes => this.session?.Bytes;
 
     internal FileOffsetIndex? Index => this.session?.Index;
 
@@ -191,7 +191,7 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel
         // Alongside indexing, not blocking it - see JsonViewModel.ApplyInitialSchemaAsync.
         _ = ApplyInitialSchemaAsync(path);
 
-        var session = IndexedFileSession<FileOffsetIndex>.Start(new MMapFile(path), FileOffsetIndex.StartIndexing, progressReporter);
+        var session = IndexedSourceSession<FileOffsetIndex>.Start(new MMapFile(path), FileOffsetIndex.StartIndexing, progressReporter);
         this.session = session;
 
         // Await a small initial batch so the first paint isn't a totally empty scrollbar;
@@ -202,7 +202,7 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel
             IndexFailure = failure;
 
         SelectedLine = null;
-        lines = new NdJsonLineCollection(session.Index, session.File);
+        lines = new NdJsonLineCollection(session.Index, session.Bytes);
         OnPropertyChanged(nameof(Lines));
 
         UpdateStatusText();

@@ -19,14 +19,14 @@ public class JsonPathDecodingTests
         try
         {
             File.WriteAllText(path, "{\"" + serializedName + "\":1}");
-            using var session = IndexedFileSession<JsonStructureIndex>.Start(new MMapFile(path), JsonStructureIndex.StartIndexing);
+            using var session = IndexedSourceSession<JsonStructureIndex>.Start(new MMapFile(path), JsonStructureIndex.StartIndexing);
             await session.IndexingTask;
             string expectedPath = "$['" + decodedName.Replace("\\", "\\\\").Replace("'", "\\'") + "']";
-            var resolved = await JsonPathResolver.ResolveAsync(session.Index, session.File, expectedPath);
+            var resolved = await JsonPathResolver.ResolveAsync(session.Index, session.Bytes, expectedPath);
             Assert.Equal(1, resolved.TokenIndex);
-            string selectedPath = JsonPathBuilder.Build(session.Index, session.File, 1);
+            string selectedPath = JsonPathBuilder.Build(session.Index, session.Bytes, 1);
             Assert.Equal(decodedName == "a" ? "$.a" : expectedPath, selectedPath);
-            Assert.Equal(1, (await JsonPathResolver.ResolveAsync(session.Index, session.File, selectedPath)).TokenIndex);
+            Assert.Equal(1, (await JsonPathResolver.ResolveAsync(session.Index, session.Bytes, selectedPath)).TokenIndex);
         }
         finally { File.Delete(path); }
     }

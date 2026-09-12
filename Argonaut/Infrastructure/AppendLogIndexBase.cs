@@ -34,7 +34,7 @@ public abstract class AppendLogIndexBase<T> where T : struct
     // be overwritten by whichever wait asked for a larger target, which stranded the smaller
     // one's task forever: nothing completed it, MarkComplete only ever saw the newer slot, and
     // the task the caller had already awaited never finished. That is a hang, not a delay - it
-    // deadlocked IndexedFileSession.Dispose, which joins exactly these registered tasks.
+    // deadlocked IndexedSourceSession.Dispose, which joins exactly these registered tasks.
     private readonly List<(int Target, TaskCompletionSource<bool> Ready)> waiters = [];
 
     // Hot-path mirror of the LOWEST outstanding target: 0 means "nobody is waiting", so the

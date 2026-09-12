@@ -6,7 +6,7 @@ namespace Argonaut.Features.Json;
 
 /// <summary>
 /// Owns the lifetime pair behind one array-as-table document: an
-/// <see cref="IndexedFileSession{TIndex}"/> over the array's own byte range, plus the
+/// <see cref="IndexedSourceSession{TIndex}"/> over the array's own byte range, plus the
 /// <see cref="JsonArrayElementIndex"/> that reads that session's token index for as long as it
 /// runs. Same job <see cref="Diff.JsonDiffSession"/> does for a diff, with one file session
 /// instead of two.
@@ -41,7 +41,7 @@ public sealed class JsonArrayTableSession : IDocumentSession
 
     /// <summary>The sub-range mapping and its token scan. The element index reads this index for
     /// its whole lifetime, which is what fixes the disposal order below.</summary>
-    public IndexedFileSession<JsonStructureIndex> Inner { get; }
+    public IndexedSourceSession<JsonStructureIndex> Inner { get; }
 
     /// <summary>Ordinal addressing over the array's direct children - the table's row source.</summary>
     public JsonArrayElementIndex Elements { get; }
@@ -66,7 +66,7 @@ public sealed class JsonArrayTableSession : IDocumentSession
     /// </summary>
     public IndexFailure? Failure => this.Inner.Failure ?? this.Elements.Failure;
 
-    private JsonArrayTableSession(IndexedFileSession<JsonStructureIndex> inner, JsonArrayElementIndex elements, CancellationTokenSource elementCts)
+    private JsonArrayTableSession(IndexedSourceSession<JsonStructureIndex> inner, JsonArrayElementIndex elements, CancellationTokenSource elementCts)
     {
         this.Inner = inner;
         this.Elements = elements;
@@ -82,7 +82,7 @@ public sealed class JsonArrayTableSession : IDocumentSession
     /// </summary>
     public static JsonArrayTableSession Start(string path, long offset, long length, IProgressReporter? progressReporter = null)
     {
-        var inner = IndexedFileSession<JsonStructureIndex>.Start(
+        var inner = IndexedSourceSession<JsonStructureIndex>.Start(
             new MMapFile(path, offset, length), JsonStructureIndex.StartIndexing, progressReporter);
 
         var elementCts = CancellationTokenSource.CreateLinkedTokenSource(inner.TearingDown);

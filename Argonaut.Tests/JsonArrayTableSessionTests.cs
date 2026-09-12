@@ -20,7 +20,7 @@ public class JsonArrayTableSessionTests
     }
 
     /// <summary>A file big enough that indexing takes real time, so an immediate dispose lands
-    /// mid-scan - the technique IndexedFileSessionTests and JsonDiffSessionTests both use.</summary>
+    /// mid-scan - the technique IndexedSourceSessionTests and JsonDiffSessionTests both use.</summary>
     private static string WriteLargeTempJson(int elements = 400_000)
     {
         var sb = new StringBuilder("[");
@@ -65,7 +65,7 @@ public class JsonArrayTableSessionTests
             var session = JsonArrayTableSession.Start(path, 0, new FileInfo(path).Length);
             await session.IndexingTask;
 
-            var file = session.Inner.File;
+            var file = session.Inner.Bytes;
             session.Dispose();
 
             Assert.Throws<ObjectDisposedException>(() => file.RequireContiguous(0, 1));

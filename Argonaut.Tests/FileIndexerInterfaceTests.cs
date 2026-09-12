@@ -9,7 +9,7 @@ namespace Argonaut.Tests;
 /// <summary>
 /// Verifies both file indexers behave identically when seen through <see cref="IFileIndexer"/>:
 /// the interface members mirror the indexer-specific ones, so generic consumers (the
-/// completion monitor, IndexedFileSession) can rely on either implementation.
+/// completion monitor, IndexedSourceSession) can rely on either implementation.
 /// </summary>
 public class FileIndexerInterfaceTests
 {

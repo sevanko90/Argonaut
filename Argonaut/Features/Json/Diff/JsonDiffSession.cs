@@ -5,7 +5,7 @@ using Argonaut.Infrastructure;
 namespace Argonaut.Features.Json.Diff;
 
 /// <summary>
-/// Owns the lifetime trio behind one diff: TWO <see cref="IndexedFileSession{TIndex}"/>s
+/// Owns the lifetime trio behind one diff: TWO <see cref="IndexedSourceSession{TIndex}"/>s
 /// (each guarding its own mapping with the cancel → join → release ordering
 /// docs/architecture.md mandates) plus the <see cref="JsonDiffIndex"/> reading spans from
 /// BOTH mappings. The diff task cannot be a RegisterDependentTask of either side - neither
@@ -17,7 +17,7 @@ namespace Argonaut.Features.Json.Diff;
 ///   3. dispose Left (which cancels, joins its scan and dependents, releases its mapping)
 ///   4. dispose Right
 ///
-/// Idempotent, same as IndexedFileSession - the diff view model and the view's detach
+/// Idempotent, same as IndexedSourceSession - the diff view model and the view's detach
 /// handler both call it. Not thread-safe: create and dispose from the UI thread.
 /// </summary>
 public sealed class JsonDiffSession : IDocumentSession
@@ -26,9 +26,9 @@ public sealed class JsonDiffSession : IDocumentSession
     private readonly Task hashReleaseTask;
     private bool disposed;
 
-    public IndexedFileSession<JsonStructureIndex> Left { get; }
+    public IndexedSourceSession<JsonStructureIndex> Left { get; }
 
-    public IndexedFileSession<JsonStructureIndex> Right { get; }
+    public IndexedSourceSession<JsonStructureIndex> Right { get; }
 
     public JsonDiffIndex Diff { get; }
 
@@ -64,7 +64,7 @@ public sealed class JsonDiffSession : IDocumentSession
     public IndexFailure? Failure => null;
 
     private JsonDiffSession(string leftPath, string rightPath,
-        IndexedFileSession<JsonStructureIndex> left, IndexedFileSession<JsonStructureIndex> right,
+        IndexedSourceSession<JsonStructureIndex> left, IndexedSourceSession<JsonStructureIndex> right,
         JsonDiffIndex diff, CancellationTokenSource diffCts)
     {
         this.LeftPath = leftPath;
@@ -94,13 +94,13 @@ public sealed class JsonDiffSession : IDocumentSession
 
         // The lambda (not a method group) closes over the options - see the StartIndexing
         // overload remarks for why the original signature had to stay intact.
-        var left = IndexedFileSession<JsonStructureIndex>.Start(
+        var left = IndexedSourceSession<JsonStructureIndex>.Start(
             new MMapFile(leftPath), (f, r, ct) => JsonStructureIndex.StartIndexing(f, options, r, ct), leftProgress);
 
-        IndexedFileSession<JsonStructureIndex> right;
+        IndexedSourceSession<JsonStructureIndex> right;
         try
         {
-            right = IndexedFileSession<JsonStructureIndex>.Start(
+            right = IndexedSourceSession<JsonStructureIndex>.Start(
                 new MMapFile(rightPath), (f, r, ct) => JsonStructureIndex.StartIndexing(f, options, r, ct), rightProgress);
         }
         catch
@@ -112,7 +112,7 @@ public sealed class JsonDiffSession : IDocumentSession
         var diffCts = CancellationTokenSource.CreateLinkedTokenSource(left.TearingDown, right.TearingDown);
         try
         {
-            var diff = JsonDiffIndex.Start(left.Index, left.File, right.Index, right.File, diffProgress, diffCts.Token);
+            var diff = JsonDiffIndex.Start(left.Index, left.Bytes, right.Index, right.Bytes, diffProgress, diffCts.Token);
             return new JsonDiffSession(leftPath, rightPath, left, right, diff, diffCts);
         }
         catch
@@ -125,8 +125,8 @@ public sealed class JsonDiffSession : IDocumentSession
     }
 
     private static async Task ReleaseContentHashesWhenFinishedAsync(
-        IndexedFileSession<JsonStructureIndex> left,
-        IndexedFileSession<JsonStructureIndex> right,
+        IndexedSourceSession<JsonStructureIndex> left,
+        IndexedSourceSession<JsonStructureIndex> right,
         JsonDiffIndex diff)
     {
         try
@@ -147,7 +147,7 @@ public sealed class JsonDiffSession : IDocumentSession
     /// <summary>
     /// Requests both sides' scans stop early, along with the diff itself, and fires
     /// <see cref="TearingDown"/>. Idempotent, including after
-    /// <see cref="Dispose"/> - same contract as <see cref="IndexedFileSession{TIndex}.RequestStop"/>
+    /// <see cref="Dispose"/> - same contract as <see cref="IndexedSourceSession{TIndex}.RequestStop"/>
     /// and <see cref="Argonaut.Features.Raw.RawIndexSession.RequestStop"/>. Harmless to call
     /// before Dispose: <see cref="diffCts"/> is already a linked source over both sides'
     /// tokens, so cancelling them was always going to cancel the diff too - but calling this

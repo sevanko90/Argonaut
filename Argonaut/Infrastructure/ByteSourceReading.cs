@@ -86,7 +86,7 @@ public static class ByteSourceReading
     /// nothing to release and does not implement <see cref="IDisposable"/> at all. So this is a
     /// no-op rather than a constraint on the interface, which keeps the release decision in the
     /// same one place as the teardown ordering that makes it safe (see
-    /// <see cref="IndexedFileSession{TIndex}"/>).
+    /// <see cref="IndexedSourceSession{TIndex}"/>).
     ///
     /// Only a session that owns its source may call this. Sub-range readers and search hold
     /// their own sources and release those; nobody releases a source handed to them.

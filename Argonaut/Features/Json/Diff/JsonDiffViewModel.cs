@@ -283,7 +283,7 @@ public sealed class JsonDiffViewModel : IndexedDocumentViewModel
             // A genuine right-side row (Added, or the destination side of a Moved record) -
             // its own token gives the real path directly.
             if (row.Right is { } right && !ReferenceEquals(row.Right, row.Left))
-                return JsonPathBuilder.Build(s.Right.Index, s.Right.File, right.TokenIndex);
+                return JsonPathBuilder.Build(s.Right.Index, s.Right.Bytes, right.TokenIndex);
 
             // A mirrored row (unchanged content walked off the left document into both
             // panes): the left path is NOT valid here whenever an ancestor moved - e.g.
@@ -294,8 +294,8 @@ public sealed class JsonDiffViewModel : IndexedDocumentViewModel
             if (row.Left is { } mirrored && row.MirrorLeftContainerToken is { } leftContainer
                 && row.MirrorRightContainerToken is { } rightContainer)
             {
-                string basePath = JsonPathBuilder.Build(s.Right.Index, s.Right.File, rightContainer);
-                var suffix = JsonPathBuilder.BuildRelativeSegments(s.Left.Index, s.Left.File, mirrored.TokenIndex, leftContainer);
+                string basePath = JsonPathBuilder.Build(s.Right.Index, s.Right.Bytes, rightContainer);
+                var suffix = JsonPathBuilder.BuildRelativeSegments(s.Left.Index, s.Left.Bytes, mirrored.TokenIndex, leftContainer);
                 var sb = new System.Text.StringBuilder(basePath);
                 foreach (var segment in suffix)
                     sb.Append(segment.Label);
@@ -303,8 +303,8 @@ public sealed class JsonDiffViewModel : IndexedDocumentViewModel
             }
         }
 
-        return row.Left is { } left ? JsonPathBuilder.Build(s.Left.Index, s.Left.File, left.TokenIndex)
-            : row.Right is { } r ? JsonPathBuilder.Build(s.Right.Index, s.Right.File, r.TokenIndex)
+        return row.Left is { } left ? JsonPathBuilder.Build(s.Left.Index, s.Left.Bytes, left.TokenIndex)
+            : row.Right is { } r ? JsonPathBuilder.Build(s.Right.Index, s.Right.Bytes, r.TokenIndex)
             : null;
     }
 

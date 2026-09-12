@@ -6,7 +6,7 @@ using Argonaut.Infrastructure;
 namespace Argonaut.Features.Raw;
 
 /// <summary>
-/// Raw-viewer variant of <see cref="IndexedFileSession{TIndex}"/>: owns the <see cref="IByteSource"/>
+/// Raw-viewer variant of <see cref="IndexedSourceSession{TIndex}"/>: owns the <see cref="IByteSource"/>
 /// its bytes come from, the background <see cref="RawSegmentIndex"/> scanning it, and the CancellationTokenSource
 /// that stops that scan - with one deliberate difference. The mapping lives for the whole
 /// document lifetime while the index can be replaced (<see cref="RestartIndex"/>, the wrap-width
@@ -14,8 +14,8 @@ namespace Argonaut.Features.Raw;
 /// across a wrap-width change avoids the cost of a multi-GB unmap/remap and lets a running
 /// search continue uninterrupted (its match offsets are unaffected by re-wrapping).
 ///
-/// Because of that, this session tracks TWO lifetimes rather than IndexedFileSession's one -
-/// see <see cref="TearingDown"/>. Teardown ordering is otherwise IndexedFileSession's:
+/// Because of that, this session tracks TWO lifetimes rather than IndexedSourceSession's one -
+/// see <see cref="TearingDown"/>. Teardown ordering is otherwise IndexedSourceSession's:
 ///
 ///   cancel -> join the indexing task -> release the mapping
 ///
@@ -32,7 +32,7 @@ public sealed class RawIndexSession : IDocumentSession
     private CancellationTokenSource indexCts;
     private bool disposed;
 
-    public IByteSource File { get; }
+    public IByteSource Bytes { get; }
 
     public RawSegmentIndex Index { get; private set; }
 
@@ -55,33 +55,33 @@ public sealed class RawIndexSession : IDocumentSession
     /// </summary>
     public CancellationToken TearingDown => this.mappingCts.Token;
 
-    private RawIndexSession(IByteSource file, RawSegmentIndex index, CancellationTokenSource mappingCts, CancellationTokenSource indexCts)
+    private RawIndexSession(IByteSource bytes, RawSegmentIndex index, CancellationTokenSource mappingCts, CancellationTokenSource indexCts)
     {
-        this.File = file;
+        this.Bytes = bytes;
         this.Index = index;
         this.mappingCts = mappingCts;
         this.indexCts = indexCts;
     }
 
     /// <summary>
-    /// Starts indexing <paramref name="file"/> and returns the session that now owns it.
-    /// Takes ownership of <paramref name="file"/> immediately: if starting the indexer throws,
+    /// Starts indexing <paramref name="bytes"/> and returns the session that now owns it.
+    /// Takes ownership of <paramref name="bytes"/> immediately: if starting the indexer throws,
     /// the file is disposed here and the exception propagates.
     /// </summary>
-    public static RawIndexSession Start(IByteSource file, int wrapWidth, IProgressReporter? progressReporter = null)
+    public static RawIndexSession Start(IByteSource bytes, int wrapWidth, IProgressReporter? progressReporter = null)
     {
         var mappingCts = new CancellationTokenSource();
         var indexCts = CancellationTokenSource.CreateLinkedTokenSource(mappingCts.Token);
         try
         {
-            var index = RawSegmentIndex.StartIndexing(file, wrapWidth, progressReporter, indexCts.Token);
-            return new RawIndexSession(file, index, mappingCts, indexCts);
+            var index = RawSegmentIndex.StartIndexing(bytes, wrapWidth, progressReporter, indexCts.Token);
+            return new RawIndexSession(bytes, index, mappingCts, indexCts);
         }
         catch
         {
             indexCts.Dispose();
             mappingCts.Dispose();
-            file.Release();
+            bytes.Release();
             throw;
         }
     }
@@ -105,7 +105,7 @@ public sealed class RawIndexSession : IDocumentSession
         this.indexCts.Dispose();
 
         this.indexCts = CancellationTokenSource.CreateLinkedTokenSource(this.mappingCts.Token);
-        this.Index = RawSegmentIndex.StartIndexing(this.File, wrapWidth, progressReporter, this.indexCts.Token);
+        this.Index = RawSegmentIndex.StartIndexing(this.Bytes, wrapWidth, progressReporter, this.indexCts.Token);
     }
 
     /// <summary>
@@ -132,7 +132,7 @@ public sealed class RawIndexSession : IDocumentSession
         this.mappingCts.Cancel();
         try { this.Index.IndexingTask.Wait(); } catch { /* cancellation/failure observed here only to unblock disposal */ }
 
-        this.File.Release();
+        this.Bytes.Release();
         this.indexCts.Dispose();
         this.mappingCts.Dispose();
     }

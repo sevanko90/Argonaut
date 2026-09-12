@@ -41,9 +41,9 @@ public sealed class RawVisibleRow
 // indexer reads a single row from the memory-mapped file on demand. RawTextSurface reads it by
 // index for the rows it is drawing and subscribes to its growth notifications; the read-only
 // IList + INotifyCollectionChanged surface and the empty-once-disposed safety live in
-// MemoryMappedCollectionBase (structural twin of MemoryMappedFileLineCollection - see the
+// VirtualizingItemsSourceBase (structural twin of NdJsonLineCollection - see the
 // growth-tick note there).
-public sealed class RawRowCollection : MemoryMappedCollectionBase
+public sealed class RawRowCollection : VirtualizingItemsSourceBase
 {
     /// <summary>
     /// Rows kept decoded after they scroll away, so scrolling back does not re-read the mapping.
@@ -139,7 +139,7 @@ public sealed class RawRowCollection : MemoryMappedCollectionBase
             int startingIndex = notifiedCount;
             notifiedCount = current;
             // Placeholder entries only - the panel re-queries realized rows through the
-            // indexer (see MemoryMappedFileLineCollection.OnGrowthTick). Backed by a countful
+            // indexer (see NdJsonLineCollection.OnGrowthTick). Backed by a countful
             // stand-in rather than a real array: mid-scan deltas run to millions of rows, and
             // a real object?[] per tick is a large-object-heap allocation 8x/second for the
             // whole scan - GBs of garbage on a multi-GB file.

@@ -21,7 +21,7 @@ namespace Argonaut.Shell;
 /// Disposing before the swap matters because setting CurrentDocument makes Avalonia tear down
 /// the outgoing view, and that teardown enumerates the old ListBox's whole-file, mmap-backed
 /// ItemsSource once. The collections report themselves empty once disposed (see
-/// MemoryMappedFileLineCollection / JsonVisibleRowCollection / CsvRowCollection), so an
+/// NdJsonLineCollection / JsonVisibleRowCollection / CsvRowCollection), so an
 /// already-disposed document turns that walk into a no-op instead of a multi-second, whole-file
 /// materialization that also read freed memory and crashed. The hosting view's
 /// DetachedFromVisualTree handler also disposes its DataContext, as an idempotent safety net

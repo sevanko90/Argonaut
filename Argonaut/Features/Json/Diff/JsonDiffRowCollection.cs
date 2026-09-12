@@ -24,7 +24,7 @@ namespace Argonaut.Features.Json.Diff;
 /// renders a live left-document preview so the view is never an empty pane with a
 /// spinner; the right pane fills in when the diff starts streaming.
 /// </summary>
-public sealed class JsonDiffRowCollection : MemoryMappedCollectionBase
+public sealed class JsonDiffRowCollection : VirtualizingItemsSourceBase
 {
     private const int ChildCap = 10_000;
 

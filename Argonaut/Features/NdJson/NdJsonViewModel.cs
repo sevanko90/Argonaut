@@ -18,7 +18,7 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel
     private const int InitialIndexedLineTarget = 250;
 
     private IndexedFileSession<FileOffsetIndex>? session;
-    private MemoryMappedFileLineCollection? lines;
+    private NdJsonLineCollection? lines;
     private NdJsonSelectedLine? selectedLine;
     private JsonViewModel? selectedLineJsonViewModel;
     private string? highlightTerm;
@@ -39,7 +39,7 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel
 
     public int LineCount => this.session?.Index.LineCount ?? 0;
 
-    public MemoryMappedFileLineCollection Lines => lines ?? throw new InvalidOperationException("LoadAsync must complete before Lines is accessed.");
+    public NdJsonLineCollection Lines => lines ?? throw new InvalidOperationException("LoadAsync must complete before Lines is accessed.");
 
     public NdJsonSelectedLine? SelectedLine
     {
@@ -202,7 +202,7 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel
             IndexFailure = failure;
 
         SelectedLine = null;
-        lines = new MemoryMappedFileLineCollection(session.Index, session.File);
+        lines = new NdJsonLineCollection(session.Index, session.File);
         OnPropertyChanged(nameof(Lines));
 
         UpdateStatusText();
@@ -333,7 +333,7 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel
     }
 
     /// <summary>The nested per-line JsonViewModel and its settings-handler subscriptions - run
-    /// between rows disposal and the session join, same slot MemoryMappedCollectionBase's
+    /// between rows disposal and the session join, same slot VirtualizingItemsSourceBase's
     /// subclasses use for their own teardown.</summary>
     protected override void DisposeCore()
     {

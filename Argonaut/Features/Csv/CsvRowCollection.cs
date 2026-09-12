@@ -23,13 +23,13 @@ public sealed class CsvVisibleRow
     public IReadOnlyList<CsvCell> Cells { get; }
 }
 
-// Adapted from Argonaut.Features.NdJson.MemoryMappedFileLineCollection: same
-// MemoryMappedCollectionBase (read-only IList + INotifyCollectionChanged + empty-once-disposed)
+// Adapted from Argonaut.Features.NdJson.NdJsonLineCollection: same
+// VirtualizingItemsSourceBase (read-only IList + INotifyCollectionChanged + empty-once-disposed)
 // plus an LRU-cache + growth-timer, so VirtualizingStackPanel only touches realized rows while
 // FileOffsetIndex keeps indexing in the background. The one addition is dataStartIndex, which
 // lets the "first row is header" tickbox shift which absolute line each virtual row index maps
 // to without re-indexing the file.
-public sealed class CsvRowCollection : MemoryMappedCollectionBase, IColumnFitSource
+public sealed class CsvRowCollection : VirtualizingItemsSourceBase, IColumnFitSource
 {
     private const int CacheCapacity = 1000;
     private static readonly TimeSpan GrowthPollInterval = TimeSpan.FromMilliseconds(120);

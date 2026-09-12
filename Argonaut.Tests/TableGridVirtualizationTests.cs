@@ -31,7 +31,7 @@ namespace Argonaut.Tests;
 /// </summary>
 public sealed class TableGridVirtualizationTests
 {
-    /// <summary>Same surface MemoryMappedCollectionBase presents (read-only fixed-size IList +
+    /// <summary>Same surface VirtualizingItemsSourceBase presents (read-only fixed-size IList +
     /// INotifyCollectionChanged), counting every indexer hit and every enumeration so a test can
     /// tell viewport-sized realization from a whole-collection walk.</summary>
     private sealed class CountingRows : IList, INotifyCollectionChanged, IColumnFitSource

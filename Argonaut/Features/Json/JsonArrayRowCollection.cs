@@ -28,7 +28,7 @@ public enum JsonArrayColumnMode
 /// The table's ItemsSource: <see cref="CsvVisibleRow"/>s produced on demand from a JSON array,
 /// so the CSV grid's presentation layer renders them unchanged.
 ///
-/// It keeps no walk state of its own. <see cref="MemoryMappedCollectionBase.Count"/> derives from
+/// It keeps no walk state of its own. <see cref="VirtualizingItemsSourceBase.Count"/> derives from
 /// <see cref="JsonArrayElementIndex.ElementCount"/>, and realizing a row is a
 /// <see cref="JsonArrayElementIndex.TokenForElement"/> lookup per element the row covers - one in
 /// <see cref="JsonArrayColumnMode.ByProperty"/> mode (plus a bounded read of that element's
@@ -41,7 +41,7 @@ public enum JsonArrayColumnMode
 /// say where each of them lives inside an element both arrive finished, from whoever discovered
 /// the property names or chose the reshape width.
 /// </summary>
-public sealed class JsonArrayRowCollection : MemoryMappedCollectionBase, IColumnFitSource
+public sealed class JsonArrayRowCollection : VirtualizingItemsSourceBase, IColumnFitSource
 {
     private const int CacheCapacity = 1000;
 

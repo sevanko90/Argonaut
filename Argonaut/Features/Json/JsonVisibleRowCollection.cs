@@ -124,7 +124,7 @@ public sealed class JsonRow
 /// actually realized, and only currently-expanded subtrees (capped per container) are
 /// ever materialized into the visible list - the rest of a huge document is never touched.
 /// </summary>
-public sealed class JsonVisibleRowCollection : MemoryMappedCollectionBase
+public sealed class JsonVisibleRowCollection : VirtualizingItemsSourceBase
 {
     internal const int ChildCap = 10_000;
     // Alias kept for callers/tests; the cap itself lives with the row-text machinery in

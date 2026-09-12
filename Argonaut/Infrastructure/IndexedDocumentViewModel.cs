@@ -25,7 +25,7 @@ namespace Argonaut.Infrastructure;
 /// replaces its field and needs no re-registration.
 ///
 /// Cost is nil at this layer: one instance per open document, at most one live at a time.
-/// The per-element hot path (<see cref="MemoryMappedCollectionBase.GetItem"/>) is untouched.
+/// The per-element hot path (<see cref="VirtualizingItemsSourceBase.GetItem"/>) is untouched.
 /// </summary>
 public abstract class IndexedDocumentViewModel : ObservableObject, IDocumentViewModel
 {

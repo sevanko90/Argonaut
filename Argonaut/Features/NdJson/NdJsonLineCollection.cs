@@ -7,11 +7,11 @@ using Argonaut.Infrastructure;
 namespace Argonaut.Features.NdJson;
 
 /// <summary>
-/// Model that represents a line of a text file
+/// One line as the NDJSON list renders it: its 1-based number and its display text.
 /// </summary>
-public sealed class MemoryMappedFileVisibleLine
+public sealed class NdJsonVisibleLine
 {
-    public MemoryMappedFileVisibleLine(int lineNumber, string text)
+    public NdJsonVisibleLine(int lineNumber, string text)
     {
         LineNumber = lineNumber;
         Text = text;
@@ -22,25 +22,25 @@ public sealed class MemoryMappedFileVisibleLine
     public string Text { get; }
 }
 
-// Backs the ListBox's ItemsSource directly against the whole file: the count is the true total
-// line count, and the indexer lazily reads a single line from the memory-mapped file on demand.
+// Backs the ListBox's ItemsSource directly against the whole document: the count is the true
+// total line count, and the indexer lazily reads a single line from the byte source on demand.
 // The read-only IList + INotifyCollectionChanged surface and the empty-once-disposed safety live
-// in MemoryMappedCollectionBase; this only supplies the live count, item materialization, and the
+// in VirtualizingItemsSourceBase; this only supplies the live count, item materialization, and the
 // background growth notifications.
-public sealed class MemoryMappedFileLineCollection : MemoryMappedCollectionBase
+public sealed class NdJsonLineCollection : VirtualizingItemsSourceBase
 {
     private const int CacheCapacity = 1000;
     private static readonly TimeSpan GrowthPollInterval = TimeSpan.FromMilliseconds(120);
 
     private readonly FileOffsetIndex index;
     private readonly IByteSource bytes;
-    private readonly Dictionary<int, LinkedListNode<(int Index, MemoryMappedFileVisibleLine Line)>> cache = new();
-    private readonly LinkedList<(int Index, MemoryMappedFileVisibleLine Line)> cacheOrder = new();
+    private readonly Dictionary<int, LinkedListNode<(int Index, NdJsonVisibleLine Line)>> cache = new();
+    private readonly LinkedList<(int Index, NdJsonVisibleLine Line)> cacheOrder = new();
 
     private DispatcherTimer? growthTimer;
     private int notifiedCount;
 
-    public MemoryMappedFileLineCollection(FileOffsetIndex index, IByteSource bytes)
+    public NdJsonLineCollection(FileOffsetIndex index, IByteSource bytes)
     {
         this.index = index;
         this.bytes = bytes;
@@ -54,7 +54,7 @@ public sealed class MemoryMappedFileLineCollection : MemoryMappedCollectionBase
 
     protected override object GetItem(int index) => GetLine(index);
 
-    private MemoryMappedFileVisibleLine GetLine(int i)
+    private NdJsonVisibleLine GetLine(int i)
     {
         if (cache.TryGetValue(i, out var node))
         {
@@ -65,12 +65,12 @@ public sealed class MemoryMappedFileLineCollection : MemoryMappedCollectionBase
 
         int lineCount = index.LineCount;
         if (i < 0 || i >= lineCount)
-            return new MemoryMappedFileVisibleLine(i + 1, string.Empty);
+            return new NdJsonVisibleLine(i + 1, string.Empty);
 
         var lineSpan = index.GetLineSpan(i);
-        var line = new MemoryMappedFileVisibleLine(i + 1, NdJsonLineReader.ReadDisplayLine(bytes, lineSpan));
+        var line = new NdJsonVisibleLine(i + 1, NdJsonLineReader.ReadDisplayLine(bytes, lineSpan));
 
-        var newNode = new LinkedListNode<(int, MemoryMappedFileVisibleLine)>((i, line));
+        var newNode = new LinkedListNode<(int, NdJsonVisibleLine)>((i, line));
         cacheOrder.AddFirst(newNode);
         cache[i] = newNode;
 

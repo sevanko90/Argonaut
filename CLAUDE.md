@@ -23,6 +23,41 @@ threw `JsonReaderException: '0x00' is invalid after a single JSON value`. It did
 padding rounding happened to align differently there. Fixed by storing `Length` from `FileInfo(path).Length` in
 `MMapFile`'s constructor instead of deriving it from the accessor.
 
+## Reading bytes: `IByteSource`, and why a whole range needs asking for
+
+Every consumer of a document's bytes is typed to `IByteSource`, never to `MMapFile`. The concrete
+mapping is named only by the sites that construct one; readers, indexes and row collections take
+the interface, which is what lets a clipboard array or a downloaded payload be substituted without
+touching them.
+
+The interface has three members, and the important one does not promise what a caller usually
+wants. `GetContiguousSpan(offset, maxLength)` returns **up to** what was asked for, truncated at
+an internal boundary, because a span is a pointer and a length - it can only describe one
+contiguous run of memory, and a piece table's logical range may live in two buffers. So:
+
+- **Scan loops advance by the length returned, not the length requested**, and treat an empty
+  return as the termination signal (`FileOffsetIndex.ProduceOffsets`, `FileTypeDetector`'s three
+  finders, `FileSearchSession.Scan`). A loop that assumes it got its whole chunk silently skips
+  bytes over a split source.
+- **A whole range comes from `ByteSourceReading.RequireContiguous`**, which returns exactly the
+  range or throws - the contract the old `MMapFile.GetSpan` had, and over any single-buffer source
+  the identical zero-copy span. `ByteAt` is the single-byte peek (one byte can never straddle),
+  and `GetUtf8String` is the one decode-on-demand idiom.
+- **There is deliberately no pooled-gather helper.** Only `RawPieceTable` can split a range, and
+  the raw viewer gathers inline at the four places it needs to (`RawRowReader.ReadRow` is the
+  pattern: try contiguous, else `ArrayPool` + `CopyTo`) because only it knows each range's display
+  cap. Everything else reads whole ranges of unbounded size - a whole NDJSON line, the JSON parse
+  window - where renting would cost more memory than the read saves. If editing ever reaches those
+  views, `RequireContiguous`'s call sites are the worklist.
+- **`Release()` is for the one owner of a source**, the document session, and only after its
+  cancel → join → release ordering (see `IndexedFileSession`). It is a no-op for a source holding
+  no OS resource, which is why `IByteSource` does not extend `IDisposable`. Sub-range readers and
+  search own their own sources and release those; nobody releases a source handed to them.
+
+Where the parser already holds the bytes, take them from it rather than re-reading the source by
+absolute offset - `JsonStructureIndex` hashes `reader.ValueSpan`, and only falls back to the
+source when `HasValueSequence` says the token straddles a parse window.
+
 ## UI-threading convention: rely on the dispatcher's SynchronizationContext
 
 Avalonia installs a `SynchronizationContext` on the UI thread, so an `await` in a method that *started* on the

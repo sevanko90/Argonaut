@@ -66,7 +66,7 @@ public partial class NdJsonView : UserControl
         }
 
         // Disposed synchronously here (before the content swap's trailing ItemsSource walk):
-        // MemoryMappedFileLineCollection reports empty once disposed, so that walk reads nothing.
+        // NdJsonLineCollection reports empty once disposed, so that walk reads nothing.
         if (DataContext is IDisposable d)
             d.Dispose();
     }

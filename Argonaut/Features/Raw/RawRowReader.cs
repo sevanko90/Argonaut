@@ -24,6 +24,24 @@ public static class RawRowReader
     /// <summary>Start of the Control Pictures block (U+2400), which runs parallel to C0.</summary>
     private const int ControlPicturesBase = 0x2400;
 
+    /// <summary>U+0085 NEXT LINE, the C1 control - Unicode's form of EBCDIC's NL.</summary>
+    private const char NextLine = (char)0x0085;
+
+    /// <summary>U+2028 LINE SEPARATOR.</summary>
+    private const char LineSeparator = (char)0x2028;
+
+    /// <summary>U+2029 PARAGRAPH SEPARATOR.</summary>
+    private const char ParagraphSeparator = (char)0x2029;
+
+    /// <summary>U+2424 SYMBOL FOR NEWLINE, shown for <see cref="NextLine"/>.</summary>
+    internal const char NextLinePicture = (char)0x2424;
+
+    /// <summary>U+21B5, shown for <see cref="LineSeparator"/>.</summary>
+    internal const char LineSeparatorPicture = (char)0x21B5;
+
+    /// <summary>U+00B6 PILCROW, shown for <see cref="ParagraphSeparator"/>.</summary>
+    internal const char ParagraphSeparatorPicture = (char)0x00B6;
+
     public static string ReadRow(IByteSource source, long start, long endExclusive, bool isSoftWrapped)
     {
         int length = (int)(endExclusive - start);
@@ -89,13 +107,47 @@ public static class RawRowReader
 
     /// <summary>
     /// The display substitution, shared with <see cref="RawRowDecoder"/> so the two cannot
-    /// disagree about what a row looks like.
+    /// disagree about what a row looks like. One char in, one char out - which is what lets
+    /// <see cref="RawRowDecoder"/> substitute without touching its char-to-byte offset map.
     /// </summary>
     internal static char SubstituteControl(char c)
         => !IsDisplayControl(c) ? c
             : c == Delete ? DeletePicture
+            : c == NextLine ? NextLinePicture
+            : c == LineSeparator ? LineSeparatorPicture
+            : c == ParagraphSeparator ? ParagraphSeparatorPicture
             : (char)(ControlPicturesBase + c);
 
-    /// <summary>C0 controls and DEL are substituted; tab passes through (TextBlock renders it).</summary>
-    internal static bool IsDisplayControl(char c) => (c < ' ' && c != '\t') || c == Delete;
+    /// <summary>
+    /// C0 controls, DEL, and the three separators that are not '\n' are substituted; tab passes
+    /// through (the text layout renders it).
+    ///
+    /// NEL, LINE SEPARATOR and PARAGRAPH SEPARATOR are mandatory line breaks to Unicode (UAX #14)
+    /// and so to the text layout, which would otherwise stack several lines of text inside one
+    /// 22px row band and clip all but the first. They are NOT breaks to this viewer: rows are
+    /// broken on '\n' bytes, because that is what every tool a user cross-references a line
+    /// number with counts, and because the scan finds breaks with a one-byte vectorized IndexOf
+    /// that a three-byte UTF-8 sequence cannot join. A lone CR is already handled the same way -
+    /// shown inline as a glyph, not treated as an end of line.
+    /// </summary>
+    internal static bool IsDisplayControl(char c)
+        => (c < ' ' && c != '\t')
+            || c == Delete
+            || c == NextLine
+            || c == LineSeparator
+            || c == ParagraphSeparator;
+
+    /// <summary>
+    /// True for the glyphs <see cref="SubstituteControl"/> produces. Shared with
+    /// <see cref="RawWordStops"/>, which selects each of them alone: a substitution stands for a
+    /// byte the file does not otherwise show, and selecting exactly one is what makes it a single
+    /// thing to delete.
+    ///
+    /// A real U+2400-U+2426, U+21B5 or U+00B6 in the file decodes to the same char and is treated
+    /// the same way. The cost is one glyph selecting alone, which is also what it looks like.
+    /// </summary>
+    internal static bool IsSubstitutionGlyph(char c)
+        => c is >= (char)ControlPicturesBase and <= (char)0x2426
+            || c == LineSeparatorPicture
+            || c == ParagraphSeparatorPicture;
 }

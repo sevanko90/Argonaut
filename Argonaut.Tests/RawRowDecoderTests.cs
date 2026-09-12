@@ -120,6 +120,25 @@ public class RawRowDecoderTests
         Assert.Equal("a\tb", row.Text);
     }
 
+    /// <summary>
+    /// The separator substitutions are one char for one character, so the offsets either side of
+    /// them still name the bytes they came from - NEL is two bytes, LS and PS three each.
+    /// </summary>
+    [Fact]
+    public void UnicodeSeparators_BecomeGlyphsWithoutMovingOffsets()
+    {
+        var row = Decode("a\u0085b\u2028c\u2029d");
+
+        Assert.Equal("a\u2424b\u21b5c\u00b6d", row.Text);
+        Assert.Equal(0, row.ByteOffsetForChar(0));  // a
+        Assert.Equal(1, row.ByteOffsetForChar(1));  // NEL, 2 bytes
+        Assert.Equal(3, row.ByteOffsetForChar(2));  // b
+        Assert.Equal(4, row.ByteOffsetForChar(3));  // LS, 3 bytes
+        Assert.Equal(7, row.ByteOffsetForChar(4));  // c
+        Assert.Equal(8, row.ByteOffsetForChar(5));  // PS, 3 bytes
+        Assert.Equal(11, row.ByteOffsetForChar(6)); // d
+    }
+
     [Theory]
     [InlineData("line\n", 4)]
     [InlineData("line\r\n", 4)]

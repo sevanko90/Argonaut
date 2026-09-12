@@ -280,7 +280,8 @@ sharpened, what this document anticipated:
 
 - **§6's warning about the caret understates one part of it.** The caret's hardest dependency is
   not rendering but decoding: `RawRowReader` is lossy in four directions at once (multi-byte
-  collapse, one U+FFFD per invalid run, Control Picture substitution, trailing newline stripped),
+  collapse, one U+FFFD per invalid run, glyph substitution for controls and for the Unicode
+  separators that are not `\n`, trailing newline stripped),
   so a character index says nothing about a byte offset. `RawRowDecoder` produces the map, and
   `RawCaretStops` turns it into legal positions — both of which are byte-layer work with no UI,
   and both of which would otherwise have surfaced halfway through building the view.

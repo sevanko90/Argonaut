@@ -34,8 +34,10 @@ public static class RawWordStops
         Punctuation,
 
         /// <summary>
-        /// A display substitution - U+FFFD for a run of invalid bytes, or a Control Picture for a
-        /// C0 control. It stands for bytes that are not text, so it never joins a run: selecting
+        /// A display substitution - U+FFFD for a run of invalid bytes, or one of the glyphs
+        /// <see cref="RawRowReader.IsSubstitutionGlyph"/> names: a Control Picture for a C0
+        /// control or DEL, and the marks standing for NEL, LINE SEPARATOR and PARAGRAPH
+        /// SEPARATOR. It stands for bytes that are not text, so it never joins a run: selecting
         /// exactly one of them is what makes a corrupt sequence a single thing to delete.
         /// </summary>
         Opaque
@@ -200,7 +202,7 @@ public static class RawWordStops
 
     private static WordClass Classify(char c)
     {
-        if (c == Rune.ReplacementChar.Value || IsControlPicture(c))
+        if (c == Rune.ReplacementChar.Value || RawRowReader.IsSubstitutionGlyph(c))
             return WordClass.Opaque;
         if (char.IsWhiteSpace(c))
             return WordClass.Whitespace;
@@ -209,13 +211,6 @@ public static class RawWordStops
 
         return WordClass.Punctuation;
     }
-
-    /// <summary>
-    /// The block <see cref="RawRowReader.SubstituteControl"/> maps C0 and DEL into. A real
-    /// U+2400 in the file decodes to the same char, so it is treated as opaque too - the cost of
-    /// that is one glyph selecting alone, which is also what it looks like.
-    /// </summary>
-    private static bool IsControlPicture(char c) => c is >= '␀' and <= '␡';
 
     private static RowCursor Load(IRawRowIndex rows, IByteSource source, int rowIndex)
     {

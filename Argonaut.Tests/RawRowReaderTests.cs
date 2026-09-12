@@ -67,6 +67,20 @@ public class RawRowReaderTests
         Assert.Equal("a\tb", ReadRowFromBytes("a\tb"u8.ToArray(), 0, 3, false));
     }
 
+    /// <summary>
+    /// NEL, LINE SEPARATOR and PARAGRAPH SEPARATOR are mandatory line breaks to Unicode, so a
+    /// text layout given them raw stacks several lines of text inside one row band and clips all
+    /// but the first. They are not row breaks here - rows break on '\n' - so they are shown as
+    /// glyphs, one char each, the way a lone CR already is.
+    /// </summary>
+    [Fact]
+    public void UnicodeSeparators_BecomeGlyphs()
+    {
+        byte[] content = Encoding.UTF8.GetBytes("a\u0085b\u2028c\u2029d");
+
+        Assert.Equal("a\u2424b\u21b5c\u00b6d", ReadRowFromBytes(content, 0, content.Length, false));
+    }
+
     [Fact]
     public void MultibyteText_RoundTrips()
     {

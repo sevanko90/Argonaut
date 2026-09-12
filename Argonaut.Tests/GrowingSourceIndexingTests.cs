@@ -66,7 +66,7 @@ public class GrowingSourceIndexingTests
         await Task.Delay(Settle);
 
         Assert.False(index.IndexingTask.IsCompleted);
-        Assert.False(index.IsComplete);
+        Assert.False(index.AllItemsPublished);
 
         source.Seal();
         await index.IndexingTask;

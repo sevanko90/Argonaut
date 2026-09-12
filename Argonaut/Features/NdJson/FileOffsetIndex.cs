@@ -16,7 +16,7 @@ public readonly record struct FileLineSpan(long Offset, int Length);
 /// A class that scans, calculates, and holds line offset and length values
 /// for a large memory-mapped file to allow fast seeking and loading of arbitrary lines
 /// </summary>
-public sealed class FileOffsetIndex : AppendLogIndexBase<FileLineSpan>, IFileIndexer
+public sealed class FileOffsetIndex : AppendLogIndexBase<FileLineSpan>, IBackgroundIndex
 {
     // Size of the chunk scanned per outer-loop pass. Scanning is zero-copy (spans over the
     // mapped file), so this only bounds progress-reporting granularity and span length —
@@ -33,7 +33,7 @@ public sealed class FileOffsetIndex : AppendLogIndexBase<FileLineSpan>, IFileInd
     public Task IndexingTask { get; private set; } = Task.CompletedTask;
 
     /// <summary>
-    /// Returns the number of lines in the index (may be less than the actual number of lines until <see cref="AppendLogIndexBase{T}.IsComplete"/> is true).
+    /// Returns the number of lines in the index (may be less than the actual number of lines until <see cref="AppendLogIndexBase{T}.AllItemsPublished"/> is true).
     /// </summary>
     public int LineCount => this.ItemCount;
 

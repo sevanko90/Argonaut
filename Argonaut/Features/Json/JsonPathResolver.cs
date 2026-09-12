@@ -143,7 +143,7 @@ public static class JsonPathResolver
             int endIndex = index.GetToken(containerIndex).EndIndex;
             if (endIndex >= 0)
                 return endIndex;
-            if (index.IsComplete)
+            if (index.AllItemsPublished)
                 throw new MalformedIndexException("The file ended before a container was closed - it may be truncated or malformed.");
 
             await index.WaitForTokenCountAsync(index.TokenCount + CoverageWaitBatch);

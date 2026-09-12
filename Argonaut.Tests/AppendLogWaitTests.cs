@@ -30,7 +30,7 @@ public class AppendLogWaitTests
             OnItemsPublished(items.Count);
         }
 
-        public void Stop() => MarkComplete();
+        public void Stop() => MarkAllItemsPublished();
     }
 
     [Fact]

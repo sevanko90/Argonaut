@@ -72,7 +72,7 @@ public sealed class RawEditedRowIndex : IRawRowIndex
         ArgumentNullException.ThrowIfNull(original);
         ArgumentNullException.ThrowIfNull(originalBytes);
         ArgumentNullException.ThrowIfNull(document);
-        if (!original.IsComplete)
+        if (!original.AllItemsPublished)
             throw new ArgumentException("The scan must have finished before edits are layered on it.", nameof(original));
 
         this.original = original;

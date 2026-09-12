@@ -81,7 +81,7 @@ public sealed class JsonArrayRowCollection : VirtualizingItemsSourceBase, IColum
         // states: a walk that finishes in the window between the snapshot and a check made
         // after it would leave this collection with no monitor, permanently reporting the
         // element count it happened to see here.
-        bool walkWasRunning = !elements.IsComplete;
+        bool walkWasRunning = !elements.AllItemsPublished;
 
         this.notifiedCount = GetCount();
 
@@ -101,7 +101,7 @@ public sealed class JsonArrayRowCollection : VirtualizingItemsSourceBase, IColum
         // tick - and a row that changes rather than appears cannot be published as an Add.
         // Publishing only whole rows until the walk completes keeps growth a pure append; the
         // final refresh (which the growth monitor guarantees) brings the last partial row in.
-        return elements.IsComplete ? (count + columns - 1) / columns : count / columns;
+        return elements.AllItemsPublished ? (count + columns - 1) / columns : count / columns;
     }
 
     protected override object GetItem(int index) => GetRow(index);
@@ -309,7 +309,7 @@ public sealed class JsonArrayRowCollection : VirtualizingItemsSourceBase, IColum
     private void StartGrowthMonitor()
     {
         growthMonitor = new IndexGrowthMonitor(GrowthPollInterval, elements.IndexingTask,
-            isComplete: () => elements.IsComplete,
+            isComplete: () => elements.AllItemsPublished,
             refresh: NotifyGrowth);
     }
 

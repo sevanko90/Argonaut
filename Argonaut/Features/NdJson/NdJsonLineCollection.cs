@@ -46,7 +46,7 @@ public sealed class NdJsonLineCollection : VirtualizingItemsSourceBase
         this.bytes = bytes;
         notifiedCount = index.LineCount;
 
-        if (!index.IsComplete)
+        if (!index.AllItemsPublished)
             StartGrowthMonitor();
     }
 
@@ -94,7 +94,7 @@ public sealed class NdJsonLineCollection : VirtualizingItemsSourceBase
     private void OnGrowthTick(object? sender, EventArgs e)
     {
         int current = index.LineCount;
-        bool complete = index.IsComplete;
+        bool complete = index.AllItemsPublished;
 
         if (current > notifiedCount)
         {

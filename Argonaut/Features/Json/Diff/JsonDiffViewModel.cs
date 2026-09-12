@@ -358,7 +358,7 @@ public sealed class JsonDiffViewModel : IndexedDocumentViewModel
             goToNextDiff: GoToNextDiff);
 
         // A small initial batch so the preview's first paint isn't empty (mirrors
-        // JsonViewModel.LoadCore); a tiny file completes the wait via MarkComplete instead.
+        // JsonViewModel.LoadCore); a tiny file completes the wait via MarkAllItemsPublished instead.
         await session.Left.Index.WaitForTokenCountAsync(250);
         if (IsDisposed)
             return;
@@ -404,7 +404,7 @@ public sealed class JsonDiffViewModel : IndexedDocumentViewModel
             return;
         }
 
-        if (!current.Diff.IsComplete)
+        if (!current.Diff.AllItemsPublished)
             return;
 
         StatusText = Summarize(current.Diff);

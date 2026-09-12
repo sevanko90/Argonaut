@@ -110,14 +110,14 @@ public sealed class JsonDiffRowCollection : VirtualizingItemsSourceBase
         // document for the rest of its life, with nothing left to rebuild it. Attaching a
         // monitor to an already-finished task costs one immediate final refresh, which is
         // exactly the refresh that window loses.
-        bool diffWasRunning = !session.Diff.IsComplete;
+        bool diffWasRunning = !session.Diff.AllItemsPublished;
 
         Rebuild();
 
         if (diffWasRunning)
         {
             growthMonitor = new IndexGrowthMonitor(GrowthPollInterval, session.Diff.IndexingTask,
-                isComplete: () => session.Diff.IsComplete,
+                isComplete: () => session.Diff.AllItemsPublished,
                 refresh: RefreshIfGrown);
         }
     }
@@ -152,11 +152,11 @@ public sealed class JsonDiffRowCollection : VirtualizingItemsSourceBase
         var counts = (session.Diff.RecordCount, session.Left.Index.TokenCount);
         // The move-reconciliation pass mutates records without growing the log, so the
         // completion refresh must rebuild once even when the counts are unchanged.
-        bool completionPass = session.Diff.IsComplete && !finalRebuildDone;
+        bool completionPass = session.Diff.AllItemsPublished && !finalRebuildDone;
         if (counts == lastRebuildCounts && !completionPass)
             return;
 
-        if (session.Diff.IsComplete)
+        if (session.Diff.AllItemsPublished)
             finalRebuildDone = true;
         Rebuild();
     }
@@ -283,7 +283,7 @@ public sealed class JsonDiffRowCollection : VirtualizingItemsSourceBase
         {
             WalkRecordSubtree(0, newVisible);
         }
-        else if (!diff.IsComplete && session.Left.Index.TokenCount > 0)
+        else if (!diff.AllItemsPublished && session.Left.Index.TokenCount > 0)
         {
             // Preview: the left document streams into the left pane while both sides index.
             WalkTokenSubtree(RowKind.SubLeft, leftTokenOverrides, 0, 0, -1, DiffStatus.Unchanged, newVisible);

@@ -16,10 +16,10 @@ public class IndexedSourceSessionTests
     /// Controllable indexer stub: its IndexingTask completes only when the session's token
     /// is cancelled, mimicking a cooperative background scan.
     /// </summary>
-    private sealed class StubIndexer : IFileIndexer
+    private sealed class StubIndexer : IBackgroundIndex
     {
         public Task IndexingTask { get; init; } = Task.CompletedTask;
-        public bool IsComplete => IndexingTask.IsCompleted;
+        public bool AllItemsPublished => IndexingTask.IsCompleted;
         public int ItemCount => 0;
         public IndexFailure? Failure => null;
     }

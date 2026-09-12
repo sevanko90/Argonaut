@@ -252,7 +252,7 @@ public class JsonStructureIndexTests
     public async Task CancelledBeforeTheScanStarts_StillMarksItselfComplete()
     {
         // Task.Run(body, token) SKIPS the body when the token is already cancelled as the pool
-        // dequeues the work item, which would leave MarkComplete uncalled and IsComplete false
+        // dequeues the work item, which would leave MarkAllItemsPublished uncalled and AllItemsPublished false
         // forever - hanging every waiter registered through WaitForTokenCountAsync for the life
         // of the process. AppendLogIndexBase.StartScan is what makes the signal unconditional.
         string path = Path.GetTempFileName();
@@ -273,7 +273,7 @@ public class JsonStructureIndexTests
                 // Cancellation faults the task; only the completion signal matters here.
             }
 
-            Assert.True(index.IsComplete);
+            Assert.True(index.AllItemsPublished);
 
             // A regression would hang the run rather than fail it, so the wait is raced.
             var wait = index.WaitForTokenCountAsync(1000);

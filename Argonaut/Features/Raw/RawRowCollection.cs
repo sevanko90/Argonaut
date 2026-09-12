@@ -77,7 +77,7 @@ public sealed class RawRowCollection : VirtualizingItemsSourceBase
         this.bytes = bytes;
         notifiedCount = index.RowCount;
 
-        if (!index.IsComplete)
+        if (!index.AllItemsPublished)
             StartGrowthMonitor();
     }
 
@@ -131,7 +131,7 @@ public sealed class RawRowCollection : VirtualizingItemsSourceBase
     private void OnGrowthTick(object? sender, EventArgs e)
     {
         int current = index.RowCount;
-        bool complete = index.IsComplete;
+        bool complete = index.AllItemsPublished;
 
         if (current > notifiedCount)
         {

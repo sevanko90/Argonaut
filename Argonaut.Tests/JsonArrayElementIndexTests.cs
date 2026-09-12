@@ -69,7 +69,7 @@ public class JsonArrayElementIndexTests
         using var f = await BuildAsync("[]");
 
         Assert.Equal(0, f.Elements.ElementCount);
-        Assert.True(f.Elements.IsComplete);
+        Assert.True(f.Elements.AllItemsPublished);
     }
 
     [Fact]
@@ -194,7 +194,7 @@ public class JsonArrayElementIndexTests
         using var f = await BuildAsync("""{"a":1}""");
 
         Assert.NotNull(f.Elements.Failure);
-        Assert.True(f.Elements.IsComplete);
+        Assert.True(f.Elements.AllItemsPublished);
         Assert.Equal(0, f.Elements.ElementCount);
     }
 
@@ -251,7 +251,7 @@ public class JsonArrayElementIndexTests
     public async Task CancelledBeforeTheScanStarts_StillMarksItselfComplete()
     {
         // Task.Run(body, token) SKIPS the body outright when the token is already cancelled as
-        // the pool dequeues the work item. That would leave MarkComplete uncalled, IsComplete
+        // the pool dequeues the work item. That would leave MarkAllItemsPublished uncalled, AllItemsPublished
         // false forever, and every waiter hanging for the life of the process - which is exactly
         // what a document disposed between starting its scan and the pool picking it up does.
         // AppendLogIndexBase.StartScan is what makes the completion signal unconditional.
@@ -267,7 +267,7 @@ public class JsonArrayElementIndexTests
             var elements = JsonArrayElementIndex.Start(source, 0, cts.Token);
 
             await Observed(elements.IndexingTask);
-            Assert.True(elements.IsComplete);
+            Assert.True(elements.AllItemsPublished);
 
             // The assertion that matters: a waiter is released rather than hanging forever. A
             // regression here would hang the run, so it is raced against a timeout.

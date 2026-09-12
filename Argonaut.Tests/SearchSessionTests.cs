@@ -46,7 +46,7 @@ public class SearchSessionTests
 
         WithSession(content, "needle", chunkSize: 32, session =>
         {
-            Assert.True(session.IsComplete);
+            Assert.True(session.AllItemsPublished);
             Assert.Equal(new long[] { 30 }, Offsets(session));
         });
     }
@@ -89,7 +89,7 @@ public class SearchSessionTests
     {
         WithSession(string.Empty, "anything", chunkSize: 32, session =>
         {
-            Assert.True(session.IsComplete);
+            Assert.True(session.AllItemsPublished);
             Assert.Equal(0, session.MatchCount);
             Assert.False(session.WasCancelled);
         });
@@ -103,7 +103,7 @@ public class SearchSessionTests
         WithSession(content, "ab", chunkSize: 1024, session =>
         {
             Assert.True(session.HitMatchCap);
-            Assert.True(session.IsComplete);
+            Assert.True(session.AllItemsPublished);
             Assert.Equal(10, session.MatchCount);
         }, maxMatches: 10);
     }
@@ -128,7 +128,7 @@ public class SearchSessionTests
 
             await session.WaitForMatchCountAsync(5);
 
-            Assert.True(session.IsComplete);
+            Assert.True(session.AllItemsPublished);
             Assert.Equal(0, session.MatchCount);
         }
         finally
@@ -173,7 +173,7 @@ public class SearchSessionTests
             matcher.Release.Set();
 
             await session.ScanTask; // must not throw
-            Assert.True(session.IsComplete);
+            Assert.True(session.AllItemsPublished);
             Assert.True(session.WasCancelled);
 
             // A waiter registered against a cancelled scan must still be released.
@@ -219,7 +219,7 @@ public class SearchSessionTests
         await session.ScanTask; // must not throw
 
         Assert.True(session.ScanTask.IsCompletedSuccessfully);
-        Assert.True(session.IsComplete);
+        Assert.True(session.AllItemsPublished);
         Assert.Equal(0, session.MatchCount);
         Assert.NotNull(session.OpenFailure);
     }

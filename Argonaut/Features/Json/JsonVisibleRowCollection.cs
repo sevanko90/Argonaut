@@ -222,7 +222,7 @@ public sealed class JsonVisibleRowCollection : VirtualizingItemsSourceBase
         // leave this collection with no monitor and no final refresh, showing whatever part of
         // the tree the index had reached. Monitoring an already-finished scan just spends one
         // immediate final refresh.
-        bool scanWasRunning = !index.IsComplete;
+        bool scanWasRunning = !index.AllItemsPublished;
 
         Rebuild();
 
@@ -795,7 +795,7 @@ public sealed class JsonVisibleRowCollection : VirtualizingItemsSourceBase
     private void StartGrowthMonitor()
     {
         growthMonitor = new IndexGrowthMonitor(GrowthPollInterval, index.IndexingTask,
-            isComplete: () => index.IsComplete,
+            isComplete: () => index.AllItemsPublished,
             refresh: () =>
             {
                 if (!IsDisposed && !visibleTreeSettled && index.TokenCount != lastRebuildTokenCount)

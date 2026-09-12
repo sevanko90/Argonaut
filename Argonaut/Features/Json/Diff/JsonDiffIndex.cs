@@ -59,7 +59,7 @@ public readonly record struct JsonDiffRecord(
 /// documents by Merkle content hash (see <see cref="JsonIndexOptions.ComputeContentHashes"/>)
 /// and publishes fixed-size records in merged render order - the record log IS the flattened
 /// diff tree, walked directly by the diff row collection. Same publishing shape as the other
-/// scanners (<see cref="AppendLogIndexBase{T}"/>), so it gets IsComplete/Failure/waiters and
+/// scanners (<see cref="AppendLogIndexBase{T}"/>), so it gets AllItemsPublished/Failure/waiters and
 /// lock-free reads for free.
 ///
 /// Key properties, each load-bearing:

@@ -184,7 +184,7 @@ public sealed class FindController
             var waits = new List<Task>(sessions.Length);
             foreach (var session in sessions)
             {
-                if (!session.IsComplete)
+                if (!session.AllItemsPublished)
                     waits.Add(session.WaitForMatchCountAsync(session.MatchCount + 1));
             }
 
@@ -219,7 +219,7 @@ public sealed class FindController
     {
         foreach (var session in sessions)
         {
-            if (!session.IsComplete)
+            if (!session.AllItemsPublished)
                 return false;
         }
 

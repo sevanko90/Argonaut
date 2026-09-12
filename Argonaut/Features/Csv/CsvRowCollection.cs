@@ -52,7 +52,7 @@ public sealed class CsvRowCollection : VirtualizingItemsSourceBase, IColumnFitSo
         this.dataStartIndex = dataStartIndex;
         notifiedCount = GetCount();
 
-        if (!index.IsComplete)
+        if (!index.AllItemsPublished)
             StartGrowthMonitor();
     }
 
@@ -144,7 +144,7 @@ public sealed class CsvRowCollection : VirtualizingItemsSourceBase, IColumnFitSo
     private void OnGrowthTick(object? sender, EventArgs e)
     {
         int current = GetCount();
-        bool complete = index.IsComplete;
+        bool complete = index.AllItemsPublished;
 
         if (current > notifiedCount)
         {

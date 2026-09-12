@@ -27,7 +27,7 @@ namespace Argonaut.Infrastructure;
 /// Not thread-safe: create, register and dispose from one thread (the UI thread in this
 /// app). The indexing/dependent tasks themselves of course run in the background.
 /// </summary>
-public sealed class IndexedSourceSession<TIndex> : IDocumentSession where TIndex : class, IFileIndexer
+public sealed class IndexedSourceSession<TIndex> : IDocumentSession where TIndex : class, IBackgroundIndex
 {
     private readonly CancellationTokenSource cts;
     private readonly List<Task> dependentTasks = new();

@@ -63,7 +63,7 @@ public record struct JsonTokenInfo(
 /// documents; <see cref="GetToken"/> unpacks back to the friendly <see cref="JsonTokenInfo"/>
 /// shape so callers never see the packed representation.
 /// </summary>
-public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.PackedToken>, IFileIndexer
+public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.PackedToken>, IBackgroundIndex
 {
     // Sentinel NameLength stored in the packed word when a token has no property name
     // (array element or root value). One value out of the 16-bit range is reserved for
@@ -173,7 +173,7 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
     public Task IndexingTask { get; private set; } = Task.CompletedTask;
 
     /// <summary>
-    /// Number of tokens indexed so far (may grow until <see cref="AppendLogIndexBase{T}.IsComplete"/> is true).
+    /// Number of tokens indexed so far (may grow until <see cref="AppendLogIndexBase{T}.AllItemsPublished"/> is true).
     /// </summary>
     public int TokenCount => this.ItemCount;
 

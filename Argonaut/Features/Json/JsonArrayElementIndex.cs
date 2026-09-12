@@ -25,7 +25,7 @@ namespace Argonaut.Features.Json;
 ///    63 EndIndex hops per lookup, each an O(1) unpack from the packed token log.
 ///  - <b>Derived, not scanned, from <see cref="Diff.JsonDiffIndex"/></b>: it consumes another
 ///    index rather than a file, so it has its own <see cref="IndexingTask"/> and is deliberately
-///    NOT an <see cref="IFileIndexer"/> - it must never be the thing an
+///    NOT an <see cref="IBackgroundIndex"/> - it must never be the thing an
 ///    <see cref="IndexedSourceSession{TIndex}"/> starts.
 ///
 /// It differs from the diff in one way that matters: the diff waits for its sources to COMPLETE
@@ -72,7 +72,7 @@ public sealed class JsonArrayElementIndex : AppendLogIndexBase<int>
 
     /// <summary>
     /// Number of elements addressable so far - may grow, in <see cref="ElementStride"/> steps,
-    /// until <see cref="AppendLogIndexBase{T}.IsComplete"/> is true. Every counted element's own
+    /// until <see cref="AppendLogIndexBase{T}.AllItemsPublished"/> is true. Every counted element's own
     /// token has closed, so <see cref="TokenForElement"/> can hop past it.
     /// </summary>
     public int ElementCount => Volatile.Read(ref this.publishedElementCount);
@@ -117,7 +117,7 @@ public sealed class JsonArrayElementIndex : AppendLogIndexBase<int>
     /// </summary>
     public async Task WaitForElementCountAsync(int targetCount)
     {
-        while (ElementCount < targetCount && !IsComplete)
+        while (ElementCount < targetCount && !AllItemsPublished)
             await WaitForCountAsync((targetCount + ElementStride - 1) / ElementStride + 1);
     }
 
@@ -211,7 +211,7 @@ public sealed class JsonArrayElementIndex : AppendLogIndexBase<int>
     {
         while (this.source.TokenCount <= token)
         {
-            if (this.source.IsComplete)
+            if (this.source.AllItemsPublished)
                 return this.source.TokenCount > token;
 
             await this.source.WaitForTokenIndexedAsync(token);
@@ -226,7 +226,7 @@ public sealed class JsonArrayElementIndex : AppendLogIndexBase<int>
     {
         while (this.source.GetToken(token).EndIndex < 0)
         {
-            if (this.source.IsComplete)
+            if (this.source.AllItemsPublished)
                 return this.source.GetToken(token).EndIndex >= 0;
 
             await this.source.WaitForTokenCountAsync(this.source.TokenCount + CoverageWaitBatch);

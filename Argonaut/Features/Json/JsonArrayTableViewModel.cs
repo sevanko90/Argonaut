@@ -222,7 +222,7 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
         this.session = session;
 
         // A small initial batch so the first paint isn't an empty grid, and so there is a real
-        // sample to width the columns from; a short array completes the wait via MarkComplete.
+        // sample to width the columns from; a short array completes the wait via MarkAllItemsPublished.
         await session.Elements.WaitForElementCountAsync(InitialElementTarget);
         if (IsDisposed)
             return;

@@ -41,7 +41,7 @@ public readonly record struct RawRowAnchor(long PackedOffset, int LineNumber);
 /// row's bucket anchor is already visible; the base class's item (= anchor) waiter machinery
 /// underpins <see cref="WaitForRowCountAsync"/>.
 /// </summary>
-public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IFileIndexer, IRawRowIndex
+public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IBackgroundIndex, IRawRowIndex
 {
     /// <summary>Rows per stored anchor. The RAM/rescan trade: 16 bytes per stride rows of
     /// index, at most stride × (WrapWidth + 1) bytes rescanned per row lookup.</summary>
@@ -71,7 +71,7 @@ public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IFileInd
 
     /// <summary>
     /// Number of display rows available so far (may grow, in anchor-stride steps, until
-    /// <see cref="AppendLogIndexBase{T}.IsComplete"/> is true).
+    /// <see cref="AppendLogIndexBase{T}.AllItemsPublished"/> is true).
     /// </summary>
     public int RowCount => Volatile.Read(ref this.publishedRowCount);
 
@@ -219,7 +219,7 @@ public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IFileInd
     /// </summary>
     public async Task WaitForRowCountAsync(int targetCount)
     {
-        while (RowCount < targetCount && !IsComplete)
+        while (RowCount < targetCount && !AllItemsPublished)
             await WaitForCountAsync((targetCount + AnchorStride - 1) / AnchorStride + 1);
     }
 

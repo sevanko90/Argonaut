@@ -248,7 +248,7 @@ public class RawEditedRowIndexTests
 
         // The guard itself: an index that has not finished is refused.
         var unfinished = RawSegmentIndex.StartIndexing(new MemoryByteSource(new byte[8 * 1024 * 1024]), 80);
-        if (!unfinished.IsComplete)
+        if (!unfinished.AllItemsPublished)
         {
             Assert.Throws<ArgumentException>(() =>
                 new RawEditedRowIndex(unfinished, source, new RawPieceTable(source)));

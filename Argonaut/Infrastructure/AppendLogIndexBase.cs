@@ -11,7 +11,7 @@ namespace Argonaut.Infrastructure;
 /// <see cref="SegmentedAppendLog{T}"/> from a single writer thread while UI-thread readers
 /// consume them lock-free (FileOffsetIndex, JsonStructureIndex, SearchSession).
 ///
-/// The base owns the log and the cold waiter machinery (WaitForCountAsync / MarkComplete).
+/// The base owns the log and the cold waiter machinery (WaitForCountAsync / MarkAllItemsPublished).
 /// The hot scan loops stay in the derived classes and interact with the base only through
 /// <see cref="items"/> and the inlined <see cref="OnItemsPublished"/> check, so this
 /// extraction adds zero indirection on the per-record hot path.
@@ -32,7 +32,7 @@ public abstract class AppendLogIndexBase<T> where T : struct
     // want different targets - a document's date-scheme inference waits for its whole sample
     // while a path resolve waits for the next batch - and one slot cannot hold both. It used to
     // be overwritten by whichever wait asked for a larger target, which stranded the smaller
-    // one's task forever: nothing completed it, MarkComplete only ever saw the newer slot, and
+    // one's task forever: nothing completed it, MarkAllItemsPublished only ever saw the newer slot, and
     // the task the caller had already awaited never finished. That is a hang, not a delay - it
     // deadlocked IndexedSourceSession.Dispose, which joins exactly these registered tasks.
     private readonly List<(int Target, TaskCompletionSource<bool> Ready)> waiters = [];
@@ -42,20 +42,22 @@ public abstract class AppendLogIndexBase<T> where T : struct
     // inside the sync lock.
     private volatile int pendingWaitTarget;
 
-    // volatile: read lock-free by IsComplete/readers; written once by the writer thread.
+    // volatile: read lock-free by AllItemsPublished/readers; written once by the writer thread.
     private volatile bool complete;
 
     // volatile: written once by the writer thread (inside RunIndexing's catch), read
-    // lock-free by IFileIndexer.Failure. Written before `complete` so a reader that
-    // observes IsComplete also observes the failure that caused it.
+    // lock-free by IBackgroundIndex.Failure. Written before `complete` so a reader that
+    // observes AllItemsPublished also observes the failure that caused it.
     private volatile IndexFailure? failure;
 
     /// <summary>
-    /// True once the scan has stopped publishing items. For the file indexers this means
-    /// "fully indexed"; derived classes with other stop reasons (cancellation, caps)
-    /// qualify it with their own flags.
+    /// True once the scan has stopped publishing items - set in <see cref="RunIndexing"/>'s
+    /// finally, so it covers a scan that finished, one that failed and one that was cancelled
+    /// alike. It promises only that a count already observed will not grow again; which of the
+    /// three happened is <see cref="Failure"/>'s business, plus whatever flags a derived class
+    /// adds for its own stop reasons (cancellation, the match cap).
     /// </summary>
-    public bool IsComplete => this.complete;
+    public bool AllItemsPublished => this.complete;
 
     /// <summary>
     /// Non-null when the scan stopped because of an error; null on success and on
@@ -64,7 +66,7 @@ public abstract class AppendLogIndexBase<T> where T : struct
     public IndexFailure? Failure => this.failure;
 
     /// <summary>
-    /// Number of items published so far (may grow until <see cref="IsComplete"/> is true).
+    /// Number of items published so far (may grow until <see cref="AllItemsPublished"/> is true).
     /// </summary>
     public int ItemCount => this.items.Count;
 
@@ -90,7 +92,7 @@ public abstract class AppendLogIndexBase<T> where T : struct
             // between the first check above and the flag becoming visible to it. The
             // condition is monotone (count only grows), so any later append also notices
             // the flag - this re-check only matters if no further item is ever appended.
-            // MarkComplete drains the list under this same lock, so a scan that stopped
+            // MarkAllItemsPublished drains the list under this same lock, so a scan that stopped
             // before the flag went up is caught here rather than left waiting.
             if (this.items.Count >= targetCount || this.complete)
             {
@@ -123,7 +125,7 @@ public abstract class AppendLogIndexBase<T> where T : struct
     /// Hot-path check the writer runs after publishing items. One volatile read per call
     /// instead of a lock (which would cost 10-20ns per record - a large fraction of the
     /// vectorized scan's per-record budget). A transiently missed flag is harmless: the
-    /// condition is monotone, so the next publish re-checks it, and MarkComplete signals
+    /// condition is monotone, so the next publish re-checks it, and MarkAllItemsPublished signals
     /// unconditionally at the end of the scan.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -162,11 +164,12 @@ public abstract class AppendLogIndexBase<T> where T : struct
     }
 
     /// <summary>
-    /// Marks the scan as complete and releases EVERY outstanding wait unconditionally - waits
-    /// for targets the file never reaches (e.g. an initial-batch wait on a small file, or any
-    /// wait outstanding when the scan is cancelled) depend on this signal to complete.
+    /// Records that no further items are coming and releases EVERY outstanding wait
+    /// unconditionally - waits for targets the source never reaches (e.g. an initial-batch wait
+    /// on a small document, or any wait outstanding when the scan is cancelled) depend on this
+    /// signal to complete.
     /// </summary>
-    protected void MarkComplete()
+    protected void MarkAllItemsPublished()
     {
         this.complete = true;
 
@@ -191,7 +194,7 @@ public abstract class AppendLogIndexBase<T> where T : struct
     ///
     /// <b>The scan's cancellation token is deliberately NOT passed to <see cref="Task.Run(Action)"/>.</b>
     /// A token already cancelled when the pool picks the work item makes Task.Run skip the body
-    /// outright - which would mean <see cref="MarkComplete"/> never runs, <see cref="IsComplete"/>
+    /// outright - which would mean <see cref="MarkAllItemsPublished"/> never runs, <see cref="AllItemsPublished"/>
     /// stays false forever, and every waiter registered through <see cref="WaitForCountAsync"/>
     /// hangs for the life of the process. The body observes cancellation itself and still reaches
     /// <see cref="RunIndexing"/>'s finally, so the completion signal is unconditional. This is not
@@ -208,7 +211,7 @@ public abstract class AppendLogIndexBase<T> where T : struct
 
     /// <summary>
     /// Runs a scan body on the writer thread, recording any non-cancellation fault as
-    /// <see cref="Failure"/> before rethrowing (so <see cref="IFileIndexer.IndexingTask"/>
+    /// <see cref="Failure"/> before rethrowing (so <see cref="IBackgroundIndex.IndexingTask"/>
     /// still faults the same way it always did), and marking the scan complete either way.
     /// Started through <see cref="StartScan"/>, never by a bare Task.Run.
     /// </summary>
@@ -229,7 +232,7 @@ public abstract class AppendLogIndexBase<T> where T : struct
         }
         finally
         {
-            this.MarkComplete();
+            this.MarkAllItemsPublished();
         }
     }
 
@@ -261,7 +264,7 @@ public abstract class AppendLogIndexBase<T> where T : struct
         }
         finally
         {
-            this.MarkComplete();
+            this.MarkAllItemsPublished();
         }
     }
 

@@ -72,7 +72,7 @@ public class JsonDiffSessionTests
             using var session = LoadFromPath.StartDiff(leftPath, rightPath);
             await session.HashReleaseTask;
 
-            Assert.True(session.Diff.IsComplete);
+            Assert.True(session.Diff.AllItemsPublished);
             Assert.False(session.Left.Index.HasContentHashes);
             Assert.False(session.Right.Index.HasContentHashes);
             Assert.Throws<InvalidOperationException>(() => session.Left.Index.GetContentHash(0));
@@ -174,7 +174,7 @@ public class JsonDiffSessionTests
             Assert.Null(session.Left.Index.Failure);
             Assert.NotNull(session.Right.Index.Failure);
             Assert.Equal(0, session.Diff.RecordCount);
-            Assert.True(session.Diff.IsComplete);
+            Assert.True(session.Diff.AllItemsPublished);
             Assert.False(session.Left.Index.HasContentHashes);
             Assert.False(session.Right.Index.HasContentHashes);
 

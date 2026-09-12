@@ -22,25 +22,26 @@ public readonly record struct SearchMatch(long Offset, int Length);
 public readonly record struct ScanTarget(IByteOrigin Origin, long Offset = 0, long Length = -1);
 
 /// <summary>
-/// One background scan of a file for a search term. Matches stream into a lock-free append log
-/// as they're found, so the UI can step through results ("find next") while the scan is still
-/// running, exactly the way the file indexers publish their tokens/lines - same
+/// One background scan of a document for a search term. Matches stream into a lock-free append
+/// log as they're found, so the UI can step through results ("find next") while the scan is
+/// still running, exactly the way the document indexers publish their tokens/lines - same
 /// single-writer/multi-reader machinery via AppendLogIndexBase.
 ///
-/// Unlike the file indexers, a search session is deliberately independent: it owns its own
+/// Unlike those indexers, a search session is deliberately independent: it owns its own
 /// CancellationTokenSource (exposed as <see cref="RequestStop"/>) rather than taking a caller's
-/// token, because searches may be started and stopped freely while the file's indexing is
-/// still running. For the same reason its IsComplete means "the scan has stopped" - finished,
-/// cancelled, capped, or unable to read the file (see <see cref="WasCancelled"/>/
-/// <see cref="HitMatchCap"/>/<see cref="OpenFailure"/>) - which is why it does not implement
-/// IFileIndexer.
+/// token, because searches may be started and stopped freely while the document's indexing is
+/// still running. It is also not an index OF the document, and stopping early at the match cap
+/// is a normal outcome rather than a partial result - so it does not implement
+/// <see cref="IBackgroundIndex"/>, and callers read <see cref="WasCancelled"/>/
+/// <see cref="HitMatchCap"/>/<see cref="OpenFailure"/> to tell its stop reasons apart.
 ///
 /// Knows nothing about JSON structure or the display: it reports byte offsets only. Mapping
 /// an offset to a token/line and revealing it is the navigators' job.
 ///
-/// The scan opens its OWN mapping of the target, one chunk at a time. Nothing outside this
-/// class owns memory it reads, so a document can be torn down while a scan over the same path
-/// runs, and stopping a scan is never a precondition for releasing anything.
+/// The scan opens its OWN source over the target, one chunk at a time, from the
+/// <see cref="IByteOrigin"/> in its <see cref="ScanTarget"/>. Nothing outside this class owns
+/// memory it reads, so a document can be torn down while a scan over the same origin runs, and
+/// stopping a scan is never a precondition for releasing anything.
 /// </summary>
 public sealed class SearchSession : AppendLogIndexBase<SearchMatch>, IMatchSource, IDisposable
 {
@@ -52,9 +53,9 @@ public sealed class SearchSession : AppendLogIndexBase<SearchMatch>, IMatchSourc
 
     private readonly CancellationTokenSource stopSource = new();
 
-    // volatile: read lock-free after IsComplete is observed true; written by the scan thread
-    // BEFORE MarkComplete's volatile store of the completion flag, so any reader seeing
-    // IsComplete also sees these.
+    // volatile: read lock-free after AllItemsPublished is observed true; written by the scan thread
+    // BEFORE MarkAllItemsPublished's volatile store of the completion flag, so any reader seeing
+    // AllItemsPublished also sees these.
     private volatile bool cancelled;
     private volatile bool hitMatchCap;
     private volatile string? openFailure;
@@ -65,7 +66,7 @@ public sealed class SearchSession : AppendLogIndexBase<SearchMatch>, IMatchSourc
 
     public Task ScanTask { get; private set; } = Task.CompletedTask;
 
-    /// <summary>Matches found so far (grows until <see cref="AppendLogIndexBase{T}.IsComplete"/> is true).</summary>
+    /// <summary>Matches found so far (grows until <see cref="AppendLogIndexBase{T}.AllItemsPublished"/> is true).</summary>
     public int MatchCount => this.ItemCount;
 
     /// <summary>True if the scan stopped because <see cref="RequestStop"/> was called.</summary>
@@ -220,7 +221,7 @@ public sealed class SearchSession : AppendLogIndexBase<SearchMatch>, IMatchSourc
             if (ct.IsCancellationRequested)
                 cancelled = true;
 
-            this.MarkComplete();
+            this.MarkAllItemsPublished();
             progressReporter?.Report("Searching", length, length);
         }
     }

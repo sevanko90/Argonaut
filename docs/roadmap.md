@@ -114,10 +114,11 @@ and virtualization-by-arithmetic are exactly what rendering gives up.
 - **Markdown highlighting in the raw view.** Fence state carried on the index's existing anchors
   (one bit per 64 rows), span classification per visible row, styled runs in `RawTextSurface`.
   No dependency, no new view.
-- **Markdown detection.** `.md`/`.markdown` by extension, plus a corroborated content heuristic —
-  a lone `#` means shell, YAML or C, so a strong signal (ATX heading with a space, code fence,
-  setext underline, link, table) plus a second distinct one. Worth having even with nothing to
-  render yet.
+- **Markdown detection.** `.md`/`.markdown` by extension, plus a corroborated content heuristic.
+  The discriminating construct is heading *depth* varying (`#` and `##` in one file), not the hash
+  itself — `#` is the comment character of half the languages in use, and `**` is emphasis in
+  several others. Everything else (code fence, setext underline, link, table) needs a second
+  distinct signal. Worth having even with nothing to render yet.
 - **A markdown preview view.** Markdig for the AST, our own block renderer over the virtualized
   list pattern, behind a size gate. `Markdown.Avalonia` is the shortcut if a non-virtualized tree
   is acceptable at small sizes.

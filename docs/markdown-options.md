@@ -132,19 +132,26 @@ Makefile all start `#`. The signal has to be *structure*, and more than one kind
 rules, all evaluated over a bounded prefix (the detector's existing `PreflightScanLimit` of 1MB is
 the natural bound, and in practice the first few dozen lines decide it):
 
-| Signal | Pattern | Why it discriminates |
-| --- | --- | --- |
-| ATX heading | line starts `#`-`######` then a **space** | `#include`, `#!/bin/sh`, `#define` have no space; `# comment` in YAML/shell does, hence "more than one signal" |
-| Fenced code | line starts ` ``` ` or `~~~` | Almost nothing else uses it at line start |
-| Setext heading | a text line followed by a line of only `=` or `-` | Strong, and common in older READMEs |
-| List item | line starts `-`, `*`, `+` then a space, or `1.` then a space | Weak alone (diffs and YAML look like this), useful as corroboration |
-| Link or image | `[text](url)` or `![alt](src)` | Strong; rare outside markdown |
-| Table row | a line containing `\|` with a `\| --- \|` separator line under it | Strong |
-| Emphasis pair | `**text**` or `_text_` within a line | Weak alone — multiplication, globs, snake_case |
+| Signal | Pattern | Strength | Why |
+| --- | --- | --- | --- |
+| Heading depth varies | both `#` and `##`, or `##` and `###`, each then a space | **Strong** | The discriminating construct. Comment styles are uniform - a file does not switch from `#` to `##` to mean something different - while a document's headings nest by definition |
+| `##`+ heading | line starts `##`-`######` then a space | Moderate | Far better than `#`, but not proof: R, Perl and shell all use `##` for decorative section comments |
+| `#` heading | line starts `#` then a space | Weak | It is the comment character of shell, Python, YAML, Ruby, Perl, INI files and Makefiles. (`#include`, `#define`, `#!/bin/sh` fail on the required space, so they are free) |
+| Fenced code | line starts ` ``` ` or `~~~` | **Strong** | Almost nothing else uses it at line start |
+| Setext heading | a text line followed by a line of only `=` or `-` | **Strong** | Common in older READMEs, rare elsewhere |
+| Link or image | `[text](url)` or `![alt](src)` | **Strong** | Rare outside markdown |
+| Table row | a line containing `\|` with a `\| --- \|` separator under it | **Strong** | Rare outside markdown |
+| List item | line starts `-`, `*`, `+` then a space, or `1.` then a space | Weak | Diffs, YAML sequences and changelogs all look like this |
+| Emphasis pair | `**text**` or `_text_` within a line | Weak | Multiplication, globs, snake_case, and `/** */` doc comments |
 
-A workable rule: **one strong signal plus any second distinct signal**, or **two ATX headings at
-different levels**. A file whose entire markdown evidence is one `#` line stays `Unidentified` and
-opens in the raw view, which is the right failure.
+A workable rule: **varying heading depth on its own**, or **one strong signal plus any second
+distinct signal**. Weak signals never qualify alone or in pairs - a file whose entire markdown
+evidence is a few `#` lines and some `*` bullets is a shell script with a comment header, and it
+stays `Unidentified` and opens in the raw view, which is the right failure.
+
+The rule to resist is scoring individual characters. `#` and `**` are the two most common comment
+and emphasis markers in the world's source code; what no source file does is *vary its heading
+depth*, because its `#`s are not headings at all.
 
 The cost of guessing wrong is genuinely low in both directions, which is what makes a heuristic
 acceptable at all: a false positive opens the preview on something that is not markdown, and the

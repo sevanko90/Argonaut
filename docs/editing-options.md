@@ -335,6 +335,13 @@ substitution glyph instead of the character it stands for would defeat the point
 all. The name comes from `UnicodeNames`, a table generated from the Unicode Character Database,
 because .NET carries categories but no names.
 
+Measured (Apple M5, Release, `RawCaretReadoutBenchmarks`): 448ns and 144B per readout on an
+ordinary line, where the allocation is the two strings the gutter displays; 25us at the 1MB column
+cap over ASCII and 1.0ms when every rune must be decoded, neither allocating anything further;
+21ns and 56B for a name lookup. Through the view model, with all three gutter strings formatted, a
+caret move costs ~760B. The name table is 1.6MB resident after its one-time inflate, and a session
+that never shows a caret never pays it.
+
 Two numbers are bounded rather than exact, and say so in the gutter. A column is a character count
 from the start of the line, and a line here can be a multi-GB minified document, so the scan back
 to the line start is capped (`ColumnScanBytes`, 1MB); a selection's character count is capped the

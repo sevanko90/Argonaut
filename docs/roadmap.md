@@ -150,14 +150,30 @@ same origin rather than re-materialising it.
   raw editor can mean "paste into the document" once editing is wired up. Ctrl+Shift+V as a
   paste-as-new-document that works with a document open is the obvious extension.
 
-  **No spill to a temp file, at any size, and that is deliberate.** Avalonia hands clipboard text
-  over as a `string`, so a 100 MB paste has already cost ~200 MB of UTF-16 on the large object
-  heap plus the UTF-8 copy before anything can decide what to do with it. Spilling after that
-  point would not avoid the peak, only the retention, and would buy a temp file's lifetime, its
-  deletion ordering, and the Windows "cannot delete a mapped file" hazard. Instead the string is
-  dropped as soon as the bytes exist, and a paste past `MaxPasteBytes` (64 MB) is declined with a
-  message pointing at a file. A clipboard will hold far more than that - this is a limit on what
-  is worth holding as managed memory, not a limit of the clipboard.
+  **No spill to a temp file, at any size** - and not because of a threshold judgement, because
+  the clipboard cannot be read any other way. Avalonia's API has no incremental read and no way
+  to ask the size first: `IAsyncDataTransferItem.TryGetRawAsync` hands over the whole payload in
+  one allocation. So the process is holding those bytes regardless, and a spill would only change
+  whether they sit in managed memory - paid for with a temp file's lifetime, its deletion
+  ordering, and the Windows "cannot delete a mapped file" hazard. `MaxPasteBytes` (64 MB) is a
+  sanity bound, not a spill threshold; past it the paste is declined with a message pointing at a
+  file. A clipboard will hold far more than 64 MB.
+
+  What *is* worth doing, and is done: `MainWindow` inspects `IAsyncDataTransfer.Formats` (which
+  needs no fetch) and prefers a platform format that yields UTF-8 bytes -
+  `public.utf8-plain-text` on macOS, `text/plain;charset=utf-8` on X11/Wayland - falling back to
+  `TryGetTextAsync` otherwise. That skips a whole representation on those platforms: no UTF-16
+  string (two bytes per ASCII character, on the large object heap at any size worth worrying
+  about) and no transcode to the UTF-8 the indexers read. Windows has no standard UTF-8 clipboard
+  format, so it takes the string path.
+
+  **If the doubled copy on Windows ever matters**, the native APIs can do better and disagree
+  about how: Windows can report an `HGLOBAL`'s size with `GlobalSize` before copying anything and
+  lets you transcode from the locked pointer in chunks; X11's INCR protocol and Wayland's file
+  descriptor are genuinely incremental but tell you nothing about the size up front; macOS gives
+  you an `NSData` whole. Exploiting that means three native backends plus the clipboard-locking
+  and delayed-rendering edge cases, for a case the cap already bounds - so it is deliberately not
+  done.
 - **Load from URL.** Needs an `HttpByteOrigin`: the download on the background with progress
   through `IProgressReporter` and cancellation, reporting `AvailableLength` as bytes land and
   `LengthSettled` when the response completes. The indexers already consume growth, and

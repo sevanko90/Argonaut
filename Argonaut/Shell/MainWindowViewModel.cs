@@ -46,14 +46,14 @@ public sealed class MainWindowViewModel : ObservableObject
 
     /// <summary>
     /// Largest paste opened rather than declined. Not a clipboard limit - a clipboard will happily
-    /// hold far more, and people do copy megabytes out of terminals and query grids. It is a limit
-    /// on what is worth holding as managed memory: see <see cref="PasteAsync"/> for why spilling
-    /// past it would not help.
+    /// hold far more, and people do copy megabytes out of terminals and query grids. It is a
+    /// sanity bound on what is worth holding as one managed array, given that the alternative
+    /// (spilling to disk) is not available: see <see cref="PasteAsync"/>.
     /// </summary>
     internal const long MaxPasteBytes = 64L * 1024 * 1024;
 
     private readonly Func<string, Task<bool>> confirmReplace;
-    private readonly Func<Task<string?>>? readClipboardText;
+    private readonly Func<Task<byte[]?>>? readClipboardBytes;
     private readonly DocumentLoader documentLoader;
     private readonly FindController findController;
 
@@ -98,10 +98,10 @@ public sealed class MainWindowViewModel : ObservableObject
     /// tests inject fakes to exercise the lifecycle without real files or indexing.
     /// </param>
     public MainWindowViewModel(Func<string, Task<bool>> confirmReplace,
-        Func<Task<string?>>? readClipboardText = null, DocumentLoader? documentLoader = null)
+        Func<Task<byte[]?>>? readClipboardBytes = null, DocumentLoader? documentLoader = null)
     {
         this.confirmReplace = confirmReplace;
-        this.readClipboardText = readClipboardText;
+        this.readClipboardBytes = readClipboardBytes;
         this.documentLoader = documentLoader ?? DocumentViewCatalog.LoadAsync;
 
         themeMode = ThemePreference.Load();
@@ -137,7 +137,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
     /// <summary>Whether <see cref="PasteAsync"/> can do anything - false when the view model was
     /// built without a clipboard reader.</summary>
-    public bool CanPaste => this.readClipboardText is not null;
+    public bool CanPaste => this.readClipboardBytes is not null;
 
     /// <summary>The current file's name, shown in the toolbar.</summary>
     public string FileName
@@ -520,24 +520,24 @@ public sealed class MainWindowViewModel : ObservableObject
     /// No-op when no clipboard reader was supplied (the view model can be constructed without
     /// one, and tests usually are).
     ///
-    /// Deliberately does NOT spill to a temp file at any size. Avalonia hands clipboard text over
-    /// as a <see cref="string"/>, so a 100 MB paste has already cost ~200 MB of UTF-16 on the
-    /// large object heap plus the UTF-8 copy before this method can decide anything - spilling
-    /// after that point would not avoid the peak, only the retention, and would buy a temp file's
-    /// lifetime, its deletion ordering, and the Windows "cannot delete a mapped file" hazard. So
-    /// instead the string is dropped as soon as the bytes exist (letting the larger of the two be
-    /// collected while indexing runs), and a paste past <see cref="MaxPasteBytes"/> is declined
+    /// Deliberately does NOT spill to a temp file at any size, and cannot: Avalonia's clipboard
+    /// API has no streaming read - the whole payload arrives as one array (or one string) before
+    /// anything here can look at it, and there is no way to ask the size first. So the process is
+    /// holding those bytes either way, and the only thing a spill would change is whether they
+    /// stay in managed memory - paid for with a temp file's lifetime, its deletion ordering, and
+    /// the Windows "cannot delete a mapped file" hazard. Not worth it; the bytes go straight into
+    /// a <see cref="MemoryByteOrigin"/>, and a paste past <see cref="MaxPasteBytes"/> is declined
     /// with a message pointing at the thing the app is actually built for: a file.
     /// </summary>
     public async Task PasteAsync()
     {
-        if (this.readClipboardText is null)
+        if (this.readClipboardBytes is null)
             return;
 
-        string? text;
+        byte[]? bytes;
         try
         {
-            text = await this.readClipboardText();
+            bytes = await this.readClipboardBytes();
         }
         catch (Exception ex)
         {
@@ -546,16 +546,15 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
-        if (string.IsNullOrEmpty(text))
+        if (bytes is null || bytes.Length == 0)
         {
             ToastService.Show("The clipboard has no text to open.");
             return;
         }
 
-        long byteCount = Encoding.UTF8.GetByteCount(text);
-        if (byteCount > MaxPasteBytes)
+        if (bytes.Length > MaxPasteBytes)
         {
-            ToastService.Show($"That's {byteCount / (1024 * 1024):N0} MB of text — save it to a file and open that instead.");
+            ToastService.Show($"That's {bytes.Length / (1024 * 1024):N0} MB of text — save it to a file and open that instead.");
             return;
         }
 
@@ -565,9 +564,6 @@ public sealed class MainWindowViewModel : ObservableObject
             if (!confirmed)
                 return;
         }
-
-        var bytes = Encoding.UTF8.GetBytes(text);
-        text = null; // the UTF-16 original is the bigger of the two; let it go before indexing
 
         await OpenOriginAsync(new MemoryByteOrigin(bytes, PastedDocumentName), addToRecents: false);
     }

@@ -14,8 +14,12 @@ public class ClipboardPasteTests
 {
     private static MainWindowViewModel WithClipboard(string? text,
         Func<string, Task<bool>>? confirmReplace = null)
+        => WithClipboardBytes(text is null ? null : Encoding.UTF8.GetBytes(text), confirmReplace);
+
+    private static MainWindowViewModel WithClipboardBytes(byte[]? bytes,
+        Func<string, Task<bool>>? confirmReplace = null)
         => new(confirmReplace ?? (_ => Task.FromResult(true)),
-            readClipboardText: () => Task.FromResult(text));
+            readClipboardBytes: () => Task.FromResult(bytes));
 
     [Fact]
     public async Task PastedJsonOpensAsADocumentWithNoPath()
@@ -40,7 +44,7 @@ public class ClipboardPasteTests
     {
         FileTypeDetector.FileKind? detected = null;
         var vm = new MainWindowViewModel(_ => Task.FromResult(true),
-            readClipboardText: () => Task.FromResult<string?>(text),
+            readClipboardBytes: () => Task.FromResult<byte[]?>(Encoding.UTF8.GetBytes(text)),
             documentLoader: (kind, origin, _) =>
             {
                 detected = kind;
@@ -89,7 +93,7 @@ public class ClipboardPasteTests
     public async Task AClipboardThatThrowsIsReportedRatherThanPropagated()
     {
         var vm = new MainWindowViewModel(_ => Task.FromResult(true),
-            readClipboardText: () => throw new InvalidOperationException("no clipboard today"));
+            readClipboardBytes: () => throw new InvalidOperationException("no clipboard today"));
 
         await vm.PasteAsync();
 
@@ -103,12 +107,44 @@ public class ClipboardPasteTests
     [Fact]
     public async Task APasteOverTheCapIsDeclined()
     {
-        string tooBig = new('x', (int)MainWindowViewModel.MaxPasteBytes + 1);
-        var vm = WithClipboard(tooBig);
+        var vm = WithClipboardBytes(new byte[MainWindowViewModel.MaxPasteBytes + 1]);
 
         await vm.PasteAsync();
 
         Assert.False(vm.IsFileOpen);
+    }
+
+    /// <summary>
+    /// The clipboard hands over UTF-8 bytes when the platform offers such a format, and those
+    /// bytes reach the document unaltered - no decode/re-encode round trip on the way.
+    /// </summary>
+    [Fact]
+    public async Task Utf8BytesFromTheClipboardReachTheDocumentUnaltered()
+    {
+        byte[] utf8 = Encoding.UTF8.GetBytes("{\"name\":\"caf\u00e9 na\u00efve \ud83d\ude80\"}");
+        IByteOrigin? captured = null;
+        var vm = new MainWindowViewModel(_ => Task.FromResult(true),
+            readClipboardBytes: () => Task.FromResult<byte[]?>(utf8),
+            documentLoader: (_, origin, _) =>
+            {
+                captured = origin;
+                return Task.FromResult<IDocumentViewModel>(new PasteDocument(origin));
+            });
+
+        await vm.PasteAsync();
+
+        Assert.NotNull(captured);
+        Assert.Equal(utf8.Length, captured!.AvailableLength);
+
+        var source = captured.Open();
+        try
+        {
+            Assert.True(source.RequireContiguous(0, utf8.Length).SequenceEqual(utf8));
+        }
+        finally
+        {
+            source.Release();
+        }
     }
 
     [Fact]
@@ -121,7 +157,7 @@ public class ClipboardPasteTests
             int asked = 0;
             var vm = new MainWindowViewModel(
                 _ => { asked++; return Task.FromResult(false); },
-                readClipboardText: () => Task.FromResult<string?>("{\"fromClipboard\":true}"),
+                readClipboardBytes: () => Task.FromResult<byte[]?>(Encoding.UTF8.GetBytes("{\"fromClipboard\":true}")),
                 documentLoader: (_, origin, _) => Task.FromResult<IDocumentViewModel>(new PasteDocument(origin)));
 
             await vm.OpenPathAsync(path);
@@ -136,36 +172,6 @@ public class ClipboardPasteTests
         finally
         {
             File.Delete(path);
-        }
-    }
-
-    [Fact]
-    public async Task PastedBytesAreTheClipboardTextAsUtf8()
-    {
-        const string text = "{\"caf\\u00e9\":\"naïve\"}";
-        IByteOrigin? captured = null;
-        var vm = new MainWindowViewModel(_ => Task.FromResult(true),
-            readClipboardText: () => Task.FromResult<string?>(text),
-            documentLoader: (_, origin, _) =>
-            {
-                captured = origin;
-                return Task.FromResult<IDocumentViewModel>(new PasteDocument(origin));
-            });
-
-        await vm.PasteAsync();
-
-        Assert.NotNull(captured);
-        var expected = Encoding.UTF8.GetBytes(text);
-        Assert.Equal(expected.Length, captured!.AvailableLength);
-
-        var source = captured.Open();
-        try
-        {
-            Assert.Equal(text, source.GetUtf8String(0, expected.Length));
-        }
-        finally
-        {
-            source.Release();
         }
     }
 

@@ -112,7 +112,7 @@ public sealed class MainWindowViewModelTests : IDisposable
     }
 
     private static MainWindowViewModel CreateViewModel(MainWindowViewModel.DocumentLoader loader)
-        => new(_ => Task.FromResult(true), loader);
+        => new(_ => Task.FromResult(true), documentLoader: loader);
 
     [Fact]
     public async Task OpenPath_PublishesDocument_AndMirrorsStatus()
@@ -373,7 +373,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         var switched = new FakeDocument { FilePath = path, StatusText = "switched" };
         var vm = new MainWindowViewModel(
             _ => throw new InvalidOperationException("confirmReplace must not be called for a view switch"),
-            (kind, _, _) => Task.FromResult<IDocumentViewModel>(kind == FileTypeDetector.FileKind.Json ? initial : switched));
+            documentLoader: (kind, _, _) => Task.FromResult<IDocumentViewModel>(kind == FileTypeDetector.FileKind.Json ? initial : switched));
 
         await vm.OpenPathAsync(path);
         await vm.SwitchViewAsync(FileTypeDetector.FileKind.Ndjson);

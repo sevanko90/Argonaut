@@ -11,6 +11,7 @@ public sealed record RecentFileItem(string Path, string FileName);
 public partial class EmptyStateView : UserControl
 {
     public event EventHandler? ChooseFileRequested;
+    public event EventHandler? PasteRequested;
     public event EventHandler? ClearRecentFilesRequested;
     public event EventHandler<string>? OpenRecentFileRequested;
 
@@ -27,9 +28,17 @@ public partial class EmptyStateView : UserControl
         ClearRecentFilesButton.IsVisible = items.Count > 0;
     }
 
+    /// <summary>Hides the paste affordance when the platform gave us no clipboard to read.</summary>
+    public void SetPasteAvailable(bool available) => PasteButton.IsVisible = available;
+
     private void OnChooseFile(object? sender, RoutedEventArgs e)
     {
         ChooseFileRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void OnPaste(object? sender, RoutedEventArgs e)
+    {
+        PasteRequested?.Invoke(this, EventArgs.Empty);
     }
 
     private void OnClearRecentFiles(object? sender, RoutedEventArgs e)

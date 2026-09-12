@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using Argonaut.Features.Json;
 using Argonaut.Features.Json.Diff;
@@ -40,7 +41,19 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private const string DefaultTitle = AppInfo.Name;
 
+    /// <summary>What a pasted document is called, since it has no file name.</summary>
+    private const string PastedDocumentName = "Pasted text";
+
+    /// <summary>
+    /// Largest paste opened rather than declined. Not a clipboard limit - a clipboard will happily
+    /// hold far more, and people do copy megabytes out of terminals and query grids. It is a limit
+    /// on what is worth holding as managed memory: see <see cref="PasteAsync"/> for why spilling
+    /// past it would not help.
+    /// </summary>
+    internal const long MaxPasteBytes = 64L * 1024 * 1024;
+
     private readonly Func<string, Task<bool>> confirmReplace;
+    private readonly Func<Task<string?>>? readClipboardText;
     private readonly DocumentLoader documentLoader;
     private readonly FindController findController;
 
@@ -84,9 +97,11 @@ public sealed class MainWindowViewModel : ObservableObject
     /// Overrides how documents are built (defaults to the real memory-mapped view models);
     /// tests inject fakes to exercise the lifecycle without real files or indexing.
     /// </param>
-    public MainWindowViewModel(Func<string, Task<bool>> confirmReplace, DocumentLoader? documentLoader = null)
+    public MainWindowViewModel(Func<string, Task<bool>> confirmReplace,
+        Func<Task<string?>>? readClipboardText = null, DocumentLoader? documentLoader = null)
     {
         this.confirmReplace = confirmReplace;
+        this.readClipboardText = readClipboardText;
         this.documentLoader = documentLoader ?? DocumentViewCatalog.LoadAsync;
 
         themeMode = ThemePreference.Load();
@@ -119,6 +134,10 @@ public sealed class MainWindowViewModel : ObservableObject
 
     /// <summary>True when a document is loaded; drives the toolbar's visibility.</summary>
     public bool IsFileOpen => currentFilePath is not null;
+
+    /// <summary>Whether <see cref="PasteAsync"/> can do anything - false when the view model was
+    /// built without a clipboard reader.</summary>
+    public bool CanPaste => this.readClipboardText is not null;
 
     /// <summary>The current file's name, shown in the toolbar.</summary>
     public string FileName
@@ -492,9 +511,81 @@ public sealed class MainWindowViewModel : ObservableObject
                 return;
         }
 
-        var requestId = openRequest.Begin();
+        await OpenOriginAsync(new FileByteOrigin(normalizedPath), addToRecents: true);
+    }
 
-        var origin = new FileByteOrigin(normalizedPath);
+    /// <summary>
+    /// Reads the clipboard as text and opens it as a document in its own right - no file
+    /// involved, so <see cref="IByteOrigin.Path"/> is null and every path-keyed feature skips it.
+    /// No-op when no clipboard reader was supplied (the view model can be constructed without
+    /// one, and tests usually are).
+    ///
+    /// Deliberately does NOT spill to a temp file at any size. Avalonia hands clipboard text over
+    /// as a <see cref="string"/>, so a 100 MB paste has already cost ~200 MB of UTF-16 on the
+    /// large object heap plus the UTF-8 copy before this method can decide anything - spilling
+    /// after that point would not avoid the peak, only the retention, and would buy a temp file's
+    /// lifetime, its deletion ordering, and the Windows "cannot delete a mapped file" hazard. So
+    /// instead the string is dropped as soon as the bytes exist (letting the larger of the two be
+    /// collected while indexing runs), and a paste past <see cref="MaxPasteBytes"/> is declined
+    /// with a message pointing at the thing the app is actually built for: a file.
+    /// </summary>
+    public async Task PasteAsync()
+    {
+        if (this.readClipboardText is null)
+            return;
+
+        string? text;
+        try
+        {
+            text = await this.readClipboardText();
+        }
+        catch (Exception ex)
+        {
+            OpenDebugLog.Write($"Paste: reading the clipboard threw: {ex}");
+            ToastService.Show("Couldn't read the clipboard.");
+            return;
+        }
+
+        if (string.IsNullOrEmpty(text))
+        {
+            ToastService.Show("The clipboard has no text to open.");
+            return;
+        }
+
+        long byteCount = Encoding.UTF8.GetByteCount(text);
+        if (byteCount > MaxPasteBytes)
+        {
+            ToastService.Show($"That's {byteCount / (1024 * 1024):N0} MB of text — save it to a file and open that instead.");
+            return;
+        }
+
+        if (IsFileOpen)
+        {
+            var confirmed = await confirmReplace("Replace the currently loaded file with the clipboard contents?");
+            if (!confirmed)
+                return;
+        }
+
+        var bytes = Encoding.UTF8.GetBytes(text);
+        text = null; // the UTF-16 original is the bigger of the two; let it go before indexing
+
+        await OpenOriginAsync(new MemoryByteOrigin(bytes, PastedDocumentName), addToRecents: false);
+    }
+
+    /// <summary>
+    /// Detects and opens <paramref name="origin"/>, replacing any current document. Shared tail of
+    /// <see cref="OpenPathAsync"/> and <see cref="PasteAsync"/>: everything from detection onwards
+    /// is the same whether the bytes came from a file or not. <see cref="openRequest"/> guards
+    /// against a newer open superseding this one mid-load; the loser is disposed here (never
+    /// published), so its source is released.
+    ///
+    /// Takes ownership of <paramref name="origin"/>: it is disposed here if detection fails, and
+    /// otherwise passes to the shell's own ownership (see <see cref="AdoptOrigins"/>).
+    /// </summary>
+    private async Task OpenOriginAsync(IByteOrigin origin, bool addToRecents)
+    {
+        var requestId = openRequest.Begin();
+        string name = origin.Path ?? origin.DisplayName;
 
         FileTypeDetector.FileKind fileType;
         try
@@ -503,21 +594,21 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            OpenDebugLog.Write($"OpenPath: DetectFileType threw: {ex}");
+            OpenDebugLog.Write($"OpenOrigin: DetectFileType threw: {ex}");
             origin.Dispose();
             return;
         }
 
-        OpenDebugLog.Write($"OpenPath: normalizedPath='{normalizedPath}', fileType={fileType}");
+        OpenDebugLog.Write($"OpenOrigin: name='{name}', fileType={fileType}");
 
         // UI hygiene and defence in depth (see the remark in OpenDiffAsync) - the outgoing
-        // document's own mapping scope is what actually stops a live search before the
-        // content swap tears its MMapFile down.
+        // document's own source scope is what actually stops a live search before the content
+        // swap releases it.
         DetachFind();
         FindBarResetRequested?.Invoke();
-        StatusText = $"Indexing {normalizedPath}… 0%";
+        StatusText = $"Indexing {name}… 0%";
 
-        await LoadAndPublishAsync(fileType, origin, requestId, addToRecents: true);
+        await LoadAndPublishAsync(fileType, origin, requestId, addToRecents);
     }
 
     /// <summary>

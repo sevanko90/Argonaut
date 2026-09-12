@@ -56,7 +56,7 @@ public class JsonArrayTableEntryPointTests
     /// round-trip that proves the range is a whole, well-formed JSON array.</summary>
     private static async Task<int> ElementsInRangeAsync(ArrayTableRequest request)
     {
-        using var session = LoadFromPath.StartArrayTable(request.Origin.Path, request.Offset, request.Length);
+        using var session = JsonArrayTableSession.Start(request.Origin, request.Offset, request.Length);
         await session.IndexingTask;
 
         Assert.Null(session.Failure);

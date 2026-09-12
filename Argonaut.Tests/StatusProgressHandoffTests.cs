@@ -93,7 +93,7 @@ public sealed class StatusProgressHandoffTests : IDisposable
             var document = new FakeDocument { FilePath = path, StatusText = "12,345 tokens indexed so far" };
 
             IProgressReporter? reporter = null;
-            var vm = new MainWindowViewModel(_ => Task.FromResult(true), (_, _, r) =>
+            var vm = new MainWindowViewModel(_ => Task.FromResult(true), documentLoader: (_, _, r) =>
             {
                 reporter = r;
                 return Task.FromResult<IDocumentViewModel>(document);
@@ -127,7 +127,7 @@ public sealed class StatusProgressHandoffTests : IDisposable
             var document = new FakeDocument { FilePath = path, StatusText = "250 rows indexed so far" };
 
             IProgressReporter? reporter = null;
-            var vm = new MainWindowViewModel(_ => Task.FromResult(true), (_, _, r) =>
+            var vm = new MainWindowViewModel(_ => Task.FromResult(true), documentLoader: (_, _, r) =>
             {
                 reporter = r;
                 return Task.FromResult<IDocumentViewModel>(document);

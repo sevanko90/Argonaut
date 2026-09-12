@@ -41,7 +41,8 @@ public partial class MainWindow : Window
         InitializeComponent();
 
         viewModel = new MainWindowViewModel(
-            message => ConfirmDialog.Show(this, message));
+            message => ConfirmDialog.Show(this, message),
+            readClipboardText: ReadClipboardTextAsync);
         DataContext = viewModel;
         viewModel.PropertyChanged += OnViewModelPropertyChanged;
         viewModel.FindStatusChanged += status => FindBarControl.SetStatus(status);
@@ -52,6 +53,8 @@ public partial class MainWindow : Window
         ArrayTableService.Requested += request => _ = viewModel.OpenArrayTableAsync(request);
 
         EmptyState.ChooseFileRequested += async (_, _) => await BrowseForFile();
+        EmptyState.PasteRequested += async (_, _) => await viewModel.PasteAsync();
+        EmptyState.SetPasteAvailable(viewModel.CanPaste);
         EmptyState.OpenRecentFileRequested += (_, path) => viewModel.OpenRecentFile(path);
         EmptyState.ClearRecentFilesRequested += (_, _) => viewModel.ClearRecentFiles();
         EmptyState.SetRecentFiles(viewModel.RecentFiles);
@@ -68,6 +71,31 @@ public partial class MainWindow : Window
         AddHandler(KeyDownEvent, OnGlobalKeyDown, Avalonia.Interactivity.RoutingStrategies.Tunnel);
 
         _ = CheckForUpdatesOnStartupAsync();
+    }
+
+    /// <summary>
+    /// The clipboard's text, or null when there is none (or no clipboard at all). Passed to the
+    /// view model as a delegate so it stays free of Avalonia's TopLevel, and so tests can supply
+    /// clipboard contents without one.
+    /// </summary>
+    private async Task<string?> ReadClipboardTextAsync()
+    {
+        var clipboard = GetTopLevel(this)?.Clipboard;
+        if (clipboard is null)
+            return null;
+
+        var transfer = await clipboard.TryGetDataAsync();
+        if (transfer is null)
+            return null;
+
+        try
+        {
+            return await transfer.TryGetTextAsync();
+        }
+        finally
+        {
+            (transfer as IDisposable)?.Dispose();
+        }
     }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -115,6 +143,17 @@ public partial class MainWindow : Window
                 e.Handled = true;
             }
 
+            return;
+        }
+
+        // Only while nothing is open. Once the raw view's editing lands, plain Ctrl+V inside it
+        // has to mean "paste into the document", not "replace the document" - so this shortcut
+        // deliberately does not exist when there is a document to paste into. The empty state's
+        // button is the affordance that always works.
+        if (e.Key == Key.V && cmdOrCtrl && !viewModel.IsFileOpen && viewModel.CanPaste)
+        {
+            _ = viewModel.PasteAsync();
+            e.Handled = true;
             return;
         }
 

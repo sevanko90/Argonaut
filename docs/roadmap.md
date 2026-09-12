@@ -142,11 +142,22 @@ document, `OpenRange()` for a sub-document, one search chunk, or an NDJSON line.
 an origin's lifetime is the **input**, not the view, so a view swap re-opens a source over the
 same origin rather than re-materialising it.
 
-- **Paste from clipboard.** The plumbing is done and tested: `MemoryByteOrigin` loads through
-  JSON, NDJSON and its per-line sub-documents, and `SearchSession` searches it. What remains is
-  the UI - a paste command that reads the clipboard, builds the origin, and runs it through
-  `OpenOriginAsync`, plus a size threshold above which it spills to a temp file and is served by
-  `FileByteOrigin` so the tuned multi-GB mapped path stays the one in use.
+- **Paste from clipboard — done.** `MainWindowViewModel.PasteAsync` reads the clipboard through
+  an injected delegate, builds a `MemoryByteOrigin`, and runs it through the same
+  `OpenOriginAsync` a file takes, so detection is on the bytes (a paste has no extension) and
+  every path-keyed feature skips it. Reachable from the empty state's "Paste data" button and
+  Ctrl+V — the shortcut deliberately only while nothing is open, so that plain Ctrl+V inside the
+  raw editor can mean "paste into the document" once editing is wired up. Ctrl+Shift+V as a
+  paste-as-new-document that works with a document open is the obvious extension.
+
+  **No spill to a temp file, at any size, and that is deliberate.** Avalonia hands clipboard text
+  over as a `string`, so a 100 MB paste has already cost ~200 MB of UTF-16 on the large object
+  heap plus the UTF-8 copy before anything can decide what to do with it. Spilling after that
+  point would not avoid the peak, only the retention, and would buy a temp file's lifetime, its
+  deletion ordering, and the Windows "cannot delete a mapped file" hazard. Instead the string is
+  dropped as soon as the bytes exist, and a paste past `MaxPasteBytes` (64 MB) is declined with a
+  message pointing at a file. A clipboard will hold far more than that - this is a limit on what
+  is worth holding as managed memory, not a limit of the clipboard.
 - **Load from URL.** Needs an `HttpByteOrigin`: the download on the background with progress
   through `IProgressReporter` and cancellation, reporting `AvailableLength` as bytes land and
   `LengthSettled` when the response completes. The indexers already consume growth, and

@@ -240,7 +240,7 @@ public class IndexedSourceSessionTests
     /// Pruning must observe a completed-but-faulted task's
     /// Exception before dropping it, or the fault surfaces as an unhandled
     /// TaskScheduler.UnobservedTaskException at finalization instead - exactly what
-    /// FileSearchSession.Scan racing ObjectDisposedException out of MMapFile.GetSpan would
+    /// SearchSession.Scan racing ObjectDisposedException out of MMapFile.GetSpan would
     /// produce if pruning didn't observe it.
     /// </summary>
     [Fact]

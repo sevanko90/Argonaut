@@ -119,11 +119,16 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel
         => selectedLineJsonViewModel?.SchemaSettings.SetDocument(SchemaSettings.Document);
 
     /// <summary>Persists the schema choice against the NDJSON file itself, so reopening it
-    /// restores the binding for every line.</summary>
+    /// restores the binding for every line. The preference store is keyed by path, so a document
+    /// with no path (a paste) simply does not remember its choice - keying it by display name
+    /// would let two different pastes overwrite each other's binding.</summary>
     private void OnMasterSchemaSettingsPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (Origin?.Path is not { } documentPath)
+            return;
+
         if (e.PropertyName is null or nameof(JsonSchemaSettings.SelectedEntry) or nameof(JsonSchemaSettings.SelectedRootName))
-            SchemaSelectionPreference.Save(FilePath, SchemaSettings.SelectedEntry?.FilePath, SchemaSettings.IsRootExplicitlyChosen ? SchemaSettings.SelectedRootName : null);
+            SchemaSelectionPreference.Save(documentPath, SchemaSettings.SelectedEntry?.FilePath, SchemaSettings.IsRootExplicitlyChosen ? SchemaSettings.SelectedRootName : null);
     }
 
     /// <summary>Lifts the open line's schema-type match scores into the shared toolbar - see the
@@ -181,17 +186,18 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel
         selectedLineJsonViewModel?.SetDefaultExpandDepth(depth);
     }
 
-    public async Task LoadAsync(string path, IProgressReporter? progressReporter = null)
+    public async Task LoadAsync(IByteOrigin origin, IProgressReporter? progressReporter = null)
     {
-        FilePath = path;
+        Origin = origin;
+        FilePath = origin.Path ?? origin.DisplayName;
         DefaultExpandDepth = ExpandDepthPreference.Load();
         toolbar = new JsonToolbarViewModel(HintSettings, SchemaSettings, DefaultExpandDepth, SetDefaultExpandDepth,
-            refreshSchemaEntries: () => RefreshSchemaEntriesAsync(path));
+            refreshSchemaEntries: () => RefreshSchemaEntriesAsync(origin.Path));
 
         // Alongside indexing, not blocking it - see JsonViewModel.ApplyInitialSchemaAsync.
-        _ = ApplyInitialSchemaAsync(path);
+        _ = ApplyInitialSchemaAsync(origin.Path);
 
-        var session = IndexedSourceSession<FileOffsetIndex>.Start(new MMapFile(path), FileOffsetIndex.StartIndexing, progressReporter);
+        var session = IndexedSourceSession<FileOffsetIndex>.Start(origin.Open(), FileOffsetIndex.StartIndexing, progressReporter);
         this.session = session;
 
         // Await a small initial batch so the first paint isn't a totally empty scrollbar;
@@ -211,7 +217,7 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel
 
     /// <summary>Populates the schema catalog and applies any sidecar/remembered binding for the
     /// NDJSON file - see <see cref="JsonSchemaCatalog.GatherForDocument"/>.</summary>
-    private async Task ApplyInitialSchemaAsync(string documentPath)
+    private async Task ApplyInitialSchemaAsync(string? documentPath)
     {
         var (entries, preselected, rootName) = await Task.Run(() => JsonSchemaCatalog.GatherForDocument(documentPath));
         if (IsDisposed)
@@ -225,7 +231,7 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel
 
     /// <summary>Re-lists the schema catalog without touching the current selection - see
     /// <see cref="JsonViewModel.RefreshSchemaEntriesAsync"/>.</summary>
-    private async Task RefreshSchemaEntriesAsync(string documentPath)
+    private async Task RefreshSchemaEntriesAsync(string? documentPath)
     {
         var (entries, _, _) = await Task.Run(() => JsonSchemaCatalog.GatherForDocument(documentPath));
         if (!IsDisposed)
@@ -294,7 +300,7 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel
         var jsonViewModel = new JsonViewModel { DefaultExpandDepth = DefaultExpandDepth };
         try
         {
-            await jsonViewModel.LoadAsync(FilePath, trimmed.Offset, trimmed.Length);
+            await jsonViewModel.LoadAsync(Origin!, trimmed.Offset, trimmed.Length);
         }
         catch
         {

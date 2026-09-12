@@ -18,7 +18,7 @@ public class FileTypeDetectorTests
         try
         {
             File.WriteAllBytes(path, Encoding.UTF8.GetBytes(content));
-            return FileTypeDetector.DetectFileType(path);
+            return LoadFromPath.DetectFileType(path);
         }
         finally
         {
@@ -121,7 +121,7 @@ public class FileTypeDetectorTests
         try
         {
             File.WriteAllBytes(path, Encoding.UTF8.GetBytes(content));
-            return FileTypeDetector.IsPlausibleFor(kind, path, out reason);
+            return LoadFromPath.IsPlausibleFor(kind, path, out reason);
         }
         finally
         {

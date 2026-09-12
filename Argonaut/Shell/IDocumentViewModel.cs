@@ -30,7 +30,16 @@ namespace Argonaut.Shell;
 /// </summary>
 public interface IDocumentViewModel : INotifyPropertyChanged, IDisposable
 {
-    /// <summary>Full path of the loaded file.</summary>
+    /// <summary>
+    /// Where this document's bytes came from - the one thing that knows whether it has a path on
+    /// disk at all. Null only before a load has begun. The shell owns its lifetime (it outlives
+    /// this view model, across a view swap), so a document reads it and never disposes it.
+    /// </summary>
+    IByteOrigin? Origin { get; }
+
+    /// <summary>Full path of the loaded file, or its display name when it has no path (a paste,
+    /// a download). Shown to the user; use <see cref="Origin"/>'s Path for anything that has to
+    /// touch the file system.</summary>
     string FilePath { get; }
 
     /// <summary>

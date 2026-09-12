@@ -49,7 +49,7 @@ public class GrowingSourceIndexingTests
         Assert.True(source.Waits > 0, "the scan never actually waited for more bytes");
 
         // Same spans a fully-present source produces.
-        var settled = FileOffsetIndex.StartIndexing(new ArrayByteSource(payload));
+        var settled = FileOffsetIndex.StartIndexing(new MemoryByteSource(payload));
         await settled.IndexingTask;
         Assert.Equal(settled.LineCount, index.LineCount);
         for (int i = 0; i < settled.LineCount; i++)
@@ -105,7 +105,7 @@ public class GrowingSourceIndexingTests
         await DripAsync(source, payload.Length / 10, 10);
         await index.IndexingTask;
 
-        var settled = JsonStructureIndex.StartIndexing(new ArrayByteSource(payload));
+        var settled = JsonStructureIndex.StartIndexing(new MemoryByteSource(payload));
         await settled.IndexingTask;
 
         Assert.Null(index.Failure);
@@ -171,7 +171,7 @@ public class GrowingSourceIndexingTests
         await DripAsync(source, payload.Length / 12, 12);
         await index.IndexingTask;
 
-        var settled = RawSegmentIndex.StartIndexing(new ArrayByteSource(payload), wrapWidth: 16);
+        var settled = RawSegmentIndex.StartIndexing(new MemoryByteSource(payload), wrapWidth: 16);
         await settled.IndexingTask;
 
         Assert.True(source.Waits > 0, "the scan never actually waited for more bytes");
@@ -196,7 +196,7 @@ public class GrowingSourceIndexingTests
         source.Seal();
         await index.IndexingTask;
 
-        var settled = RawSegmentIndex.StartIndexing(new ArrayByteSource(payload), wrapWidth: 16);
+        var settled = RawSegmentIndex.StartIndexing(new MemoryByteSource(payload), wrapWidth: 16);
         await settled.IndexingTask;
 
         Assert.Equal(settled.RowCount, index.RowCount);

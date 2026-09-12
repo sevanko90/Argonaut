@@ -60,11 +60,22 @@ public static class JsonSchemaCatalog
     /// Pure filesystem work (two directory listings and a settings read) - call it off the UI
     /// thread.
     /// </summary>
-    public static (IReadOnlyList<SchemaCatalogEntry> Entries, SchemaCatalogEntry? Preselected, string? RootName) GatherForDocument(string documentPath)
+    /// <param name="documentPath">
+    /// The document's own path, or null when it has no path on disk - a clipboard paste, or a
+    /// download served from memory. Both of the document-specific bindings are keyed by path (the
+    /// <c>&lt;file&gt;.schema.json</c> sidecar, and the schema last chosen for this path), so
+    /// with no path there is nothing to preselect and the user folder's schemas are all that can
+    /// be offered. That is a real, usable result rather than an error: the user can still pick a
+    /// schema by hand, it just cannot be remembered for next time.
+    /// </param>
+    public static (IReadOnlyList<SchemaCatalogEntry> Entries, SchemaCatalogEntry? Preselected, string? RootName) GatherForDocument(string? documentPath)
     {
         var entries = new List<SchemaCatalogEntry>(Enumerate());
         SchemaCatalogEntry? preselected = null;
         string? rootName = null;
+
+        if (documentPath is null)
+            return (entries, null, null);
 
         string sidecarPath = documentPath + SidecarSuffix;
         if (SafeExists(sidecarPath))

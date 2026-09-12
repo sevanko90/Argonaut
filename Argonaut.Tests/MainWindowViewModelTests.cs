@@ -66,6 +66,8 @@ public sealed class MainWindowViewModelTests : IDisposable
         private string status = "loaded";
         private IndexFailure? indexFailure;
 
+        public IByteOrigin? Origin { get; init; }
+
         public string FilePath { get; init; } = string.Empty;
 
         public string StatusText
@@ -174,8 +176,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         var docA = new FakeDocument { FilePath = pathA };
         var docB = new FakeDocument { FilePath = pathB, StatusText = "B loaded" };
 
-        var vm = CreateViewModel((_, path, _) =>
-            Task.FromResult<IDocumentViewModel>(path == pathA ? docA : docB));
+        var vm = CreateViewModel((_, origin, _) =>            Task.FromResult<IDocumentViewModel>(origin.Path == pathA ? docA : docB));
 
         await vm.OpenPathAsync(pathA);
         await vm.OpenPathAsync(pathB);
@@ -195,7 +196,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         var gateA = new TaskCompletionSource<IDocumentViewModel>();
         var gateB = new TaskCompletionSource<IDocumentViewModel>();
 
-        var vm = CreateViewModel((_, path, _) => path == pathA ? gateA.Task : gateB.Task);
+        var vm = CreateViewModel((_, origin, _) => origin.Path == pathA ? gateA.Task : gateB.Task);
 
         // Both opens suspend at the loader await; the second bumps the request id, so the
         // first is now stale even though its load finishes last.
@@ -238,8 +239,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         string pathB = WriteJsonFile("b.json");
         var docA = new FakeDocument { FilePath = pathA };
         var docB = new FakeDocument { FilePath = pathB };
-        var vm = CreateViewModel((_, p, _) =>
-            Task.FromResult<IDocumentViewModel>(p == pathA ? docA : docB));
+        var vm = CreateViewModel((_, origin, _) =>            Task.FromResult<IDocumentViewModel>(origin.Path == pathA ? docA : docB));
 
         await vm.OpenPathAsync(pathA);
         await vm.OpenPathAsync(pathB);
@@ -563,5 +563,70 @@ public sealed class MainWindowViewModelTests : IDisposable
         Assert.False(loaderCalledTwice);
         Assert.Same(document, vm.CurrentDocument);
         Assert.False(document.Disposed);
+    }
+
+    // ---- origin lifetime -----------------------------------------------------------------
+
+    /// <summary>
+    /// The load-bearing property of an origin's lifetime being the open INPUT rather than the
+    /// view: re-indexing the same document as a different kind must hand the loader the very
+    /// same origin. If it built a new one, a URL would be re-downloaded and a paste
+    /// re-materialised every time the user switched views.
+    /// </summary>
+    [Fact]
+    public async Task SwitchView_ReusesTheSameOriginRatherThanBuildingANewOne()
+    {
+        string path = WriteJsonFile();
+        var seen = new List<IByteOrigin>();
+        var vm = CreateViewModel((_, origin, _) =>
+        {
+            seen.Add(origin);
+            return Task.FromResult<IDocumentViewModel>(new FakeDocument { Origin = origin, FilePath = path });
+        });
+
+        await vm.OpenPathAsync(path);
+        await vm.SwitchViewAsync(FileTypeDetector.FileKind.Unidentified);
+
+        Assert.Equal(2, seen.Count);
+        Assert.Same(seen[0], seen[1]);
+    }
+
+    [Fact]
+    public async Task OpeningADifferentPath_BuildsANewOrigin()
+    {
+        string pathA = WriteJsonFile("a.json");
+        string pathB = WriteJsonFile("b.json");
+        var seen = new List<IByteOrigin>();
+        var vm = CreateViewModel((_, origin, _) =>
+        {
+            seen.Add(origin);
+            return Task.FromResult<IDocumentViewModel>(new FakeDocument { Origin = origin, FilePath = origin.Path! });
+        });
+
+        await vm.OpenPathAsync(pathA);
+        await vm.OpenPathAsync(pathB);
+
+        Assert.Equal(2, seen.Count);
+        Assert.NotSame(seen[0], seen[1]);
+        Assert.Equal(Path.GetFullPath(pathA), seen[0].Path);
+        Assert.Equal(Path.GetFullPath(pathB), seen[1].Path);
+    }
+
+    /// <summary>
+    /// The origin reaches the document, so anything that needs to know whether these bytes are a
+    /// file on disk (recent files, the schema sidecar, save, reveal in folder) can ask rather
+    /// than inferring it from a display string.
+    /// </summary>
+    [Fact]
+    public async Task ThePublishedDocumentCarriesItsOrigin()
+    {
+        string path = WriteJsonFile();
+        var vm = CreateViewModel((_, origin, _) =>
+            Task.FromResult<IDocumentViewModel>(new FakeDocument { Origin = origin, FilePath = path }));
+
+        await vm.OpenPathAsync(path);
+
+        Assert.NotNull(vm.CurrentDocument!.Origin);
+        Assert.Equal(Path.GetFullPath(path), vm.CurrentDocument.Origin!.Path);
     }
 }

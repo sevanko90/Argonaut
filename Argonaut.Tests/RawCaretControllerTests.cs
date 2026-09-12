@@ -15,7 +15,7 @@ public class RawCaretControllerTests
     private static (RawCaretController Caret, RawSegmentIndex Index, IByteSource Source) Over(
         string text, int wrapWidth = 80)
     {
-        var source = new ArrayByteSource(Encoding.UTF8.GetBytes(text));
+        var source = new MemoryByteSource(Encoding.UTF8.GetBytes(text));
         var index = RawSegmentIndex.StartIndexing(source, wrapWidth);
         index.IndexingTask.GetAwaiter().GetResult();
         return (new RawCaretController(index, source), index, source);

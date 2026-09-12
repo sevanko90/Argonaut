@@ -75,6 +75,42 @@ Where the parser already holds the bytes, take them from it rather than re-readi
 absolute offset - `JsonStructureIndex` hashes `reader.ValueSpan`, and only falls back to the
 source when `HasValueSequence` says the token straddles a parse window.
 
+## Origins own where bytes came from; sources own reading them
+
+Two types, deliberately not one, because they have different lifetimes:
+
+- **`IByteOrigin`** lives as long as the open **input** - across view swaps included. The shell
+  owns one per input (two when diffing) plus the materialised backing (the file, a temp-file
+  spill, a pinned array), and releases it only when the input changes (`AdoptOrigins`). That is
+  what stops switching from JSON to Raw re-downloading a URL or re-materialising a paste.
+- **`IByteSource`** lives as long as one **session**, which releases it. Unchanged, and what keeps
+  teardown safe: a session joins its scans before releasing what it owns.
+
+So a caller that needs bytes asks the origin for **its own** source and releases it; nobody
+releases a source handed to them. Do not collapse these into one type, and do not hand sessions a
+shared source - that turns the release ordering into a reference count, and a reference count got
+wrong here is a native use-after-free rather than an exception.
+
+`SearchSession` is the call site that proves it: its scan runs on a background thread that
+`FindController` cancels and forgets, never joins, so it must own every chunk it reads - which
+means it needs a factory, not a source. `OpenRange` is also why it keeps one source per chunk
+rather than opening the whole document (RSS double-counting, and a multi-GB unmap contending with
+the document's own on the UI thread at close).
+
+Other rules that fall out of the split:
+
+- **A sub-range is always settled.** `OpenRange` is only legal for bytes that have already
+  arrived, so growth (`AvailableLength`/`LengthSettled`) lives on the origin and on the whole
+  document source. A mapping is a fixed snapshot of a byte range and can never grow, so an
+  in-flight streamed source is never an `MMapFile`.
+- **`Path` is null for a document that is not a file**, and that is the single thing the
+  path-shaped features consult - recent files, the `<file>.schema.json` sidecar, the remembered
+  schema binding, save, reveal in folder. Degrade off `Path is not null`; never key anything by
+  `DisplayName` (two pastes would collide) and never write a path-keyed preference for a document
+  that has no path.
+- **`FilePath` on a view model is display text** (`Path ?? DisplayName`). Anything that touches the
+  file system reads `Origin.Path` instead.
+
 ## UI-threading convention: rely on the dispatcher's SynchronizationContext
 
 Avalonia installs a `SynchronizationContext` on the UI thread, so an `await` in a method that *started* on the

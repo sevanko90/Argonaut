@@ -340,14 +340,15 @@ public sealed class JsonDiffViewModel : IndexedDocumentViewModel
     /// (it renders the left-document preview immediately); indexing and the diff continue
     /// in the background, monitored for status/failure updates.
     /// </summary>
-    public async Task LoadAsync(string leftPath, string rightPath)
+    public async Task LoadAsync(IByteOrigin leftOrigin, IByteOrigin rightOrigin)
     {
-        FilePath = leftPath;
-        RightFilePath = rightPath;
+        Origin = leftOrigin;
+        FilePath = leftOrigin.Path ?? leftOrigin.DisplayName;
+        RightFilePath = rightOrigin.Path ?? rightOrigin.DisplayName;
 
-        var session = JsonDiffSession.Start(leftPath, rightPath,
-            leftProgress: new ProgressToStatus(this, "Indexing " + Path.GetFileName(leftPath)),
-            rightProgress: new ProgressToStatus(this, "Indexing " + Path.GetFileName(rightPath)),
+        var session = JsonDiffSession.Start(leftOrigin, rightOrigin,
+            leftProgress: new ProgressToStatus(this, "Indexing " + leftOrigin.DisplayName),
+            rightProgress: new ProgressToStatus(this, "Indexing " + rightOrigin.DisplayName),
             diffProgress: new ProgressToStatus(this, "Comparing"));
         this.session = session;
 

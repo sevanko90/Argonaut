@@ -25,7 +25,7 @@ public class JsonDiffRowCollectionTests
             string leftPath = WriteTemp(leftJson);
             string rightPath = WriteTemp(rightJson);
 
-            var session = JsonDiffSession.Start(leftPath, rightPath);
+            var session = LoadFromPath.StartDiff(leftPath, rightPath);
             try { await session.Diff.IndexingTask; } catch { }
 
             // Diff complete before the collection is built, so no growth monitor (and no

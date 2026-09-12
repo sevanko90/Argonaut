@@ -74,21 +74,21 @@ public sealed class JsonArrayTableSession : IDocumentSession
     }
 
     /// <summary>
-    /// Maps <paramref name="length"/> bytes of <paramref name="path"/> starting at
+    /// Takes <paramref name="length"/> bytes of <paramref name="origin"/> starting at
     /// <paramref name="offset"/> - which must be exactly the array's <c>[</c>…<c>]</c> range -
     /// indexes it as a JSON document in its own right, and starts walking its elements.
     /// Ownership of everything started transfers to the returned session; a failure partway
     /// disposes what was already started before rethrowing.
     /// </summary>
-    public static JsonArrayTableSession Start(string path, long offset, long length, IProgressReporter? progressReporter = null)
+    public static JsonArrayTableSession Start(IByteOrigin origin, long offset, long length, IProgressReporter? progressReporter = null)
     {
         var inner = IndexedSourceSession<JsonStructureIndex>.Start(
-            new MMapFile(path, offset, length), JsonStructureIndex.StartIndexing, progressReporter);
+            origin.OpenRange(offset, length), JsonStructureIndex.StartIndexing, progressReporter);
 
         var elementCts = CancellationTokenSource.CreateLinkedTokenSource(inner.TearingDown);
         try
         {
-            // Token 0: the mapping IS the array, so its root value is the array itself.
+            // Token 0: the sub-range IS the array, so its root value is the array itself.
             var elements = JsonArrayElementIndex.Start(inner.Index, 0, elementCts.Token);
             return new JsonArrayTableSession(inner, elements, elementCts);
         }

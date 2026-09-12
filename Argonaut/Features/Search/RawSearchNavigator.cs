@@ -24,7 +24,7 @@ public sealed class RawSearchNavigator : ISearchNavigator
         this.viewModel = viewModel;
     }
 
-    public ScanTarget ScanTarget => new ScanTarget(viewModel.FilePath);
+    public ScanTarget ScanTarget => new ScanTarget(viewModel.Origin!);
 
     public void SetHighlightTerm(string? term) => viewModel.HighlightTerm = term;
 

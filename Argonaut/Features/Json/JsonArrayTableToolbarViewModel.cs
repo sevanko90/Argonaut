@@ -47,14 +47,14 @@ public sealed class JsonArrayTableToolbarViewModel : ObservableObject
     private int selectedArrayColumns = JsonArrayColumnDiscovery.DefaultArrayColumns;
     private bool canExpandArrays;
 
-    public JsonArrayTableToolbarViewModel(string originPath, bool canReshape,
+    public JsonArrayTableToolbarViewModel(string arrayPath, bool canReshape,
         Action<JsonArrayColumnModeOption> setColumnMode, Action<int> setArrayColumns, Func<Task> back)
     {
         this.setColumnMode = setColumnMode;
         this.setArrayColumns = setArrayColumns;
         this.back = back;
 
-        OriginPath = originPath;
+        ArrayPath = arrayPath;
 
         CanReshape = canReshape;
 
@@ -79,10 +79,10 @@ public sealed class JsonArrayTableToolbarViewModel : ObservableObject
     }
 
     /// <summary>The JSONPath this array sits at in the origin document.</summary>
-    public string OriginPath { get; }
+    public string ArrayPath { get; }
 
     /// <summary>Banner text identifying the array in the origin document.</summary>
-    public string OriginDescription => $"Table view of {OriginPath}";
+    public string OriginDescription => $"Table view of {ArrayPath}";
 
     /// <summary>Whether the column-mode picker is shown at all. False for an array of objects,
     /// whose columns are the property names by definition - the by-property entry is then the

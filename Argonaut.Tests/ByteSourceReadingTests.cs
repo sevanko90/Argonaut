@@ -13,7 +13,7 @@ namespace Argonaut.Tests;
 /// </summary>
 public class ByteSourceReadingTests
 {
-    private static ArrayByteSource Source(string text) => new(Encoding.UTF8.GetBytes(text));
+    private static MemoryByteSource Source(string text) => new(Encoding.UTF8.GetBytes(text));
 
     /// <summary>A piece table with an edit in the middle: the only source in the codebase that
     /// can serve a range in two parts, so the only one that exercises the split contract.</summary>

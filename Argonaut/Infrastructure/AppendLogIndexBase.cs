@@ -9,7 +9,7 @@ namespace Argonaut.Infrastructure;
 /// <summary>
 /// Shared base for the background scanners that publish fixed-size records into a
 /// <see cref="SegmentedAppendLog{T}"/> from a single writer thread while UI-thread readers
-/// consume them lock-free (FileOffsetIndex, JsonStructureIndex, FileSearchSession).
+/// consume them lock-free (FileOffsetIndex, JsonStructureIndex, SearchSession).
 ///
 /// The base owns the log and the cold waiter machinery (WaitForCountAsync / MarkComplete).
 /// The hot scan loops stay in the derived classes and interact with the base only through

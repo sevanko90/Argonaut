@@ -159,7 +159,10 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
         if (e.PropertyName is not (null or nameof(JsonSchemaSettings.SelectedEntry) or nameof(JsonSchemaSettings.SelectedRootName)) || Toolbar is null)
             return;
 
-        SchemaSelectionPreference.Save(FilePath, SchemaSettings.SelectedEntry?.FilePath, SchemaSettings.IsRootExplicitlyChosen ? SchemaSettings.SelectedRootName : null);
+        // Keyed by path, so a document without one (a paste) does not remember its choice -
+        // keying it by display name would let two different pastes overwrite each other.
+        if (Origin?.Path is { } documentPath)
+            SchemaSelectionPreference.Save(documentPath, SchemaSettings.SelectedEntry?.FilePath, SchemaSettings.IsRootExplicitlyChosen ? SchemaSettings.SelectedRootName : null);
     }
 
     /// <summary>
@@ -278,7 +281,7 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
         long length = end.Offset + end.Length - offset;
 
         ArrayTableService.Request(new ArrayTableRequest(
-            FilePath, offset, length, JsonPathBuilder.Build(current.Index, current.Bytes, tokenIndex)));
+            Origin!, offset, length, JsonPathBuilder.Build(current.Index, current.Bytes, tokenIndex)));
     }
 
     /// <summary>
@@ -291,20 +294,21 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
         rows?.SetDefaultExpandDepth(depth);
     }
 
-    public Task LoadAsync(string path, IProgressReporter? progressReporter = null)
+    public Task LoadAsync(IByteOrigin origin, IProgressReporter? progressReporter = null)
     {
-        FilePath = path;
-        ScanTarget = new ScanTarget(path);
+        Origin = origin;
+        FilePath = origin.Path ?? origin.DisplayName;
+        ScanTarget = new ScanTarget(origin);
         DefaultExpandDepth = ExpandDepthPreference.Load();
         toolbar = new JsonToolbarViewModel(HintSettings, SchemaSettings, DefaultExpandDepth, SetDefaultExpandDepth, NavigateToPathAsync,
-            refreshSchemaEntries: () => RefreshSchemaEntriesAsync(path));
+            refreshSchemaEntries: () => RefreshSchemaEntriesAsync(origin.Path));
 
-        var loadTask = LoadCore(new MMapFile(path), progressReporter);
+        var loadTask = LoadCore(origin.Open(), progressReporter);
 
         // Runs alongside indexing rather than blocking the open: whichever finishes first, the
         // other side picks the schema up (LoadCore applies whatever is current when it creates
         // the rows; OnSchemaChanged handles the reverse order).
-        _ = ApplyInitialSchemaAsync(path);
+        _ = ApplyInitialSchemaAsync(origin.Path);
 
         return loadTask;
     }
@@ -315,7 +319,7 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
     /// (see <see cref="SchemaSelectionPreference"/>). Nothing here is ever an error - a missing
     /// sidecar and an unreadable schema folder both just mean "no schema".
     /// </summary>
-    private async Task ApplyInitialSchemaAsync(string documentPath)
+    private async Task ApplyInitialSchemaAsync(string? documentPath)
     {
         var (entries, preselected, rootName) = await Task.Run(() => JsonSchemaCatalog.GatherForDocument(documentPath));
         if (IsDisposed)
@@ -330,7 +334,7 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
     /// <summary>Re-lists the schema catalog without touching the current selection - so a
     /// schema dropped into the user folder mid-session shows up next time the combo opens,
     /// rather than requiring a restart. See <see cref="JsonToolbarViewModel.IsSchemaFlyoutOpen"/>.</summary>
-    private async Task RefreshSchemaEntriesAsync(string documentPath)
+    private async Task RefreshSchemaEntriesAsync(string? documentPath)
     {
         var (entries, _, _) = await Task.Run(() => JsonSchemaCatalog.GatherForDocument(documentPath));
         if (!IsDisposed)
@@ -338,16 +342,17 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
     }
 
     /// <summary>
-    /// Loads the sub-document occupying the byte range [offset, offset + length) of the file
-    /// at <paramref name="path"/> - e.g. one line of a larger NDJSON file. Creates and owns
-    /// its own independent sub-range mapping (disposed with this view model), so a caller
-    /// never allocates a mapping this view model is then responsible for freeing.
+    /// Loads the sub-document occupying the byte range [offset, offset + length) of
+    /// <paramref name="origin"/> - e.g. one line of a larger NDJSON document. Asks the origin
+    /// for its own independent sub-range source (released with this view model), so a caller
+    /// never allocates a source this view model is then responsible for freeing.
     /// </summary>
-    public Task LoadAsync(string path, long offset, long length, IProgressReporter? progressReporter = null)
+    public Task LoadAsync(IByteOrigin origin, long offset, long length, IProgressReporter? progressReporter = null)
     {
-        FilePath = path;
-        ScanTarget = new ScanTarget(path, offset, length);
-        return LoadCore(new MMapFile(path, offset, length), progressReporter);
+        Origin = origin;
+        FilePath = origin.Path ?? origin.DisplayName;
+        ScanTarget = new ScanTarget(origin, offset, length);
+        return LoadCore(origin.OpenRange(offset, length), progressReporter);
     }
 
     private async Task LoadCore(IByteSource bytes, IProgressReporter? progressReporter)

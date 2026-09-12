@@ -25,12 +25,12 @@ public sealed record DocumentViewOption(FileTypeDetector.FileKind Kind, string D
 public static class DocumentViewCatalog
 {
     private static readonly (Func<IDocumentViewModel> Create,
-        Func<IDocumentViewModel, FileTypeDetector.FileKind, string, IProgressReporter, Task> Load) [] Registrations =
+        Func<IDocumentViewModel, FileTypeDetector.FileKind, IByteOrigin, IProgressReporter, Task> Load) [] Registrations =
     {
-        (() => new JsonViewModel(), (vm, _, p, r) => ((JsonViewModel)vm).LoadAsync(p, r)),
-        (() => new NdJsonViewModel(), (vm, _, p, r) => ((NdJsonViewModel)vm).LoadAsync(p, r)),
-        (() => new CsvViewModel(), (vm, k, p, r) => ((CsvViewModel)vm).LoadAsync(p, k == FileTypeDetector.FileKind.Tsv ? (byte)'\t' : (byte)',', r)),
-        (() => new RawViewModel(), (vm, _, p, r) => ((RawViewModel)vm).LoadAsync(p, r)),
+        (() => new JsonViewModel(), (vm, _, o, r) => ((JsonViewModel)vm).LoadAsync(o, r)),
+        (() => new NdJsonViewModel(), (vm, _, o, r) => ((NdJsonViewModel)vm).LoadAsync(o, r)),
+        (() => new CsvViewModel(), (vm, k, o, r) => ((CsvViewModel)vm).LoadAsync(o, k == FileTypeDetector.FileKind.Tsv ? (byte)'\t' : (byte)',', r)),
+        (() => new RawViewModel(), (vm, _, o, r) => ((RawViewModel)vm).LoadAsync(o, r)),
     };
 
     // Display order doubles as the source of display names - one FileKind can only ever mean
@@ -74,11 +74,11 @@ public static class DocumentViewCatalog
     }
 
     /// <summary>Builds and loads the document view model registered for <paramref name="kind"/>.</summary>
-    public static async Task<IDocumentViewModel> LoadAsync(FileTypeDetector.FileKind kind, string path, IProgressReporter reporter)
+    public static async Task<IDocumentViewModel> LoadAsync(FileTypeDetector.FileKind kind, IByteOrigin origin, IProgressReporter reporter)
     {
         var registration = Registrations[KindToRegistration[kind]];
         var vm = registration.Create();
-        await registration.Load(vm, kind, path, reporter);
+        await registration.Load(vm, kind, origin, reporter);
         return vm;
     }
 }

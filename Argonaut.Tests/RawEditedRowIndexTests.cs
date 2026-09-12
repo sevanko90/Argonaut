@@ -25,7 +25,7 @@ public class RawEditedRowIndexTests
             this.originalBytes = original;
             this.wrapWidth = wrapWidth;
 
-            OriginalSource = new ArrayByteSource(original);
+            OriginalSource = new MemoryByteSource(original);
             var index = RawSegmentIndex.StartIndexing(OriginalSource, wrapWidth);
             index.IndexingTask.GetAwaiter().GetResult();
 
@@ -34,7 +34,7 @@ public class RawEditedRowIndexTests
             Oracle = new List<byte>(original);
         }
 
-        public ArrayByteSource OriginalSource { get; }
+        public MemoryByteSource OriginalSource { get; }
         public RawPieceTable Table { get; }
         public RawEditedRowIndex Rows { get; }
         public List<byte> Oracle { get; }
@@ -57,7 +57,7 @@ public class RawEditedRowIndexTests
             byte[] edited = Oracle.ToArray();
             Assert.Equal(edited.Length, Table.AvailableLength);
 
-            var freshSource = new ArrayByteSource(edited);
+            var freshSource = new MemoryByteSource(edited);
             var fresh = RawSegmentIndex.StartIndexing(freshSource, this.wrapWidth);
             fresh.IndexingTask.GetAwaiter().GetResult();
 
@@ -242,12 +242,12 @@ public class RawEditedRowIndexTests
     [Fact]
     public void ScanMustBeCompleteBeforeEditsAreLayeredOn()
     {
-        var source = new ArrayByteSource(Bytes("alpha\n"));
+        var source = new MemoryByteSource(Bytes("alpha\n"));
         var index = RawSegmentIndex.StartIndexing(source, 80);
         index.IndexingTask.GetAwaiter().GetResult();
 
         // The guard itself: an index that has not finished is refused.
-        var unfinished = RawSegmentIndex.StartIndexing(new ArrayByteSource(new byte[8 * 1024 * 1024]), 80);
+        var unfinished = RawSegmentIndex.StartIndexing(new MemoryByteSource(new byte[8 * 1024 * 1024]), 80);
         if (!unfinished.IsComplete)
         {
             Assert.Throws<ArgumentException>(() =>

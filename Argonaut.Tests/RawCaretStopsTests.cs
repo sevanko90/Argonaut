@@ -18,7 +18,7 @@ public class RawCaretStopsTests
 {
     private static (RawSegmentIndex Index, IByteSource Source) Indexed(byte[] content, int wrapWidth = 80)
     {
-        var source = new ArrayByteSource(content);
+        var source = new MemoryByteSource(content);
         var index = RawSegmentIndex.StartIndexing(source, wrapWidth);
         index.IndexingTask.GetAwaiter().GetResult();
         return (index, source);

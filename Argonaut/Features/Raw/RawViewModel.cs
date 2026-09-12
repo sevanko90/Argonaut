@@ -239,13 +239,14 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
         }
     }
 
-    public async Task LoadAsync(string path, IProgressReporter? progressReporter = null)
+    public async Task LoadAsync(IByteOrigin origin, IProgressReporter? progressReporter = null)
     {
-        this.FilePath = path;
+        this.Origin = origin;
+        this.FilePath = origin.Path ?? origin.DisplayName;
         this.wrapWidth = RawWrapWidthPreference.Load();
         this.toolbar = new RawToolbarViewModel(this.wrapWidth, SetWrapWidth);
 
-        var session = RawIndexSession.Start(new MMapFile(path), this.wrapWidth, progressReporter);
+        var session = RawIndexSession.Start(origin.Open(), this.wrapWidth, progressReporter);
         this.session = session;
 
         // Await a small initial batch so the first paint isn't an empty list; RowCount then
@@ -261,7 +262,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
         OnPropertyChanged(nameof(Rows));
         OnPropertyChanged(nameof(RowCount));
 
-        StatusText = $"{path} — {RowCount:N0} rows indexed so far";
+        StatusText = $"{FilePath} — {RowCount:N0} rows indexed so far";
         MonitorIndexing();
     }
 

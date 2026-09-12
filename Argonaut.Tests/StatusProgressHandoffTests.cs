@@ -51,6 +51,8 @@ public sealed class StatusProgressHandoffTests : IDisposable
     {
         private string status = "loaded";
 
+        public IByteOrigin? Origin { get; init; }
+
         public string FilePath { get; init; } = string.Empty;
 
         public string StatusText

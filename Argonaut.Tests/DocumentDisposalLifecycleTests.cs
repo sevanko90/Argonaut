@@ -89,7 +89,7 @@ public class DocumentDisposalLifecycleTests
     }
 
     /// <summary>Blocks a search scan inside its first window until released - same technique as
-    /// FileSearchSessionTests.BlockingMatcher, used here to force a deterministic interleaving:
+    /// SearchSessionTests.BlockingMatcher, used here to force a deterministic interleaving:
     /// the scan is provably still holding a span over the mapping when Dispose is called.</summary>
     private sealed class BlockingMatcher : ISearchMatcher
     {
@@ -122,7 +122,7 @@ public class DocumentDisposalLifecycleTests
     private static async Task DisposeDuringActiveSearchAsync(string path, Action dispose)
     {
         var matcher = new BlockingMatcher();
-        var session = FileSearchSession.Start(new ScanTarget(path), matcher);
+        var session = SearchSession.Start(LoadFromPath.ScanTargetFor(path), matcher);
 
         matcher.Entered.Wait();
 
@@ -393,7 +393,7 @@ public class DocumentDisposalLifecycleTests
             Assert.False(vm.IndexingTask.IsCompleted);
 
             var navigator = (JsonDiffSearchNavigator)vm.CreateSearchNavigator()!;
-            Assert.Equal(leftPath, navigator.ScanTargets[0].Path);
+            Assert.Equal(leftPath, navigator.ScanTargets[0].Origin.Path);
 
             await DisposeDuringActiveSearchAsync(leftPath, vm.Dispose);
         }
@@ -416,7 +416,7 @@ public class DocumentDisposalLifecycleTests
             Assert.False(vm.IndexingTask.IsCompleted);
 
             var navigator = (JsonDiffSearchNavigator)vm.CreateSearchNavigator()!;
-            Assert.Equal(rightPath, navigator.ScanTargets[1].Path);
+            Assert.Equal(rightPath, navigator.ScanTargets[1].Origin.Path);
 
             await DisposeDuringActiveSearchAsync(rightPath, vm.Dispose);
         }

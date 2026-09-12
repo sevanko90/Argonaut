@@ -17,15 +17,20 @@ public sealed class IncompatibleViewModel : ObservableObject, IDocumentViewModel
     private readonly Action openAsRawText;
     private readonly Action jumpToFailureLocation;
 
-    public IncompatibleViewModel(string filePath, string attemptedViewName, IndexFailure? failure,
+    public IncompatibleViewModel(IByteOrigin? origin, string filePath, string attemptedViewName, IndexFailure? failure,
         Action openAsRawText, Action jumpToFailureLocation)
     {
+        Origin = origin;
         FilePath = filePath;
         AttemptedViewName = attemptedViewName;
         IndexFailure = failure;
         this.openAsRawText = openAsRawText;
         this.jumpToFailureLocation = jumpToFailureLocation;
     }
+
+    /// <summary>See <see cref="IDocumentViewModel.Origin"/>. Carried through so the banner's
+    /// "open as raw text" can reload the same bytes rather than needing a path.</summary>
+    public IByteOrigin? Origin { get; }
 
     public string FilePath { get; }
 

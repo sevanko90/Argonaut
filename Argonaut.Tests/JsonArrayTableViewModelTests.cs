@@ -179,7 +179,7 @@ public class JsonArrayTableViewModelTests
             await document.LoadAsync(path, 0, new FileInfo(path).Length, "$.items");
 
             var toolbar = Assert.IsType<JsonArrayTableToolbarViewModel>(document.Toolbar);
-            Assert.Equal("$.items", toolbar.OriginPath);
+            Assert.Equal("$.items", toolbar.ArrayPath);
             Assert.Equal("Table view of $.items", toolbar.OriginDescription);
         }
         finally

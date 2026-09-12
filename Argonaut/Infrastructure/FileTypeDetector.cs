@@ -44,13 +44,24 @@ public static class FileTypeDetector
     /// <summary>
     /// Detect whether a file is structurally JSON or NDJson
     /// </summary>
-    /// <param name="path">Path to file</param>
+    /// <param name="origin">The document to inspect.</param>
     /// <returns>The detected type of the file</returns>
     /// <remarks>Should handle multi-gb file by scanning bytes rather than trying to parse data</remarks>
-    public static FileKind DetectFileType(string path)
+    public static FileKind DetectFileType(IByteOrigin origin)
     {
-        using var mmap = new MMapFile(path);
+        var mmap = origin.Open();
+        try
+        {
+            return Detect(mmap);
+        }
+        finally
+        {
+            mmap.Release();
+        }
+    }
 
+    private static FileKind Detect(IByteSource mmap)
+    {
         long length = mmap.AvailableLength;
         if (length == 0)
             return FileKind.Unidentified;
@@ -94,11 +105,23 @@ public static class FileTypeDetector
     /// fail partway through.
     /// </summary>
     /// <param name="kind">The view the user is forcing.</param>
-    /// <param name="path">Path to the file.</param>
+    /// <param name="origin">The document to inspect.</param>
     /// <param name="reason">Set to a human-readable explanation when this returns false.</param>
-    public static bool IsPlausibleFor(FileKind kind, string path, out string reason)
+    public static bool IsPlausibleFor(FileKind kind, IByteOrigin origin, out string reason)
     {
-        using var mmap = new MMapFile(path);
+        var mmap = origin.Open();
+        try
+        {
+            return IsPlausible(kind, mmap, out reason);
+        }
+        finally
+        {
+            mmap.Release();
+        }
+    }
+
+    private static bool IsPlausible(FileKind kind, IByteSource mmap, out string reason)
+    {
         long length = mmap.AvailableLength;
 
         switch (kind)
@@ -216,7 +239,7 @@ public static class FileTypeDetector
         return count;
     }
 
-    // The chunked-scan loops in these three helpers (and in FileOffsetIndex/FileSearchSession)
+    // The chunked-scan loops in these three helpers (and in FileOffsetIndex/SearchSession)
     // are deliberately duplicated, not abstracted: they're hot paths, and the indirection an
     // abstraction would add costs more than the ~15 shared lines save.
     private static long FindNonWhitespace(IByteSource file, long start, long end)

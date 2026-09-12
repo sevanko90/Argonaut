@@ -61,7 +61,7 @@ public class DocumentViewCatalogTests
         try
         {
             var reporter = new NullProgressReporter();
-            using var document = await DocumentViewCatalog.LoadAsync(kind, path, reporter);
+            using var document = await LoadFromPath.LoadDocumentAsync(kind, path, reporter);
 
             Assert.IsType(expectedType, document);
             Assert.True(document.CanHandleFileType(kind));
@@ -79,7 +79,7 @@ public class DocumentViewCatalogTests
         try
         {
             var reporter = new NullProgressReporter();
-            using var document = await DocumentViewCatalog.LoadAsync(FileTypeDetector.FileKind.Tsv, path, reporter);
+            using var document = await LoadFromPath.LoadDocumentAsync(FileTypeDetector.FileKind.Tsv, path, reporter);
 
             var csv = Assert.IsType<CsvViewModel>(document);
             Assert.Equal((byte)'\t', csv.Delimiter);
@@ -97,7 +97,7 @@ public class DocumentViewCatalogTests
         try
         {
             var reporter = new NullProgressReporter();
-            using var document = await DocumentViewCatalog.LoadAsync(FileTypeDetector.FileKind.Csv, path, reporter);
+            using var document = await LoadFromPath.LoadDocumentAsync(FileTypeDetector.FileKind.Csv, path, reporter);
 
             var csv = Assert.IsType<CsvViewModel>(document);
             Assert.Equal((byte)',', csv.Delimiter);

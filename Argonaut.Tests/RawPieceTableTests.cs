@@ -22,7 +22,7 @@ public class RawPieceTableTests
         return destination;
     }
 
-    private static RawPieceTable TableOver(string text) => new(new ArrayByteSource(Bytes(text)));
+    private static RawPieceTable TableOver(string text) => new(new MemoryByteSource(Bytes(text)));
 
     [Fact]
     public void UneditedTable_ReadsExactlyTheOriginal()
@@ -167,7 +167,7 @@ public class RawPieceTableTests
         Assert.Equal(Bytes("hello big world"), ReadAll(table));
 
         // What a save does when the rename fails: the mapping is gone, so re-open and carry on.
-        table.RepointOriginal(new ArrayByteSource(Bytes("hello world")));
+        table.RepointOriginal(new MemoryByteSource(Bytes("hello world")));
 
         Assert.Equal(Bytes("hello big world"), ReadAll(table));
     }
@@ -177,7 +177,7 @@ public class RawPieceTableTests
     {
         var table = TableOver("hello world");
 
-        Assert.Throws<ArgumentException>(() => table.RepointOriginal(new ArrayByteSource(Bytes("shorter"))));
+        Assert.Throws<ArgumentException>(() => table.RepointOriginal(new MemoryByteSource(Bytes("shorter"))));
     }
 
     [Fact]
@@ -225,7 +225,7 @@ public class RawPieceTableTests
         var seedBytes = new byte[4096];
         random.NextBytes(seedBytes);
 
-        var table = new RawPieceTable(new ArrayByteSource(seedBytes));
+        var table = new RawPieceTable(new MemoryByteSource(seedBytes));
         var oracle = new List<byte>(seedBytes);
 
         for (int step = 0; step < 400; step++)

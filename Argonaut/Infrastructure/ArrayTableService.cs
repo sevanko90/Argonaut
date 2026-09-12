@@ -11,9 +11,9 @@ namespace Argonaut.Infrastructure;
 /// JsonTokenInfo.Offset).</param>
 /// <param name="Length">Byte length of the array, opening bracket through closing bracket
 /// inclusive, so [Offset, Offset + Length) is a valid JSON document on its own.</param>
-/// <param name="OriginPath">JSONPath the array sits at in the origin document - the banner's
+/// <param name="ArrayPath">JSONPath the array sits at in the source document - the banner's
 /// text, and where Back navigates to.</param>
-public readonly record struct ArrayTableRequest(string Path, long Offset, long Length, string OriginPath);
+public readonly record struct ArrayTableRequest(IByteOrigin Origin, long Offset, long Length, string ArrayPath);
 
 /// <summary>
 /// App-wide "open this array as a table" requests. The JSON view model resolves the byte range

@@ -32,9 +32,9 @@ public sealed class JsonDiffSession : IDocumentSession
 
     public JsonDiffIndex Diff { get; }
 
-    public string LeftPath { get; }
+    public IByteOrigin LeftOrigin { get; }
 
-    public string RightPath { get; }
+    public IByteOrigin RightOrigin { get; }
 
     /// <summary>
     /// See <see cref="IDocumentSession.TearingDown"/>. The diff's own source, which is linked
@@ -63,12 +63,12 @@ public sealed class JsonDiffSession : IDocumentSession
     /// </summary>
     public IndexFailure? Failure => null;
 
-    private JsonDiffSession(string leftPath, string rightPath,
+    private JsonDiffSession(IByteOrigin leftOrigin, IByteOrigin rightOrigin,
         IndexedSourceSession<JsonStructureIndex> left, IndexedSourceSession<JsonStructureIndex> right,
         JsonDiffIndex diff, CancellationTokenSource diffCts)
     {
-        this.LeftPath = leftPath;
-        this.RightPath = rightPath;
+        this.LeftOrigin = leftOrigin;
+        this.RightOrigin = rightOrigin;
         this.Left = left;
         this.Right = right;
         this.Diff = diff;
@@ -81,12 +81,12 @@ public sealed class JsonDiffSession : IDocumentSession
     internal Task HashReleaseTask => this.hashReleaseTask;
 
     /// <summary>
-    /// Opens both files, starts both indexers (with content hashes - the whole point) and
+    /// Opens a source over each origin, starts both indexers (with content hashes - the whole point) and
     /// the diff worker, which internally waits for both indexes to complete before
     /// comparing. Ownership of everything started transfers to the returned session; a
     /// failure to open the second file disposes the first side before rethrowing.
     /// </summary>
-    public static JsonDiffSession Start(string leftPath, string rightPath,
+    public static JsonDiffSession Start(IByteOrigin leftOrigin, IByteOrigin rightOrigin,
         IProgressReporter? leftProgress = null, IProgressReporter? rightProgress = null,
         IProgressReporter? diffProgress = null)
     {
@@ -95,13 +95,13 @@ public sealed class JsonDiffSession : IDocumentSession
         // The lambda (not a method group) closes over the options - see the StartIndexing
         // overload remarks for why the original signature had to stay intact.
         var left = IndexedSourceSession<JsonStructureIndex>.Start(
-            new MMapFile(leftPath), (f, r, ct) => JsonStructureIndex.StartIndexing(f, options, r, ct), leftProgress);
+            leftOrigin.Open(), (f, r, ct) => JsonStructureIndex.StartIndexing(f, options, r, ct), leftProgress);
 
         IndexedSourceSession<JsonStructureIndex> right;
         try
         {
             right = IndexedSourceSession<JsonStructureIndex>.Start(
-                new MMapFile(rightPath), (f, r, ct) => JsonStructureIndex.StartIndexing(f, options, r, ct), rightProgress);
+                rightOrigin.Open(), (f, r, ct) => JsonStructureIndex.StartIndexing(f, options, r, ct), rightProgress);
         }
         catch
         {
@@ -113,7 +113,7 @@ public sealed class JsonDiffSession : IDocumentSession
         try
         {
             var diff = JsonDiffIndex.Start(left.Index, left.Bytes, right.Index, right.Bytes, diffProgress, diffCts.Token);
-            return new JsonDiffSession(leftPath, rightPath, left, right, diff, diffCts);
+            return new JsonDiffSession(leftOrigin, rightOrigin, left, right, diff, diffCts);
         }
         catch
         {

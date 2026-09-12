@@ -130,7 +130,7 @@ public sealed class RawViewModelTests : IDisposable
         }
     }
 
-    /// <summary>Blocks a search scan mid-window until released - see FileSearchSessionTests'
+    /// <summary>Blocks a search scan mid-window until released - see SearchSessionTests'
     /// identical BlockingMatcher for why this makes the interleaving deterministic.</summary>
     private sealed class BlockingMatcher : ISearchMatcher
     {
@@ -165,7 +165,7 @@ public sealed class RawViewModelTests : IDisposable
             await vm.LoadAsync(WriteNewlinelessFile());
             await vm.IndexingTask;
 
-            var session = FileSearchSession.Start(new ScanTarget(vm.FilePath), matcher);
+            var session = SearchSession.Start(LoadFromPath.ScanTargetFor(vm.FilePath), matcher);
 
             matcher.Entered.Wait(); // the scan is now provably mid-chunk
 

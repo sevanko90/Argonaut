@@ -105,12 +105,13 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
         OnPropertyChanged(nameof(SelectedColumnIndex));
     }
 
-    public async Task LoadAsync(string path, byte delimiter, IProgressReporter? progressReporter = null)
+    public async Task LoadAsync(IByteOrigin origin, byte delimiter, IProgressReporter? progressReporter = null)
     {
-        this.FilePath = path;
+        this.Origin = origin;
+        this.FilePath = origin.Path ?? origin.DisplayName;
         this.delimiter = delimiter;
 
-        var session = IndexedSourceSession<FileOffsetIndex>.Start(new MMapFile(path), FileOffsetIndex.StartIndexing, progressReporter);
+        var session = IndexedSourceSession<FileOffsetIndex>.Start(origin.Open(), FileOffsetIndex.StartIndexing, progressReporter);
         this.session = session;
 
         // Await a small initial batch so the first paint isn't a totally empty grid, and so
@@ -136,7 +137,7 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
         OnPropertyChanged(nameof(ColumnCount));
         OnPropertyChanged(nameof(RowCount));
 
-        StatusText = $"{path} — {RowCount:N0} rows indexed so far";
+        StatusText = $"{FilePath} — {RowCount:N0} rows indexed so far";
         MonitorIndexing();
     }
 

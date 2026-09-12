@@ -44,7 +44,7 @@ public class JsonDiffSessionTests
         string rightPath = WriteTempJson("""{"a":2}""");
         try
         {
-            var session = JsonDiffSession.Start(leftPath, rightPath);
+            var session = LoadFromPath.StartDiff(leftPath, rightPath);
             await session.Diff.IndexingTask;
             Assert.True(session.Diff.RecordCount > 0);
 
@@ -69,7 +69,7 @@ public class JsonDiffSessionTests
         string rightPath = WriteTempJson("""{"a":[1,2,4]}""");
         try
         {
-            using var session = JsonDiffSession.Start(leftPath, rightPath);
+            using var session = LoadFromPath.StartDiff(leftPath, rightPath);
             await session.HashReleaseTask;
 
             Assert.True(session.Diff.IsComplete);
@@ -93,7 +93,7 @@ public class JsonDiffSessionTests
         string rightPath = WriteLargeTempJson();
         try
         {
-            var session = JsonDiffSession.Start(leftPath, rightPath);
+            var session = LoadFromPath.StartDiff(leftPath, rightPath);
             var diffTask = session.Diff.IndexingTask;
 
             // Dispose immediately - the diff task is still waiting on both indexes. It must
@@ -122,7 +122,7 @@ public class JsonDiffSessionTests
         string rightPath = WriteLargeTempJson();
         try
         {
-            var session = JsonDiffSession.Start(leftPath, rightPath);
+            var session = LoadFromPath.StartDiff(leftPath, rightPath);
             await session.Left.IndexingTask; // the small side finishes fast
 
             session.Dispose();
@@ -147,7 +147,7 @@ public class JsonDiffSessionTests
         string rightPath = WriteLargeTempJson();
         try
         {
-            var session = JsonDiffSession.Start(leftPath, rightPath);
+            var session = LoadFromPath.StartDiff(leftPath, rightPath);
             await Task.Delay(50);
             session.Dispose();
 
@@ -167,7 +167,7 @@ public class JsonDiffSessionTests
         string rightPath = WriteTempJson("{\"broken\": tru"); // invalid JSON
         try
         {
-            var session = JsonDiffSession.Start(leftPath, rightPath);
+            var session = LoadFromPath.StartDiff(leftPath, rightPath);
             await session.Diff.IndexingTask; // completes (empty) despite the side failure
             await session.HashReleaseTask;
 
@@ -201,7 +201,7 @@ public class JsonDiffSessionTests
         string rightPath = WriteLargeTempJson();
         try
         {
-            var session = JsonDiffSession.Start(leftPath, rightPath);
+            var session = LoadFromPath.StartDiff(leftPath, rightPath);
 
             session.RequestStop();
             session.RequestStop(); // idempotent before Dispose
@@ -226,7 +226,7 @@ public class JsonDiffSessionTests
         string rightPath = WriteTempJson("[2]");
         try
         {
-            var session = JsonDiffSession.Start(leftPath, rightPath);
+            var session = LoadFromPath.StartDiff(leftPath, rightPath);
             session.Dispose();
             session.Dispose(); // view model and view detach handler both call it
         }

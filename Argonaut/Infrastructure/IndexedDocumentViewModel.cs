@@ -49,6 +49,9 @@ public abstract class IndexedDocumentViewModel : ObservableObject, IDocumentView
     /// </summary>
     protected bool IsDisposed => disposed;
 
+    /// <summary>See <see cref="IDocumentViewModel.Origin"/>. Set once, by the load.</summary>
+    public IByteOrigin? Origin { get; protected set; }
+
     public string FilePath
     {
         get => filePath;

@@ -128,47 +128,42 @@ and virtualization-by-arithmetic are exactly what rendering gives up.
 
 ## Input sources
 
-The read half of this is done: every consumer is typed to `IByteSource`, including
-`IndexedFileSession.File` and `RawIndexSession.File`, and the whole-range read that used to be
-`MMapFile.GetSpan` is now `ByteSourceReading.RequireContiguous` (with `ByteAt` for single-byte
-peeks and `Release` for the one owner's teardown). `MMapFile` survives only as the file-backed
-implementation — nothing outside `Infrastructure` names the type except the load sites that
-construct one. So substituting an array-backed or temp-file-backed source is now a question of
-*who creates it*, not of what the readers can accept.
+Both halves of the seam are now in place.
 
-What is still path-shaped is **identity and creation**: `MMapFile` is built from a path at nine
-sites, and search, the NDJSON sub-document view and the array table re-map the *path* to get an
-independent view of a byte range.
+**Reading** goes through `IByteSource`: every consumer is typed to it, the whole-range read is
+`ByteSourceReading.RequireContiguous`, and `AvailableLength`/`LengthSettled`/`WaitForLength` let a
+scan index bytes that are still arriving. `MMapFile` survives only as the file-backed
+implementation.
 
-- **Paste from clipboard, and load from URL.** What remains is the identity half of the seam: a
-  type that owns where the bytes came from (a display name, whether there is a path on disk, and
-  how to hand out a sub-range view of [offset, length) without going back to a path), implemented
-  three ways — the existing mapped file, an in-memory array, and a streamed HTTP response. The
-  work is in the creation sites: every view model that constructs `new MMapFile(path)` takes one
-  of these instead, and the three places that re-map by path (`FileSearchSession`'s chunk views,
-  `JsonArrayTableSession`, `JsonViewModel`'s sub-document load) ask it for the sub-range.
+**Creation and identity** go through `IByteOrigin`: it owns where the bytes came from (a display
+name, a path on disk or null) and hands out `IByteSource`s over them - `Open()` for the whole
+document, `OpenRange()` for a sub-document, one search chunk, or an NDJSON line. Implemented by
+`FileByteOrigin` and `MemoryByteOrigin`. The shell owns one per open input (two when diffing) and
+an origin's lifetime is the **input**, not the view, so a view swap re-opens a source over the
+same origin rather than re-materialising it.
 
-  Ownership is the decision to get right, and it is *not* "pass one shared instance down". A diff
-  has two inputs, so nothing is per-document; and the sessions' teardown rule (cancel → join the
-  scans → release the source) is only safe because the session *owns* what it releases — a
-  borrowed instance turns that into a reference count, which is the invariant that fails as a
-  native use-after-free rather than an exception. The shape that avoids it: a long-lived,
-  shell-owned *origin* that owns the materialisation (the file on disk, the temp-file spill, the
-  pinned array) and hands out short-lived per-session sources over it, leaving today's ownership
-  contract exactly as it is.
-
-  Two decisions to make when it is picked up, not now:
-  - **Where large non-file payloads live.** A clipboard paste or a download above some threshold
-    should spill to a temp file and be served by the ordinary mapped-file provider, so the multi-GB
-    path stays exactly the one that is already tuned; only small payloads stay as a pinned array.
-    That keeps `Length` OS-reported for everything big (see CLAUDE.md) and costs one copy.
-  - **What the path-shaped features do without a path.** Recent files, save-as, reload and "open
-    containing folder" all assume one exists. The provider needs to say so, and the UI needs to
-    degrade rather than each site guarding on a null path.
-
-  The HTTP provider also wants the download itself on the background with progress reported through
-  `IProgressReporter` and cancellation off `IDocumentSession.TearingDown`, so a slow or wedged URL is
-  no different from a slow index.
+- **Paste from clipboard.** The plumbing is done and tested: `MemoryByteOrigin` loads through
+  JSON, NDJSON and its per-line sub-documents, and `SearchSession` searches it. What remains is
+  the UI - a paste command that reads the clipboard, builds the origin, and runs it through
+  `OpenOriginAsync`, plus a size threshold above which it spills to a temp file and is served by
+  `FileByteOrigin` so the tuned multi-GB mapped path stays the one in use.
+- **Load from URL.** Needs an `HttpByteOrigin`: the download on the background with progress
+  through `IProgressReporter` and cancellation, reporting `AvailableLength` as bytes land and
+  `LengthSettled` when the response completes. The indexers already consume growth, and
+  `Utf8JsonReader`'s `isFinalBlock`/`JsonReaderState` resumption is the streaming primitive, so
+  the work is in the origin rather than in the readers. Note a mapping is a fixed snapshot of a
+  byte range and can never grow, so the in-flight source cannot be an `MMapFile` - it is either
+  in-memory chunks or a pre-sized mapping whose written extent is tracked separately (and whose
+  unwritten tail must never be reported as data - see CLAUDE.md).
+- **Still path-shaped.** Recent files, save, reload and "open containing folder" all consult
+  `IByteOrigin.Path` and skip when it is null; the schema catalog takes a null document path and
+  offers the user folder's schemas without a sidecar or a remembered binding. What is left is
+  driving the toolbar/menu enabled state off `Path is not null` in one place rather than per site.
+- **One accepted edge case.** Disposing a temp-file-backed origin while a search is still scanning
+  it deletes the file under that scan. `SearchSession.Scan` already catches every exception into
+  `OpenFailure` ("an unreadable/vanished target is an outcome rather than a fault"), so it
+  degrades to a failed search rather than a crash. `FileOptions.DeleteOnClose` on the spill would
+  remove even that.
 
 ## Memory and performance
 

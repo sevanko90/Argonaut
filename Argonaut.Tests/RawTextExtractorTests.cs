@@ -1,4 +1,5 @@
 using System.Text;
+using Argonaut.Infrastructure;
 using Argonaut.Features.Raw;
 
 namespace Argonaut.Tests;
@@ -13,7 +14,7 @@ public class RawTextExtractorTests
 {
     private const char ReplacementChar = (char)0xFFFD;
 
-    private static ArrayByteSource Source(string text) => new(Encoding.UTF8.GetBytes(text));
+    private static MemoryByteSource Source(string text) => new(Encoding.UTF8.GetBytes(text));
 
     [Fact]
     public void ExtractsTheRequestedRange()
@@ -28,7 +29,7 @@ public class RawTextExtractorTests
     {
         // A row drops its trailing newline and substitutes Control Pictures for display; copied
         // text must do neither, or pasting it into another program is silently wrong.
-        var source = new ArrayByteSource([(byte)'a', (byte)'\n', 0x07, (byte)'b']);
+        var source = new MemoryByteSource([(byte)'a', (byte)'\n', 0x07, (byte)'b']);
 
         Assert.True(RawTextExtractor.TryExtract(source, 0, 4, out string text));
 
@@ -42,7 +43,7 @@ public class RawTextExtractorTests
     [Fact]
     public void InvalidBytesBecomeReplacementCharacters()
     {
-        var source = new ArrayByteSource([(byte)'a', 0xC3, (byte)'b']);
+        var source = new MemoryByteSource([(byte)'a', 0xC3, (byte)'b']);
 
         Assert.True(RawTextExtractor.TryExtract(source, 0, 3, out string text));
 

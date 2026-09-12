@@ -1,4 +1,5 @@
 using System.Text;
+using Argonaut.Infrastructure;
 using Argonaut.Features.Raw;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Engines;
@@ -31,7 +32,7 @@ public class RawEditKeystrokeBenchmarks
     /// through OperationsPerInvoke is not swamped by timer resolution.</summary>
     private const int KeystrokeBurst = 64;
 
-    private ArrayByteSource source = null!;
+    private MemoryByteSource source = null!;
     private RawSegmentIndex index = null!;
     private RawPieceTable document = null!;
     private RawEditedRowIndex rows = null!;
@@ -44,7 +45,7 @@ public class RawEditKeystrokeBenchmarks
         for (int i = 0; i < LineCount; i++)
             text.Append($"line {i}: the quick brown fox jumps over the lazy dog\n");
 
-        this.source = new ArrayByteSource(Encoding.UTF8.GetBytes(text.ToString()));
+        this.source = new MemoryByteSource(Encoding.UTF8.GetBytes(text.ToString()));
         this.index = RawSegmentIndex.StartIndexing(this.source, WrapWidth);
         this.index.IndexingTask.GetAwaiter().GetResult();
     }

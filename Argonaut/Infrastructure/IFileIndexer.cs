@@ -9,7 +9,7 @@ namespace Argonaut.Infrastructure;
 /// (tokens). Lets generic consumers - the completion monitor, IndexedSourceSession - work
 /// with either indexer without knowing which one they have.
 ///
-/// FileSearchSession shares the same publishing machinery (AppendLogIndexBase) but is
+/// SearchSession shares the same publishing machinery (AppendLogIndexBase) but is
 /// intentionally NOT an IFileIndexer: its IsComplete means "the scan stopped", including
 /// cancellation and the match cap, so treating it as a finished index would misreport.
 /// </summary>

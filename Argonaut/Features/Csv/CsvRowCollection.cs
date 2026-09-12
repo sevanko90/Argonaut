@@ -35,7 +35,7 @@ public sealed class CsvRowCollection : MemoryMappedCollectionBase, IColumnFitSou
     private static readonly TimeSpan GrowthPollInterval = TimeSpan.FromMilliseconds(120);
 
     private readonly FileOffsetIndex index;
-    private readonly MMapFile mmap;
+    private readonly IByteSource bytes;
     private readonly byte delimiter;
     private readonly Dictionary<int, LinkedListNode<(int Index, CsvVisibleRow Row)>> cache = new();
     private readonly LinkedList<(int Index, CsvVisibleRow Row)> cacheOrder = new();
@@ -44,10 +44,10 @@ public sealed class CsvRowCollection : MemoryMappedCollectionBase, IColumnFitSou
     private DispatcherTimer? growthTimer;
     private int notifiedCount;
 
-    public CsvRowCollection(FileOffsetIndex index, MMapFile mmap, byte delimiter, int dataStartIndex)
+    public CsvRowCollection(FileOffsetIndex index, IByteSource bytes, byte delimiter, int dataStartIndex)
     {
         this.index = index;
-        this.mmap = mmap;
+        this.bytes = bytes;
         this.delimiter = delimiter;
         this.dataStartIndex = dataStartIndex;
         notifiedCount = GetCount();
@@ -74,7 +74,7 @@ public sealed class CsvRowCollection : MemoryMappedCollectionBase, IColumnFitSou
             return new CsvVisibleRow(i + 1, Array.Empty<CsvCell>());
 
         var lineSpan = index.GetLineSpan(i + dataStartIndex);
-        var fields = CsvFieldReader.ReadFields(mmap, lineSpan, delimiter);
+        var fields = CsvFieldReader.ReadFields(bytes, lineSpan, delimiter);
         var cells = new CsvCell[fields.Length];
         for (int c = 0; c < fields.Length; c++)
             cells[c] = new CsvCell(fields[c]);

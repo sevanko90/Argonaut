@@ -37,7 +37,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
 
     internal RawSegmentIndex? Index => this.session?.Index;
 
-    internal MMapFile? Mmap => this.session?.File;
+    internal IByteSource? Bytes => this.session?.File;
 
     /// <summary>Fires when this document begins tearing down, for
     /// <see cref="ISearchNavigator.DocumentTearingDown"/>. Deliberately the mapping-lifetime

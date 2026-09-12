@@ -27,7 +27,7 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
 
     protected override IDisposable? MappedRows => rows;
 
-    internal MMapFile? Mmap => session?.File;
+    internal IByteSource? Bytes => session?.File;
 
     internal JsonStructureIndex? Index => session?.Index;
 
@@ -174,8 +174,8 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
     public void SelectToken(int tokenIndex)
     {
         SelectedTokenIndex = tokenIndex;
-        SelectedPath = JsonPathBuilder.Build(Index!, Mmap!, tokenIndex);
-        SelectedPathSegments = JsonPathBuilder.BuildSegments(Index!, Mmap!, tokenIndex);
+        SelectedPath = JsonPathBuilder.Build(Index!, Bytes!, tokenIndex);
+        SelectedPathSegments = JsonPathBuilder.BuildSegments(Index!, Bytes!, tokenIndex);
         rows?.EnsureVisible(tokenIndex);
     }
 
@@ -350,9 +350,9 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
         return LoadCore(new MMapFile(path, offset, length), progressReporter);
     }
 
-    private async Task LoadCore(MMapFile mmap, IProgressReporter? progressReporter)
+    private async Task LoadCore(IByteSource bytes, IProgressReporter? progressReporter)
     {
-        var session = IndexedFileSession<JsonStructureIndex>.Start(mmap, JsonStructureIndex.StartIndexing, progressReporter);
+        var session = IndexedFileSession<JsonStructureIndex>.Start(bytes, JsonStructureIndex.StartIndexing, progressReporter);
         this.session = session;
 
         // Await a small initial batch so the first paint isn't empty; the row collection

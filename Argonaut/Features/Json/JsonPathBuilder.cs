@@ -25,9 +25,9 @@ public static class JsonPathBuilder
 {
     private static readonly Regex BareIdentifier = new("^[A-Za-z_][A-Za-z0-9_]*$", RegexOptions.Compiled);
 
-    public static string Build(JsonStructureIndex index, MMapFile mmap, int tokenIndex)
+    public static string Build(JsonStructureIndex index, IByteSource bytes, int tokenIndex)
     {
-        var segments = BuildSegments(index, mmap, tokenIndex);
+        var segments = BuildSegments(index, bytes, tokenIndex);
         var sb = new StringBuilder();
         foreach (var segment in segments)
             sb.Append(segment.Label);
@@ -35,7 +35,7 @@ public static class JsonPathBuilder
         return sb.ToString();
     }
 
-    public static IReadOnlyList<JsonPathSegment> BuildSegments(JsonStructureIndex index, MMapFile mmap, int tokenIndex)
+    public static IReadOnlyList<JsonPathSegment> BuildSegments(JsonStructureIndex index, IByteSource bytes, int tokenIndex)
     {
         var raw = new List<(string Text, int TokenIndex)>();
         int current = tokenIndex;
@@ -51,7 +51,7 @@ public static class JsonPathBuilder
             }
 
             string text = token.NameLength >= 0
-                ? FormatMemberSegment(ReadText(mmap, token.NameOffset, token.NameLength))
+                ? FormatMemberSegment(ReadText(bytes, token.NameOffset, token.NameLength))
                 : $"[{FindArrayIndex(index, parentIndex, current)}]";
 
             raw.Add((text, current));
@@ -87,7 +87,7 @@ public static class JsonPathBuilder
     /// structurally identical by construction, so re-deriving only that suffix - still just
     /// O(depth) - gives the correct full path without re-walking or re-indexing anything.
     /// </summary>
-    public static IReadOnlyList<JsonPathSegment> BuildRelativeSegments(JsonStructureIndex index, MMapFile mmap, int tokenIndex, int stopAtToken)
+    public static IReadOnlyList<JsonPathSegment> BuildRelativeSegments(JsonStructureIndex index, IByteSource bytes, int tokenIndex, int stopAtToken)
     {
         var raw = new List<(string Text, int TokenIndex)>();
         int current = tokenIndex;
@@ -98,7 +98,7 @@ public static class JsonPathBuilder
             int parentIndex = token.ParentIndex;
 
             string text = token.NameLength >= 0
-                ? FormatMemberSegment(ReadText(mmap, token.NameOffset, token.NameLength))
+                ? FormatMemberSegment(ReadText(bytes, token.NameOffset, token.NameLength))
                 : $"[{FindArrayIndex(index, parentIndex, current)}]";
 
             raw.Add((text, current));
@@ -145,20 +145,20 @@ public static class JsonPathBuilder
         return $"['{escaped}']";
     }
 
-    private static string ReadText(MMapFile mmap, long offset, int length)
+    private static string ReadText(IByteSource bytes, long offset, int length)
     {
         if (length <= 0)
             return string.Empty;
 
-        var raw = mmap.GetSpan(offset, length);
+        var raw = bytes.RequireContiguous(offset, length);
         if (JsonUnescape.IsPlain(raw))
             return Encoding.UTF8.GetString(raw);
 
         // Allocate only the final string. Even enormous escaped names use fixed scratch
         // space: count first, then decode directly into the string's character storage.
         int charCount = JsonUnescape.DecodeUtf16(raw, default);
-        return string.Create(charCount, (mmap, offset, length), static (destination, source) =>
-            JsonUnescape.DecodeUtf16(source.mmap.GetSpan(source.offset, source.length), destination));
+        return string.Create(charCount, (bytes, offset, length), static (destination, source) =>
+            JsonUnescape.DecodeUtf16(source.bytes.RequireContiguous(source.offset, source.length), destination));
     }
 
     private static bool IsContainer(JsonTokenKind kind) => kind is JsonTokenKind.StartObject or JsonTokenKind.StartArray;

@@ -308,7 +308,7 @@ public class IndexedFileSessionTests
                 {
                     try
                     {
-                        _ = file.GetSpan(0, 1);
+                        _ = file.RequireContiguous(0, 1);
                     }
                     catch (ObjectDisposedException)
                     {

@@ -57,7 +57,7 @@ public sealed class RawRowCollection : MemoryMappedCollectionBase
     private static readonly TimeSpan GrowthPollInterval = TimeSpan.FromMilliseconds(120);
 
     private readonly RawSegmentIndex index;
-    private readonly MMapFile mmap;
+    private readonly IByteSource bytes;
     private readonly Dictionary<int, LinkedListNode<(int Index, RawVisibleRow Row)>> cache = new();
     private readonly LinkedList<(int Index, RawVisibleRow Row)> cacheOrder = new();
 
@@ -71,10 +71,10 @@ public sealed class RawRowCollection : MemoryMappedCollectionBase
     /// </summary>
     internal int MaterializedRowCount;
 
-    public RawRowCollection(RawSegmentIndex index, MMapFile mmap)
+    public RawRowCollection(RawSegmentIndex index, IByteSource bytes)
     {
         this.index = index;
-        this.mmap = mmap;
+        this.bytes = bytes;
         notifiedCount = index.RowCount;
 
         if (!index.IsComplete)
@@ -102,7 +102,7 @@ public sealed class RawRowCollection : MemoryMappedCollectionBase
         var info = index.GetRowInfo(i);
         var row = new RawVisibleRow(
             info.LineNumber,
-            RawRowReader.ReadRow(mmap, info.Start, info.End, info.IsSoftWrapped),
+            RawRowReader.ReadRow(bytes, info.Start, info.End, info.IsSoftWrapped),
             info.IsSoftWrapped,
             info.Start,
             info.End);

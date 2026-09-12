@@ -52,8 +52,8 @@ public class JsonDiffSessionTests
             var rightFile = session.Right.File;
             session.Dispose();
 
-            Assert.Throws<ObjectDisposedException>(() => leftFile.GetSpan(0, 1));
-            Assert.Throws<ObjectDisposedException>(() => rightFile.GetSpan(0, 1));
+            Assert.Throws<ObjectDisposedException>(() => leftFile.RequireContiguous(0, 1));
+            Assert.Throws<ObjectDisposedException>(() => rightFile.RequireContiguous(0, 1));
         }
         finally
         {
@@ -105,8 +105,8 @@ public class JsonDiffSessionTests
             Assert.True(session.Right.IndexingTask.IsCompleted);
             Assert.False(session.Left.Index.HasContentHashes);
             Assert.False(session.Right.Index.HasContentHashes);
-            Assert.Throws<ObjectDisposedException>(() => session.Left.File.GetSpan(0, 1));
-            Assert.Throws<ObjectDisposedException>(() => session.Right.File.GetSpan(0, 1));
+            Assert.Throws<ObjectDisposedException>(() => session.Left.File.RequireContiguous(0, 1));
+            Assert.Throws<ObjectDisposedException>(() => session.Right.File.RequireContiguous(0, 1));
         }
         finally
         {
@@ -180,7 +180,7 @@ public class JsonDiffSessionTests
 
             var leftFile = session.Left.File;
             session.Dispose();
-            Assert.Throws<ObjectDisposedException>(() => leftFile.GetSpan(0, 1));
+            Assert.Throws<ObjectDisposedException>(() => leftFile.RequireContiguous(0, 1));
         }
         finally
         {

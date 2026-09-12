@@ -1,7 +1,7 @@
 namespace Argonaut.Features.Json;
 
 /// <summary>
-/// Options for <see cref="JsonStructureIndex.StartIndexing(Argonaut.Infrastructure.MMapFile, JsonIndexOptions, Argonaut.Infrastructure.IProgressReporter?, System.Threading.CancellationToken)"/>.
+/// Options for <see cref="JsonStructureIndex.StartIndexing(Argonaut.Infrastructure.IByteSource, JsonIndexOptions, Argonaut.Infrastructure.IProgressReporter?, System.Threading.CancellationToken)"/>.
 /// </summary>
 public readonly struct JsonIndexOptions
 {

@@ -33,17 +33,17 @@ public sealed class MemoryMappedFileLineCollection : MemoryMappedCollectionBase
     private static readonly TimeSpan GrowthPollInterval = TimeSpan.FromMilliseconds(120);
 
     private readonly FileOffsetIndex index;
-    private readonly MMapFile mmap;
+    private readonly IByteSource bytes;
     private readonly Dictionary<int, LinkedListNode<(int Index, MemoryMappedFileVisibleLine Line)>> cache = new();
     private readonly LinkedList<(int Index, MemoryMappedFileVisibleLine Line)> cacheOrder = new();
 
     private DispatcherTimer? growthTimer;
     private int notifiedCount;
 
-    public MemoryMappedFileLineCollection(FileOffsetIndex index, MMapFile mmap)
+    public MemoryMappedFileLineCollection(FileOffsetIndex index, IByteSource bytes)
     {
         this.index = index;
-        this.mmap = mmap;
+        this.bytes = bytes;
         notifiedCount = index.LineCount;
 
         if (!index.IsComplete)
@@ -68,7 +68,7 @@ public sealed class MemoryMappedFileLineCollection : MemoryMappedCollectionBase
             return new MemoryMappedFileVisibleLine(i + 1, string.Empty);
 
         var lineSpan = index.GetLineSpan(i);
-        var line = new MemoryMappedFileVisibleLine(i + 1, NdJsonLineReader.ReadDisplayLine(mmap, lineSpan));
+        var line = new MemoryMappedFileVisibleLine(i + 1, NdJsonLineReader.ReadDisplayLine(bytes, lineSpan));
 
         var newNode = new LinkedListNode<(int, MemoryMappedFileVisibleLine)>((i, line));
         cacheOrder.AddFirst(newNode);

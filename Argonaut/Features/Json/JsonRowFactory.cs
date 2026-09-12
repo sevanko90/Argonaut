@@ -7,7 +7,7 @@ using Argonaut.Infrastructure;
 namespace Argonaut.Features.Json;
 
 /// <summary>
-/// Builds display <see cref="JsonRow"/>s from a (index, mmap) pair, extracted verbatim from
+/// Builds display <see cref="JsonRow"/>s from a (index, bytes) pair, extracted verbatim from
 /// JsonVisibleRowCollection so the diff view can host two of these (one per side) while the
 /// JSON view keeps exactly one. Owns everything about turning a token into displayed text -
 /// scalar decoding/truncation, container summaries and child counts, hints, schema labels -
@@ -33,13 +33,13 @@ internal sealed class JsonRowFactory
     private readonly LruCache<int, int> childCountCache = new(ChildCountCacheCapacity);
 
     private readonly JsonStructureIndex index;
-    private readonly MMapFile mmap;
+    private readonly IByteSource bytes;
     private readonly IReadOnlyList<IValueHintProvider>? hintProviders;
 
-    public JsonRowFactory(JsonStructureIndex index, MMapFile mmap, IReadOnlyList<IValueHintProvider>? hintProviders)
+    public JsonRowFactory(JsonStructureIndex index, IByteSource bytes, IReadOnlyList<IValueHintProvider>? hintProviders)
     {
         this.index = index;
-        this.mmap = mmap;
+        this.bytes = bytes;
         this.hintProviders = hintProviders;
     }
 
@@ -79,7 +79,7 @@ internal sealed class JsonRowFactory
             schemaTitle = schema.GetTitle(schemaNodeId);
             schemaDescription = schema.GetDescription(schemaNodeId);
 
-            // Enum matching reuses the value string already decoded above - no extra mmap read,
+            // Enum matching reuses the value string already decoded above - no extra bytes read,
             // no extra allocation - and a matched member label supersedes the node's own title,
             // since "Sold by third party" says more here than "Availability".
             if (!isContainer && schema.TryGetEnumLabel(schemaNodeId, value, token.Kind, out var enumTitle, out var enumDescription))
@@ -124,7 +124,7 @@ internal sealed class JsonRowFactory
             if (!provider.IsActive)
                 continue;
 
-            if (provider.TryClassify(token.Kind, mmap.GetSpan(token.Offset, token.Length), out var candidate))
+            if (provider.TryClassify(token.Kind, bytes.RequireContiguous(token.Offset, token.Length), out var candidate))
             {
                 string? hint = provider.FormatHint(in candidate, tokenIndex);
                 if (hint is not null)
@@ -189,7 +189,7 @@ internal sealed class JsonRowFactory
     }
 
     private string ReadText(long offset, int length, out bool truncated)
-        => DisplayText.Read(mmap, offset, length, out truncated, MaxDisplayTextLength);
+        => DisplayText.Read(bytes, offset, length, out truncated, MaxDisplayTextLength);
 
     private static string FormatByteLength(int bytes) => bytes switch
     {

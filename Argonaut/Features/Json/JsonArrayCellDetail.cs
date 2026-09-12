@@ -58,7 +58,7 @@ public sealed class JsonArrayCellDetail : IDisposable
     /// two levels deep - enough to see the shape without walking a large subtree on the click -
     /// and a scalar gets its text.
     /// </summary>
-    public static JsonArrayCellDetail ForToken(JsonStructureIndex index, MMapFile file, int tokenIndex, string title)
+    public static JsonArrayCellDetail ForToken(JsonStructureIndex index, IByteSource file, int tokenIndex, string title)
     {
         var token = index.GetToken(tokenIndex);
 

@@ -47,14 +47,14 @@ public static class JsonPathResolver
     // a Result so callers never need to catch anything but cancellation.
     private sealed class MalformedIndexException(string message) : Exception(message);
 
-    public static async Task<JsonPathResolveResult> ResolveAsync(JsonStructureIndex index, MMapFile mmap, string path, CancellationToken cancellationToken = default)
+    public static async Task<JsonPathResolveResult> ResolveAsync(JsonStructureIndex index, IByteSource bytes, string path, CancellationToken cancellationToken = default)
     {
         if (!TryParse(path, out var segments, out string? parseError))
             return new JsonPathResolveResult(null, parseError);
 
         try
         {
-            return await ResolveSegmentsAsync(index, mmap, segments, cancellationToken);
+            return await ResolveSegmentsAsync(index, bytes, segments, cancellationToken);
         }
         catch (MalformedIndexException ex)
         {
@@ -62,7 +62,7 @@ public static class JsonPathResolver
         }
     }
 
-    private static async Task<JsonPathResolveResult> ResolveSegmentsAsync(JsonStructureIndex index, MMapFile mmap, List<Segment> segments, CancellationToken cancellationToken)
+    private static async Task<JsonPathResolveResult> ResolveSegmentsAsync(JsonStructureIndex index, IByteSource bytes, List<Segment> segments, CancellationToken cancellationToken)
     {
         await index.WaitForTokenIndexedAsync(0);
         if (index.TokenCount == 0)
@@ -100,7 +100,7 @@ public static class JsonPathResolver
 
                 bool isMatch = segment.IsArrayIndex
                     ? position == segment.ArrayIndex
-                    : child.NameLength >= 0 && JsonUnescape.EqualsDecodedUtf8(mmap.GetSpan(child.NameOffset, child.NameLength), memberUtf8);
+                    : child.NameLength >= 0 && JsonUnescape.EqualsDecodedUtf8(bytes.RequireContiguous(child.NameOffset, child.NameLength), memberUtf8);
 
                 if (isMatch)
                 {

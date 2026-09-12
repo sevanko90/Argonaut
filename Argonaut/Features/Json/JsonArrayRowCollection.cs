@@ -51,7 +51,7 @@ public sealed class JsonArrayRowCollection : MemoryMappedCollectionBase, IColumn
 
     private readonly JsonArrayElementIndex elements;
     private readonly JsonStructureIndex index;
-    private readonly MMapFile mmap;
+    private readonly IByteSource bytes;
     private readonly JsonRowFactory rowFactory;
     private readonly LruCache<int, CsvVisibleRow> cache = new(CacheCapacity);
 
@@ -67,13 +67,13 @@ public sealed class JsonArrayRowCollection : MemoryMappedCollectionBase, IColumn
     private IndexGrowthMonitor? growthMonitor;
     private int notifiedCount;
 
-    public JsonArrayRowCollection(JsonArrayElementIndex elements, JsonStructureIndex index, MMapFile mmap,
+    public JsonArrayRowCollection(JsonArrayElementIndex elements, JsonStructureIndex index, IByteSource bytes,
         CsvStructure structure, ExpandedRoutes routes, JsonArrayColumnMode mode)
     {
         this.elements = elements;
         this.index = index;
-        this.mmap = mmap;
-        this.rowFactory = new JsonRowFactory(index, mmap, hintProviders: null);
+        this.bytes = bytes;
+        this.rowFactory = new JsonRowFactory(index, bytes, hintProviders: null);
         this.structure = structure;
         this.routes = routes;
         this.mode = mode;
@@ -204,7 +204,7 @@ public sealed class JsonArrayRowCollection : MemoryMappedCollectionBase, IColumn
             bool isContainer = IsContainer(info.Kind);
 
             bool matched = info.NameLength >= 0
-                ? level.TryMatchName(mmap.GetSpan(info.NameOffset, info.NameLength), out int column, out var inner)
+                ? level.TryMatchName(bytes.RequireContiguous(info.NameOffset, info.NameLength), out int column, out var inner)
                 : level.TryMatchIndex(ordinal, out column, out inner);
 
             if (matched)
@@ -258,7 +258,7 @@ public sealed class JsonArrayRowCollection : MemoryMappedCollectionBase, IColumn
             bool isContainer = IsContainer(info.Kind);
 
             bool matched = info.NameLength >= 0
-                ? level.TryMatchName(mmap.GetSpan(info.NameOffset, info.NameLength), out int column, out var inner)
+                ? level.TryMatchName(bytes.RequireContiguous(info.NameOffset, info.NameLength), out int column, out var inner)
                 : level.TryMatchIndex(ordinal, out column, out inner);
 
             if (matched)

@@ -104,7 +104,7 @@ public sealed class RawViewModelTests : IDisposable
             await vm.LoadAsync(WriteNewlinelessFile());
             await vm.IndexingTask;
 
-            var mmapBefore = vm.Mmap;
+            var mmapBefore = vm.Bytes;
             var rowsBefore = vm.Rows;
             var indexBefore = vm.Index;
             int generationBefore = vm.IndexGeneration;
@@ -112,7 +112,7 @@ public sealed class RawViewModelTests : IDisposable
             vm.SetWrapWidth(80);
             await vm.IndexingTask;
 
-            Assert.Same(mmapBefore, vm.Mmap);          // the mapping must survive (live search safety)
+            Assert.Same(mmapBefore, vm.Bytes);          // the mapping must survive (live search safety)
             Assert.NotSame(rowsBefore, vm.Rows);       // fresh ItemsSource instance
             Assert.NotSame(indexBefore, vm.Index);
             Assert.Equal(generationBefore + 1, vm.IndexGeneration);

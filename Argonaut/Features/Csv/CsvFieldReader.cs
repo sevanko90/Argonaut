@@ -33,13 +33,13 @@ public static class CsvFieldReader
     /// Stop after this many fields, treating the rest of the row as one final field. Omit for
     /// the true, uncapped split - what search needs, since a match can land in any column.
     /// </param>
-    public static CsvFieldSpan[] SplitToSpans(MMapFile file, FileLineSpan lineSpan, byte delimiter, int maxFields = int.MaxValue)
+    public static CsvFieldSpan[] SplitToSpans(IByteSource file, FileLineSpan lineSpan, byte delimiter, int maxFields = int.MaxValue)
     {
         var trimmed = NdJsonLineReader.TrimTrailingNewline(file, lineSpan);
         if (trimmed.Length == 0)
             return [new CsvFieldSpan(trimmed.Offset, 0)];
 
-        var span = file.GetSpan(trimmed.Offset, trimmed.Length);
+        var span = file.RequireContiguous(trimmed.Offset, trimmed.Length);
 
         // Two passes over the (already mapped, no I/O) row bytes instead of a growing
         // List<CsvFieldSpan> + ToArray(): counting first means the result array is
@@ -86,7 +86,7 @@ public static class CsvFieldReader
     /// model. A field wrapped in a matching pair of '"' has the quotes stripped and any doubled
     /// '""' unescaped to a literal '"'.
     /// </summary>
-    public static string[] ReadFields(MMapFile file, FileLineSpan lineSpan, byte delimiter)
+    public static string[] ReadFields(IByteSource file, FileLineSpan lineSpan, byte delimiter)
     {
         var spans = SplitToSpans(file, lineSpan, delimiter, MaxDisplayFields);
         var fields = new string[spans.Length];
@@ -96,7 +96,7 @@ public static class CsvFieldReader
         return fields;
     }
 
-    private static string DecodeField(MMapFile file, CsvFieldSpan span)
+    private static string DecodeField(IByteSource file, CsvFieldSpan span)
     {
         if (span.Length == 0)
             return string.Empty;
@@ -107,7 +107,7 @@ public static class CsvFieldReader
         if (span.Length > DisplayText.MaxLength)
             return DisplayText.Read(file, span.Offset, span.Length, out _);
 
-        var bytes = file.GetSpan(span.Offset, span.Length);
+        var bytes = file.RequireContiguous(span.Offset, span.Length);
         if (bytes.Length >= 2 && bytes[0] == (byte)'"' && bytes[^1] == (byte)'"')
             return Encoding.UTF8.GetString(bytes[1..^1]).Replace("\"\"", "\"");
 

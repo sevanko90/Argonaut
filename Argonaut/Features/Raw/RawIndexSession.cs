@@ -6,8 +6,8 @@ using Argonaut.Infrastructure;
 namespace Argonaut.Features.Raw;
 
 /// <summary>
-/// Raw-viewer variant of <see cref="IndexedFileSession{TIndex}"/>: owns the <see cref="MMapFile"/>
-/// mapping, the background <see cref="RawSegmentIndex"/> scanning it, and the CancellationTokenSource
+/// Raw-viewer variant of <see cref="IndexedFileSession{TIndex}"/>: owns the <see cref="IByteSource"/>
+/// its bytes come from, the background <see cref="RawSegmentIndex"/> scanning it, and the CancellationTokenSource
 /// that stops that scan - with one deliberate difference. The mapping lives for the whole
 /// document lifetime while the index can be replaced (<see cref="RestartIndex"/>, the wrap-width
 /// change). That difference is the whole reason this class exists: keeping the mapping fixed
@@ -32,7 +32,7 @@ public sealed class RawIndexSession : IDocumentSession
     private CancellationTokenSource indexCts;
     private bool disposed;
 
-    public MMapFile File { get; }
+    public IByteSource File { get; }
 
     public RawSegmentIndex Index { get; private set; }
 
@@ -55,7 +55,7 @@ public sealed class RawIndexSession : IDocumentSession
     /// </summary>
     public CancellationToken TearingDown => this.mappingCts.Token;
 
-    private RawIndexSession(MMapFile file, RawSegmentIndex index, CancellationTokenSource mappingCts, CancellationTokenSource indexCts)
+    private RawIndexSession(IByteSource file, RawSegmentIndex index, CancellationTokenSource mappingCts, CancellationTokenSource indexCts)
     {
         this.File = file;
         this.Index = index;
@@ -68,7 +68,7 @@ public sealed class RawIndexSession : IDocumentSession
     /// Takes ownership of <paramref name="file"/> immediately: if starting the indexer throws,
     /// the file is disposed here and the exception propagates.
     /// </summary>
-    public static RawIndexSession Start(MMapFile file, int wrapWidth, IProgressReporter? progressReporter = null)
+    public static RawIndexSession Start(IByteSource file, int wrapWidth, IProgressReporter? progressReporter = null)
     {
         var mappingCts = new CancellationTokenSource();
         var indexCts = CancellationTokenSource.CreateLinkedTokenSource(mappingCts.Token);
@@ -81,7 +81,7 @@ public sealed class RawIndexSession : IDocumentSession
         {
             indexCts.Dispose();
             mappingCts.Dispose();
-            file.Dispose();
+            file.Release();
             throw;
         }
     }
@@ -132,7 +132,7 @@ public sealed class RawIndexSession : IDocumentSession
         this.mappingCts.Cancel();
         try { this.Index.IndexingTask.Wait(); } catch { /* cancellation/failure observed here only to unblock disposal */ }
 
-        this.File.Dispose();
+        this.File.Release();
         this.indexCts.Dispose();
         this.mappingCts.Dispose();
     }

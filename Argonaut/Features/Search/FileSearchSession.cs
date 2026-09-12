@@ -159,7 +159,7 @@ public sealed class FileSearchSession : AppendLogIndexBase<SearchMatch>, IMatchS
                 // for tens of microseconds against ~1ms of scanning per chunk.
                 using (var view = new MMapFile(target.Path, target.Offset + chunkStart, size))
                 {
-                    var chunk = view.GetSpan(0, size);
+                    var chunk = view.RequireContiguous(0, size);
 
                     int from = (int)(searchFrom - chunkStart);
                     while (matcher.TryFindNext(chunk, from, out int matchIndex, out int matchLength))

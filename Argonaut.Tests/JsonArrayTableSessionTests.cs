@@ -1,5 +1,6 @@
 using System.Text;
 using Argonaut.Features.Json;
+using Argonaut.Infrastructure;
 
 namespace Argonaut.Tests;
 
@@ -67,7 +68,7 @@ public class JsonArrayTableSessionTests
             var file = session.Inner.File;
             session.Dispose();
 
-            Assert.Throws<ObjectDisposedException>(() => file.GetSpan(0, 1));
+            Assert.Throws<ObjectDisposedException>(() => file.RequireContiguous(0, 1));
         }
         finally
         {

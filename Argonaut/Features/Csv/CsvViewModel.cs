@@ -29,7 +29,7 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
 
     internal FileOffsetIndex? Index => this.session?.Index;
 
-    internal MMapFile? Mmap => this.session?.File;
+    internal IByteSource? Bytes => this.session?.File;
 
     /// <summary>Fires when this document begins tearing down, for
     /// <see cref="ISearchNavigator.DocumentTearingDown"/> - a find reveal links it so it stops

@@ -1,7 +1,6 @@
 using System;
 using System.IO;
 using System.IO.MemoryMappedFiles;
-using System.Text;
 
 namespace Argonaut.Infrastructure;
 
@@ -10,8 +9,8 @@ namespace Argonaut.Infrastructure;
 ///
 /// <see cref="Length"/> always comes from <see cref="FileInfo"/>, never from the accessor's
 /// capacity: the OS rounds the mapping up to its allocation granularity, and the trailing
-/// zero-padding must never be exposed as data (see CLAUDE.md). <see cref="GetSpan"/> bounds
-/// every request against the real file length for the same reason.
+/// zero-padding must never be exposed as data (see CLAUDE.md). <see cref="GetContiguousSpan"/>
+/// bounds every request against the real file length for the same reason.
 /// </summary>
 public sealed unsafe class MMapFile : IByteSource, IDisposable
 {
@@ -26,7 +25,7 @@ public sealed unsafe class MMapFile : IByteSource, IDisposable
     {
         Length = new FileInfo(path).Length;
         if (Length == 0)
-            return; // an empty file can't be mapped; GetSpan can only ever yield an empty span
+            return; // an empty file can't be mapped; GetContiguousSpan can only ever yield an empty span
 
         this.mmf = MemoryMappedFile.CreateFromFile(path, FileMode.Open, null, 0, MemoryMappedFileAccess.Read);
         this.accessor = this.mmf.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
@@ -47,7 +46,7 @@ public sealed unsafe class MMapFile : IByteSource, IDisposable
     {
         Length = length;
         if (Length == 0)
-            return; // an empty range can't be mapped; GetSpan can only ever yield an empty span
+            return; // an empty range can't be mapped; GetContiguousSpan can only ever yield an empty span
 
         this.mmf = MemoryMappedFile.CreateFromFile(path, FileMode.Open, null, 0, MemoryMappedFileAccess.Read);
         this.accessor = this.mmf.CreateViewAccessor(offset, length, MemoryMappedFileAccess.Read);
@@ -58,32 +57,17 @@ public sealed unsafe class MMapFile : IByteSource, IDisposable
     }
 
     /// <summary>
-    /// Returns a zero-copy view of the file bytes [offset, offset + length).
-    /// The span is only valid until this <see cref="MMapFile"/> is disposed.
+    /// See <see cref="IByteSource.GetContiguousSpan"/>. A mapping is one buffer, so this only
+    /// ever truncates at end of file - it never splits a request the way a piece table does,
+    /// which is why <see cref="ByteSourceReading.RequireContiguous"/> over a mapping is always
+    /// the zero-copy path.
     /// </summary>
-    public ReadOnlySpan<byte> GetSpan(long offset, int length)
+    public ReadOnlySpan<byte> GetContiguousSpan(long offset, int maxLength)
     {
         // A read after Dispose dereferences released memory - a native use-after-free that
         // surfaces as an uncatchable AccessViolationException. Fail as a catchable managed
         // exception instead, so an ordering mistake (e.g. a view enumerating an mmap-backed
         // collection after its mapping was disposed) is diagnosable rather than a hard crash.
-        ObjectDisposedException.ThrowIf(disposed, this);
-
-        ArgumentOutOfRangeException.ThrowIfNegative(offset);
-        ArgumentOutOfRangeException.ThrowIfNegative(length);
-        if (offset + length > Length)
-            throw new ArgumentOutOfRangeException(nameof(length),
-                $"Requested range [{offset}, {offset + length}) extends past the end of the file ({Length} bytes).");
-
-        return new ReadOnlySpan<byte>(this.ptr + offset, length);
-    }
-
-    /// <summary>
-    /// See <see cref="IByteSource.GetContiguousSpan"/>. A mapping is one buffer, so this only
-    /// ever truncates at end of file - it never splits a request the way a piece table does.
-    /// </summary>
-    public ReadOnlySpan<byte> GetContiguousSpan(long offset, int maxLength)
-    {
         ObjectDisposedException.ThrowIf(disposed, this);
 
         if (offset < 0 || offset >= Length || maxLength <= 0)
@@ -99,14 +83,6 @@ public sealed unsafe class MMapFile : IByteSource, IDisposable
         span.CopyTo(destination);
         return span.Length;
     }
-
-    /// <summary>
-    /// Decodes the file bytes [offset, offset + length) as UTF-8. The one place the
-    /// "decode text on demand from an (offset, length) span" idiom lives, so every reader
-    /// goes through <see cref="GetSpan"/>'s real-length bounds check (see CLAUDE.md).
-    /// </summary>
-    public string GetUtf8String(long offset, int length)
-        => Encoding.UTF8.GetString(GetSpan(offset, length));
 
     public void Dispose()
     {

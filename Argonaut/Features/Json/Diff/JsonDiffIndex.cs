@@ -121,9 +121,9 @@ public sealed class JsonDiffIndex : AppendLogIndexBase<JsonDiffIndex.PackedDiffR
     }
 
     private readonly JsonStructureIndex leftIndex;
-    private readonly MMapFile leftFile;
+    private readonly IByteSource leftFile;
     private readonly JsonStructureIndex rightIndex;
-    private readonly MMapFile rightFile;
+    private readonly IByteSource rightFile;
     private readonly IProgressReporter? progressReporter;
     private readonly CancellationToken cancellationToken;
 
@@ -142,7 +142,7 @@ public sealed class JsonDiffIndex : AppendLogIndexBase<JsonDiffIndex.PackedDiffR
 
     public Task WaitForRecordCountAsync(int targetCount) => this.WaitForCountAsync(targetCount);
 
-    private JsonDiffIndex(JsonStructureIndex leftIndex, MMapFile leftFile, JsonStructureIndex rightIndex, MMapFile rightFile,
+    private JsonDiffIndex(JsonStructureIndex leftIndex, IByteSource leftFile, JsonStructureIndex rightIndex, IByteSource rightFile,
         IProgressReporter? progressReporter, CancellationToken cancellationToken)
     {
         this.leftIndex = leftIndex;
@@ -159,7 +159,7 @@ public sealed class JsonDiffIndex : AppendLogIndexBase<JsonDiffIndex.PackedDiffR
     /// diff completes empty - side failures are the caller's to attribute and report.
     /// The caller (JsonDiffSession) guarantees both mappings outlive <see cref="IndexingTask"/>.
     /// </summary>
-    public static JsonDiffIndex Start(JsonStructureIndex leftIndex, MMapFile leftFile, JsonStructureIndex rightIndex, MMapFile rightFile,
+    public static JsonDiffIndex Start(JsonStructureIndex leftIndex, IByteSource leftFile, JsonStructureIndex rightIndex, IByteSource rightFile,
         IProgressReporter? progressReporter = null, CancellationToken cancellationToken = default)
     {
         var diff = new JsonDiffIndex(leftIndex, leftFile, rightIndex, rightFile, progressReporter, cancellationToken);
@@ -448,10 +448,10 @@ public sealed class JsonDiffIndex : AppendLogIndexBase<JsonDiffIndex.PackedDiffR
         return children;
     }
 
-    private static ulong NameHash(JsonStructureIndex index, MMapFile file, int token)
+    private static ulong NameHash(JsonStructureIndex index, IByteSource file, int token)
     {
         var info = index.GetToken(token);
-        return JsonUnescape.DecodedHash(file.GetSpan(info.NameOffset, info.NameLength));
+        return JsonUnescape.DecodedHash(file.RequireContiguous(info.NameOffset, info.NameLength));
     }
 
     private bool NamesEqual(int leftToken, int rightToken)
@@ -459,8 +459,8 @@ public sealed class JsonDiffIndex : AppendLogIndexBase<JsonDiffIndex.PackedDiffR
         var left = this.leftIndex.GetToken(leftToken);
         var right = this.rightIndex.GetToken(rightToken);
         return JsonUnescape.DecodedEquals(
-            this.leftFile.GetSpan(left.NameOffset, left.NameLength),
-            this.rightFile.GetSpan(right.NameOffset, right.NameLength));
+            this.leftFile.RequireContiguous(left.NameOffset, left.NameLength),
+            this.rightFile.RequireContiguous(right.NameOffset, right.NameLength));
     }
 
     // ── Arrays (stage 3: histogram anchors + Myers in the gaps) ────────────────────────

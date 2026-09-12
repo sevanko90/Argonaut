@@ -60,7 +60,7 @@ public sealed class FileOffsetIndex : AppendLogIndexBase<FileLineSpan>, IFileInd
     /// <param name="file">Memory mapped file to index</param>
     /// <param name="progressReporter">Progress reporter</param>
     /// <returns>The index class, initially running in the background</returns>
-    public static FileOffsetIndex StartIndexing(MMapFile file, IProgressReporter? progressReporter = null, CancellationToken cancellationToken = default)
+    public static FileOffsetIndex StartIndexing(IByteSource file, IProgressReporter? progressReporter = null, CancellationToken cancellationToken = default)
     {
         var index = new FileOffsetIndex();
         index.IndexingTask = index.StartScan(() => index.ProduceOffsets(file, progressReporter, cancellationToken));
@@ -81,13 +81,13 @@ public sealed class FileOffsetIndex : AppendLogIndexBase<FileLineSpan>, IFileInd
     /// <param name="file">Memory-mapped file to index</param>
     /// <param name="progressReporter">Allows callers to be notified of progress</param>
     /// <param name="cancellationToken">
-    /// Checked once per scan chunk so a caller tearing down the owning <see cref="MMapFile"/>
-    /// (e.g. window close mid-scan) can stop this loop before it dereferences memory the OS
-    /// has unmapped - see CLAUDE.md / MMapFile for why touching the mapping after disposal is
-    /// a native use-after-free, not a catchable .NET exception.
+    /// Checked once per scan chunk so a caller tearing down the owning source (e.g. window
+    /// close mid-scan) can stop this loop before it dereferences memory the OS has unmapped -
+    /// see CLAUDE.md / <see cref="MMapFile"/> for why touching a mapping after disposal is a
+    /// native use-after-free, not a catchable .NET exception.
     /// </param>
     /// <remarks>Invoked in the background via a task</remarks>
-    private void ProduceOffsets(MMapFile file, IProgressReporter? progressReporter, CancellationToken cancellationToken)
+    private void ProduceOffsets(IByteSource file, IProgressReporter? progressReporter, CancellationToken cancellationToken)
     {
         long length = file.Length;
         if (length == 0)
@@ -106,10 +106,16 @@ public sealed class FileOffsetIndex : AppendLogIndexBase<FileLineSpan>, IFileInd
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                // Scan the mapped bytes directly - no buffer, no copy. IndexOf over a byte
+                // Scan the source's own bytes directly - no buffer, no copy. IndexOf over a byte
                 // span is SIMD-vectorized, which is what makes this loop fast on multi-GB files.
-                int size = (int)Math.Min(ScanChunkSize, length - offset);
-                var chunk = file.GetSpan(offset, size);
+                // Whatever length comes back is what this iteration covers: a single-buffer
+                // source always serves the whole chunk, and a split one just makes the loop take
+                // an extra turn (see IByteSource.GetContiguousSpan).
+                var chunk = file.GetContiguousSpan(offset, (int)Math.Min(ScanChunkSize, length - offset));
+                if (chunk.IsEmpty)
+                    break;
+
+                int size = chunk.Length;
 
                 int pos = 0;
                 while (pos < size)

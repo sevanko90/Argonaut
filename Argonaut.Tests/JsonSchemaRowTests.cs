@@ -62,7 +62,7 @@ public class JsonSchemaRowTests
         for (int i = 0; i < index.TokenCount; i++)
         {
             var token = index.GetToken(i);
-            if (token.NameLength == wanted.Length && mmap.GetSpan(token.NameOffset, token.NameLength).SequenceEqual(wanted))
+            if (token.NameLength == wanted.Length && mmap.RequireContiguous(token.NameOffset, token.NameLength).SequenceEqual(wanted))
                 return i;
         }
 

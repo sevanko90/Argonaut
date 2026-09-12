@@ -23,8 +23,9 @@ public interface IByteSource
     /// <b>truncated at the first internal boundary</b> - so a caller wanting a whole range must
     /// either loop until it has consumed what it asked for, or use <see cref="CopyTo"/>. Returns
     /// an empty span at or past <see cref="Length"/>, which is also the loop's termination
-    /// signal; it never throws for an out-of-range read the way <see cref="MMapFile.GetSpan"/>
-    /// does, because a scan walking to EOF is the normal case here rather than a bug.
+    /// signal; it never throws for an out-of-range read the way
+    /// <see cref="ByteSourceReading.RequireContiguous"/> does, because a scan walking to EOF is
+    /// the normal case here rather than a bug.
     /// </summary>
     ReadOnlySpan<byte> GetContiguousSpan(long offset, int maxLength);
 

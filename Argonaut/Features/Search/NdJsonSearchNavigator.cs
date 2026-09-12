@@ -59,7 +59,7 @@ public sealed class NdJsonSearchNavigator : ISearchNavigator
         // sub-range origin.
         var lineSpan = viewModel.Index!.GetLineSpan(lineIndex);
         long relativeOffset = match.Offset - lineSpan.Offset;
-        if (relativeOffset < 0 || relativeOffset >= nested.Mmap!.Length)
+        if (relativeOffset < 0 || relativeOffset >= nested.Bytes!.Length)
             return; // hit landed on the line's trailing newline bytes - the line selection is enough
 
         var tokenIndex = await JsonOffsetTokenResolver.ResolveWhenCoveredAsync(nested.Index!, relativeOffset, ct);

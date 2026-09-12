@@ -39,7 +39,7 @@ public sealed class CsvSearchNavigator : ISearchNavigator
             return;
 
         var lineSpan = viewModel.Index!.GetLineSpan(lineIndex);
-        var fieldSpans = CsvFieldReader.SplitToSpans(viewModel.Mmap!, lineSpan, viewModel.Delimiter);
+        var fieldSpans = CsvFieldReader.SplitToSpans(viewModel.Bytes!, lineSpan, viewModel.Delimiter);
 
         int columnIndex = 0;
         for (int i = 0; i < fieldSpans.Length; i++)

@@ -128,21 +128,34 @@ and virtualization-by-arithmetic are exactly what rendering gives up.
 
 ## Input sources
 
-Today a document is always a path: every load site builds an `MMapFile` from one, and the
-`IByteSource` seam it implements stops at the read API — `IndexedFileSession.File` is typed as the
-concrete `MMapFile`, and search, the NDJSON sub-document view and the array table all re-map the
-*path* to get an independent view of a byte range.
+The read half of this is done: every consumer is typed to `IByteSource`, including
+`IndexedFileSession.File` and `RawIndexSession.File`, and the whole-range read that used to be
+`MMapFile.GetSpan` is now `ByteSourceReading.RequireContiguous` (with `ByteAt` for single-byte
+peeks and `Release` for the one owner's teardown). `MMapFile` survives only as the file-backed
+implementation — nothing outside `Infrastructure` names the type except the load sites that
+construct one. So substituting an array-backed or temp-file-backed source is now a question of
+*who creates it*, not of what the readers can accept.
 
-- **Paste from clipboard, and load from URL.** Both are the same piece of work: widen the seam from
-  "a mapped file" to a byte-span emitter that does not care where the bytes came from. Rename/extend
-  `IByteSource` into an `IDataProvider` that owns the source's identity as well as its bytes
-  (length, a display name, whether it has a path on disk, and how to derive a sub-range provider for
-  [offset, length) without going back to a path), then implement it three ways: the existing mapped
-  file, a `ClipboardDataProvider` over an in-memory array, and an `HttpDataProvider` that streams the
-  response. The work is mostly in the call sites, not the interface: `IndexedFileSession<TIndex>` and
-  every view model that constructs `new MMapFile(path)` move to taking a provider, and the three
-  places that re-map by path (`FileSearchSession`'s chunk views, `JsonArrayTableSession`,
-  `JsonViewModel`'s sub-document load) must ask the provider for the sub-range instead.
+What is still path-shaped is **identity and creation**: `MMapFile` is built from a path at nine
+sites, and search, the NDJSON sub-document view and the array table re-map the *path* to get an
+independent view of a byte range.
+
+- **Paste from clipboard, and load from URL.** What remains is the identity half of the seam: a
+  type that owns where the bytes came from (a display name, whether there is a path on disk, and
+  how to hand out a sub-range view of [offset, length) without going back to a path), implemented
+  three ways — the existing mapped file, an in-memory array, and a streamed HTTP response. The
+  work is in the creation sites: every view model that constructs `new MMapFile(path)` takes one
+  of these instead, and the three places that re-map by path (`FileSearchSession`'s chunk views,
+  `JsonArrayTableSession`, `JsonViewModel`'s sub-document load) ask it for the sub-range.
+
+  Ownership is the decision to get right, and it is *not* "pass one shared instance down". A diff
+  has two inputs, so nothing is per-document; and the sessions' teardown rule (cancel → join the
+  scans → release the source) is only safe because the session *owns* what it releases — a
+  borrowed instance turns that into a reference count, which is the invariant that fails as a
+  native use-after-free rather than an exception. The shape that avoids it: a long-lived,
+  shell-owned *origin* that owns the materialisation (the file on disk, the temp-file spill, the
+  pinned array) and hands out short-lived per-session sources over it, leaving today's ownership
+  contract exactly as it is.
 
   Two decisions to make when it is picked up, not now:
   - **Where large non-file payloads live.** A clipboard paste or a download above some threshold

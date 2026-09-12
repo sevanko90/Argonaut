@@ -28,7 +28,7 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel
 
     protected override IDisposable? MappedRows => this.lines;
 
-    internal MMapFile? Mmap => this.session?.File;
+    internal IByteSource? Bytes => this.session?.File;
 
     internal FileOffsetIndex? Index => this.session?.Index;
 
@@ -265,14 +265,14 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel
 
     public string GetLineText(int lineIndex)
     {
-        return NdJsonLineReader.ReadLine(this.Mmap!, this.Index!.GetLineSpan(lineIndex));
+        return NdJsonLineReader.ReadLine(this.Bytes!, this.Index!.GetLineSpan(lineIndex));
     }
 
     public void LoadSelectedLine(int lineIndex)
     {
         var lineSpan = this.Index!.GetLineSpan(lineIndex);
         // Display text only - the JSON tree below is parsed from lineSpan itself, uncapped.
-        SelectedLine = new NdJsonSelectedLine(lineIndex + 1, NdJsonLineReader.ReadDisplayLine(this.Mmap!, lineSpan));
+        SelectedLine = new NdJsonSelectedLine(lineIndex + 1, NdJsonLineReader.ReadDisplayLine(this.Bytes!, lineSpan));
 
         var requestId = selectionRequest.Begin();
         var previous = SelectedLineJsonViewModel;
@@ -290,7 +290,7 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel
 
     private async Task LoadSelectedLineJsonAsync(long requestId, FileLineSpan lineSpan)
     {
-        var trimmed = NdJsonLineReader.TrimTrailingNewline(this.Mmap!, lineSpan);
+        var trimmed = NdJsonLineReader.TrimTrailingNewline(this.Bytes!, lineSpan);
         var jsonViewModel = new JsonViewModel { DefaultExpandDepth = DefaultExpandDepth };
         try
         {

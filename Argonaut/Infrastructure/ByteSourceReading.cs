@@ -35,7 +35,7 @@ public static class ByteSourceReading
         var span = source.GetContiguousSpan(offset, 1);
         if (span.IsEmpty)
             throw new ArgumentOutOfRangeException(nameof(offset),
-                $"Offset {offset} is outside the readable range (0 to {source.Length}).");
+                $"Offset {offset} is outside the readable range (0 to {source.AvailableLength}).");
 
         return span[0];
     }
@@ -61,10 +61,10 @@ public static class ByteSourceReading
         if (contiguous.Length == length)
             return contiguous;
 
-        if (offset + length > source.Length)
+        if (offset + length > source.AvailableLength)
             throw new ArgumentOutOfRangeException(nameof(length),
                 $"Requested range [{offset}, {offset + length}) extends past the end of the data " +
-                $"({source.Length} bytes).");
+                $"({source.AvailableLength} bytes).");
 
         throw new NotSupportedException(
             $"Range [{offset}, {offset + length}) is split across this source's internal buffers " +

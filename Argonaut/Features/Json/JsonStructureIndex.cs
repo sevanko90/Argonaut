@@ -278,7 +278,7 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
     private static long StartOfTroubleAfter(IByteSource file, JsonTokenInfo lastGoodToken)
     {
         long offset = lastGoodToken.Offset + lastGoodToken.Length;
-        long limit = Math.Min(file.Length, offset + MaxTroubleSkip);
+        long limit = Math.Min(file.AvailableLength, offset + MaxTroubleSkip);
         while (offset < limit)
         {
             byte b = file.ByteAt(offset);
@@ -378,7 +378,6 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
     private void BuildCore(IByteSource file, IProgressReporter? progressReporter, CancellationToken cancellationToken)
     {
         long offset = 0;
-        long length = file.Length;
 
         var state = new JsonReaderState(new JsonReaderOptions
         {
@@ -399,22 +398,38 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
         // Progress is reported from inside the token loop in ~5% steps: parsing runs over a
         // handful of giant windows (usually exactly one), so the outer loop no longer
         // iterates often enough to hang reporting off it.
-        long reportStep = Math.Max(1, length / 20);
+        long reportStep = Math.Max(1, file.AvailableLength / 20);
         long nextReport = reportStep;
 
-        while (offset < length)
+        while (true)
         {
+            // AvailableLength is re-read every turn, never snapshotted - for a streamed source
+            // it is only the end so far (see IByteSource.AvailableLength).
+            long available = file.AvailableLength;
+            if (offset >= available)
+            {
+                if (file.LengthSettled)
+                    break;
+
+                file.WaitForLength(offset + 1, cancellationToken);
+                continue;
+            }
+
             // Parse directly over the source's own bytes - zero copies. A span is capped at
             // int.MaxValue bytes, so a sub-2GiB file (the common case) is parsed in one
             // pass with no reader-state resumption; larger files resume across window
             // boundaries the same way the old copied chunks did. A source that serves less
             // than the whole window just resumes more often - the JsonReaderState carry-over
-            // below is exactly the machinery for it, so no gathering is ever needed here.
-            var window = file.GetContiguousSpan(offset, (int)Math.Min(int.MaxValue, length - offset));
+            // below is exactly the machinery for it, so neither a split source nor a still
+            // arriving one needs anything gathered here.
+            var window = file.GetContiguousSpan(offset, (int)Math.Min(int.MaxValue, available - offset));
             if (window.IsEmpty)
-                break;
+                continue;
 
-            bool isFinalBlock = offset + window.Length >= length;
+            // Only the end of *settled* data is a final block. Telling the reader a window is
+            // final when more bytes are still to come would make it reject the truncated token
+            // at the end rather than wait for the rest of it.
+            bool isFinalBlock = file.LengthSettled && offset + window.Length >= available;
             var reader = new Utf8JsonReader(window, isFinalBlock, state);
 
             while (reader.Read())
@@ -562,7 +577,7 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
                 long consumedSoFar = offset + reader.BytesConsumed;
                 if (consumedSoFar >= nextReport)
                 {
-                    progressReporter?.Report("Indexing", consumedSoFar, length);
+                    progressReporter?.Report("Indexing", consumedSoFar, available);
                     while (nextReport <= consumedSoFar)
                         nextReport += reportStep;
                 }
@@ -572,13 +587,24 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
             state = reader.CurrentState;
 
             if (consumed == 0 && !isFinalBlock)
+            {
+                // No progress on a non-final window means the window ends mid-token. Either the
+                // rest of that token has not arrived yet - wait for it - or the data is all here
+                // and one token genuinely exceeds a full window, which is unsupported.
+                if (!file.LengthSettled && offset + window.Length >= available)
+                {
+                    file.WaitForLength(available + 1, cancellationToken);
+                    continue;
+                }
+
                 throw new NotSupportedException(
                     $"A single JSON token larger than this parse window ({window.Length} bytes) is not supported.");
+            }
 
             offset += consumed;
         }
 
-        progressReporter?.Report("Indexing", length, length);
+        progressReporter?.Report("Indexing", offset, offset);
     }
 
     /// <summary>

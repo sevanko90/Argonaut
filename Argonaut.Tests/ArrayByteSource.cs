@@ -14,12 +14,12 @@ internal sealed class ArrayByteSource : IByteSource
 
     public ArrayByteSource(byte[] bytes) => this.bytes = bytes;
 
-    public long Length => this.bytes.Length;
+    public long AvailableLength => this.bytes.Length;
 
     public ReadOnlySpan<byte> GetContiguousSpan(long offset, int maxLength)
-        => offset < 0 || offset >= Length || maxLength <= 0
+        => offset < 0 || offset >= AvailableLength || maxLength <= 0
             ? ReadOnlySpan<byte>.Empty
-            : this.bytes.AsSpan((int)offset, (int)Math.Min(maxLength, Length - offset));
+            : this.bytes.AsSpan((int)offset, (int)Math.Min(maxLength, AvailableLength - offset));
 
     public int CopyTo(long offset, Span<byte> destination)
     {

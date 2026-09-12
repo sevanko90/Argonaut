@@ -72,7 +72,7 @@ public class RawCaretControllerTests
 
         caret.MoveRight(extend: false);
 
-        Assert.Equal(source.Length, caret.Caret.Offset);
+        Assert.Equal(source.AvailableLength, caret.Caret.Offset);
     }
 
     [Fact]
@@ -178,7 +178,7 @@ public class RawCaretControllerTests
         }
 
         Assert.DoesNotContain(3L, visited); // between '\r' and '\n'
-        Assert.Equal(source.Length, visited[^1]);
+        Assert.Equal(source.AvailableLength, visited[^1]);
     }
 
     [Fact]
@@ -189,8 +189,8 @@ public class RawCaretControllerTests
         caret.SelectAll();
 
         Assert.Equal(0, caret.Selection.Start);
-        Assert.Equal(source.Length, caret.Selection.End);
-        Assert.Equal(source.Length, caret.Caret.Offset);
+        Assert.Equal(source.AvailableLength, caret.Selection.End);
+        Assert.Equal(source.AvailableLength, caret.Caret.Offset);
     }
 
     [Fact]

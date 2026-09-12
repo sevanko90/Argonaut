@@ -89,31 +89,38 @@ public sealed class FileOffsetIndex : AppendLogIndexBase<FileLineSpan>, IFileInd
     /// <remarks>Invoked in the background via a task</remarks>
     private void ProduceOffsets(IByteSource file, IProgressReporter? progressReporter, CancellationToken cancellationToken)
     {
-        long length = file.Length;
-        if (length == 0)
-        {
-            progressReporter?.Report("Indexing");
-            return;
-        }
-
         long offset = 0;
         long currentLineStart = 0;
         try
         {
             // Chunked-scan loop deliberately duplicated (see also FileSearchSession.Scan,
             // FileTypeDetector): hot path, indirection would cost more than the shared lines.
-            while (offset < length)
+            while (true)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+
+                // AvailableLength is re-read every turn, never snapshotted: for a streamed
+                // source it is only the end *so far*, and a loop that bounded itself by the
+                // value it saw at entry would stop there and then publish a complete index over
+                // a partial document (see IByteSource.AvailableLength).
+                long available = file.AvailableLength;
+                if (offset >= available)
+                {
+                    if (file.LengthSettled)
+                        break;
+
+                    file.WaitForLength(offset + 1, cancellationToken);
+                    continue;
+                }
 
                 // Scan the source's own bytes directly - no buffer, no copy. IndexOf over a byte
                 // span is SIMD-vectorized, which is what makes this loop fast on multi-GB files.
                 // Whatever length comes back is what this iteration covers: a single-buffer
                 // source always serves the whole chunk, and a split one just makes the loop take
                 // an extra turn (see IByteSource.GetContiguousSpan).
-                var chunk = file.GetContiguousSpan(offset, (int)Math.Min(ScanChunkSize, length - offset));
+                var chunk = file.GetContiguousSpan(offset, (int)Math.Min(ScanChunkSize, available - offset));
                 if (chunk.IsEmpty)
-                    break;
+                    continue;
 
                 int size = chunk.Length;
 
@@ -132,21 +139,23 @@ public sealed class FileOffsetIndex : AppendLogIndexBase<FileLineSpan>, IFileInd
                 }
 
                 offset += size;
-                progressReporter?.Report("Indexing", offset, length);
+                progressReporter?.Report("Indexing", offset, available);
             }
         }
         finally
         {
-            // Only on a genuine end-of-file is there a trailing (newline-less) line to record.
-            // On cancellation (close/teardown mid-scan) currentLineStart is wherever the scan
-            // stopped, so length - currentLineStart is the entire un-scanned remainder - which
-            // on a multi-GB file exceeds int.MaxValue and overflows the checked cast. Skip it.
-            if (!cancellationToken.IsCancellationRequested && currentLineStart < length)
+            // Only on a genuine end of data is there a trailing (newline-less) line to record -
+            // and only once the length has settled, since a line with no newline yet may simply
+            // be one whose newline has not arrived. On cancellation (close/teardown mid-scan)
+            // currentLineStart is wherever the scan stopped, so the remainder is the entire
+            // un-scanned tail - which on a multi-GB file exceeds int.MaxValue and overflows the
+            // checked cast. Skip it in both cases.
+            if (!cancellationToken.IsCancellationRequested && file.LengthSettled && currentLineStart < offset)
             {
-                this.AddLineSpan(new FileLineSpan(currentLineStart, checked((int)(length - currentLineStart))));
+                this.AddLineSpan(new FileLineSpan(currentLineStart, checked((int)(offset - currentLineStart))));
             }
 
-            progressReporter?.Report("Indexing", length, length);
+            progressReporter?.Report("Indexing", offset, offset);
         }
     }
 

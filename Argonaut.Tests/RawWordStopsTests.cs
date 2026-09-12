@@ -131,7 +131,7 @@ public class RawWordStopsTests
         var (index, source) = Indexed(new string('a', RawWordStops.MaxWordBytes + 1000));
 
         Assert.Null(RawWordStops.WordAt(index, source, 0));
-        Assert.Null(RawWordStops.WordAt(index, source, source.Length / 2));
+        Assert.Null(RawWordStops.WordAt(index, source, source.AvailableLength / 2));
     }
 
     [Fact]

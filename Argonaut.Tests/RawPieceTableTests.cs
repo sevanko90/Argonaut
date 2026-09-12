@@ -16,7 +16,7 @@ public class RawPieceTableTests
     /// <summary>Reads the whole document back through the public surface, as a reader would.</summary>
     private static byte[] ReadAll(IByteSource source)
     {
-        var destination = new byte[source.Length];
+        var destination = new byte[source.AvailableLength];
         int copied = source.CopyTo(0, destination);
         Assert.Equal(destination.Length, copied);
         return destination;
@@ -30,7 +30,7 @@ public class RawPieceTableTests
         var table = TableOver("hello world");
 
         Assert.True(table.IsUnedited);
-        Assert.Equal(11, table.Length);
+        Assert.Equal(11, table.AvailableLength);
         Assert.Equal(Bytes("hello world"), ReadAll(table));
     }
 
@@ -39,7 +39,7 @@ public class RawPieceTableTests
     {
         var table = TableOver(string.Empty);
 
-        Assert.Equal(0, table.Length);
+        Assert.Equal(0, table.AvailableLength);
         Assert.Equal(0, table.PieceCount);
         Assert.Empty(ReadAll(table));
     }
@@ -125,7 +125,7 @@ public class RawPieceTableTests
         table.Insert(3, Bytes("XY")); // abc | XY | def - three pieces
 
         // A read spanning the whole document is served in pieces...
-        var firstSpan = table.GetContiguousSpan(0, (int)table.Length);
+        var firstSpan = table.GetContiguousSpan(0, (int)table.AvailableLength);
         Assert.Equal(Bytes("abc"), firstSpan.ToArray());
 
         // ...while CopyTo crosses the boundaries for callers that need one buffer.
@@ -192,7 +192,7 @@ public class RawPieceTableTests
         table.Restore(before);
 
         Assert.Equal(Bytes("hello world"), ReadAll(table));
-        Assert.Equal(11, table.Length);
+        Assert.Equal(11, table.AvailableLength);
     }
 
     [Fact]
@@ -230,7 +230,7 @@ public class RawPieceTableTests
 
         for (int step = 0; step < 400; step++)
         {
-            long length = table.Length;
+            long length = table.AvailableLength;
             Assert.Equal(oracle.Count, length);
 
             bool deleting = length > 0 && random.Next(100) < 40;
@@ -250,7 +250,7 @@ public class RawPieceTableTests
                 oracle.InsertRange(offset, payload);
             }
 
-            Assert.Equal(oracle.Count, table.Length);
+            Assert.Equal(oracle.Count, table.AvailableLength);
             Assert.Equal(oracle.ToArray(), ReadAll(table));
         }
     }

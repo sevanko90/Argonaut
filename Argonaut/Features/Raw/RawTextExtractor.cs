@@ -33,8 +33,8 @@ public static class RawTextExtractor
     {
         ArgumentNullException.ThrowIfNull(source);
 
-        long from = Math.Clamp(start, 0, source.Length);
-        long to = Math.Clamp(endExclusive, from, source.Length);
+        long from = Math.Clamp(start, 0, source.AvailableLength);
+        long to = Math.Clamp(endExclusive, from, source.AvailableLength);
         long length = to - from;
 
         if (length > MaxExtractBytes)

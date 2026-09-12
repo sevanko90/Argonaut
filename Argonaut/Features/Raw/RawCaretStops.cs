@@ -39,7 +39,7 @@ public static class RawCaretStops
     /// </summary>
     public static long Snap(IRawRowIndex index, IByteSource source, long offset, CaretSnap direction)
     {
-        long clamped = Math.Clamp(offset, 0, source.Length);
+        long clamped = Math.Clamp(offset, 0, source.AvailableLength);
         if (!TryDecodeRowAt(index, source, clamped, out var row, out var info))
             return clamped;
 
@@ -56,19 +56,19 @@ public static class RawCaretStops
     /// document when there is none.</summary>
     public static long Next(IRawRowIndex index, IByteSource source, long offset)
     {
-        if (offset >= source.Length)
-            return source.Length;
+        if (offset >= source.AvailableLength)
+            return source.AvailableLength;
 
         long from = Math.Max(offset, 0);
         if (!TryDecodeRowAt(index, source, from, out var row, out var info))
-            return source.Length;
+            return source.AvailableLength;
 
         int within = (int)(from - info.Start);
 
         // At or past the last drawn byte - i.e. sitting in the row's newline, which holds no
         // caret - so the next stop is the first byte of the next row.
         if (within >= row.DisplayByteLength)
-            return Math.Min(info.End, source.Length);
+            return Math.Min(info.End, source.AvailableLength);
 
         // The smallest boundary STRICTLY greater than `within`. Strictly matters: the two halves
         // of a surrogate pair report the same byte offset, so taking "the next char" would hand
@@ -83,7 +83,7 @@ public static class RawCaretStops
     /// <summary>The previous legal caret position before <paramref name="offset"/>, or 0.</summary>
     public static long Previous(IRawRowIndex index, IByteSource source, long offset)
     {
-        long from = Math.Min(offset, source.Length);
+        long from = Math.Min(offset, source.AvailableLength);
         if (from <= 0)
             return 0;
 

@@ -75,7 +75,7 @@ public class RawTextExtractorTests
         var table = new RawPieceTable(Source("hello world"));
         table.Insert(5, Encoding.UTF8.GetBytes(" big"));
 
-        Assert.True(RawTextExtractor.TryExtract(table, 0, table.Length, out string text));
+        Assert.True(RawTextExtractor.TryExtract(table, 0, table.AvailableLength, out string text));
 
         Assert.Equal("hello big world", text);
     }
@@ -87,7 +87,7 @@ public class RawTextExtractorTests
         // a string that looks complete and is not.
         var huge = new OversizedSource(RawTextExtractor.MaxExtractBytes + 1);
 
-        Assert.False(RawTextExtractor.TryExtract(huge, 0, huge.Length, out string text));
+        Assert.False(RawTextExtractor.TryExtract(huge, 0, huge.AvailableLength, out string text));
         Assert.Equal(string.Empty, text);
 
         // A range inside the cap over the same document still works.
@@ -102,14 +102,14 @@ public class RawTextExtractorTests
 
         public OversizedSource(long length)
         {
-            Length = length;
+            AvailableLength = length;
             Array.Fill(this.window, (byte)'x');
         }
 
-        public long Length { get; }
+        public long AvailableLength { get; }
 
         public ReadOnlySpan<byte> GetContiguousSpan(long offset, int maxLength)
-            => offset < 0 || offset >= Length || maxLength <= 0
+            => offset < 0 || offset >= AvailableLength || maxLength <= 0
                 ? ReadOnlySpan<byte>.Empty
                 : this.window.AsSpan(0, (int)Math.Min(maxLength, this.window.Length));
 

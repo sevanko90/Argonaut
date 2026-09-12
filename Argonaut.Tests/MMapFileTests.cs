@@ -53,7 +53,7 @@ public class MMapFileTests
     {
         // 100 bytes is far below any platform's allocation granularity, so a capacity-derived
         // length would be wrong here.
-        WithFile(new byte[100], file => Assert.Equal(100, file.Length));
+        WithFile(new byte[100], file => Assert.Equal(100, file.AvailableLength));
     }
 
     [Fact]
@@ -93,7 +93,7 @@ public class MMapFileTests
     {
         WithFile(Array.Empty<byte>(), file =>
         {
-            Assert.Equal(0, file.Length);
+            Assert.Equal(0, file.AvailableLength);
             Assert.Equal(0, file.RequireContiguous(0, 0).Length);
             Assert.Throws<ArgumentOutOfRangeException>(() => file.RequireContiguous(0, 1));
         });
@@ -109,11 +109,11 @@ public class MMapFileTests
             File.WriteAllBytes(path, content);
 
             using var middle = new MMapFile(path, 8, 7);
-            Assert.Equal(7, middle.Length);
-            Assert.Equal("{\"b\":2}", Encoding.UTF8.GetString(middle.RequireContiguous(0, (int)middle.Length)));
+            Assert.Equal(7, middle.AvailableLength);
+            Assert.Equal("{\"b\":2}", Encoding.UTF8.GetString(middle.RequireContiguous(0, (int)middle.AvailableLength)));
 
             using var last = new MMapFile(path, 16, 7);
-            Assert.Equal("{\"c\":3}", Encoding.UTF8.GetString(last.RequireContiguous(0, (int)last.Length)));
+            Assert.Equal("{\"c\":3}", Encoding.UTF8.GetString(last.RequireContiguous(0, (int)last.AvailableLength)));
         }
         finally
         {

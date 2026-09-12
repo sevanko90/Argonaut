@@ -61,7 +61,7 @@ public class ByteSourceReadingTests
 
         // The bytes are all present - CopyTo gathers them - but no single span can describe them,
         // so the whole-range read has to fail instead of quietly yielding the first piece.
-        Assert.Equal(12, table.Length);
+        Assert.Equal(12, table.AvailableLength);
         Assert.Throws<NotSupportedException>(() => table.RequireContiguous(0, 12));
 
         var destination = new byte[12];

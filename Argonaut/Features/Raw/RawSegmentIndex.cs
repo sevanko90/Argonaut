@@ -251,29 +251,61 @@ public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IFileInd
     /// <remarks>Invoked in the background via a task</remarks>
     private void ProduceRows(IProgressReporter? progressReporter, CancellationToken cancellationToken)
     {
-        long length = this.source.Length;
-        if (length == 0)
-        {
-            progressReporter?.Report("Indexing");
-            return;
-        }
-
         long start = 0;
         int rows = 0;
         int lineNumber = 1;
         bool atLineStart = true;
         long nextProgressReport = ProgressReportStride;
+
+        // Cached, not snapshotted: this loop runs once per row rather than once per chunk, so
+        // asking the source how much has arrived on every row would add two interface calls per
+        // row to a scan that does tens of millions of them. Instead the pair is cached and
+        // refreshed only when a row actually reaches the cached end - which for a settled source
+        // (every source but a streamed one) happens exactly once, at the end of the data.
+        long available = this.source.AvailableLength;
+        bool settled = this.source.LengthSettled;
+
         try
         {
-            while (start < length)
+            while (true)
             {
                 if (rows % CancellationCheckRowStride == 0)
                     cancellationToken.ThrowIfCancellationRequested();
 
+                if (start >= available)
+                {
+                    available = this.source.AvailableLength;
+                    settled = this.source.LengthSettled;
+                    if (start >= available)
+                    {
+                        if (settled)
+                            break;
+
+                        this.source.WaitForLength(start + 1, cancellationToken);
+                        continue;
+                    }
+                }
+
+                var (end, softWrap) = RawRowBoundary.Next(this.source, WrapWidth, start);
+
+                // A row that ends exactly where the data currently does may only look finished
+                // because the rest has not arrived - its newline could be the next byte, or it
+                // could wrap further. This index is append-only with bucket anchors, so a row
+                // published at the wrong width can never be corrected: wait for more instead.
+                if (end >= available && !settled)
+                {
+                    available = this.source.AvailableLength;
+                    settled = this.source.LengthSettled;
+                    if (end >= available && !settled)
+                    {
+                        this.source.WaitForLength(available + 1, cancellationToken);
+                        continue;
+                    }
+                }
+
                 if (rows % AnchorStride == 0)
                     AppendAnchor(start, atLineStart, lineNumber, rows);
 
-                var (end, softWrap) = RawRowBoundary.Next(this.source, WrapWidth, start);
                 if (softWrap)
                 {
                     atLineStart = false;
@@ -288,7 +320,7 @@ public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IFileInd
                 start = end;
                 if (start >= nextProgressReport)
                 {
-                    progressReporter?.Report("Indexing", start, length);
+                    progressReporter?.Report("Indexing", start, available);
                     nextProgressReport = start + ProgressReportStride;
                 }
             }
@@ -300,7 +332,7 @@ public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IFileInd
             // count is safe to publish even on cancellation - unlike the dense indexers,
             // there is no un-scanned remainder to mis-record.
             Volatile.Write(ref this.publishedRowCount, rows);
-            progressReporter?.Report("Indexing", length, length);
+            progressReporter?.Report("Indexing", start, start);
         }
     }
 

@@ -220,7 +220,7 @@ public class RawRowDecoderTests
         table.Insert(3, content.AsSpan(3));
         Assert.True(table.PieceCount > 1);
 
-        var split = RawRowDecoder.Decode(table, 0, table.Length, isSoftWrapped: true);
+        var split = RawRowDecoder.Decode(table, 0, table.AvailableLength, isSoftWrapped: true);
         var whole = DecodeBytes(content, isSoftWrapped: true);
 
         Assert.Equal(whole.Text, split.Text);

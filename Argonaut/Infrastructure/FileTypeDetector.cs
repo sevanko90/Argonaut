@@ -51,7 +51,7 @@ public static class FileTypeDetector
     {
         using var mmap = new MMapFile(path);
 
-        long length = mmap.Length;
+        long length = mmap.AvailableLength;
         if (length == 0)
             return FileKind.Unidentified;
 
@@ -99,7 +99,7 @@ public static class FileTypeDetector
     public static bool IsPlausibleFor(FileKind kind, string path, out string reason)
     {
         using var mmap = new MMapFile(path);
-        long length = mmap.Length;
+        long length = mmap.AvailableLength;
 
         switch (kind)
         {

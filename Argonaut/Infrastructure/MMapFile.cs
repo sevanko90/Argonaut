@@ -19,12 +19,12 @@ public sealed unsafe class MMapFile : IByteSource, IDisposable
     private readonly byte* ptr;
     private bool disposed;
 
-    public long Length { get; }
+    public long AvailableLength { get; }
 
     public MMapFile(string path)
     {
-        Length = new FileInfo(path).Length;
-        if (Length == 0)
+        AvailableLength = new FileInfo(path).Length;
+        if (AvailableLength == 0)
             return; // an empty file can't be mapped; GetContiguousSpan can only ever yield an empty span
 
         this.mmf = MemoryMappedFile.CreateFromFile(path, FileMode.Open, null, 0, MemoryMappedFileAccess.Read);
@@ -44,8 +44,8 @@ public sealed unsafe class MMapFile : IByteSource, IDisposable
     /// </summary>
     public MMapFile(string path, long offset, long length)
     {
-        Length = length;
-        if (Length == 0)
+        AvailableLength = length;
+        if (AvailableLength == 0)
             return; // an empty range can't be mapped; GetContiguousSpan can only ever yield an empty span
 
         this.mmf = MemoryMappedFile.CreateFromFile(path, FileMode.Open, null, 0, MemoryMappedFileAccess.Read);
@@ -70,10 +70,10 @@ public sealed unsafe class MMapFile : IByteSource, IDisposable
         // collection after its mapping was disposed) is diagnosable rather than a hard crash.
         ObjectDisposedException.ThrowIf(disposed, this);
 
-        if (offset < 0 || offset >= Length || maxLength <= 0)
+        if (offset < 0 || offset >= AvailableLength || maxLength <= 0)
             return ReadOnlySpan<byte>.Empty;
 
-        return new ReadOnlySpan<byte>(this.ptr + offset, (int)Math.Min(maxLength, Length - offset));
+        return new ReadOnlySpan<byte>(this.ptr + offset, (int)Math.Min(maxLength, AvailableLength - offset));
     }
 
     /// <summary>See <see cref="IByteSource.CopyTo"/>. One mapping, so this is a single copy.</summary>

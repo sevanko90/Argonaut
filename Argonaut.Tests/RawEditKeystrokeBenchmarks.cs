@@ -54,7 +54,7 @@ public class RawEditKeystrokeBenchmarks
     {
         this.document = new RawPieceTable(this.source);
         this.rows = new RawEditedRowIndex(this.index, this.source, this.document);
-        this.caret = this.source.Length / 2;
+        this.caret = this.source.AvailableLength / 2;
     }
 
     [Benchmark(OperationsPerInvoke = KeystrokeBurst)]

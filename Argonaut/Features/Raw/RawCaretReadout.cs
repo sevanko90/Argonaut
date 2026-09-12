@@ -61,7 +61,7 @@ public readonly record struct RawCaretReadout(
         ArgumentNullException.ThrowIfNull(rows);
         ArgumentNullException.ThrowIfNull(source);
 
-        long offset = Math.Clamp(caret.Offset, 0, source.Length);
+        long offset = Math.Clamp(caret.Offset, 0, source.AvailableLength);
         var (lineNumber, column) = LineAndColumn(rows, source, offset);
 
         return new RawCaretReadout(
@@ -81,7 +81,7 @@ public readonly record struct RawCaretReadout(
     /// </summary>
     private static string DescribeCharacterAt(IByteSource source, long offset)
     {
-        if (offset >= source.Length)
+        if (offset >= source.AvailableLength)
             return EndOfFile;
 
         Span<byte> encoded = stackalloc byte[4];

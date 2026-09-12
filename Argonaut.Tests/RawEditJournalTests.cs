@@ -24,7 +24,7 @@ public class RawEditJournalTests
         {
             get
             {
-                var destination = new byte[Table.Length];
+                var destination = new byte[Table.AvailableLength];
                 Table.CopyTo(0, destination);
                 return Encoding.UTF8.GetString(destination);
             }

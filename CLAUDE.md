@@ -14,8 +14,9 @@ allocation granularity (this rounding differs between Windows and macOS), so it 
 size and expose trailing zero-padding bytes as if they were real content.
 
 Always source the true length from the file itself (e.g. `new FileInfo(path).Length`) and use that explicit value
-everywhere data bounds matter (indexing loops, readers, length reported to callers). Only use the accessor/view
-capacity for the mechanics of the mapping itself, never as a stand-in for "how much real data is here."
+everywhere data bounds matter (indexing loops, readers, length reported to callers — `MMapFile.AvailableLength`).
+Only use the accessor/view capacity for the mechanics of the mapping itself, never as a stand-in for "how much real
+data is here."
 
 This has caused a real bug before: `JsonStructureIndex.Build` read past the real end of file on Windows (using
 `MMapFile.Length` which returned `_accessor.Capacity`), fed trailing `0x00` padding into `Utf8JsonReader`, and
@@ -30,15 +31,31 @@ mapping is named only by the sites that construct one; readers, indexes and row 
 the interface, which is what lets a clipboard array or a downloaded payload be substituted without
 touching them.
 
-The interface has three members, and the important one does not promise what a caller usually
-wants. `GetContiguousSpan(offset, maxLength)` returns **up to** what was asked for, truncated at
-an internal boundary, because a span is a pointer and a length - it can only describe one
-contiguous run of memory, and a piece table's logical range may live in two buffers. So:
+Two of its members do not promise what a caller naively expects, and both traps are silent.
+
+`GetContiguousSpan(offset, maxLength)` returns **up to** what was asked for, truncated at an
+internal boundary, because a span is a pointer and a length - it can only describe one contiguous
+run of memory, and a piece table's logical range may live in two buffers.
+
+`AvailableLength` is how much is readable **right now**, not a total: a streamed source is still
+receiving, and `LengthSettled` is what says the value is final. It is named `AvailableLength`
+rather than `Length` precisely because four scan loops had snapshotted it once at entry, which
+over a growing source stops at whatever had arrived and then publishes a *complete* index over a
+partial document. So:
 
 - **Scan loops advance by the length returned, not the length requested**, and treat an empty
   return as the termination signal (`FileOffsetIndex.ProduceOffsets`, `FileTypeDetector`'s three
   finders, `FileSearchSession.Scan`). A loop that assumes it got its whole chunk silently skips
   bytes over a split source.
+- **Never snapshot `AvailableLength`.** Re-read it each turn, and when the scan reaches it, ask
+  `LengthSettled` whether that was the end or only the end so far - if not, block in
+  `WaitForLength` and carry on. `WaitForLength` is blocking by design: its callers are the
+  background scan bodies, which already run off the UI thread, so waiting there keeps those parse
+  loops synchronous. Never call it from the UI thread. Anything a scan finalises at the end of the
+  data - `FileOffsetIndex`'s trailing newline-less line, `RawSegmentIndex`'s last row, the JSON
+  reader's `isFinalBlock` - is conditional on `LengthSettled`, or it freezes a partial answer into
+  an append-only index. `GrowingByteSource` in the tests is the only source that exercises this;
+  every other one is settled from birth, so a regression here is invisible without it.
 - **A whole range comes from `ByteSourceReading.RequireContiguous`**, which returns exactly the
   range or throws - the contract the old `MMapFile.GetSpan` had, and over any single-buffer source
   the identical zero-copy span. `ByteAt` is the single-byte peek (one byte can never straddle),

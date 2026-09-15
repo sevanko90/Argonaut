@@ -10,7 +10,7 @@ set -euo pipefail
 #   version must be a clean SemVer (e.g. 1.4.0, no leading 'v') when packing for release;
 #   omitted (or during local/dev runs) it defaults to 0.0.1 (vpk rejects 0.0.0). Velopack's
 #   AutoApplyOnStartup (silently swapping in the highest-versioned .nupkg from its local
-#   package cache on launch) is disabled in Program.cs, so a low, stable local version here is
+#   package cache on launch) is disabled in VelopackAppUpdater, so a low, stable local version here is
 #   safe - it won't get clobbered by a higher-versioned package left in that cache by an
 #   earlier local run.
 

@@ -30,4 +30,10 @@
     <ProjectReference Include="..\Argonaut\Argonaut.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The App Store build's notices, for LicenseNoticesTests: tests build the GitHub channel, so
+         this variant is never the one embedded in the Argonaut assembly they load. -->
+    <None Include="..\THIRD-PARTY-NOTICES.appstore.txt" Link="THIRD-PARTY-NOTICES.appstore.txt" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

@@ -136,4 +136,4 @@ Linux still ships as a plain zip with no auto-update, for now.
 
 ## License
 
-Argonaut is released under the [MIT License](LICENSE). It is built on open-source components whose licences and notices are collected in [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt), which ships with the app (About > Licenses and third-party notices). After adding a package or bumping a version, regenerate it with `python3 scripts/make-third-party-notices.py`.
+Argonaut is released under the [MIT License](LICENSE). It is built on open-source components whose licences and notices are collected in [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt), which ships with the app (About > Licenses and third-party notices). After adding a package or bumping a version, regenerate it (and `THIRD-PARTY-NOTICES.appstore.txt`, the App Store build's copy, which omits Velopack) with `python3 scripts/make-third-party-notices.py`.

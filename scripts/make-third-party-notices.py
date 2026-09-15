@@ -5,7 +5,12 @@ The file is embedded in the app (Help > About > Licenses and third-party notices
 the published binaries, because MIT, BSD, OFL and the Unicode License all require their notices to
 travel with binary copies. See Argonaut/Infrastructure/LicenseNotices.cs for the reader.
 
-Run it deliberately, not from the build, whenever a package is added or its version moves:
+One file is written per distribution channel (DistributionChannel in Argonaut.csproj, which picks
+the file a build embeds): THIRD-PARTY-NOTICES.txt for GitHub, THIRD-PARTY-NOTICES.appstore.txt for
+the App Store, which is built without Velopack and so must not credit it.
+
+Run it deliberately, not from the build, whenever a package is added or its version moves. Restore
+the default (GitHub) channel first - it resolves every package any channel ships:
 
     dotnet restore Argonaut/Argonaut.csproj
     python3 scripts/make-third-party-notices.py
@@ -35,7 +40,11 @@ import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 ASSETS = ROOT / "Argonaut" / "obj" / "project.assets.json"
-OUTPUT = ROOT / "THIRD-PARTY-NOTICES.txt"
+# One notices file per distribution channel (DistributionChannel in Argonaut.csproj).
+OUTPUTS = {
+    "github": ROOT / "THIRD-PARTY-NOTICES.txt",
+    "appstore": ROOT / "THIRD-PARTY-NOTICES.appstore.txt",
+}
 RULE = "=" * 80
 
 # Packages that never reach a user: DiagnosticsSupport is excluded from non-Debug builds in
@@ -62,7 +71,8 @@ UNICODE_TRADEMARK = (
 )
 
 # Each section: the component, its homepage, which packages it covers (exact ids, or a prefix
-# ending in '.'), and the parts its notice text is assembled from, in order.
+# ending in '.'), optionally the channels (keys of OUTPUTS) that ship it - every channel when
+# absent - and the parts its notice text is assembled from, in order.
 SECTIONS = [
     {
         "component": "Avalonia",
@@ -130,6 +140,7 @@ SECTIONS = [
         "component": "Velopack",
         "homepage": "https://github.com/velopack/velopack",
         "packages": ["Velopack"],
+        "channels": ["github"],
         "parts": [
             ("literal", "Covers the Velopack library and the native updater it installs alongside the app.\n"),
             ("fetch", "https://raw.githubusercontent.com/velopack/velopack/develop/LICENSE"),
@@ -248,11 +259,13 @@ def main() -> None:
     if uncovered:
         sys.exit("No notice section covers: " + ", ".join(sorted(uncovered)))
 
-    sections = [build_section(s, packages_path, versions) for s in SECTIONS]
-    # Bytes, not write_text: every part is already LF-normalised, and text mode would translate
-    # to CRLF on Windows.
-    OUTPUT.write_bytes("\n".join(sections).encode("utf-8"))
-    print(f"Wrote {OUTPUT.relative_to(ROOT)} ({OUTPUT.stat().st_size:,} bytes, {len(sections)} sections)")
+    built = [(s, build_section(s, packages_path, versions)) for s in SECTIONS]
+    for channel, output in OUTPUTS.items():
+        sections = [text for s, text in built if "channels" not in s or channel in s["channels"]]
+        # Bytes, not write_text: every part is already LF-normalised, and text mode would translate
+        # to CRLF on Windows.
+        output.write_bytes("\n".join(sections).encode("utf-8"))
+        print(f"Wrote {output.relative_to(ROOT)} ({output.stat().st_size:,} bytes, {len(sections)} sections)")
 
 
 if __name__ == "__main__":

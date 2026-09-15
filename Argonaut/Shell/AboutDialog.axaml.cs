@@ -1,4 +1,5 @@
 using Argonaut.Infrastructure;
+using Argonaut.Infrastructure.Updates;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using System.Diagnostics;
@@ -15,6 +16,7 @@ public partial class AboutDialog : Window
         NameText.Text = AppInfo.Name;
         VersionText.Text = $"Version {AppInfo.Version}";
         RepoLinkButton.Content = AppInfo.RepoUrl;
+        AutoUpdateCheckBox.IsVisible = AppUpdaters.Current.SupportsSelfUpdate;
         AutoUpdateCheckBox.IsChecked = AutoUpdatePreference.Load();
     }
 

@@ -3,7 +3,7 @@ using System.Reflection;
 namespace Argonaut.Infrastructure;
 
 /// <summary>
-/// App identity constants shared between the About dialog and <see cref="UpdateService"/>.
+/// App identity constants shared between the About dialog and the GitHub build's updater.
 /// </summary>
 public static class AppInfo
 {

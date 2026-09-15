@@ -40,6 +40,23 @@ public class LicenseNoticesTests
     }
 
     /// <summary>
+    /// The App Store build embeds THIRD-PARTY-NOTICES.appstore.txt instead: every component the
+    /// GitHub build credits, except the self-updater that channel is built without - and no mention
+    /// of it anywhere, since the file ships inside the store bundle.
+    /// </summary>
+    [Fact]
+    public void AppStoreNotices_AreTheGitHubNoticesWithoutVelopack()
+    {
+        string appStoreNotices = File.ReadAllText(
+            Path.Combine(AppContext.BaseDirectory, "THIRD-PARTY-NOTICES.appstore.txt"));
+
+        Assert.DoesNotContain("velopack", appStoreNotices, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(
+            LicenseNotices.Load().Skip(1).Select(n => n.Component).Where(c => c != "Velopack"),
+            LicenseNotices.Parse(appStoreNotices).Select(n => n.Component));
+    }
+
+    /// <summary>
     /// Notices easy to lose: xxHash (BSD-2) is inside System.IO.Hashing and only named in the
     /// runtime's notices; the Inter font is OFL, not the MIT of the package that embeds it; and
     /// FreeType's licence asks for a credit line in the documentation.

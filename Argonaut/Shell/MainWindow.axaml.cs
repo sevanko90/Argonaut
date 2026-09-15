@@ -10,8 +10,8 @@ using Avalonia.Platform.Storage;
 using Avalonia.Styling;
 using Avalonia.Threading;
 using Argonaut.Infrastructure;
+using Argonaut.Infrastructure.Updates;
 using System.Threading.Tasks;
-using Velopack;
 
 namespace Argonaut.Shell;
 
@@ -34,7 +34,7 @@ public partial class MainWindow : Window
         "M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z";
 
     private readonly MainWindowViewModel viewModel;
-    private readonly UpdateService updateService = new();
+    private readonly IAppUpdater updater = AppUpdaters.Current;
     private DispatcherTimer? toastTimer;
 
     public MainWindow()
@@ -63,6 +63,8 @@ public partial class MainWindow : Window
         ApplyThemeMode(viewModel.ThemeMode);
         ApplyContentFontMode(viewModel.ContentFontMode);
 
+        CheckForUpdatesButton.IsVisible = updater.SupportsSelfUpdate;
+
         FindBarControl.FindRequested += (term, direction) => _ = viewModel.FindAsync(term, direction);
         FindBarControl.ResetRequested += CloseFindBar;
 
@@ -71,7 +73,9 @@ public partial class MainWindow : Window
         AddHandler(DragDrop.DropEvent, OnDrop);
         AddHandler(KeyDownEvent, OnGlobalKeyDown, Avalonia.Interactivity.RoutingStrategies.Tunnel);
 
-        _ = CheckForUpdatesOnStartupAsync();
+        // A store build is updated by the store: no check, no preference read, no marker written.
+        if (updater.SupportsSelfUpdate)
+            _ = CheckForUpdatesOnStartupAsync();
     }
 
     /// <summary>
@@ -284,37 +288,37 @@ public partial class MainWindow : Window
     /// </summary>
     private async Task CheckForUpdatesOnStartupAsync()
     {
-        if (!updateService.IsInstalled || !updateService.ShouldCheckOnStartup())
+        if (!updater.IsInstalled || !StartupUpdateCheck.IsDue())
             return;
 
-        updateService.RecordStartupCheck();
+        StartupUpdateCheck.Record();
 
-        UpdateInfo? info;
+        AvailableUpdate? update;
         try
         {
-            info = await updateService.CheckForUpdatesAsync();
+            update = await updater.CheckForUpdatesAsync();
         }
         catch
         {
             return;
         }
 
-        if (info is not null)
-            await OfferUpdateAsync(info);
+        if (update is not null)
+            await OfferUpdateAsync(update);
     }
 
     private async void OnCheckForUpdates(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        if (!updateService.IsInstalled)
+        if (!updater.IsInstalled)
         {
             ToastService.Show("Auto-update isn't available for this build");
             return;
         }
 
-        UpdateInfo? info;
+        AvailableUpdate? update;
         try
         {
-            info = await updateService.CheckForUpdatesAsync();
+            update = await updater.CheckForUpdatesAsync();
         }
         catch (Exception ex)
         {
@@ -322,13 +326,13 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (info is null)
+        if (update is null)
         {
             ToastService.Show("You're up to date");
             return;
         }
 
-        await OfferUpdateAsync(info);
+        await OfferUpdateAsync(update);
     }
 
     /// <summary>
@@ -336,9 +340,9 @@ public partial class MainWindow : Window
     /// manual toolbar button. Declining either prompt just leaves the update for next time
     /// (re-offered on the next check) rather than tracking a separate "staged" state.
     /// </summary>
-    private async Task OfferUpdateAsync(UpdateInfo info)
+    private async Task OfferUpdateAsync(AvailableUpdate update)
     {
-        string version = info.TargetFullRelease.Version.ToString();
+        string version = update.Version;
 
         bool download = await ConfirmDialog.Show(
             this, $"Update available (v{version}). Download and install now?", "Download");
@@ -347,8 +351,8 @@ public partial class MainWindow : Window
 
         try
         {
-            await updateService.DownloadUpdatesAsync(
-                info, progress => ToastService.Show($"Downloading update... {progress}%"));
+            await updater.DownloadUpdatesAsync(
+                update, progress => ToastService.Show($"Downloading update... {progress}%"));
         }
         catch (Exception ex)
         {
@@ -359,7 +363,7 @@ public partial class MainWindow : Window
         bool restart = await ConfirmDialog.Show(
             this, $"Update downloaded (v{version}). Restart Argonaut now to apply it?", "Restart");
         if (restart)
-            updateService.ApplyUpdatesAndRestart(info);
+            updater.ApplyUpdatesAndRestart(update);
     }
 
     private void OnJumpToFailureLine(object? sender, Avalonia.Interactivity.RoutedEventArgs e)

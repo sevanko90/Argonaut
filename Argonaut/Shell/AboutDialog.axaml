@@ -19,6 +19,16 @@
                     HorizontalAlignment="Left"
                     Margin="0,4,0,0" />
         </StackPanel>
+        <StackPanel Spacing="4">
+            <TextBlock Text="Released under the MIT License."
+                       FontSize="13"
+                       Foreground="{DynamicResource AppMutedTextBrush}" />
+            <Button x:Name="NoticesLinkButton"
+                    Content="Licenses and third-party notices"
+                    Click="OnNoticesLinkClicked"
+                    Classes="linklike"
+                    HorizontalAlignment="Left" />
+        </StackPanel>
         <CheckBox x:Name="AutoUpdateCheckBox"
                   Content="Automatically check for updates"
                   Click="OnAutoUpdateToggled" />

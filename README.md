@@ -133,3 +133,7 @@ in the application folder.
 Windows and macOS builds check GitHub Releases for updates on launch (at most once every 24 hours) and offer to download and apply them - no manual re-download needed going forward.
 
 Linux still ships as a plain zip with no auto-update, for now.
+
+## License
+
+Argonaut is released under the [MIT License](LICENSE). It is built on open-source components whose licences and notices are collected in [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt), which ships with the app (About > Licenses and third-party notices). After adding a package or bumping a version, regenerate it with `python3 scripts/make-third-party-notices.py`.

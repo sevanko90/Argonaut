@@ -33,6 +33,11 @@ public partial class AboutDialog : Window
         }
     }
 
+    private async void OnNoticesLinkClicked(object? sender, RoutedEventArgs e)
+    {
+        await NoticesDialog.ShowNotices(this);
+    }
+
     private void OnClose(object? sender, RoutedEventArgs e) => Close();
 
     public static Task ShowAbout(Window owner) => new AboutDialog().ShowDialog(owner);

@@ -1,5 +1,7 @@
 # Semantic JSON diff — implementation plan
 
+> **Code names have moved on since this was written (checked 2026-09-17):** `IndexedFileSession` is now `IndexedSourceSession` (over an `IByteSource`, not a path), `MemoryMappedCollectionBase` is `VirtualizingItemsSourceBase`, `IsComplete` is `AllItemsPublished`, and `MMapFile.GetSpan` is `ByteSourceReading.RequireContiguous`. The reasoning is unaffected; read the old names as the new ones.
+
 > **Implementation status (2026-08-18, branch `json-diff`):** stages 0–5 implemented
 > (`JsonRowFactory`/`LruCache`/`IndexGrowthMonitor`, content hashes, `JsonDiffIndex`,
 > `JsonDiffSession`, `JsonDiffRowCollection`/`JsonDiffViewModel`/views, shell "Compare

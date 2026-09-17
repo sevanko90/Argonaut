@@ -1,5 +1,7 @@
 # JSON array table — nested values, options considered
 
+> **Code names have moved on since this was written (checked 2026-09-17):** `mmap.GetSpan` is now `ByteSourceReading.RequireContiguous` over an `IByteSource`. The reasoning is unaffected; read the old names as the new ones.
+
 Decision record for how the array-as-table view should render elements that contain **nested
 objects and arrays**. Sibling to [json-array-table-options.md](json-array-table-options.md),
 which decided where the table lives and who owns its mapping; this one decides what a cell shows

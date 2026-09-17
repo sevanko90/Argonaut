@@ -1,5 +1,7 @@
 # JSON array table — options considered
 
+> **Code names have moved on since this was written (checked 2026-09-17):** `IndexedFileSession` is now `IndexedSourceSession`, and a sub-range is opened with `IByteOrigin.OpenRange(offset, length)` rather than `new MMapFile(path, offset, length)`. The reasoning is unaffected; read the old names as the new ones.
+
 Decision record for the "view a JSON array as a table" feature. The feature shipped; its build
 plan has been deleted now that the code is the record of what was built. This document holds the
 options that were weighed and discarded, so the *why* survives.

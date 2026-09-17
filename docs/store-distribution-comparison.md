@@ -65,7 +65,7 @@ entitlement; today's ad-hoc-signed, non-sandboxed `.app` (see
 for this codebase:
 
 - File opening today goes through `StorageProvider.OpenFilePickerAsync` and OS drag-
-  and-drop ([Argonaut/Shell/MainWindow.axaml.cs:211](../Argonaut/Shell/MainWindow.axaml.cs)) —
+  and-drop (`MainWindow.OnDrop`, [Argonaut/Shell/MainWindow.axaml.cs](../Argonaut/Shell/MainWindow.axaml.cs)) —
   both are sandbox-exempt (the OS grants temporary read access for files chosen
   through its own picker/drop APIs), so **first open of a file needs no code change.**
 - **Recent files do need a code change.** [RecentFileHistory.cs](../Argonaut/Infrastructure/RecentFileHistory.cs)
@@ -75,6 +75,28 @@ for this codebase:
   persisted instead of/alongside the plain path, resolved back into an access grant
   each time a recent entry is reopened. This is a real, non-trivial implementation
   item, not just a build-config change.
+- **The schema features read files the user never picked, and would silently lose them.**
+  Three path-keyed behaviours in [JsonSchemaCatalog.cs](../Argonaut/Features/Json/Schema/JsonSchemaCatalog.cs)
+  assume ordinary file-system access:
+  - The `<file>.schema.json` sidecar is a *sibling* of the opened document. A picker or drop
+    grant covers the document only, so the sidecar is unreadable and simply never offered.
+    Fixing it means asking for the folder (a folder picker, or a bookmark to it), not just the file.
+  - The remembered schema binding can name a schema outside the catalog folders, stored as a
+    plain path - the same relaunch problem as recent files, and the same bookmark fix.
+  - "Open schema folder…" (`OpenUserDirectory`) reveals `AppDataPaths.GetSchemasDirectory()`
+    with `Process.Start`. Under the sandbox, application data resolves inside
+    `~/Library/Containers/<bundle id>/…`, which users do not browse to and which is hard to drop
+    schemas into; the folder is the catalog's whole mechanism for user schemas, so this wants
+    a rethink (an "Add schema…" picker that copies into the container) rather than a path fix.
+    Whether the `Process.Start` reveal itself works sandboxed is unverified.
+
+  Pasted documents are unaffected: they have no path, so all three already skip them.
+- **Saving (not yet built) needs a sandbox-specific implementation.** A picker grant covers the
+  chosen file, not its folder, so the planned temp-file-beside-the-original save is denied. The
+  save path is designed around this - see `IFileReplacer` in
+  [editing-options.md](editing-options.md) §4 - and needs the
+  `com.apple.security.files.user-selected.read-write` entitlement plus read-write (not read-only)
+  security-scoped bookmarks for recent files that should stay saveable.
 - `MMapFile`/`Utf8JsonReader` etc. operate on whatever `SafeFileHandle`/stream the
   sandboxed access grant already opened, so no changes needed once the file handle is
   legitimately obtained — the sandbox constraint is entirely about *how the app is
@@ -102,29 +124,30 @@ entirely for that distribution.
 | | Velopack + GitHub Releases | Microsoft Store (MSIX) | Mac App Store |
 |---|---|---|---|
 | Source of truth | GH tag/release (this stays true regardless) | Same GH tag, packaged downstream | Same GH tag, packaged downstream |
-| Code changes required | None beyond the update plumbing itself | None expected (full-trust Desktop Bridge) | Real: sandbox entitlements + security-scoped bookmarks for recent files |
+| Code changes required | None beyond the update plumbing itself | None expected (full-trust Desktop Bridge) | Real: sandbox entitlements, security-scoped bookmarks (recent files, remembered schemas), schema sidecar and schema folder rework, sandboxed save |
 | New signing identity | Optional (Developer ID improves macOS UX) | Store-managed | Required, separate from Developer ID |
 | Monetary cost | $0 (or $99/yr Apple if adding notarization) | $0 (free as of 2026) | $99/yr Apple Developer Program |
 | Release latency | Immediate — publish = live | Hours–days (store review) | Hours–days, sometimes longer (App Review) |
 | Update delivery | Self-managed, our control, deltas on Windows | Store's own mechanism | Store's own mechanism |
 | First-run trust friction for user | SmartScreen/Gatekeeper warnings (mitigated by signing) | None — Store apps are pre-trusted | None — Store apps are pre-trusted |
-| Ongoing maintenance | One pipeline (already planned) | One more CI leg + submission step | One more CI leg + submission step + entitlement upkeep |
+| Ongoing maintenance | One pipeline (built) | One more CI leg + submission step | One more CI leg + submission step + entitlement upkeep |
 
 ## Recommendation
 
 Treat both stores as optional, later add-ons rather than replacements for the
 Velopack/GitHub pipeline, which should stay the default channel: it has zero review
-latency, needs no sandboxing rework, and is already the planned source of truth.
+latency, needs no sandboxing rework, and is built and already the source of truth.
 
 - **Microsoft Store is comparatively cheap to add** if there's a reason to want it
   (discoverability, org policies that only allow Store-installed software) — no
   sandbox rework, no recurring cost, and a fairly light CI addition.
 - **Mac App Store is the more expensive of the two** — it requires the security-scoped
-  bookmark work for recent files, a second signing identity, a recurring $99/yr, and
+  bookmark work for recent files and remembered schemas, rework of the schema sidecar and
+  schema folder, a second signing identity, a recurring $99/yr, and
   decouples release cadence from GH tagging via App Review turnaround. Worth doing
   only if there's a concrete reason (e.g. users specifically expect to find/update the
   app through the Mac App Store) rather than by default.
 
 Neither store submission should block or be sequenced ahead of the Velopack/GitHub
 plan — they're independent, later work streams building on the same source-of-truth
-pipeline once it exists.
+pipeline that now exists.

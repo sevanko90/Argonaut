@@ -1,5 +1,7 @@
 # Plan: Auto-update from GitHub Releases via Velopack
 
+> **Status (checked 2026-09-17): built.** The update check lives in `Argonaut/Infrastructure/UpdateService.cs`, driven from `MainWindow` (a startup check plus a manual "check for updates"), `VelopackApp.Build()` runs in `Program.cs`, and `.github/workflows/publish.yml` packs and attaches the Velopack assets for Windows and macOS. Linux stays on the manual zip, as planned. Kept as the design record; the "Goal" below describes the app before this landed.
+
 ## Goal
 
 Argonaut currently ships as a portable, self-contained single-file publish per RID

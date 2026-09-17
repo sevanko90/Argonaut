@@ -1,8 +1,8 @@
 # Argonaut architecture — shell, views, view models, mmap & disposal
 
 Reference for how a loaded file flows from disk to screen, and — the part that has bitten us
-repeatedly — who owns and releases the memory mapping. Keep this in sync when the ownership
-chain changes.
+repeatedly — who owns and releases the bytes (origins, sources, and the memory mappings behind
+them). Keep this in sync when the ownership chain changes.
 
 ## Shell
 
@@ -16,8 +16,17 @@ chain changes.
 - `MainWindow.axaml` binds `ContentControl.Content="{Binding CurrentDocument}"`; implicit
   `DataTemplate`s map each document view model to its view (`JsonViewModel`→`JsonView`, etc.),
   including `IncompatibleViewModel`→`IncompatibleView`. `EmptyStateView` shows when `!IsFileOpen`.
-- File loading is injectable via `MainWindowViewModel.DocumentLoader` (tests supply fakes; the
-  real default is `DocumentViewCatalog.LoadAsync`).
+- File loading is injectable via `MainWindowViewModel.DocumentLoader`, shaped
+  `(FileKind, IByteOrigin, IProgressReporter)` (tests supply fakes; the real default is
+  `DocumentViewCatalog.LoadAsync`). A loader is handed an **origin**, never a path or a source -
+  see "Origins and sources" below.
+- Every input enters through `OpenOriginAsync`: `OpenPathAsync` wraps a path in a
+  `FileByteOrigin`, `PasteAsync` wraps the clipboard's bytes in a `MemoryByteOrigin` (declined
+  past `MaxPasteBytes`, 64 MB), and `OpenDiffAsync` takes two. From there detection runs on the
+  bytes, not the extension, so a paste with no name is detected the same way a file is.
+- **The shell owns the origins for the open input** (`ownedOrigins`, one per input, two when
+  diffing) and releases them only when the input actually changes, in `AdoptOrigins`. A view
+  switch keeps them, which is what stops JSON → Raw from re-materialising a paste.
 
 ## Documents
 
@@ -71,20 +80,22 @@ chain changes.
   the user picks a different kind; it's naturally inert when code sets it to mirror the
   already-current kind (on open, or after a switch completes), because the shell always updates
   `currentKind` before reassigning `SelectedView`.
-- `SwitchViewAsync` re-indexes the *same* file as a different kind: unlike `OpenPathAsync`, it
+- `SwitchViewAsync` re-indexes the *same* origin as a different kind, opening a fresh source
+  over it rather than re-materialising anything: unlike `OpenPathAsync`, it
   skips the replace-confirmation and doesn't touch recent files, but otherwise shares the exact
   publish path (`LoadAndPublishAsync`) — including the staleness guard and the pre-flight/failure
   handling below.
 
 ## Index failures & the incompatible-file placeholder
 
-- `IFileIndexer.Failure` (`Infrastructure/IndexFailure.cs`) is non-null when a background scan
+- `IBackgroundIndex.Failure` (`Infrastructure/IBackgroundIndex.cs`, record in
+  `Infrastructure/IndexFailure.cs`) is non-null when a background scan
   stopped because of an error, null on success *and* on cancellation. `AppendLogIndexBase.RunIndexing`
   is the one place that catches a scan's exception, records it (via the overridable
   `DescribeFailure`, which `JsonStructureIndex` enriches with line/column/byte-offset from a
   `JsonException`), and rethrows — so `IndexingTask` faults as if nothing had caught it.
 - Forcing an incompatible kind onto a file (via the switcher) is classified in two stages:
-  1. **Pre-flight** — `FileTypeDetector.IsPlausibleFor(kind, path, out reason)` is a cheap header
+  1. **Pre-flight** — `FileTypeDetector.IsPlausibleFor(kind, origin, out reason)` is a cheap header
      check (no indexing) that rejects an obvious mismatch (e.g. CSV content forced to JSON)
      instantly.
   2. **Zero-progress rule** — if indexing still fails, `Failure.ItemsIndexed == 0` means nothing
@@ -96,9 +107,10 @@ chain changes.
   the switcher, and the close button all keep working) but never calls `FindController.Attach`
   — the caller already detached find before attempting the load, and the placeholder's
   `CreateSearchNavigator()` returns null (mirrored by `IsFindAvailable` hiding the find bar).
-  `IncompatibleViewModel.Dispose()` is a no-op: it has no backing `MMapFile`/session to release,
-  so it needs no special handling in the disposal ownership chain below beyond the normal
-  outgoing-document dispose.
+  `IncompatibleViewModel.Dispose()` is a no-op: it has no source or session to release, so it
+  needs no special handling in the disposal ownership chain below beyond the normal
+  outgoing-document dispose. The origin it was classified from is still adopted by the shell, so
+  switching to a view that can read it re-opens the same input.
 - A *late* failure (the initial batch loaded clean, but a background scan later throws) is
   caught the same way, via `MainWindowViewModel.OnDocumentPropertyChanged` watching
   `IndexFailure`: zero items swaps to the placeholder, some items just raises the banner.
@@ -135,7 +147,8 @@ chain changes.
 - Views are dumb: `JsonView` / `NdJsonView` / `CsvView` render bindings and forward input.
   Selection/scroll sync lives in code-behind; all behavior is in the view model.
 - `NdJsonViewModel` hosts a nested per-line `JsonViewModel` (`SelectedLineJsonViewModel`) for
-  the right-hand JSON pane. That nested VM has its own single-line sub-range mapping.
+  the right-hand JSON pane. That nested VM has its own single-line sub-range source
+  (`JsonViewModel.LoadAsync(origin, offset, length)`, which calls `origin.OpenRange`).
 - `JsonArrayTableViewModel` renders one JSON array as a CSV-style grid, over its own sub-range
   session covering exactly the array's `[`…`]` bytes — so it shares nothing with the JSON
   document it was opened from, which is required rather than tidy, since the shell disposes the
@@ -185,45 +198,49 @@ chain changes.
   sized themselves. Columns come from the sampled
   elements: property names for an array of objects, a single `value` column otherwise — and the
   toolbar's reshape-into-N-columns picker is offered *only* in the second case, since an object
-  array is already columned by its own data. Back reloads the origin file as
+  array is already columned by its own data. Back reloads the origin as
   JSON and reveals the origin path through `IPathNavigable`. The link is hidden on the per-line
   documents NDJSON nests, whose token offsets are mapping-relative and therefore not file
   offsets.
 
-## Memory-mapped files
+## Origins and sources
 
-- `MMapFile` (`Infrastructure/MMapFile.cs`) is a read-only zero-copy view. Two ctors: whole
-  file, and `(path, offset, length)` for a sub-range (one NDJSON line). The VM that needs a
-  sub-range takes path+offset+length and creates its own mapping — callers never hand a
-  mapping to a VM to free.
-- `Length` always comes from `FileInfo`, never the accessor capacity (see CLAUDE.md).
-- `GetSpan` throws `ObjectDisposedException` if used after `Dispose` — a use-after-free is a
-  catchable managed error, never a silent access violation.
-- **`IByteSource` (`Infrastructure/IByteSource.cs`) is the seam the raw editor reads through.**
-  `MMapFile` implements it, and so does `RawPieceTable` — so `RawSegmentIndex`, `RawRowReader`
-  and `RawRowDecoder` read "the document" without knowing whether it is a plain mapping or a
-  piece table over (mapping, scratch). Its one difference from `GetSpan` is the contract that
-  makes a piece table expressible at all: `GetContiguousSpan` may return **fewer** bytes than
-  asked for, truncated at an internal boundary, so a caller wanting a whole range either loops
-  or uses `CopyTo`. It also returns empty past the end rather than throwing, because a scan
-  walking to EOF is the normal case there rather than a bug. Over a single mapping every request
-  is still served whole, so nothing about the read-only path changed.
-- `IndexedFileSession<TIndex>` (`Infrastructure/IndexedFileSession.cs`) owns the trio
-  {mapping, background index, CancellationTokenSource} and encodes teardown ordering:
-  cancel → join indexing task → join dependent tasks → release mapping. It owns the `MMapFile`
-  once `Start` is called (disposes it even if the index factory throws). `StartDependentRead`
+The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLength` growth,
+`RequireContiguous`) are specified in CLAUDE.md; this section is about who owns what.
+
+- **`IByteOrigin` (`Infrastructure/IByteOrigin.cs`) is where the bytes came from.** It carries
+  `DisplayName`, `Path` (null for a document that is not a file) and the arrival state
+  (`AvailableLength`/`LengthSettled`/`WaitForLength`), and it is the only thing that hands out
+  sources: `Open()` for the whole document, `OpenRange(offset, length)` for one NDJSON line, an
+  array's bytes as a table, or one search chunk. Implemented by `FileByteOrigin` (holds no
+  handle; every `Open` is a new `MMapFile`) and `MemoryByteOrigin` (a paste). It lives as long as
+  the open input and is owned by the shell (above).
+- **`IByteSource` (`Infrastructure/IByteSource.cs`) is one session's reader.** Every consumer is
+  typed to it. Implemented by `MMapFile`, `RawPieceTable` (a piece table over (mapping,
+  scratch), which is why a span can come back short) and `MemoryByteSource`, the in-memory
+  source behind `MemoryByteOrigin`. A caller that opened a source owns it and calls `Release()`
+  (`ByteSourceReading`); nobody releases a source handed to them.
+- `MMapFile` (`Infrastructure/MMapFile.cs`) is the file-backed source: a read-only zero-copy
+  view, whole-file or `(path, offset, length)`. `AvailableLength` always comes from `FileInfo`,
+  never the accessor capacity (see CLAUDE.md), and a mapping never grows. `GetContiguousSpan`
+  throws `ObjectDisposedException` after `Dispose` — a use-after-free is a catchable managed
+  error, never a silent access violation.
+- `IndexedSourceSession<TIndex>` (`Infrastructure/IndexedSourceSession.cs`) owns the trio
+  {source, background index, CancellationTokenSource} and encodes teardown ordering:
+  cancel → join indexing task → join dependent tasks → release source. It owns the source once
+  `Start` is called (releases it even if the index factory throws). `StartDependentRead`
   starts date-hint inference and JSON path resolution on the pool and joins those background
   readers before releasing the mapping. Their UI continuations are awaited separately and
   never joined by disposal, avoiding a wait on the UI thread from the UI thread itself. `RawIndexSession` is the wrap-width-restartable variant, with
   two cancellation sources: `mappingCts` for the document's lifetime and `indexCts` (linked from
   it) for the index `RestartIndex` recycles; `JsonDiffSession` composes two
-  `IndexedFileSession<JsonStructureIndex>`s; `JsonArrayTableSession` composes one of them with
+  `IndexedSourceSession<JsonStructureIndex>`s; `JsonArrayTableSession` composes one of them with
   the `JsonArrayElementIndex` derived from its token index. All four implement
   `IDocumentSession`, which
   `IndexedDocumentViewModel` (below) drives — the teardown pair (`TearingDown` + `RequestStop()`
   + `Dispose()`) plus the two members the status line is driven from, `IndexingTask` and
   `Failure`. `TearingDown` is named for the moment it fires, per CLAUDE.md's naming convention.
-- **`IDocumentSession` is deliberately not an index.** Two implementations own an `IFileIndexer`
+- **`IDocumentSession` is deliberately not an index.** Two implementations own an `IBackgroundIndex`
   and the diff owns a `JsonDiffIndex` that isn't one, so exposing `session.Index` would force a
   nullable indexer accessor plus virtual escape hatches on `IndexingTask` and `MonitorIndexing`
   to route around the odd one out. All a document needs from an index is a task to await and a
@@ -243,15 +260,16 @@ chain changes.
 - **A scan's completion signal must be unconditional.** Every index starts its scan through
   `AppendLogIndexBase.StartScan` / `StartStreamingScan`, which deliberately do NOT pass the
   cancellation token to `Task.Run`: a token already cancelled when the pool dequeues the work
-  item makes `Task.Run` skip the body, so `MarkComplete` would never run, `IsComplete` would
-  stay false forever, and every waiter would hang for the life of the process. The body observes
+  item makes `Task.Run` skip the body, so `MarkAllItemsPublished` would never run,
+  `AllItemsPublished` would stay false forever, and every waiter would hang for the life of the process. The body observes
   cancellation itself and still reaches the `finally`.
 
 ## Virtualized ItemsSources
 
-- `MemoryMappedCollectionBase` (`Infrastructure/MemoryMappedCollectionBase.cs`) is the shared
-  base for the list ItemsSources: `JsonVisibleRowCollection`, `MemoryMappedFileLineCollection`,
-  `CsvRowCollection`, `JsonArrayRowCollection`. It supplies the read-only `IList` +
+- `VirtualizingItemsSourceBase` (`Infrastructure/VirtualizingItemsSourceBase.cs`) is the shared
+  base for the list ItemsSources: `JsonVisibleRowCollection`, `NdJsonLineCollection`,
+  `CsvRowCollection`, `JsonArrayRowCollection`, `JsonDiffRowCollection` and `RawRowCollection`.
+  It supplies the read-only `IList` +
   `INotifyCollectionChanged` surface
   Avalonia's `VirtualizingStackPanel` needs.
 - **The raw view is the exception, and deliberately so.** `RawTextSurface`
@@ -272,7 +290,7 @@ chain changes.
   has been since the last refresh, and the host clamps any offset it is handed against it. During
   a full-speed scan one 120ms growth tick is over a million rows, so a reveal deep in a large file
   clamps short and stays there.
-- Subclasses implement only `GetCount()`, `GetItem(int)`, `DisposeCore()`. The base owns the
+- Subclasses implement only `GetCount()`, `GetItem(int)` and, if they hold anything, `DisposeCore()`. The base owns the
   `disposed` flag: `Count` returns 0 and the indexer returns null once disposed, and it
   short-circuits *before* calling the subclass — so a subclass cannot forget the guard.
 - Why the guard exists: on a content swap Avalonia walks the outgoing ItemsSource once. On a
@@ -291,15 +309,16 @@ chain changes.
 - The hosting view's `DetachedFromVisualTree` also disposes its `DataContext`, as an
   idempotent safety net for teardown the shell doesn't drive (e.g. window close). "The shell
   always stops find first" is therefore an unsafe assumption, and nothing depends on it: search
-  reads its own mappings (below), and the one part that does touch document state (the reveal)
+  reads its own sources (below), and the one part that does touch document state (the reveal)
   links `TearingDown`.
-- `Dispose` is idempotent on every document VM and on `IndexedFileSession` / `RawIndexSession`
-  / `JsonDiffSession` / the collections, so the two owners touching the same instance is
+- `Dispose` is idempotent on every document VM and on `IndexedSourceSession` / `RawIndexSession`
+  / `JsonDiffSession` / `JsonArrayTableSession` / the collections, so the two owners touching the same instance is
   harmless.
 - Nested per-line `JsonViewModel` (inside NDJSON) is owned by `NdJsonViewModel`: disposed on
   each new line selection (`LoadSelectedLine` disposes the previous) and in its `DisposeCore`.
 - `IndexedDocumentViewModel` (`Infrastructure/IndexedDocumentViewModel.cs`) is the base class
-  behind `JsonViewModel`/`CsvViewModel`/`NdJsonViewModel`/`RawViewModel`/`JsonDiffViewModel`.
+  behind `JsonViewModel`/`CsvViewModel`/`NdJsonViewModel`/`RawViewModel`/`JsonDiffViewModel`/
+  `JsonArrayTableViewModel`.
   Its `Dispose()` is the one place the ordering above is encoded for a document:
   `session.RequestStop()` → `rows.Dispose()` → subclass `DisposeCore()` → `session.Dispose()`.
   It also owns `FilePath`/`StatusText`/`IndexFailure` and the indexing-completion monitor
@@ -319,7 +338,7 @@ chain changes.
   created partway through `LoadAsync`, after an await; reading them live also means
   `RawViewModel`'s wrap-width restart just replaces its field.
 - `OnIndexingCompleted()` takes no argument on purpose: every subclass reports from state it
-  already has, so handing it the `IFileIndexer` would only widen what a hook can reach into.
+  already has, so handing it the `IBackgroundIndex` would only widen what a hook can reach into.
 - **A row collection samples "is the scan still running?" BEFORE its first walk, never after.**
   Every collection with an `IndexGrowthMonitor` (`JsonVisibleRowCollection`,
   `JsonArrayRowCollection`, `JsonDiffRowCollection`) attaches one only when the scan was
@@ -335,11 +354,11 @@ chain changes.
 ## Search interaction
 
 - The vocabulary splits in two: **search** is bytes (`ScanTarget`, `ISearchMatcher`,
-  `FileSearchSession` — no display knowledge), **find** is what the user steps through
+  `SearchSession` — no display knowledge), **find** is what the user steps through
   (`FindCursor`, `FindStatusText`, `FindController`). `ISearchNavigator` is the seam: targets
   down, order keys and reveals up.
-- `FindController` owns one `FileSearchSession` per searched target. A navigator hands over
-  `ScanTarget`s (path, plus offset/length for a sub-document), never mappings —
+- `FindController` owns one `SearchSession` per searched target. A navigator hands over
+  `ScanTarget`s (an `IByteOrigin`, plus offset/length for a sub-document), never sources —
   `ISearchNavigator.ScanTarget`/`ScanTargets`. A scan target is what is searched *in*; the term
   being searched *for* reaches the engine as an `ISearchMatcher`, never through the navigator.
 - `FindCursor` owns the ordered stop list and the position in it: incremental folding, sorting
@@ -350,12 +369,13 @@ chain changes.
   directly against plain lists. `FindStatusText` composes the status line as a pure function.
   What remains in `FindController` is orchestration: scan lifetime, waiting for more results,
   the reveal, and the press queue.
-- **Each scan opens its own mapping, one 4MB chunk at a time, and releases it before taking the
-  next.** So a search's lifetime is fully independent of the document's: a document can be torn
+- **Each scan opens its own source, one 4MB chunk at a time (`ScanTarget.Origin.OpenRange`), and
+  releases it before taking the next.** That is why a target carries an origin rather than a
+  source: a scan that is cancelled and never joined must own everything it reads. So a search's lifetime is fully independent of the document's: a document can be torn
   down while a scan over the same path runs, and stopping a scan is never a precondition for
   releasing anything. `FindController.StopSearch()`/`Detach()` are synchronous — they ask the
   scans to stop and return; nothing joins them.
-- **Why per-chunk and not one whole-file mapping** (do not "simplify" this back): a second
+- **Why per-chunk and not one whole-file source** (do not "simplify" this back): a second
   whole-file mapping would double-count every touched page in RSS — a full search of a 4.5GB
   file would report ~9GB — and its eventual multi-GB unmap would contend for the process-wide
   address-space lock with the document's own unmap on the UI thread at close. One chunk caps
@@ -368,7 +388,7 @@ chain changes.
 - **The reveal is the one document-scoped part of find.** It runs on the UI thread, awaits index
   coverage, and touches the document's index and rows, so `FindController` links
   `ISearchNavigator.DocumentTearingDown` (the document session's `TearingDown`) and swallows the
-  cancellation. `MMapFile.GetSpan`'s `ObjectDisposedException` remains the backstop.
+  cancellation. `MMapFile.GetContiguousSpan`'s `ObjectDisposedException` remains the backstop.
 - The shell stops find before a content swap — it clears the highlight term and find-bar
   status. That is UI state, not safety.
 - A range `ScanTarget` reports offsets relative to the range start, so a sub-document (one

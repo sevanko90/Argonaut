@@ -1,5 +1,7 @@
 # Performance & memory review — 2026-07-17
 
+> **Code names have moved on since this was written (checked 2026-09-17):** `MMapFile.GetSpan` is now `ByteSourceReading.RequireContiguous` over `IByteSource`, and `MemoryMappedFileLineCollection` is `NdJsonLineCollection`. The reasoning is unaffected; read the old names as the new ones.
+
 Findings from a full review of the indexing and viewing paths, ranked by expected impact
 for the target files (4GB NDJSON / 1.8M lines, and 60MB JSON / 6M tokens). Status reflects
 work on the `memory-optimise` branch.

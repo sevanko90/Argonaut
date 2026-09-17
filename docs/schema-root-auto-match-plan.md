@@ -1,5 +1,7 @@
 # Auto-matching a schema root to the open document
 
+> **Code names have moved on since this was written (checked 2026-09-17):** `mmap.GetSpan` is now `ByteSourceReading.RequireContiguous` over an `IByteSource`. The reasoning is unaffected; read the old names as the new ones.
+
 ## Context
 
 `docs/json-schema-hints-plan.md` assumed one schema file = one schema, so

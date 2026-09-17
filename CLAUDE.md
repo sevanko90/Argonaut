@@ -45,7 +45,7 @@ partial document. So:
 
 - **Scan loops advance by the length returned, not the length requested**, and treat an empty
   return as the termination signal (`FileOffsetIndex.ProduceOffsets`, `FileTypeDetector`'s three
-  finders, `FileSearchSession.Scan`). A loop that assumes it got its whole chunk silently skips
+  finders, `SearchSession.Scan`). A loop that assumes it got its whole chunk silently skips
   bytes over a split source.
 - **Never snapshot `AvailableLength`.** Re-read it each turn, and when the scan reaches it, ask
   `LengthSettled` whether that was the end or only the end so far - if not, block in
@@ -67,7 +67,7 @@ partial document. So:
   window - where renting would cost more memory than the read saves. If editing ever reaches those
   views, `RequireContiguous`'s call sites are the worklist.
 - **`Release()` is for the one owner of a source**, the document session, and only after its
-  cancel → join → release ordering (see `IndexedFileSession`). It is a no-op for a source holding
+  cancel → join → release ordering (see `IndexedSourceSession`). It is a no-op for a source holding
   no OS resource, which is why `IByteSource` does not extend `IDisposable`. Sub-range readers and
   search own their own sources and release those; nobody releases a source handed to them.
 
@@ -155,7 +155,7 @@ find out what it is for; a member named for what it represents answers that at t
   `IDocumentSession.TearingDown`, not `IDocumentSession.Token` — `CreateLinkedTokenSource(
   session.TearingDown)` then reads as a sentence, and a reader who has never seen the type knows
   when it fires.
-- **Methods say what stops, not that something is cancelled.** `FileSearchSession.RequestStop()`,
+- **Methods say what stops, not that something is cancelled.** `SearchSession.RequestStop()`,
   not `Cancel()` — and it matches `IDocumentSession.RequestStop`, so the same verb means the same
   thing (cooperative, returns immediately, joins nothing) everywhere in the codebase.
 - **Two things of the same type in one class must be distinguished by name.**

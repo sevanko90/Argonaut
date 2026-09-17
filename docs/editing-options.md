@@ -1,13 +1,23 @@
 # Editing a file in place — options considered
 
-Decision record for "let the user change the document, not just look at it". Nothing here is
-built. This document exists to settle *where* editing would live and *how* an edit is represented
-before any of it is scheduled, because the naive answer (mutate bytes, re-index) is the one
-answer that a multi-GB tool cannot afford.
+Decision record for "let the user change the document, not just look at it". It was written to
+settle *where* editing would live and *how* an edit is represented before any of it was
+scheduled, because the naive answer (mutate bytes, re-index) is the one answer that a multi-GB
+tool cannot afford.
 
-Every cost claim below was checked against the code at the time of writing (branch `main`,
+**Status (2026-09-17):** step 1 of the [Outcome](#outcome) is built, step 2 is part-built (caret,
+selection, copy and a position readout; no typing yet), steps 3-4 are not started. The sections
+"What step 1 actually became" and "What step 2 has become so far" at the end are the current
+record; §1-§6 are the reasoning as written.
+
+Every cost claim in §1-§6 was checked against the code at the time of writing (branch `main`,
 2026-09-09), with file/line references kept so a future reader can tell whether the reasoning
-still holds or the code has moved out from under it.
+still holds or the code has moved out from under it. Some has since moved: the
+`MMapFile.GetSpan` chokepoint those sections cite is now the `IByteSource` seam (whole ranges via
+`ByteSourceReading.RequireContiguous`, which kept `GetSpan`'s exact-or-throw contract), and
+`FileSearchSession` is `SearchSession`, reading through `IByteOrigin.OpenRange`, and
+`RawSegmentIndex.NextRowBoundary` is now `RawRowBoundary.Next`. The argument is
+unchanged by either rename; the line numbers are not current.
 
 The constraint that drives every choice: the app never holds a document in memory. It holds a
 mapping (`MMapFile`) and an index, and realizes only the rows on screen. Any editing design that
@@ -24,8 +34,9 @@ disqualified on arrival regardless of how clean it looks.
 - **What an edit costs the index** — raw re-derives, JSON overlays. The raw index is a pure
   function of the bytes and can be invalidated and regrown; the JSON index is a record of parse
   results and cannot.
-- **How a save works** — streaming rewrite to a temp file, then atomic rename. Rejected:
-  in-place patching.
+- **How a save works** — streaming rewrite to a temp file, then atomic rename, with the staging
+  and swap behind a platform seam (`IFileReplacer`) because the sandboxed macOS build cannot
+  create a temp file beside the original. Rejected: in-place patching.
 - **What happens to search while dirty** — search reflects the last save, and the document is
   marked dirty. Deferred: a merge-iterator over piece-space.
 
@@ -203,14 +214,123 @@ taking the raw scan's measured ~1024 MB/s as the ceiling for a pure byte copy �
 background re-index the app already performs on open. Save cost is O(file), which is what every
 editor pays and is not where the difficulty of this feature lives.
 
+### The replace step is a platform seam, not a `File.Move`
+
+"Temp file beside the original, then rename" names the right outcome but not an implementation,
+because the only portable piece of it is the copy. Where the temp file can live, how the swap is
+made atomic, and what survives it all differ by platform, and one target - the Mac App Store -
+forbids the naive version outright. So the writer that walks the pieces never touches the file
+system directly. It writes to a stream that a replacement abstraction hands it, and that
+abstraction owns everything either side of the copy.
+
+Sketched shape (names provisional, held to the naming rules in CLAUDE.md):
+
+```csharp
+/// Stages new content for a file and swaps it in atomically, or not at all.
+public interface IFileReplacer
+{
+    /// Creates somewhere to write the new content for <paramref name="destination"/>, on the
+    /// same volume, where this process is allowed to write. The destination need not exist yet
+    /// (Save As, export).
+    StagedFile Stage(IByteOrigin destination);
+}
+
+public abstract class StagedFile : IDisposable
+{
+    /// Where the piece walk writes. Sequential, unbuffered by the caller.
+    public abstract Stream Content { get; }
+
+    /// Flushes to stable storage and swaps the staged content in for the destination.
+    /// Either the destination is the new content afterwards, or it is untouched.
+    public abstract void Commit();
+
+    /// Disposing an uncommitted stage deletes the staged content.
+    public abstract void Dispose();
+}
+```
+
+It takes an `IByteOrigin` rather than a path string because on the sandboxed build the path is not
+sufficient on its own - the access grant travels with the origin (below) - and because a document
+with no path (a paste, a download) has nowhere to be replaced and gets Save As instead, which is
+the existing `Path is not null` degradation rule rather than a new one.
+
+**What every implementation must get right**, whichever platform it is on:
+
+- **Same volume, or it is not atomic.** A rename across volumes is a copy followed by a delete, so
+  a crash between them loses the file. The temp file goes beside the destination, or into a
+  directory the OS guarantees is on the destination's volume - never `Path.GetTempPath()`.
+- **Flush to stable storage before the swap.** `FileStream.Flush(flushToDisk: true)`. On macOS a
+  plain `fsync` does not flush the drive's own cache; confirm the runtime issues `F_FULLFSYNC`
+  there before relying on it, and issue it directly if not.
+- **Preserve what the user would notice losing.** A rename installs a *new* file, so the
+  original's permissions, ownership, ACLs and extended attributes (including macOS Finder tags
+  and quarantine flags) are gone unless copied. Copy the mode bits onto the staged file at minimum;
+  the platform APIs below preserve the rest.
+- **Replace the target of a symlink, not the link.** Resolve the destination before staging, or a
+  save turns a link into a regular file beside the real one. Hard links are broken by any
+  rename-based save; that is accepted and worth one line in the user-facing notes.
+- **Check free space first.** A save needs the full file size free on the destination volume.
+  Failing that up front is a message; failing it at 90% is a wasted minute and a temp file to clean.
+- **Clean up an abandoned stage.** A crash leaves a hidden temp file beside the user's document.
+  Name it recognisably (`.orders.json.argonaut-save-<random>`) so it can be found and swept on
+  the next save to the same folder.
+
+**Implementations:**
+
+- **Windows (portable and MSIX).** Stage beside the destination, commit with `File.Replace`
+  (Win32 `ReplaceFile`), which preserves attributes, ACLs and alternate data streams, or
+  `File.Move(overwrite: true)` when the destination does not exist yet. The MSIX build runs full
+  trust, so this is the same code with no store-specific branch.
+- **macOS and Linux, unsandboxed.** Stage beside the destination, copy the mode bits, commit with
+  `rename(2)` (which is what `File.Move(overwrite: true)` does on Unix). On macOS, prefer the
+  sandboxed implementation below even here: it preserves metadata `rename` does not, and one
+  macOS path is cheaper to maintain than two.
+- **macOS under App Sandbox (Mac App Store).** The case that forces the abstraction. A file the
+  user opened through the picker or a drop grants access to *that file*, not to its folder, so
+  creating a sibling temp file is denied. The sanctioned route is the one `NSDocument` uses:
+  `NSFileManager.URLForDirectory(NSItemReplacementDirectory, appropriateForURL: destination)` for
+  a staging directory the sandbox permits on the right volume, then
+  `replaceItemAtURL:withItemAtURL:` to swap, inside `startAccessingSecurityScopedResource` and
+  ideally an `NSFileCoordinator` write so sync clients (iCloud Drive, Dropbox) see one coherent
+  change. This needs native interop (Objective-C runtime calls or a small native shim); no .NET API
+  reaches it. It also needs the `com.apple.security.files.user-selected.read-write` entitlement,
+  and any security-scoped bookmark that should be saveable later (recent files) must be created
+  without the read-only option.
+
+**The mapping has to be gone before the commit, and that orders the whole save.** On Windows a file
+cannot be replaced while any mapping of it is open, and `MMapFile` holds one for its lifetime
+(`Argonaut/Infrastructure/MMapFile.cs:30`). But the piece walk *reads* the original through that
+same mapping to produce the staged content. So a save is necessarily:
+
+1. Stage, and walk the pieces into `Content` on a background thread, reading the original mapping.
+2. Stop and join everything that holds a source over this origin - the document session (its
+   usual cancel → join → release), and any running search, whose chunk sources `FindController`
+   otherwise cancels and forgets without joining. A search that is not joined here can still hold
+   a mapping when the commit runs.
+3. `Commit()`.
+4. Re-open the origin and start the background re-index, exactly as on open, with the piece table
+   reset to a single piece over the new file.
+
+If step 3 fails, the destination is untouched by contract, so the recovery is to re-open the
+original origin and restore the piece table and journal as they were - offsets in the piece table
+are logical, and the original bytes they point into are the same bytes as before. Unix does not
+need step 2 to succeed (a mapping survives the rename, pinning the old inode), but the ordering
+should not branch per platform: one sequence, correct on the strictest.
+
+The same seam serves every other write the roadmap has queued - Save As, export a subtree
+([json-array-table-options.md](json-array-table-options.md)), a diff saved as an RFC 6902 patch -
+each of which is a stream of bytes into a staged file with nothing different about the commit.
+[store-distribution-comparison.md](store-distribution-comparison.md) has the wider sandbox picture
+this is one part of.
+
 ## 5. Search and the other direct readers
 
 The readers that bypass the index and read the file themselves are where the sprawl is, and they
 are the reason this is a coordinate-system change rather than a feature:
 
-- **`FileSearchSession` opens its own mapping of the path, one chunk at a time**
-  (`Argonaut/Features/Search/FileSearchSession.cs:160`). It scans the bytes on disk and cannot
-  see a piece table or an overlay.
+- **`SearchSession` opens its own source over the origin, one chunk at a time**
+  (`Argonaut/Features/Search/SearchSession.cs`, `target.Origin.OpenRange`). It scans the bytes
+  the origin holds - the file on disk - and cannot see a piece table or an overlay.
 - **`RawOffsetRowResolver`** maps a byte offset back to a row for reveal — needs piece-space.
   Small.
 - **`JsonDiffIndex`** reads name spans from its own two mappings, and the content hashes it
@@ -244,8 +364,10 @@ Build the byte layer once, in the raw view.
    tests already use.
 2. **Editing UI in the raw view.** Caret, selection, clipboard, undo/redo command log. The large
    half; size it separately and do not fold it into step 1.
-3. **Save.** Streaming rewrite, temp file, atomic rename, background re-index. Dirty flag, and
-   search marked as reflecting the last save.
+3. **Save.** Streaming rewrite into an `IFileReplacer` stage, release every mapping of the
+   original, commit, background re-index. Dirty flag, and search marked as reflecting the last
+   save. Build the Windows and unsandboxed implementations first; the sandboxed macOS one is only
+   needed for a Mac App Store build, but the seam must exist from the start.
 4. **Re-evaluate the JSON view.** With 1-3 shipped, decide between the option-C overlay for
    scalar edits in the tree (small, self-contained, no index change) and leaving structural
    editing to the raw view. Do not commit to JSON edit classes 2 and 3 before this point.
@@ -311,7 +433,8 @@ caret was before a jump across a multi-GB file. Caret movement kept the minimal 
 are separate operations rather than one with a flag, since centring on every arrow key would leap
 half a screen.
 
-Still to do: typing and deletion against the piece table, edit mode gated on `IsComplete`,
+Still to do: typing and deletion against the piece table, edit mode gated on the scan having
+finished (`AllItemsPublished` - `RawEditedRowIndex` already refuses to start without it),
 undo/redo wired to the `RawEditJournal` that is built but unused, paste, and making the window's
 tunnelling Escape handler mode-aware.
 

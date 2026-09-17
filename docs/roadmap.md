@@ -24,7 +24,7 @@ and copy-out. Nothing is editable yet - typing is the next piece of work.
 - **Editing UI in the raw view.** *Part-built.* `RawTextSurface` replaced the `ListBox`: it draws
   every visible row itself, implements `ILogicalScrollable`, and holds the caret
   (`RawCaretController`, `RawCaret`), selection across rows, and copy. Still to do: **typing and
-  deletion** wired to the piece table, edit mode gated on `RawSegmentIndex.IsComplete`, undo/redo
+  deletion** wired to the piece table, edit mode gated on `RawSegmentIndex.AllItemsPublished`, undo/redo
   wired to `RawEditJournal` (built, unused), paste, and making `MainWindow`'s tunnelling Escape
   handler mode-aware. IME/dead-key composition is deferred past v1 — `Avalonia.Headless` posts
   finished text rather than composition events, so it cannot be tested here.
@@ -56,10 +56,13 @@ and copy-out. Nothing is editable yet - typing is the next piece of work.
   capped, since `IRawRowIndex.LineContaining` gets it from the anchor walk the index already does.
 - **Unicode descriptors elsewhere.** The name lookup is not raw-specific; the JSON views could
   identify a character under the cursor the same way.
-- **Save as a streaming rewrite.** Temp file beside the original, atomic rename, background
-  re-index. One sequential pass; not where the difficulty lives.
+- **Save as a streaming rewrite.** Staged temp file, atomic swap, background re-index. The copy is
+  one sequential pass and not where the difficulty lives; the swap is platform code behind
+  `IFileReplacer`, because the Mac App Store sandbox forbids a temp file beside the original and
+  Windows forbids replacing a file that is still mapped. Design in
+  [editing-options.md](editing-options.md) §4.
 - **Scalar edits in the JSON tree.** An offset-keyed replacement overlay served at
-  `MMapFile.GetSpan`, with no index change, is a small self-contained feature on its own. Decide
+  the `IByteSource` seam, with no index change, is a small self-contained feature on its own. Decide
   it *after* the raw editor ships, not before.
 - **Structural editing in the JSON tree** (delete, insert, paste) — tombstones and fragment
   indices merged into the row walk. The expensive class. Explicitly not committed to.
@@ -224,3 +227,16 @@ proposed when only tests read it; `JsonPathBuilder`, `JsonPathResolver`, `JsonAr
   search-highlight pill. Deferred over rendering-speed concerns on the virtualized tree; a
   perf-conscious plan exists outside the repo. The compact tree density (22px rows, 16px indent)
   is a settled choice and is not part of this.
+
+## Distribution
+
+Auto-update through Velopack and GitHub Releases is built (see
+[velopack-auto-update-plan.md](velopack-auto-update-plan.md)); the store channels are not.
+Detail: [store-distribution-comparison.md](store-distribution-comparison.md).
+
+- **Microsoft Store (MSIX).** Cheap: full-trust packaging, no sandbox, no code change beyond
+  compiling the Velopack update check out of the store build.
+- **Mac App Store.** Expensive, and mostly for sandbox reasons rather than packaging:
+  security-scoped bookmarks for recent files and remembered schemas, the schema sidecar and
+  schema folder reworked, and a sandboxed save implementation behind `IFileReplacer`. Only
+  worth it with a concrete reason to be in that store.

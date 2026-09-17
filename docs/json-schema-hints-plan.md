@@ -1,5 +1,7 @@
 # JSON Schema-driven display hints
 
+> **Code names have moved on since this was written (checked 2026-09-17):** `mmap.GetSpan` is now `ByteSourceReading.RequireContiguous` over an `IByteSource`. The reasoning is unaffected; read the old names as the new ones.
+
 **Status: built.** Written as a plan; kept as the design record. The one place reality diverged
 from the plan is where the labels are rendered — see "Rendering: the schema gutter" below, which
 replaced the original inline-after-the-value design.

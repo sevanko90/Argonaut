@@ -31,6 +31,7 @@ public readonly record struct RawSpanSnapshot(
     long StartOffset,
     long EndOffset,
     int RowsHeld,
+    int AnchorsHeld,
     int ConvergedOriginalRow,
     long EditReach,
     int? FirstLineNumber,
@@ -67,7 +68,8 @@ public sealed record RawEditSnapshot(
     int OriginalRowCount,
     int SpanCount,
     int TotalDerivedRows,
-    int MaxDerivedRows,
+    int HeldAnchors,
+    int MaxHeldAnchors,
     bool NeedsRebuild,
     IReadOnlyList<RawSpanSnapshot> Spans,
     int UndoDepth,
@@ -77,8 +79,11 @@ public sealed record RawEditSnapshot(
     long SelectionStart,
     long SelectionEnd)
 {
-    /// <summary>How much of the row index's budget the spans have taken, 0 to 1.</summary>
-    public double BudgetUsed => MaxDerivedRows == 0 ? 0 : (double)TotalDerivedRows / MaxDerivedRows;
+    /// <summary>
+    /// How much of the row index's budget the spans have taken, 0 to 1. The budget counts
+    /// anchors rather than rows: a row inside a span costs nothing to hold, only to re-walk.
+    /// </summary>
+    public double BudgetUsed => MaxHeldAnchors == 0 ? 0 : (double)HeldAnchors / MaxHeldAnchors;
 
     /// <summary>Bytes the document has gained or lost against the file on disk.</summary>
     public long ByteDelta => DocumentLength - OriginalLength;

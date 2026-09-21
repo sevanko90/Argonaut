@@ -112,8 +112,9 @@ internal sealed class RawEditInspectorWindow : Window
             + (state.IsUnedited ? "unedited" : "edited");
 
         this.budget.Text =
-            $"row-index budget {N(state.TotalDerivedRows)} / {N(state.MaxDerivedRows)} rows "
-            + $"({state.BudgetUsed * 100:0.00}%) across {state.SpanCount} span(s)"
+            $"row-index budget {N(state.HeldAnchors)} / {N(state.MaxHeldAnchors)} anchors "
+            + $"({state.BudgetUsed * 100:0.00}%) covering {N(state.TotalDerivedRows)} rows "
+            + $"across {state.SpanCount} span(s)"
             + (state.NeedsRebuild ? "    NEEDS REBUILD - new edit sites are being refused" : string.Empty);
         this.budgetBar.Value = Math.Clamp(state.BudgetUsed * 1000, 0, 1000);
 
@@ -150,6 +151,7 @@ internal sealed class RawEditInspectorWindow : Window
                 N(span.StartRow),
                 span.FirstLineNumber is int line ? N(line) : "—",
                 N(span.RowsHeld),
+                N(span.AnchorsHeld),
                 N(span.ConvergedOriginalRow),
                 N(span.EditReach),
                 $"{N(span.StartOffset)}..{N(span.EndOffset)}",
@@ -159,7 +161,7 @@ internal sealed class RawEditInspectorWindow : Window
         }
 
         return Table(
-            new[] { "#", "anchor", "orig row", "start row", "line", "rows held", "converged", "reach", "bytes", "own Δb/Δr/Δl", "before Δb/Δr/Δl" },
+            new[] { "#", "anchor", "orig row", "start row", "line", "rows", "anchors", "converged", "reach", "bytes", "own Δb/Δr/Δl", "before Δb/Δr/Δl" },
             rows);
     }
 

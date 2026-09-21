@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Text;
 using Argonaut.Features.Raw;
 using Argonaut.Infrastructure;
@@ -20,7 +21,7 @@ public class RawEditedRowIndexTests
         private readonly byte[] originalBytes;
         private readonly int wrapWidth;
 
-        public EditedDocument(byte[] original, int wrapWidth)
+        public EditedDocument(byte[] original, int wrapWidth, int maxHeldAnchors = int.MaxValue)
         {
             this.originalBytes = original;
             this.wrapWidth = wrapWidth;
@@ -30,7 +31,7 @@ public class RawEditedRowIndexTests
             Original.IndexingTask.GetAwaiter().GetResult();
 
             Table = new RawPieceTable(OriginalSource);
-            Rows = new RawEditedRowIndex(Original, OriginalSource, Table);
+            Rows = new RawEditedRowIndex(Original, OriginalSource, Table, maxHeldAnchors);
             Oracle = new List<byte>(original);
         }
 
@@ -238,13 +239,13 @@ public class RawEditedRowIndexTests
     /// <summary>Many lines, so edits can be put a long way apart.</summary>
     private const int RawSegmentIndexAnchorStride = 64;
 
-    private static EditedDocument LongDocument(int lines, int wrapWidth = 80)
+    private static EditedDocument LongDocument(int lines, int wrapWidth = 80, int maxHeldAnchors = int.MaxValue)
     {
         var text = new StringBuilder();
         for (int i = 0; i < lines; i++)
             text.Append($"line {i}\n");
 
-        return new EditedDocument(Bytes(text.ToString()), wrapWidth);
+        return new EditedDocument(Bytes(text.ToString()), wrapWidth, maxHeldAnchors);
     }
 
     [Fact]
@@ -301,12 +302,17 @@ public class RawEditedRowIndexTests
         // Each site costs its own anchor bucket, so the budget is what eventually says a full
         // re-index is the better deal - not the distance between the edits. Sites are spaced
         // well past one anchor stride so each opens a span of its own.
+        //
+        // Against a budget rather than the production one: a megabyte of anchors would take a
+        // third of a gigabyte of document to reach, and the mechanism under test is the same
+        // either way.
         const int SiteSpacing = 1500;
-        var document = LongDocument(300_000);
+        const int Budget = 40;
+        var document = LongDocument(300_000, maxHeldAnchors: Budget);
         Assert.False(document.Rows.NeedsRebuild);
 
         int sites = 0;
-        while (document.Rows.TotalDerivedRows <= RawEditedRowIndex.MaxDerivedRows)
+        while (document.Rows.HeldAnchors <= Budget)
         {
             long at = SiteSpacing + (sites * (long)SiteSpacing);
             Assert.True(at < document.Table.AvailableLength, "ran out of document before the budget");
@@ -577,6 +583,54 @@ public class RawEditedRowIndexTests
         Assert.Equal(1, document.Rows.SpanCount);
         document.AssertMatchesAFreshIndex("delete swallowing the span after it");
     }
+
+    [Fact]
+    public void AnEditInsideAVeryLongLine_HoldsAnchorsRatherThanEveryRow()
+    {
+        // The case that came out of running the editor on a 4GB document: a 48-byte edit inside
+        // a ~54MB unbroken line produced a span of 676,661 rows and 21MB of RawRowInfo, which was
+        // ten times the budget and refused every further edit anywhere in the file.
+        //
+        // Why the whole line has to be walked at all is in the class remarks: the appealing
+        // shortcut - "a soft-wrapped line breaks every WrapWidth bytes, so an insert leaves the
+        // later breaks where they were" - is untrue, because a forced break backs off up to 3
+        // bytes to avoid splitting a character and that chains. What is avoidable is keeping
+        // every row the walk passes.
+        const int WrapWidth = 80;
+        var text = new StringBuilder();
+        text.Append(new string('a', 400_000)).Append('\n');
+        for (int i = 0; i < 200; i++)
+            text.Append($"line {i}\n");
+
+        var document = new EditedDocument(Bytes(text.ToString()), WrapWidth);
+        document.Insert(100, Bytes("EDIT"));
+
+        var span = Assert.Single(EnumerateSpans(document));
+        Assert.True(span.RowsHeld > 4_000, $"the walk should have covered the line; it covered {span.RowsHeld} rows");
+        Assert.Equal((span.RowsHeld + RawSegmentIndexAnchorStride - 1) / RawSegmentIndexAnchorStride, span.AnchorsHeld);
+        Assert.False(document.Rows.NeedsRebuild);
+
+        document.AssertMatchesAFreshIndex("one edit inside a 400KB line");
+    }
+
+    [Fact]
+    public void RowsDeepInsideALongLinesSpan_AreRecoveredFromTheNearestAnchor()
+    {
+        // The anchors are only worth having if a row between two of them still comes back
+        // correct, so this reads every row of the span rather than only its edges - the oracle
+        // above does too, but this one says out loud which mechanism it is exercising.
+        var text = new StringBuilder();
+        text.Append(new string('b', 60_000)).Append('\n');
+        text.Append("after\n");
+
+        var document = new EditedDocument(Bytes(text.ToString()), 80);
+        document.Insert(40, Bytes("Z"));
+
+        document.AssertMatchesAFreshIndex("every row of a long line's span");
+    }
+
+    private static IEnumerable<RawSpanSnapshot> EnumerateSpans(EditedDocument document)
+        => document.Rows.DescribeSpans();
 
     /// <summary>
     /// The same oracle over a document big enough that random edits land in many different

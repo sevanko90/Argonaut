@@ -43,9 +43,25 @@ namespace Argonaut.Features.Raw;
 ///
 /// Editing the same place repeatedly widens one span; editing N places gives N spans; going back
 /// and forth between two places gives two. What is <i>not</i> bounded is N itself, so
-/// <see cref="TotalDerivedRows"/> carries a budget - see <see cref="NeedsRebuild"/> for when it
-/// runs out, what happens then, and why the rebuild it names is a merge of the edits into a new
+/// <see cref="HeldAnchors"/> carries a budget - see <see cref="NeedsRebuild"/> for when it runs
+/// out, what happens then, and why the rebuild it names is a merge of the edits into a new
 /// baseline rather than anything to do with the bytes on disk.
+///
+/// <b>A span stores anchors, not rows</b>, for exactly the reason <see cref="RawSegmentIndex"/>
+/// does: one marker every <see cref="RawSegmentIndex.AnchorStride"/> rows, and any row in between
+/// recovered by re-walking from it. The first cut held every row it derived, which is fine while
+/// a span is the sixty-odd rows an ordinary edit disturbs and is not fine at all when it is not -
+/// a 48-byte edit inside a 54MB unbroken line produced a span of 676,661 rows and 21MB of
+/// <see cref="RawRowInfo"/>, which blew the budget tenfold and locked editing out everywhere
+/// else. The same edit now costs about 10,500 anchors and 170KB.
+///
+/// That a long line has to be walked at all is not avoidable, and the appealing shortcut is
+/// unsound. Inside a soft-wrapped line the breaks fall every <c>WrapWidth</c> bytes from the line
+/// start, so it is tempting to say an insert leaves every later break where it was and converge
+/// immediately at zero displacement. <see cref="RawRowBoundary"/> backs a forced break off by up
+/// to 3 bytes to avoid splitting a UTF-8 character, and which bytes sit at the cap has just
+/// changed - so one different backoff moves the next row, and that chains. It holds for ASCII and
+/// cannot be assumed, which is not a standard a row index gets to work to.
 ///
 /// Re-derivation walks two streams from the same anchor - one over the original bytes, one over
 /// the edited document - and stops when they provably re-converge: past every edit in that span,
@@ -61,18 +77,24 @@ namespace Argonaut.Features.Raw;
 public sealed class RawEditedRowIndex : IRawRowIndex
 {
     /// <summary>
-    /// How many rows may be held across every dirty span before a full re-index is the better
-    /// deal: 1024 anchor buckets, 65,536 rows, about 2MB of <see cref="RawRowInfo"/>. That buys
-    /// roughly a thousand separate places edited at the per-span floor, or one very long line
-    /// re-flowed. See <see cref="NeedsRebuild"/> for what happens on reaching it.
+    /// How many anchors may be held across every dirty span before a full re-index is the better
+    /// deal - a budget on <i>memory</i>, at 16 bytes each, so about 1MB.
+    ///
+    /// It is deliberately not a budget on time, which the anchors do not bound: re-deriving a
+    /// span walks every row it covers, measured at roughly 30ns per row (Apple M5, Release), so
+    /// an edit inside a 32MB unbroken line costs about 13ms per keystroke and one inside a 54MB
+    /// line about 20ms - laggy but usable, where before this class held those rows in full and
+    /// cost 21MB and a blown budget instead. Bounding the walk is what the background re-index
+    /// over the piece table is for; bounding what is kept is this.
     /// </summary>
-    internal const int MaxDerivedRows = 1024 * RawSegmentIndex.AnchorStride;
+    internal const int MaxHeldAnchors = 64 * 1024;
 
     private readonly RawSegmentIndex original;
     private readonly IByteSource originalBytes;
     private readonly RawPieceTable document;
     private readonly int wrapWidth;
     private readonly long originalLength;
+    private readonly int maxHeldAnchors;
 
     /// <summary>Disjoint, ordered by position. Empty until the first edit.</summary>
     private readonly List<DirtySpan> spans = new();
@@ -84,7 +106,15 @@ public sealed class RawEditedRowIndex : IRawRowIndex
     /// while a mutating coordinate system is layered on top of it.</param>
     /// <param name="originalBytes">The bytes <paramref name="original"/> indexed.</param>
     /// <param name="document">The edited document, over the same original bytes.</param>
-    public RawEditedRowIndex(RawSegmentIndex original, IByteSource originalBytes, RawPieceTable document)
+    /// <param name="maxHeldAnchors">Test seam. The production budget
+    /// (<see cref="MaxHeldAnchors"/>) is a megabyte of anchors, which a test would need a
+    /// third of a gigabyte of document to reach; a test that wants to see what happens at the
+    /// budget passes a smaller one and exercises the same code.</param>
+    public RawEditedRowIndex(
+        RawSegmentIndex original,
+        IByteSource originalBytes,
+        RawPieceTable document,
+        int maxHeldAnchors = MaxHeldAnchors)
     {
         ArgumentNullException.ThrowIfNull(original);
         ArgumentNullException.ThrowIfNull(originalBytes);
@@ -97,6 +127,7 @@ public sealed class RawEditedRowIndex : IRawRowIndex
         this.document = document;
         this.wrapWidth = original.WrapWidth;
         this.originalLength = originalBytes.AvailableLength;
+        this.maxHeldAnchors = maxHeldAnchors;
     }
 
     /// <summary>Rows in the edited document.</summary>
@@ -104,10 +135,10 @@ public sealed class RawEditedRowIndex : IRawRowIndex
 
     /// <summary>
     /// <b>When it fires:</b> re-evaluated after every edit, and true once the spans together hold
-    /// more than <see cref="MaxDerivedRows"/> rows. There are two ways to get there - around a
-    /// thousand separate places edited, each costing its own anchor bucket, or a single edit
-    /// inside a line long enough that re-flowing the rest of it runs to that many rows by itself.
-    /// It can go false again: undoing enough shrinks the spans back.
+    /// more than <see cref="MaxHeldAnchors"/> anchors. There are two ways to get there - around a
+    /// thousand separate places edited, each costing its own anchor bucket, or a handful of edits
+    /// inside lines long enough that walking the rest of them runs to that many anchors on their
+    /// own. It can go false again: undoing enough shrinks the spans back.
     ///
     /// <b>What it means today:</b> nothing happens automatically. Row lookups stay correct either
     /// way - this is an efficiency signal, never a correctness one - and the only observable
@@ -135,14 +166,29 @@ public sealed class RawEditedRowIndex : IRawRowIndex
     /// </summary>
     public bool NeedsRebuild { get; private set; }
 
-    /// <summary>Rows currently re-derived rather than read from the original index.</summary>
+    /// <summary>Rows the spans cover - what is re-derived rather than read from the original
+    /// index. Informational: the budget is <see cref="HeldAnchors"/>, since a row inside a span
+    /// costs nothing to hold, only to re-walk.</summary>
     internal int TotalDerivedRows
     {
         get
         {
             int total = 0;
             foreach (var span in this.spans)
-                total += span.Derived.Count;
+                total += span.RowsHeld;
+
+            return total;
+        }
+    }
+
+    /// <summary>Anchors held across every span. What the budget counts.</summary>
+    internal int HeldAnchors
+    {
+        get
+        {
+            int total = 0;
+            foreach (var span in this.spans)
+                total += span.Anchors.Count;
 
             return total;
         }
@@ -165,15 +211,7 @@ public sealed class RawEditedRowIndex : IRawRowIndex
         {
             var span = this.spans[i];
 
-            int? firstLine = null;
-            foreach (var row in span.Derived)
-            {
-                if (row.LineNumber is int line)
-                {
-                    firstLine = line + span.LineDeltaBefore;
-                    break;
-                }
-            }
+            int? firstLine = span.Anchors.Count > 0 ? span.Anchors[0].LineNumber + span.LineDeltaBefore : null;
 
             described.Add(new RawSpanSnapshot(
                 i,
@@ -182,7 +220,8 @@ public sealed class RawEditedRowIndex : IRawRowIndex
                 span.StartRow,
                 span.StartOffset,
                 span.EndOffset,
-                span.Derived.Count,
+                span.RowsHeld,
+                span.Anchors.Count,
                 span.ConvergedOriginalRow,
                 span.EditReach,
                 firstLine,
@@ -203,7 +242,7 @@ public sealed class RawEditedRowIndex : IRawRowIndex
     ///
     /// An edit inside or near an existing span is always allowed: widening a span is bounded by
     /// that span alone. What is refused is opening a <i>new</i> span once the spans together have
-    /// exhausted <see cref="MaxDerivedRows"/> - at which point the honest answer is a background
+    /// exhausted <see cref="MaxHeldAnchors"/> - at which point the honest answer is a background
     /// re-index over the piece table (roadmap: "More than one dirty span in RawEditedRowIndex"),
     /// and until that exists a refusal beats quietly allocating.
     /// </summary>
@@ -270,8 +309,8 @@ public sealed class RawEditedRowIndex : IRawRowIndex
 
         var span = this.spans[at];
         int withinSpan = rowIndex - span.StartRow;
-        if (withinSpan < span.Derived.Count)
-            return span.Absolute(span.Derived[withinSpan]);
+        if (withinSpan < span.RowsHeld)
+            return WalkTo(span, withinSpan);
 
         return span.Displace(this.original.GetRowInfo(rowIndex - span.RowDeltaThrough));
     }
@@ -292,20 +331,22 @@ public sealed class RawEditedRowIndex : IRawRowIndex
         var span = this.spans[at];
         if (offset < span.EndOffset)
         {
-            // Inside the re-derived span: binary search the rows it is holding.
+            // Inside the span: binary search its anchors, then walk the bucket - the same two
+            // steps RawSegmentIndex.RowForOffset takes over the file's own anchors.
             long relative = offset - span.StartOffset;
-            var derived = span.Derived;
-            int lo = 0, hi = derived.Count - 1;
-            while (lo < hi)
+            int bucket = span.BucketContaining(relative);
+
+            var (start, atLineStart, line) = span.AnchorState(bucket);
+            for (int row = bucket * RawSegmentIndex.AnchorStride; row < span.RowsHeld; row++)
             {
-                int mid = lo + (hi - lo) / 2;
-                if (relative < derived[mid].End)
-                    hi = mid;
-                else
-                    lo = mid + 1;
+                var (end, softWrap) = RawRowBoundary.Next(this.document, this.wrapWidth, start);
+                if (offset < end)
+                    return span.StartRow + row;
+
+                start = end;
             }
 
-            return span.StartRow + lo;
+            return span.StartRow + span.RowsHeld - 1;
         }
 
         int? originalRow = this.original.RowForOffset(offset - span.ByteDeltaThrough);
@@ -330,15 +371,22 @@ public sealed class RawEditedRowIndex : IRawRowIndex
 
         var span = this.spans[at];
         int withinSpan = rowIndex - span.StartRow;
-        if (withinSpan < span.Derived.Count)
+        if (withinSpan < span.RowsHeld)
         {
-            for (int row = withinSpan; row >= 0; row--)
+            // The walk GetRowInfo does, reporting the line it tracks on the way rather than
+            // dropping it on a continuation row - RawSegmentIndex.LineContaining's split, for
+            // the same reason: a gutter wants "nothing to draw", a caret readout wants "line 54".
+            var (start, atLineStart, line) = span.AnchorState(withinSpan / RawSegmentIndex.AnchorStride);
+            for (int row = (withinSpan / RawSegmentIndex.AnchorStride) * RawSegmentIndex.AnchorStride; row < withinSpan; row++)
             {
-                if (span.Derived[row].LineNumber is int line)
-                    return line + span.LineDeltaBefore;
+                var (end, softWrap) = RawRowBoundary.Next(this.document, this.wrapWidth, start);
+                if (!softWrap)
+                    line++;
+
+                start = end;
             }
 
-            return span.StartRow > 0 ? LineContaining(span.StartRow - 1) : 1;
+            return line + span.LineDeltaBefore;
         }
 
         return this.original.LineContaining(rowIndex - span.RowDeltaThrough) is int originalLine
@@ -483,7 +531,7 @@ public sealed class RawEditedRowIndex : IRawRowIndex
         // deltas are all zero can still hold different rows from the original - a same-length
         // replacement changes which bytes a forced break backs off from - so "no delta" is not
         // evidence that the original index describes those rows again.
-        NeedsRebuild = TotalDerivedRows > MaxDerivedRows;
+        NeedsRebuild = HeldAnchors > this.maxHeldAnchors;
     }
 
     /// <summary>
@@ -497,7 +545,8 @@ public sealed class RawEditedRowIndex : IRawRowIndex
     /// </summary>
     private void Derive(DirtySpan span)
     {
-        span.Derived.Clear();
+        span.Anchors.Clear();
+        span.RowsHeld = 0;
 
         // An empty original has no anchors at all, but can still be typed into.
         var anchor = this.original.RowCount == 0
@@ -526,11 +575,14 @@ public sealed class RawEditedRowIndex : IRawRowIndex
         while (currentStart < documentLength)
         {
             var (end, softWrap) = RawRowBoundary.Next(this.document, this.wrapWidth, currentStart);
-            span.Derived.Add(new RawRowInfo(
-                currentStart - spanStart,
-                end - spanStart,
-                softWrap,
-                currentAtLineStart ? currentLine : null));
+
+            // One marker per bucket, and the rows in between are re-walked on demand. Holding
+            // every row instead is what made a long line cost 21MB (see the class remarks).
+            if (span.RowsHeld % RawSegmentIndex.AnchorStride == 0)
+                span.Anchors.Add(new SpanAnchor(currentStart - spanStart, currentLine, currentAtLineStart));
+
+            span.RowsHeld++;
+            span.Extent = end - spanStart;
 
             if (softWrap)
             {
@@ -571,7 +623,7 @@ public sealed class RawEditedRowIndex : IRawRowIndex
             if (converged)
             {
                 span.ConvergedOriginalRow = originalRow;
-                span.RowDelta = span.OriginalStartRow + span.Derived.Count - originalRow;
+                span.RowDelta = span.OriginalStartRow + span.RowsHeld - originalRow;
                 span.LineDelta = currentLine - originalLine;
                 return;
             }
@@ -580,7 +632,7 @@ public sealed class RawEditedRowIndex : IRawRowIndex
         // Walked to the end of the document without rejoining: this span runs to the end, and
         // there is no displaced tail after it to describe.
         span.ConvergedOriginalRow = this.original.RowCount;
-        span.RowDelta = span.OriginalStartRow + span.Derived.Count - this.original.RowCount;
+        span.RowDelta = span.OriginalStartRow + span.RowsHeld - this.original.RowCount;
         span.LineDelta = 0;
     }
 
@@ -617,6 +669,43 @@ public sealed class RawEditedRowIndex : IRawRowIndex
     }
 
     /// <summary>
+    /// One marker inside a dirty span: where a bucket of <see cref="RawSegmentIndex.AnchorStride"/>
+    /// rows begins, and the line state there. Sixteen bytes, against the 32 a
+    /// <see cref="RawRowInfo"/> costs for a single row.
+    /// </summary>
+    private readonly record struct SpanAnchor(long Offset, int LineNumber, bool AtLineStart);
+
+    /// <summary>
+    /// One of a span's own rows, recovered by walking forward from its bucket's anchor - at most
+    /// <see cref="RawSegmentIndex.AnchorStride"/> boundary computations, which is the same bounded
+    /// rescan a plain lookup in the original index already does.
+    /// </summary>
+    private RawRowInfo WalkTo(DirtySpan span, int withinSpan)
+    {
+        int bucket = withinSpan / RawSegmentIndex.AnchorStride;
+        var (start, atLineStart, line) = span.AnchorState(bucket);
+
+        for (int row = bucket * RawSegmentIndex.AnchorStride; ; row++)
+        {
+            var (end, softWrap) = RawRowBoundary.Next(this.document, this.wrapWidth, start);
+            if (row == withinSpan)
+                return new RawRowInfo(start, end, softWrap, atLineStart ? line + span.LineDeltaBefore : null);
+
+            if (softWrap)
+            {
+                atLineStart = false;
+            }
+            else
+            {
+                line++;
+                atLineStart = true;
+            }
+
+            start = end;
+        }
+    }
+
+    /// <summary>
     /// One place the document has been edited: the rows it re-derived, what they did to the
     /// document's byte, row and line counts, and the running totals of every span before it.
     ///
@@ -635,9 +724,18 @@ public sealed class RawEditedRowIndex : IRawRowIndex
         /// <summary>The original row this span's re-derivation rejoined the original index at.</summary>
         public int ConvergedOriginalRow;
 
-        /// <summary>Rows of the edited document, with offsets relative to <see cref="StartOffset"/>
-        /// and line numbers in the original index's numbering.</summary>
-        public readonly List<RawRowInfo> Derived = new();
+        /// <summary>
+        /// One marker every <see cref="RawSegmentIndex.AnchorStride"/> rows of this span, with
+        /// offsets relative to <see cref="StartOffset"/> and line numbers in the original index's
+        /// numbering - so a span is untouched by anything that changes before it.
+        /// </summary>
+        public readonly List<SpanAnchor> Anchors = new();
+
+        /// <summary>Rows this span covers. The anchors describe every 64th one of them.</summary>
+        public int RowsHeld;
+
+        /// <summary>Bytes this span covers, relative to <see cref="StartOffset"/>.</summary>
+        public long Extent;
 
         /// <summary>How far past this span's start every edit in it reaches, in edited bytes.</summary>
         public long EditReach;
@@ -663,14 +761,36 @@ public sealed class RawEditedRowIndex : IRawRowIndex
         public long StartOffset => OriginalStartOffset + ByteDeltaBefore;
 
         /// <summary>Exclusive end of this span, in edited-document byte space.</summary>
-        public long EndOffset => StartOffset + (Derived.Count > 0 ? Derived[^1].End : 0);
+        public long EndOffset => StartOffset + Extent;
 
-        /// <summary>One of this span's own rows in document coordinates.</summary>
-        public RawRowInfo Absolute(RawRowInfo relative)
-            => new(relative.Start + StartOffset,
-                   relative.End + StartOffset,
-                   relative.IsSoftWrapped,
-                   relative.LineNumber is int line ? line + LineDeltaBefore : null);
+        /// <summary>Where a bucket's walk starts, in document coordinates.</summary>
+        public (long Start, bool AtLineStart, int LineNumber) AnchorState(int bucket)
+        {
+            var anchor = Anchors[bucket];
+            return (StartOffset + anchor.Offset, anchor.AtLineStart, anchor.LineNumber);
+        }
+
+        /// <summary>The bucket whose walk reaches <paramref name="relative"/>: the last anchor
+        /// starting at or before it.</summary>
+        public int BucketContaining(long relative)
+        {
+            int lo = 0, hi = Anchors.Count - 1, found = 0;
+            while (lo <= hi)
+            {
+                int mid = lo + (hi - lo) / 2;
+                if (Anchors[mid].Offset <= relative)
+                {
+                    found = mid;
+                    lo = mid + 1;
+                }
+                else
+                {
+                    hi = mid - 1;
+                }
+            }
+
+            return found;
+        }
 
         /// <summary>An original row that falls after this span, moved to where it now sits.</summary>
         public RawRowInfo Displace(RawRowInfo info)

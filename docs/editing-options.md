@@ -546,11 +546,35 @@ two byte streams to re-converge; going back and forth between two places gives t
 more, because a span is a place and not a keystroke; and what is now unbounded is the *number* of
 places, which is what the budget in `NeedsRebuild` is for.
 
+**A span holds anchors, not rows — which is the only reason a long line is survivable.** The
+first cut held every row a span derived. That is fine while a span is the sixty-odd rows an
+ordinary edit disturbs, and it is not fine at all when it is not: running the editor on the 4GB
+test document, a 48-byte edit inside a ~54MB unbroken line produced a span of 676,661 rows and
+21MB of `RawRowInfo`, ten times the budget, after which every further edit anywhere in the file
+was refused. A span now stores one marker every `AnchorStride` rows and re-walks the bucket on
+demand, exactly as `RawSegmentIndex` does over the file — the same edit costs about 10,500
+anchors and 170KB.
+
+The shortcut that would avoid the walk entirely is unsound, and it is worth recording because it
+is the obvious idea. Inside a soft-wrapped line the breaks fall every `WrapWidth` bytes from the
+line start, so it looks as though an insert leaves every later break exactly where it was, and
+the span could converge immediately at zero displacement. `RawRowBoundary.BreakAtCap` backs a
+forced break off by up to 3 bytes to avoid splitting a UTF-8 character, and which bytes sit at the
+cap has just changed — so one different backoff moves the next row, and that chains to the end of
+the line. It holds for ASCII and cannot be assumed, which is not a standard a row index gets to
+work to. The line really must be walked.
+
+What the walk costs is therefore the residual problem, and it is a time cost rather than a memory
+one: roughly 30ns per row (Apple M5, Release, `RawEditKeystrokeBenchmarks.TypeCharactersInsideALongLine`),
+so 1.2ms per keystroke inside a 1MB line, 2.1ms at 8MB, 13ms at 32MB, about 20ms at the 54MB line
+that prompted this. Laggy at the top of that range, usable, and bounded by the length of the line
+rather than of the file. Bounding it properly is what the background re-index is for.
+
 **`NeedsRebuild` is honest about being unimplemented, and about what it is not.** It fires when
-the spans together hold more than 65,536 rows - about a thousand separate places edited, or one
-edit inside a line long enough to re-flow that far on its own - and the only thing that happens is
-that edits in *new* places are refused; editing where changes already exist keeps working, and
-lookups stay correct throughout.
+the spans together hold more than 65,536 anchors — a megabyte of them, about four million rows of
+coverage — and the only thing that happens is that edits in *new* places are refused; editing
+where changes already exist keeps working, and lookups stay correct throughout. It is a budget on
+what is *kept*, deliberately not on the per-keystroke walk above, which anchors do not bound.
 
 The rebuild it names is worth stating precisely, because the obvious reading of it is wrong. It is
 not a re-index of the file: the rows on screen come from the piece table, and the bytes on disk

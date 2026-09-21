@@ -32,11 +32,24 @@ public class RawEditKeystrokeBenchmarks
     /// through OperationsPerInvoke is not swamped by timer resolution.</summary>
     private const int KeystrokeBurst = 64;
 
+    /// <summary>
+    /// A single unbroken line, for the case that decides how the spans are stored: an edit
+    /// inside one has to walk to its end before the two byte streams can be shown to have
+    /// rejoined, so the keystroke cost here is the walk and nothing else.
+    /// </summary>
+    private const int LongLineBytes = 8 * 1024 * 1024;
+
     private MemoryByteSource source = null!;
     private RawSegmentIndex index = null!;
     private RawPieceTable document = null!;
     private RawEditedRowIndex rows = null!;
     private long caret;
+
+    private MemoryByteSource longLineSource = null!;
+    private RawSegmentIndex longLineIndex = null!;
+    private RawPieceTable longLineDocument = null!;
+    private RawEditedRowIndex longLineRows = null!;
+    private long longLineCaret;
 
     [GlobalSetup]
     public void Setup()
@@ -48,6 +61,12 @@ public class RawEditKeystrokeBenchmarks
         this.source = new MemoryByteSource(Encoding.UTF8.GetBytes(text.ToString()));
         this.index = RawSegmentIndex.StartIndexing(this.source, WrapWidth);
         this.index.IndexingTask.GetAwaiter().GetResult();
+
+        var longLine = new byte[LongLineBytes];
+        longLine.AsSpan().Fill((byte)'a');
+        this.longLineSource = new MemoryByteSource(longLine);
+        this.longLineIndex = RawSegmentIndex.StartIndexing(this.longLineSource, WrapWidth);
+        this.longLineIndex.IndexingTask.GetAwaiter().GetResult();
     }
 
     [IterationSetup]
@@ -56,6 +75,10 @@ public class RawEditKeystrokeBenchmarks
         this.document = new RawPieceTable(this.source);
         this.rows = new RawEditedRowIndex(this.index, this.source, this.document);
         this.caret = this.source.AvailableLength / 2;
+
+        this.longLineDocument = new RawPieceTable(this.longLineSource);
+        this.longLineRows = new RawEditedRowIndex(this.longLineIndex, this.longLineSource, this.longLineDocument);
+        this.longLineCaret = 1024;
     }
 
     [Benchmark(OperationsPerInvoke = KeystrokeBurst)]
@@ -68,5 +91,23 @@ public class RawEditKeystrokeBenchmarks
         }
 
         return this.rows.RowCount;
+    }
+
+    /// <summary>
+    /// The same keystroke inside one unbroken line, which is the worst case the design has and
+    /// the one that decided spans hold anchors rather than rows. It is reported per character so
+    /// it sits beside <see cref="TypeCharacters"/>, but it is not the same kind of number: this
+    /// one grows with the length of the line, at roughly 30ns per row walked.
+    /// </summary>
+    [Benchmark(OperationsPerInvoke = KeystrokeBurst)]
+    public int TypeCharactersInsideALongLine()
+    {
+        for (int i = 0; i < KeystrokeBurst; i++)
+        {
+            this.longLineRows.ApplyEdit(this.longLineDocument.Insert(this.longLineCaret, "z"u8));
+            this.longLineCaret++;
+        }
+
+        return this.longLineRows.RowCount;
     }
 }

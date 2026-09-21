@@ -57,26 +57,23 @@ until it lands an edited document cannot be written back.
   keystroke. The folder is excluded from non-Debug builds; the `RawEditSnapshot` behind it is
   ordinary tested code. Nothing equivalent exists for the JSON indexes, which is the obvious
   place to take this next if it earns its keep.
-- **Editing inside a very long line re-derives the rest of that line.** The one case that makes
-  the budget bite in practice, and it was found by running the editor on the 4GB test document
-  rather than by any test: a 48-byte edit inside a ~54MB unbroken line produced a span holding
-  676,661 rows — every one of them exactly the 80-byte wrap cap — which is ten times the budget,
-  so every subsequent edit *anywhere else* was refused.
+- ~~**Editing inside a very long line holds every row of it.**~~ **Fixed**, and the fix was not
+  the one first written here. Found by running the editor on the 4GB test document: a 48-byte edit
+  inside a ~54MB unbroken line produced a span of 676,661 rows and 21MB of `RawRowInfo`, ten times
+  the budget, after which every further edit anywhere was refused.
 
-  The mechanism is not a bug so much as an unhandled case. Inside a soft-wrapped line the row
-  boundaries chain from the line start every `WrapWidth` bytes, so after an insert of N bytes the
-  edited stream's later breaks sit at the *same absolute offsets* as the original's, not at
-  original + N. `Derive`'s convergence test only recognises original + N, so it keeps walking to
-  the line's real newline, where the two finally agree again.
+  The fix first proposed — converge immediately at zero displacement, since a soft-wrapped line
+  breaks every `WrapWidth` bytes from the line start — is **unsound**, and the note is kept because
+  it is the obvious idea: `RawRowBoundary.BreakAtCap` backs a forced break off up to 3 bytes to
+  avoid splitting a UTF-8 character, which bytes sit at the cap has just changed, and one different
+  backoff chains. The line genuinely has to be walked.
 
-  The fix follows from the same observation: the rows between the edit and the end of its line
-  are the original's rows *unchanged* — delta 0 in bytes, rows and lines alike. So the span can
-  converge there with zero deltas, and a short follow-on span at the line's end carries the N
-  bytes. Finding that line end needs no scan: anchors carry line numbers in ascending order, so a
-  binary search over them plus a bounded walk lands on the row where the line ends. What it costs
-  is letting a span start somewhere other than an anchor — an anchor is currently how a span
-  knows its starting line number and whether a line starts there, and a line end supplies both
-  just as well.
+  What was avoidable is *keeping* every row it walks past. A span now stores one anchor every
+  `AnchorStride` rows and re-walks the bucket on demand, exactly as `RawSegmentIndex` does — the
+  same edit costs about 10,500 anchors and 170KB. What remains is a time cost of roughly 30ns per
+  row walked, so about 20ms per keystroke at 54MB; measured across line lengths in
+  `RawEditKeystrokeBenchmarks.TypeCharactersInsideALongLine`, and bounded properly only by the
+  re-index below.
 - **Re-index over the piece table, for when `NeedsRebuild` fires.** The budget is now the only
   cap: past 65,536 derived rows — about a thousand separate places edited, or one edit re-flowing
   a very long line — `CanAbsorbEditAt` refuses to open a span somewhere new

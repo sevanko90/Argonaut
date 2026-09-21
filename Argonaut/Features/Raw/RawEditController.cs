@@ -137,6 +137,7 @@ public sealed class RawEditController
             RowIndex.TotalDerivedRows,
             RowIndex.HeldAnchors,
             RawEditedRowIndex.MaxHeldAnchors,
+            RowIndex.RowsWalkedInLastEdit,
             RowIndex.NeedsRebuild,
             RowIndex.DescribeSpans(),
             this.journal.Depth,

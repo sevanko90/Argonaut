@@ -633,6 +633,78 @@ public class RawEditedRowIndexTests
         => document.Rows.DescribeSpans();
 
     /// <summary>
+    /// A long line, plus ordinary lines after it, so an edit can be placed inside the line, at
+    /// its far end, and past it.
+    /// </summary>
+    private static (EditedDocument Document, long LineEnd) LongLineDocument(int lineBytes)
+    {
+        var text = new StringBuilder();
+        text.Append(new string('a', lineBytes)).Append('\n');
+        for (int i = 0; i < 400; i++)
+            text.Append($"line {i} after the long one\n");
+
+        return (new EditedDocument(Bytes(text.ToString()), wrapWidth: 80), lineBytes + 1);
+    }
+
+    [Fact]
+    public void AnEditLateInALongLinesSpan_ResumesTheWalkRatherThanRestartingIt()
+    {
+        // Rows before the earliest byte an edit touched cannot have moved, and their anchors are
+        // stored relative to the span's start, so the walk picks up at the last one the edit
+        // could not have disturbed. Without it, typing at the end of a long line costs the same
+        // as typing at its start - which on a 4GB document is the difference between instant and
+        // a visible stutter on every keystroke.
+        var (document, lineEnd) = LongLineDocument(400_000);
+
+        document.Insert(100, Bytes("x"));
+        long fromTheStart = document.Rows.RowsWalkedInLastEdit;
+
+        document.Insert(lineEnd - 500, Bytes("y"));
+        long fromNearTheEnd = document.Rows.RowsWalkedInLastEdit;
+
+        Assert.True(fromTheStart > 4_000, $"the first edit should have walked the line; it walked {fromTheStart}");
+        Assert.True(fromNearTheEnd < fromTheStart / 100,
+            $"resumed walk covered {fromNearTheEnd} rows against {fromTheStart} for the whole line");
+
+        document.AssertMatchesAFreshIndex("edits at both ends of a long line");
+    }
+
+    [Fact]
+    public void AnEditPastALargeSpan_OpensItsOwnSpanRatherThanWideningIt()
+    {
+        // Widening re-walks the whole span, so "near enough to widen" has to weigh what widening
+        // would cost. Next to a span covering a long line it never pays, and treating it as
+        // though it did is what made an edit just past such a line as slow as one inside it.
+        var (document, lineEnd) = LongLineDocument(400_000);
+
+        document.Insert(100, Bytes("x"));
+        Assert.Equal(1, document.Rows.SpanCount);
+
+        // Two anchor buckets past where the long line's span rejoined the original - close
+        // enough that the old rule would have widened it.
+        document.Insert(lineEnd + 2_000, Bytes("y"));
+
+        Assert.Equal(2, document.Rows.SpanCount);
+        Assert.True(document.Rows.RowsWalkedInLastEdit < 500,
+            $"opening a span should cost an anchor bucket; it walked {document.Rows.RowsWalkedInLastEdit} rows");
+
+        document.AssertMatchesAFreshIndex("edit past a long line's span");
+    }
+
+    [Fact]
+    public void AnEditBesideASmallSpan_StillWidensIt()
+    {
+        // The counterpart: widening is still right when the span is small, which is every
+        // ordinary edit. Otherwise this change would trade one cost for span proliferation.
+        var document = LongDocument(2_000, wrapWidth: 40);
+
+        document.Insert(AnchorRowStart(document, 4), Bytes("a"));
+        document.Insert(AnchorRowStart(document, 5) + 32, Bytes("b"));
+
+        Assert.Equal(1, document.Rows.SpanCount);
+    }
+
+    /// <summary>
     /// The same oracle over a document big enough that random edits land in many different
     /// spans at once - which is where the multi-span bookkeeping can go wrong without any single
     /// span being wrong. Every lookup after an edit has to cross spans, gaps and the displaced

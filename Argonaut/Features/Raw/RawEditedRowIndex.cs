@@ -89,6 +89,14 @@ public sealed class RawEditedRowIndex : IRawRowIndex
     /// </summary>
     internal const int MaxHeldAnchors = 64 * 1024;
 
+    /// <summary>
+    /// How many rows a span may already cover and still be worth widening for a nearby edit
+    /// rather than leaving alone. A few anchor buckets: widening re-walks the span, so the
+    /// trade is "re-walk what is there" against "walk one fresh anchor bucket", and it stops
+    /// being a trade at all once the span is large.
+    /// </summary>
+    private const int MaxRowsWorthWidening = 4 * RawSegmentIndex.AnchorStride;
+
     private readonly RawSegmentIndex original;
     private readonly IByteSource originalBytes;
     private readonly RawPieceTable document;
@@ -100,6 +108,7 @@ public sealed class RawEditedRowIndex : IRawRowIndex
     private readonly List<DirtySpan> spans = new();
 
     private int totalRowDelta;
+    private long rowsWalkedInLastEdit;
 
     /// <param name="original">Index over <paramref name="originalBytes"/>. Must be complete:
     /// editing is gated on a finished scan precisely so a lock-free append log is never read
@@ -197,6 +206,15 @@ public sealed class RawEditedRowIndex : IRawRowIndex
     /// <summary>Places the user has edited, as this index has grouped them.</summary>
     internal int SpanCount => this.spans.Count;
 
+    /// <summary>
+    /// Rows the last edit had to walk. The whole cost of a keystroke, in the one unit that
+    /// explains it: the walk is about 30ns a row, so this is what says whether an edit was
+    /// instant or took a tenth of a second, and why. Shown by the debug inspector, because
+    /// "typing here is slow and typing there is not" is otherwise something a user can only
+    /// describe rather than see.
+    /// </summary>
+    internal long RowsWalkedInLastEdit => this.rowsWalkedInLastEdit;
+
     /// <summary>Rows in the original index, before any of this class's displacement.</summary>
     internal int OriginalRowCount => this.original.RowCount;
 
@@ -261,6 +279,7 @@ public sealed class RawEditedRowIndex : IRawRowIndex
     /// </summary>
     public void ApplyEdit(RawEditExtent extent)
     {
+        this.rowsWalkedInLastEdit = 0;
         int index = TargetSpanFor(extent.Offset);
         var span = this.spans[index];
 
@@ -272,6 +291,7 @@ public sealed class RawEditedRowIndex : IRawRowIndex
 
         span.EditReach = Math.Max(span.EditReach, within + extent.BytesInserted);
         span.ByteDelta += extent.ByteDelta;
+        span.DirtyFrom = Math.Min(span.DirtyFrom, within);
 
         // A deletion can swallow whole spans. Folding them in now rather than letting the absorb
         // loop discover them matters: until their deltas are part of this span's, the two byte
@@ -294,6 +314,7 @@ public sealed class RawEditedRowIndex : IRawRowIndex
     {
         var absorbed = this.spans[index];
         span.EditReach = Math.Max(span.EditReach, absorbed.StartOffset + absorbed.EditReach - span.StartOffset);
+        span.DirtyFrom = Math.Min(span.DirtyFrom, absorbed.StartOffset - span.StartOffset);
         span.ByteDelta += absorbed.ByteDelta;
         this.spans.RemoveAt(index);
     }
@@ -416,7 +437,8 @@ public sealed class RawEditedRowIndex : IRawRowIndex
 
         if (at >= 0)
         {
-            int gap = (anchor * RawSegmentIndex.AnchorStride) - this.spans[at].ConvergedOriginalRow;
+            var previous = this.spans[at];
+            int gap = (anchor * RawSegmentIndex.AnchorStride) - previous.ConvergedOriginalRow;
 
             // Two separate reasons to widen the span before instead of opening a new one, and
             // only one of them is about cost.
@@ -431,8 +453,14 @@ public sealed class RawEditedRowIndex : IRawRowIndex
             bool wouldOverlap = gap <= 0;
 
             // And a new span pays for its own anchor bucket before it even reaches the edit, so
-            // an edit closer than a stride is cheaper to absorb than to describe separately.
-            bool cheaperToWiden = gap < RawSegmentIndex.AnchorStride;
+            // an edit closer than a stride is cheaper to absorb than to describe separately -
+            // but only while the span being widened is itself small. Widening re-walks the
+            // whole span, so next to one covering a million rows of a single long line it is
+            // never the cheaper option, and treating it as one is what made an edit just past
+            // such a line as slow as an edit inside it. The cost is what this compares, not
+            // only the distance.
+            bool cheaperToWiden = gap < RawSegmentIndex.AnchorStride
+                                  && previous.RowsHeld <= MaxRowsWorthWidening;
 
             if (wouldOverlap || cheaperToWiden)
                 return at;
@@ -440,6 +468,7 @@ public sealed class RawEditedRowIndex : IRawRowIndex
 
         var created = new DirtySpan
         {
+            DirtyFrom = 0,
             OriginalAnchor = anchor,
             OriginalStartOffset = this.original.RowCount == 0 ? 0 : this.original.AnchorAt(anchor).Start,
             ConvergedOriginalRow = anchor * RawSegmentIndex.AnchorStride,
@@ -535,19 +564,25 @@ public sealed class RawEditedRowIndex : IRawRowIndex
     }
 
     /// <summary>
-    /// Walks the original bytes and the edited document forward from one span's anchor in
-    /// lockstep, holding the edited document's rows, until the two provably re-converge.
+    /// Walks the edited document forward through one span, holding an anchor every
+    /// <see cref="RawSegmentIndex.AnchorStride"/> rows, until it can be shown to have rejoined
+    /// the original index.
     ///
-    /// The rows are stored <b>relative to the span's own start</b>, so a span is unaffected by
-    /// anything that changes before it: an edit in an earlier span shifts this one's position
-    /// without touching a single row it holds. Absolute answers are put back together in
-    /// <see cref="DirtySpan.Absolute"/>.
+    /// Two things keep the walk off work it does not need to do.
+    ///
+    /// <b>It resumes rather than restarts.</b> Rows before the earliest byte an edit touched are
+    /// unchanged, and their anchors are stored relative to the span's start, so the walk picks up
+    /// at the last anchor the edit could not have disturbed. Typing at the far end of a span
+    /// covering a long line therefore costs the tail of that line rather than all of it.
+    ///
+    /// <b>The original stream is positioned, not walked to.</b> Convergence cannot be declared
+    /// before the edits' reach, so until then the original index is not consulted at all; at the
+    /// reach the corresponding original row is found by lookup - two bounded anchor walks - and
+    /// only from there do the two move in lockstep. Before this the original was walked row by
+    /// row from the span's start purely to arrive at a position a binary search could have given.
     /// </summary>
     private void Derive(DirtySpan span)
     {
-        span.Anchors.Clear();
-        span.RowsHeld = 0;
-
         // An empty original has no anchors at all, but can still be typed into.
         var anchor = this.original.RowCount == 0
             ? (Start: 0L, AtLineStart: true, LineNumber: 1)
@@ -562,15 +597,38 @@ public sealed class RawEditedRowIndex : IRawRowIndex
 
         // The edited stream, which is what we keep. Line numbers are tracked in the original's
         // numbering and shifted by the spans before this one only on the way out.
-        long currentStart = spanStart;
-        bool currentAtLineStart = anchor.AtLineStart;
-        int currentLine = anchor.LineNumber;
+        long currentStart;
+        bool currentAtLineStart;
+        int currentLine;
 
-        // The original stream, walked only to recognise where the two rejoin.
-        long originalStart = anchor.Start;
-        bool originalAtLineStart = anchor.AtLineStart;
-        int originalLine = anchor.LineNumber;
-        int originalRow = span.OriginalStartRow;
+        int resumeBucket = span.ResumeBucket();
+        if (resumeBucket > 0)
+        {
+            var resume = span.Anchors[resumeBucket];
+            currentStart = spanStart + resume.Offset;
+            currentAtLineStart = resume.AtLineStart;
+            currentLine = resume.LineNumber;
+            span.Anchors.RemoveRange(resumeBucket, span.Anchors.Count - resumeBucket);
+            span.RowsHeld = resumeBucket * RawSegmentIndex.AnchorStride;
+        }
+        else
+        {
+            span.Anchors.Clear();
+            span.RowsHeld = 0;
+            currentStart = spanStart;
+            currentAtLineStart = anchor.AtLineStart;
+            currentLine = anchor.LineNumber;
+        }
+
+        span.DirtyFrom = long.MaxValue;
+
+        // The original stream, positioned on first use and walked only from there.
+        long originalStart = 0;
+        bool originalAtLineStart = false;
+        int originalLine = 0;
+        int originalRow = 0;
+        bool originalPositioned = false;
+        bool originalExhausted = false;
 
         while (currentStart < documentLength)
         {
@@ -583,6 +641,7 @@ public sealed class RawEditedRowIndex : IRawRowIndex
 
             span.RowsHeld++;
             span.Extent = end - spanStart;
+            this.rowsWalkedInLastEdit++;
 
             if (softWrap)
             {
@@ -596,26 +655,43 @@ public sealed class RawEditedRowIndex : IRawRowIndex
 
             currentStart = end;
 
-            // Bring the original stream up to the edited one, in the edited one's coordinates.
-            while (originalStart < this.originalLength && originalStart + totalDelta < currentStart)
+            // Nothing before the edits' reach can be a convergence point, so the original index
+            // is left alone until the walk gets there.
+            if (currentStart < reachEnd || originalExhausted)
+                continue;
+
+            if (!originalPositioned)
             {
-                var (originalEnd, originalSoftWrap) = RawRowBoundary.Next(this.originalBytes, this.wrapWidth, originalStart);
-                if (originalSoftWrap)
+                if (!PositionOriginal(currentStart - totalDelta, out originalStart, out originalAtLineStart, out originalLine, out originalRow))
                 {
-                    originalAtLineStart = false;
-                }
-                else
-                {
-                    originalLine++;
-                    originalAtLineStart = true;
+                    originalExhausted = true;
+                    continue;
                 }
 
-                originalStart = originalEnd;
-                originalRow++;
+                originalPositioned = true;
+            }
+            else
+            {
+                // Lockstep from there, in the edited stream's coordinates.
+                while (originalStart < this.originalLength && originalStart + totalDelta < currentStart)
+                {
+                    var (originalEnd, originalSoftWrap) = RawRowBoundary.Next(this.originalBytes, this.wrapWidth, originalStart);
+                    if (originalSoftWrap)
+                    {
+                        originalAtLineStart = false;
+                    }
+                    else
+                    {
+                        originalLine++;
+                        originalAtLineStart = true;
+                    }
+
+                    originalStart = originalEnd;
+                    originalRow++;
+                }
             }
 
             bool converged =
-                currentStart >= reachEnd &&
                 originalStart < this.originalLength &&
                 originalStart + totalDelta == currentStart &&
                 originalAtLineStart == currentAtLineStart;
@@ -674,6 +750,33 @@ public sealed class RawEditedRowIndex : IRawRowIndex
     /// <see cref="RawRowInfo"/> costs for a single row.
     /// </summary>
     private readonly record struct SpanAnchor(long Offset, int LineNumber, bool AtLineStart);
+
+    /// <summary>
+    /// Puts the original stream on the row containing <paramref name="candidate"/>, which is
+    /// where walking it forward from the span's anchor would have arrived - the largest row start
+    /// at or before that offset. False when the offset is outside the original, which is the old
+    /// walk running off the end of it and means no convergence is possible from here on.
+    /// </summary>
+    private bool PositionOriginal(long candidate, out long start, out bool atLineStart, out int line, out int row)
+    {
+        start = 0;
+        atLineStart = false;
+        line = 0;
+        row = 0;
+
+        if (candidate < 0 || candidate >= this.originalLength)
+            return false;
+
+        if (this.original.RowForOffset(candidate) is not int found)
+            return false;
+
+        var info = this.original.GetRowInfo(found);
+        row = found;
+        start = info.Start;
+        atLineStart = info.LineNumber is not null;
+        line = this.original.LineContaining(found) ?? 1;
+        return true;
+    }
 
     /// <summary>
     /// One of a span's own rows, recovered by walking forward from its bucket's anchor - at most
@@ -739,6 +842,23 @@ public sealed class RawEditedRowIndex : IRawRowIndex
 
         /// <summary>How far past this span's start every edit in it reaches, in edited bytes.</summary>
         public long EditReach;
+
+        /// <summary>
+        /// The earliest byte, relative to this span's start, that has changed since it was last
+        /// derived - so the walk can resume rather than restart. <see cref="long.MaxValue"/>
+        /// means nothing has changed since; zero means start from the beginning, which is what a
+        /// freshly opened span needs.
+        /// </summary>
+        public long DirtyFrom;
+
+        /// <summary>
+        /// The bucket the next walk may resume at: the last anchor at or before
+        /// <see cref="DirtyFrom"/>, whose own row begins on bytes the edit did not touch.
+        /// </summary>
+        public int ResumeBucket()
+            => Anchors.Count == 0 || DirtyFrom <= 0
+                ? 0
+                : Math.Min(BucketContaining(DirtyFrom), Anchors.Count - 1);
 
         public long ByteDelta;
         public int RowDelta;

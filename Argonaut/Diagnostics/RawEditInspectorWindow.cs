@@ -115,6 +115,7 @@ internal sealed class RawEditInspectorWindow : Window
             $"row-index budget {N(state.HeldAnchors)} / {N(state.MaxHeldAnchors)} anchors "
             + $"({state.BudgetUsed * 100:0.00}%) covering {N(state.TotalDerivedRows)} rows "
             + $"across {state.SpanCount} span(s)"
+            + $"    last edit walked {N(state.RowsWalkedInLastEdit)} rows"
             + (state.NeedsRebuild ? "    NEEDS REBUILD - new edit sites are being refused" : string.Empty);
         this.budgetBar.Value = Math.Clamp(state.BudgetUsed * 1000, 0, 1000);
 

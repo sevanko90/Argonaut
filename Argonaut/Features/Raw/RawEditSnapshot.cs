@@ -70,6 +70,7 @@ public sealed record RawEditSnapshot(
     int TotalDerivedRows,
     int HeldAnchors,
     int MaxHeldAnchors,
+    long RowsWalkedInLastEdit,
     bool NeedsRebuild,
     IReadOnlyList<RawSpanSnapshot> Spans,
     int UndoDepth,

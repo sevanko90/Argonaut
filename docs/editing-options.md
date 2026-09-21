@@ -565,10 +565,34 @@ the line. It holds for ASCII and cannot be assumed, which is not a standard a ro
 work to. The line really must be walked.
 
 What the walk costs is therefore the residual problem, and it is a time cost rather than a memory
-one: roughly 30ns per row (Apple M5, Release, `RawEditKeystrokeBenchmarks.TypeCharactersInsideALongLine`),
-so 1.2ms per keystroke inside a 1MB line, 2.1ms at 8MB, 13ms at 32MB, about 20ms at the 54MB line
-that prompted this. Laggy at the top of that range, usable, and bounded by the length of the line
-rather than of the file. Bounding it properly is what the background re-index is for.
+one: roughly 30ns per row (Apple M5, Release, `RawEditKeystrokeBenchmarks.TypeCharactersInsideALongLine`).
+
+Two things keep the walk off work it does not need to do, and both came out of the same report —
+that editing *near* a long line was as slow as editing inside it, and that the lag had no edge a
+user could point at.
+
+**A span resumes rather than restarts.** Rows before the earliest byte an edit touched cannot have
+moved, and a span's anchors are stored relative to its own start, so the walk picks up at the last
+anchor the edit could not have disturbed. Typing at the far end of a span covering a long line
+went from the whole line to the tail of it — measured on a 32MB line, 13ms to 0.01ms.
+
+**The original stream is positioned, not walked to.** Convergence cannot be declared before the
+edits' reach, so until then the original index is not consulted at all; at the reach the
+corresponding original row is found by lookup — two bounded anchor walks — and only from there do
+the two move in lockstep. Before this, the original was walked row by row from the span's start
+purely to arrive at a position a binary search could have given.
+
+**And widening a span now weighs what widening costs.** An edit within an anchor stride of a
+span's convergence point used to join that span on the grounds that a new span would cost an
+anchor bucket anyway. True next to an ordinary sixty-row span; badly false next to one covering a
+million rows of a long line, where widening means re-walking all of it. That is why the lag had no
+edge: it extended an anchor bucket past the end of the line, and a bucket is a distance in *rows*,
+which on a 4GB document is no distance at all on screen.
+
+What remains is an edit *early* inside a very long line, which must still walk to the line's end
+because that is where the two streams can first be shown to have rejoined: about 16ms on a 32MB
+line, 50ms on a 105MB one. See [roadmap.md](roadmap.md) for the chained-span design that would
+bound it.
 
 **`NeedsRebuild` is honest about being unimplemented, and about what it is not.** It fires when
 the spans together hold more than 65,536 anchors — a megabyte of them, about four million rows of

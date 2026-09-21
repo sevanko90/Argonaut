@@ -81,38 +81,19 @@ until it lands an edited document cannot be written back.
   at 4.4MB for 250 edits, 65MB for 1,000 and 187MB for 2,000, against 1.5MB for the piece table
   and row index together. A step now holds the *run* of the piece list each edit rewrote, which
   for typing is one piece: 3.6MB at 2,000 edits, and linear.
-- **Bounding the walk an edit early in a very long line costs.** Still open, and the two designs
-  written here before it were both wrong, so the reasoning is kept rather than replaced.
+- **Bounding the walk an edit early in a very long line costs.** Open, and written up on its own
+  in [long-line-reflow-options.md](long-line-reflow-options.md) because the analysis that picks
+  between the options is more work than the options are to describe.
 
-  An edit early in a 105MB unbroken line walks to the line's end - about 40ms per keystroke -
-  because that is the first place the edited and original streams can be *shown* to have rejoined.
-  Edits late in such a line, and past it, are already instant.
+  An edit early in a ~105MB unbroken line walks to the line's end, about 40ms per keystroke;
+  edits later in the same line, and past it, are already instant. Two shortcuts were written into
+  this file before it and both were wrong — the measurement that killed them is
+  `RawLongLineReflowTests`, and it is kept in the options document so nobody re-derives them.
 
-  **Why the obvious bounds do not work.** `RawLongLineReflowTests` measures the property they all
-  rest on, and it is the opposite of what it looks like:
-  - Over **ASCII**, an insert leaves every later break inside the line at the *same absolute
-    offset* - forced breaks are pure arithmetic from the row start when nothing backs off. The
-    boundaries do not move, but the bytes at them do.
-  - Over **multi-byte** content the backoff follows the characters, so breaks move to *old offset
-    plus the byte delta* - 194 of 200 in the measurement.
-
-  The convergence test looks for the second shape, and a large JSON or log file is the first, so
-  it walks to the newline. Converging on the first shape instead is unsound: the bytes being read
-  there are not the bytes the original index was built over, so nothing beyond the next boundary
-  is proven. Chaining capped spans and checking that each one's end did not move has the same hole
-  one level down - the check says nothing about the *next* member, whose content has also shifted.
-
-  **What is left.** Either accept the walk and let the background re-index below dissolve the span,
-  or make row boundaries inside a line independent of content - breaks at exact multiples of
-  `WrapWidth` from the line start, with a straddling character drawn whole by the row above rather
-  than moving the boundary. That second one makes the whole question analytic (a line's row count
-  becomes arithmetic, and an edit moves no later boundary at all), and it is a change to what a
-  `RawRowInfo` means, rippling into `RawRowDecoder`, `RawCaretStops`, selection and the caret
-  readout. Not small, but it is the only version that removes the walk rather than hiding it.
-
-  Orthogonal and cheaper than either: re-derive on idle rather than per keystroke, so typing does
-  not pay the walk and the index catches up in the pause. That needs a provisional row count while
-  the walk is outstanding, which is its own design.
+  Three ways out, none built: accept the walk and let the re-index below dissolve the span;
+  re-derive on idle so typing does not pay it; or make a row's boundaries independent of its
+  content, which is the only one that removes the walk rather than hiding it. The leaning is
+  towards the third, which needs analysis first — the options document lists exactly what.
 - **Re-index over the piece table, for when `NeedsRebuild` fires.** The budget is now the only
   cap: past 65,536 derived rows — about a thousand separate places edited, or one edit re-flowing
   a very long line — `CanAbsorbEditAt` refuses to open a span somewhere new

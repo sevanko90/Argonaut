@@ -591,8 +591,10 @@ which on a 4GB document is no distance at all on screen.
 
 What remains is an edit *early* inside a very long line, which must still walk to the line's end
 because that is where the two streams can first be shown to have rejoined: about 16ms on a 32MB
-line, 50ms on a 105MB one. See [roadmap.md](roadmap.md) for the chained-span design that would
-bound it.
+line, 40ms on a 105MB one. Everything else - later in the same line, and past it - is instant.
+That last case has its own decision record,
+[long-line-reflow-options.md](long-line-reflow-options.md), which carries the measurement, the two
+shortcuts that turned out to be unsound, and the three ways out.
 
 **`NeedsRebuild` is honest about being unimplemented, and about what it is not.** It fires when
 the spans together hold more than 65,536 anchors — a megabyte of them, about four million rows of
@@ -661,4 +663,6 @@ status gutter says "Edited — not saved" for the whole of it.
 - [index-memory-analysis.md](index-memory-analysis.md) — the 24 bytes/token index cost quoted
   above, and the field split behind `PackedToken`. The throughput figures are from an
   uncommitted 2026-07-24 profiling harness and are not recorded in the repo.
+- [long-line-reflow-options.md](long-line-reflow-options.md) — the one case editing is still
+  slow at, and what it would take to remove rather than hide it.
 - [roadmap.md](roadmap.md) — where this sits against everything else deferred.

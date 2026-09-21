@@ -51,6 +51,12 @@ until it lands an edited document cannot be written back.
   in between. Widen-or-open is decided by the index's own `AnchorStride` rather than a tuned
   number, and part of that rule is a correctness guard (an edit in an anchor bucket the previous
   span already covers must join it, or the spans overlap) rather than a preference.
+- ~~**A window onto the editor's internals.**~~ **Built**, Debug only: Cmd/Ctrl+Shift+D opens
+  `Diagnostics/RawEditInspectorWindow` — piece list, dirty spans with both halves of each delta,
+  budget fullness, undo depth, and a map drawing spans and pieces on one scale, refreshed per
+  keystroke. The folder is excluded from non-Debug builds; the `RawEditSnapshot` behind it is
+  ordinary tested code. Nothing equivalent exists for the JSON indexes, which is the obvious
+  place to take this next if it earns its keep.
 - **Re-index over the piece table, for when `NeedsRebuild` fires.** The budget is now the only
   cap: past 65,536 derived rows — about a thousand separate places edited, or one edit re-flowing
   a very long line — `CanAbsorbEditAt` refuses to open a span somewhere new

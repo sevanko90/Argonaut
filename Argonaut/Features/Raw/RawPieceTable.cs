@@ -173,6 +173,52 @@ public sealed class RawPieceTable : IByteSource
         return new RawEditExtent(offset, length, bytes.Length);
     }
 
+    /// <summary>Scratch chunks allocated so far.</summary>
+    internal int ScratchChunkCount => this.scratchChunks.Count;
+
+    /// <summary>
+    /// Bytes of scratch in use. The memory an edit session actually costs, against a file whose
+    /// size it is deliberately independent of - which is the claim the whole structure is here to
+    /// make, and the one worth being able to watch.
+    /// </summary>
+    internal long ScratchBytesUsed
+    {
+        get
+        {
+            long total = 0;
+            for (int i = 0; i < this.scratchChunks.Count - 1; i++)
+                total += this.scratchChunks[i].Length;
+
+            return this.scratchChunks.Count == 0 ? 0 : total + this.scratchFill;
+        }
+    }
+
+    /// <summary>
+    /// The piece list, flattened for display. Takes at most <paramref name="max"/> from the
+    /// start and reports how many it left out, so a document edited in a thousand places does
+    /// not build a thousand-entry list per keystroke for a window showing the first screenful.
+    /// </summary>
+    internal IReadOnlyList<RawPieceSnapshot> DescribePieces(int max, out int omitted)
+    {
+        int shown = Math.Min(max, this.pieces.Count);
+        omitted = this.pieces.Count - shown;
+
+        var described = new List<RawPieceSnapshot>(shown);
+        for (int i = 0; i < shown; i++)
+        {
+            var piece = this.pieces[i];
+            described.Add(new RawPieceSnapshot(
+                i,
+                piece.ChunkIndex == OriginalChunk,
+                piece.ChunkIndex,
+                piece.Offset,
+                piece.Length,
+                piece.LogicalStart));
+        }
+
+        return described;
+    }
+
     /// <summary>
     /// Copy of the current piece list, for undo. Undo restores a whole snapshot rather than
     /// inverting each edit: a piece is a few dozen bytes and the list is bounded by the rebuild

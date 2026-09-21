@@ -48,6 +48,15 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The internals inspector (Cmd/Ctrl+Shift+D) is a development tool and is not built at all
+         outside Debug, so there is nothing shipped to hide behind a setting. It is written in
+         code rather than XAML precisely so this one rule is enough - a .axaml file would need
+         excluding from AvaloniaResource too, and two rules can disagree. MainWindow's call site
+         is inside #if DEBUG to match. -->
+    <Compile Remove="Diagnostics\**" Condition="'$(Configuration)' != 'Debug'" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Compile Update="Features\Search\FindBar.axaml.cs">
       <DependentUpon>FindBar.axaml</DependentUpon>
     </Compile>

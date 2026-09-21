@@ -151,6 +151,52 @@ public sealed class RawEditedRowIndex : IRawRowIndex
     /// <summary>Places the user has edited, as this index has grouped them.</summary>
     internal int SpanCount => this.spans.Count;
 
+    /// <summary>Rows in the original index, before any of this class's displacement.</summary>
+    internal int OriginalRowCount => this.original.RowCount;
+
+    /// <summary>
+    /// The spans, flattened for display. Copies rather than exposing <see cref="DirtySpan"/>,
+    /// which is mutable and whose fields only mean anything next to the spans either side of it.
+    /// </summary>
+    internal IReadOnlyList<RawSpanSnapshot> DescribeSpans()
+    {
+        var described = new List<RawSpanSnapshot>(this.spans.Count);
+        for (int i = 0; i < this.spans.Count; i++)
+        {
+            var span = this.spans[i];
+
+            int? firstLine = null;
+            foreach (var row in span.Derived)
+            {
+                if (row.LineNumber is int line)
+                {
+                    firstLine = line + span.LineDeltaBefore;
+                    break;
+                }
+            }
+
+            described.Add(new RawSpanSnapshot(
+                i,
+                span.OriginalAnchor,
+                span.OriginalStartRow,
+                span.StartRow,
+                span.StartOffset,
+                span.EndOffset,
+                span.Derived.Count,
+                span.ConvergedOriginalRow,
+                span.EditReach,
+                firstLine,
+                span.ByteDelta,
+                span.RowDelta,
+                span.LineDelta,
+                span.ByteDeltaBefore,
+                span.RowDeltaBefore,
+                span.LineDeltaBefore));
+        }
+
+        return described;
+    }
+
     /// <summary>
     /// Whether an edit at <paramref name="offset"/> can still be tracked, asked <i>before</i> the
     /// edit is made.

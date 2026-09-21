@@ -228,6 +228,13 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
         SyncToolbarEditing();
     }
 
+    /// <summary>
+    /// The editor, once edit mode has built one. For the Debug-only internals inspector, which
+    /// is the only thing outside this class that has any business seeing it - everything else
+    /// goes through <see cref="Document"/>, <see cref="RowIndex"/> and the methods below.
+    /// </summary>
+    internal RawEditController? Editor => this.editor;
+
     /// <summary>Types text at the caret. Returns false when nothing happened, so the view can
     /// leave the key for whoever else wants it.</summary>
     public bool TypeText(string text) => Report(this.editor?.Type(text));

@@ -569,6 +569,24 @@ rebuild adds a layer, so each byte read afterwards pays one more binary search. 
 same problem more cheaply for the case that motivates it, because a save rewrites the file and
 starts again from a single piece over it.
 
+**There is an internals inspector, because none of the above is visible from the document.**
+Cmd/Ctrl+Shift+D in a Debug build opens `RawEditInspectorWindow`: the piece list, the dirty spans
+with both halves of each delta, how full the row index's budget is, the undo depth, and a map
+drawing the spans and the pieces as two bars on one horizontal scale — which is what shows the
+relationship between them, since every scratch piece sits inside a span and every span exists
+because of a scratch piece near it. It refreshes on every keystroke, so an edit's real cost is
+something you watch rather than infer.
+
+The whole `Diagnostics` folder is excluded from the build outside Debug (one `Compile Remove` in
+the csproj), which is why the window is written in code rather than XAML: a `.axaml` file would
+need excluding from `AvaloniaResource` as well, and two rules can disagree. `RawEditSnapshot` and
+the `Describe` methods behind it are ordinary compiled code with their own tests, on the grounds
+that a debugging aid which lies is worse than not having one — it is trusted at exactly the moment
+something else is already confusing. Those tests double as executable statements of the invariants
+the window is laid out to make checkable by eye: spans ordered and disjoint, piece logical starts
+tiling the document, and the last span's own delta plus everything before it coming to the
+document's own.
+
 **Two capabilities are switched off while a piece table exists**, both for the same missing
 piece. Re-wrapping is refused, because re-wrapping an edited document means a fresh scan over the
 edited bytes - the same background re-index a rebuild needs. And search still reads the file on

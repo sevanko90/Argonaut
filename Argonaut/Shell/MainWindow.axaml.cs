@@ -147,6 +147,11 @@ public partial class MainWindow : Window
 
         if (e.PropertyName is null or nameof(MainWindowViewModel.RecentFiles))
             EmptyState.SetRecentFiles(viewModel.RecentFiles);
+
+#if DEBUG
+        if (e.PropertyName is null or nameof(MainWindowViewModel.CurrentDocument))
+            DetachInternalsInspector();
+#endif
     }
 
     /// <param name="second">A second command-line path (e.g. `argonaut a.json b.json`), or
@@ -196,6 +201,17 @@ public partial class MainWindow : Window
             return;
         }
 
+#if DEBUG
+        // Development only - the whole Diagnostics folder is excluded from the build outside
+        // Debug (see Argonaut.csproj), so this shortcut cannot exist in a shipped binary.
+        if (e.Key == Key.D && cmdOrCtrl && (e.KeyModifiers & KeyModifiers.Shift) != 0)
+        {
+            ShowInternalsInspector();
+            e.Handled = true;
+            return;
+        }
+#endif
+
         if (e.Key == Key.Escape && viewModel.IsFileOpen)
         {
             // Escape is the way out of the raw editor's edit mode, and this handler tunnels -
@@ -220,6 +236,38 @@ public partial class MainWindow : Window
             e.Handled = true;
         }
     }
+
+#if DEBUG
+    private Diagnostics.RawEditInspectorWindow? internalsInspector;
+
+    /// <summary>
+    /// Opens the raw editor's internals inspector, or brings the open one forward. Re-opened
+    /// rather than re-targeted when the document has changed: a snapshot copies what it shows,
+    /// so the old window is still readable, but it belongs to a document that is gone.
+    /// </summary>
+    private void ShowInternalsInspector()
+    {
+        if (viewModel.CurrentDocument is not Features.Raw.RawViewModel raw)
+        {
+            ToastService.Show("Internals inspector: open a file in the raw viewer first.");
+            return;
+        }
+
+        if (internalsInspector is { } open && open.IsVisible)
+        {
+            open.Activate();
+            return;
+        }
+
+        internalsInspector = new Diagnostics.RawEditInspectorWindow(raw);
+        internalsInspector.Closed += (_, _) => internalsInspector = null;
+        internalsInspector.Show(this);
+    }
+
+    /// <summary>The inspector follows one document; when that document goes, it stops following
+    /// rather than reading a view model that is being torn down.</summary>
+    private void DetachInternalsInspector() => internalsInspector?.Detach();
+#endif
 
     private void CloseFindBar()
     {

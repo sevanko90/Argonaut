@@ -53,6 +53,10 @@ public sealed class RawEditController
 
     private readonly RawEditJournal journal;
 
+    /// <summary>The file's length, kept only so the inspector can report what the edits changed
+    /// it by; the piece table deliberately does not remember it.</summary>
+    private readonly long originalLength;
+
     /// <summary>True while an edit of ours is moving the caret, so the caret's own movement
     /// notification does not end the typing run the edit is part of.</summary>
     private bool movingForOwnEdit;
@@ -64,6 +68,7 @@ public sealed class RawEditController
         ArgumentNullException.ThrowIfNull(scan);
         ArgumentNullException.ThrowIfNull(originalBytes);
 
+        this.originalLength = originalBytes.AvailableLength;
         Document = new RawPieceTable(originalBytes);
         RowIndex = new RawEditedRowIndex(scan, originalBytes, Document);
         Caret = new RawCaretController(RowIndex, Document);
@@ -105,6 +110,41 @@ public sealed class RawEditController
     /// RawEditedRowIndex").
     /// </summary>
     public bool NeedsRebuild => RowIndex.NeedsRebuild;
+
+    /// <summary>
+    /// What the editor's internals look like right now, for the debug inspector. Copies
+    /// everything it reports and reads no bytes, so it is safe to take on every keystroke and
+    /// safe to keep after the document has moved on.
+    /// </summary>
+    /// <param name="maxPieces">How many pieces to describe before summarising the rest.</param>
+    public RawEditSnapshot Describe(int maxPieces = 500)
+    {
+        var pieces = Document.DescribePieces(maxPieces, out int omitted);
+        var selection = Caret.Selection;
+
+        return new RawEditSnapshot(
+            Document.AvailableLength,
+            this.originalLength,
+            Document.IsUnedited,
+            Document.PieceCount,
+            Document.ScratchChunkCount,
+            Document.ScratchBytesUsed,
+            pieces,
+            omitted,
+            RowIndex.RowCount,
+            RowIndex.OriginalRowCount,
+            RowIndex.SpanCount,
+            RowIndex.TotalDerivedRows,
+            RawEditedRowIndex.MaxDerivedRows,
+            RowIndex.NeedsRebuild,
+            RowIndex.DescribeSpans(),
+            this.journal.Depth,
+            CanUndo,
+            CanRedo,
+            Caret.Caret.Offset,
+            selection.Start,
+            selection.End);
+    }
 
     /// <summary>Whether <paramref name="scan"/> is finished, which is what editing waits for: the
     /// append log is read lock-free because nothing already written ever changes, and a row index

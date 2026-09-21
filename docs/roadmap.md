@@ -74,6 +74,31 @@ until it lands an edited document cannot be written back.
   row walked, so about 20ms per keystroke at 54MB; measured across line lengths in
   `RawEditKeystrokeBenchmarks.TypeCharactersInsideALongLine`, and bounded properly only by the
   re-index below.
+- **Chained spans, to bound the walk an edit early in a very long line costs.** The last piece of
+  the long-line problem. An edit early in a 105MB line still walks to the line's end - about 50ms
+  per keystroke - because that is the first place the edited and original streams can be *shown*
+  to have rejoined. Edits late in such a line, and past it, are already instant.
+
+  A bare cap on rows per span does not work: a span cannot stop before convergence, because
+  convergence is precisely what says how to describe every row after it. It works if the capped
+  spans **chain** - span *k+1* starts exactly where span *k* ended, taking its start offset, row
+  and line state from its predecessor rather than from an anchor of the original index, and only
+  the last span in the chain converges back to that index.
+
+  It is cheaper than it looks on both counts one would expect to concede:
+  - **No extra anchors.** 1.3M rows is 20,488 anchors whether that is one span or twenty-seven.
+    The budget is unchanged; the anchors are merely partitioned.
+  - **No extra re-derivation.** An edit early in the line re-derives only the capped span it
+    lands in. Every later span in the chain shifts by the edit's delta, but its *content* is
+    unchanged - the edit is entirely before it - so its rows relative to its own start are
+    untouched. And the chain's final convergence survives without being re-checked: it holds when
+    `originalStart + totalDelta == currentStart`, and the edit adds the same delta to both sides.
+
+  The structural cost is that a span's start stops being an anchor of the original index, which is
+  currently how it knows its starting offset, row, line number and line-start state. Those become
+  explicit fields, sourced either from an anchor or from the previous span's end, and the prefix
+  sums treat a chain as one unit. Roughly 150-200 lines in `RawEditedRowIndex`; the from-scratch
+  oracle in `RawEditedRowIndexTests` covers it.
 - **Re-index over the piece table, for when `NeedsRebuild` fires.** The budget is now the only
   cap: past 65,536 derived rows — about a thousand separate places edited, or one edit re-flowing
   a very long line — `CanAbsorbEditAt` refuses to open a span somewhere new

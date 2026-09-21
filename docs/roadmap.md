@@ -45,18 +45,28 @@ until it lands an edited document cannot be written back.
   - The caret was drawn over the full row height rather than the text's, so it overhung the glyphs.
   - Find highlighting could not span a soft wrap (pre-existing, inherited from the attached-property
     version it replaced).
-- **More than one dirty span in `RawEditedRowIndex`.** Today every edit coalesces into a single
-  span running from the earliest edit to where the re-derivation rejoins the original, and the
-  index holds every row in it. Two edits far apart therefore mean holding every row in between,
-  so `RawEditedRowIndex.CanAbsorbEditAt` refuses the second one
-  (`RawEditOutcome.TooFarFromOtherEdits`, a toast) once the span would pass `MaxDerivedRows`
-  (4096 rows). The piece table itself does not care — this is purely the row index's shape.
-  Two ways out, and they are not alternatives so much as different sizes:
-  a **list of disjoint dirty spans**, each small, found by binary search on lookup, which removes
-  the restriction outright and needs no re-scan; or the **background re-index over the piece
-  table** the design already calls for, which is the general answer but needs edits frozen while
-  it runs and so wants sequencing with save. Until one of them exists, editing in several places
-  at once across a large document is capped.
+- ~~**More than one dirty span in `RawEditedRowIndex`.**~~ **Built.** Edits no longer coalesce
+  into a single span from the earliest edit to the re-convergence point; spans are disjoint, one
+  per *place* edited, so two edits a gigabyte apart cost two anchor buckets rather than every row
+  in between. Widen-or-open is decided by the index's own `AnchorStride` rather than a tuned
+  number, and part of that rule is a correctness guard (an edit in an anchor bucket the previous
+  span already covers must join it, or the spans overlap) rather than a preference.
+- **Re-index over the piece table, for when `NeedsRebuild` fires.** The budget is now the only
+  cap: past 65,536 derived rows — about a thousand separate places edited, or one edit re-flowing
+  a very long line — `CanAbsorbEditAt` refuses to open a span somewhere new
+  (`RawEditOutcome.NoRoomForAnotherEditSite`, a toast), while editing where changes already exist
+  keeps working and every lookup stays correct.
+
+  The rebuild is **not** a re-index of the file, and the distinction is the whole difficulty: the
+  rows on screen come from the piece table, so the scan has to run over the piece table, and a
+  scan is only sound over bytes that then never change. The shape is freeze the piece table, scan
+  it, and layer a fresh single-piece `RawPieceTable` over the frozen one as the new baseline — a
+  merge of the edits into the baseline, which is what `RawPieceTable`'s "collapses it back to a
+  single piece" means. Hence the sequencing with save: edits are frozen for the whole scan
+  (seconds to minutes on a multi-GB document), `RawEditJournal`'s snapshots belong to the
+  outgoing table so undo history either ends at a rebuild or must cross one, and each rebuild adds
+  a layer that every later read pays a binary search for. A save rewrites the file and starts
+  again from one piece over it, which answers the motivating case more cheaply.
 - ~~**Caret position readout.**~~ **Built** as a status gutter along the bottom of the raw view
   (`RawCaretReadout`, `RawView.axaml`): the character under the caret named in full on the left
   (`UnicodeNames`, a generated Unicode Character Database table), and byte offset, line/column and

@@ -247,22 +247,22 @@ public class RawEditControllerTests
     }
 
     [Fact]
-    public void AnEditFarFromTheOthers_IsRefusedRatherThanHeldInFull()
+    public void EditsAtOppositeEndsOfALargeDocument_AreBothAccepted()
     {
-        // Two edits at opposite ends of a document long enough that the span between them is
-        // past what the row index will hold. Refusing is the interim answer: the real one is a
-        // background re-index over the piece table.
+        // The case that decided the row index's shape: with one dirty span this refused, because
+        // the index would have had to hold every row between the two edits. Spans are per place
+        // edited, so the distance between them costs nothing.
         var editor = Editing(string.Concat(Enumerable.Repeat("0123456789\n", 40_000)));
 
         editor.Caret.PlaceAt(0);
         Assert.Equal(RawEditOutcome.Applied, editor.Type("a"));
 
         editor.Caret.PlaceAt(editor.Document.AvailableLength - 1);
-        Assert.Equal(RawEditOutcome.TooFarFromOtherEdits, editor.Type("b"));
+        Assert.Equal(RawEditOutcome.Applied, editor.Type("b"));
 
-        // Refused means refused: nothing was written, and the first edit still stands.
         Assert.Equal((byte)'a', editor.Document.GetContiguousSpan(0, 1)[0]);
-        Assert.Equal(440_001, editor.Document.AvailableLength);
+        Assert.Equal(440_002, editor.Document.AvailableLength);
+        Assert.False(editor.NeedsRebuild);
     }
 
     [Fact]

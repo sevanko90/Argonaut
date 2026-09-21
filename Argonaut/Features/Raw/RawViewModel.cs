@@ -259,11 +259,12 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
             case RawEditOutcome.Applied:
                 return true;
 
-            case RawEditOutcome.TooFarFromOtherEdits:
-                // Until a re-index over the piece table exists, the row index cannot hold the
-                // rows between two distant edits - so the edit is refused rather than the app
-                // quietly allocating its way through them.
-                ToastService.Show("Too many separate edits to track. Undo some of them first.");
+            case RawEditOutcome.NoRoomForAnotherEditSite:
+                // Each place edited costs the row index a span of re-derived rows. Until a
+                // re-index over the piece table exists, opening more past its budget is refused
+                // rather than the app quietly allocating its way onwards. Editing where changes
+                // have already been made still works.
+                ToastService.Show("Too many separate places edited to keep track of. Save or undo some first.");
                 return true;
 
             default:

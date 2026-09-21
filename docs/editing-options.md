@@ -523,15 +523,51 @@ drawing. Forward delete is the case that shows why the caret cannot be the signa
 leaves the caret exactly where it was, so `RawCaretController` raises nothing, and a view that
 redrew only on caret movement would show the deleted character still there.
 
-**The row index's `NeedsRebuild` is not enough on its own, and the gap is now a refusal.** Edits
-coalesce into a single dirty span, so a second edit a gigabyte from the first would have
-`Rederive` hold every row in between - tens of millions of them - *before* anything could react
-to the flag. `RawEditedRowIndex.CanAbsorbEditAt` is asked first and the edit is refused with a
-toast. That is an interim answer, not the designed one: the real answer is the background
-re-index over the piece table §3 describes, which needs edits frozen while it runs and so is
-sequenced with save rather than before it. Editing in one place, which is what editing normally
-is, never approaches the threshold - the span stays at one anchor bucket plus the row or two it
-takes the two byte streams to re-converge.
+**§3's "the raw index re-derives" became several dirty spans, not one.** The first cut coalesced
+every edit into a single span running from the earliest edit to wherever re-derivation rejoined
+the original. That is correct and it is also unusable: it holds every row in between, so changing
+two characters a gigabyte apart meant materialising every row of the gigabyte between them, and
+the second edit had to be refused outright to stop it. Spans are disjoint now - one per *place*
+edited - so the cost tracks how many places, not how far apart they are.
+
+What decides between widening a span and opening a new one is the index's own anchor stride,
+not a tuned number. A span can only begin at an anchor, because an anchor is the only place the
+original stream's state is known without walking to it, so a new span already pays up to 64 rows
+of walking before it reaches the edit; an edit closer than that is cheaper to absorb. Part of the
+same rule is not about cost at all: an edit in an anchor bucket the previous span has already
+re-derived past *must* join it, or the two spans overlap and every binary search in the class
+stops meaning anything. A re-derivation that runs past the span after it swallows that one
+instead, so spans stay disjoint and ordered without anyone predicting where a walk will stop.
+The anchor boundaries are where all of this changes its answer, so they are tested directly
+(`RawEditedRowIndexTests`, the anchor-boundary section) rather than left to the random scripts.
+
+The consequences: editing in one place costs one anchor bucket plus the row or two it takes the
+two byte streams to re-converge; going back and forth between two places gives two spans, not
+more, because a span is a place and not a keystroke; and what is now unbounded is the *number* of
+places, which is what the budget in `NeedsRebuild` is for.
+
+**`NeedsRebuild` is honest about being unimplemented, and about what it is not.** It fires when
+the spans together hold more than 65,536 rows - about a thousand separate places edited, or one
+edit inside a line long enough to re-flow that far on its own - and the only thing that happens is
+that edits in *new* places are refused; editing where changes already exist keeps working, and
+lookups stay correct throughout.
+
+The rebuild it names is worth stating precisely, because the obvious reading of it is wrong. It is
+not a re-index of the file: the rows on screen come from the piece table, and the bytes on disk
+are a document the user is no longer looking at. A rebuild has to scan the *piece table*, and a
+scan is only sound over bytes that then never change - so it is: freeze the current piece table,
+scan it into a complete `RawSegmentIndex`, and layer a fresh single-piece `RawPieceTable` over the
+frozen one, which becomes the new baseline. That is the "collapses it back to a single piece" in
+`RawPieceTable`'s own remarks, and it is a *merge of the edits into the baseline* rather than a
+re-read of anything.
+
+Three things fall out of that, and together they are why it is sequenced with save rather than
+shipped with typing: edits have to be frozen for the whole scan, which on a multi-GB document is
+seconds to minutes of a blocked editor; `RawEditJournal`'s undo snapshots belong to the outgoing
+piece table, so undo history either ends at a rebuild or has to learn to cross one; and every
+rebuild adds a layer, so each byte read afterwards pays one more binary search. Saving answers the
+same problem more cheaply for the case that motivates it, because a save rewrites the file and
+starts again from a single piece over it.
 
 **Two capabilities are switched off while a piece table exists**, both for the same missing
 piece. Re-wrapping is refused, because re-wrapping an edited document means a fresh scan over the

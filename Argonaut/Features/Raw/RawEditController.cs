@@ -14,12 +14,14 @@ public enum RawEditOutcome
     NothingToDo,
 
     /// <summary>
-    /// Refused because the edit is too far from the ones already made. See
-    /// <see cref="RawEditedRowIndex.CanAbsorbEditAt"/>: the index holds every row between the
-    /// earliest edit and the point the re-derivation rejoins the original, and two edits a
-    /// gigabyte apart would mean holding every row in between.
+    /// Refused because the row index has run out of room to track another separate place. See
+    /// <see cref="RawEditedRowIndex.CanAbsorbEditAt"/>: each place edited costs the index a span
+    /// of re-derived rows, and once they exhaust its budget the honest answer is a background
+    /// re-index over the piece table rather than opening more. Distance between edits is not
+    /// what this is about - the number of distinct places is. Editing where you already have is
+    /// still allowed.
     /// </summary>
-    TooFarFromOtherEdits
+    NoRoomForAnotherEditSite
 }
 
 /// <summary>
@@ -97,9 +99,10 @@ public sealed class RawEditController
     public bool CanRedo => this.journal.CanRedo;
 
     /// <summary>
-    /// True once the re-derived span has grown past what <see cref="RawEditedRowIndex"/> is
-    /// willing to hold, so further edits away from it are refused. The real answer is a
-    /// background re-index over the piece table (roadmap: "Editing UI in the raw view").
+    /// True once the re-derived spans together hold more than <see cref="RawEditedRowIndex"/> is
+    /// willing to, so edits in places not already being edited are refused. The real answer is a
+    /// background re-index over the piece table (roadmap: "More than one dirty span in
+    /// RawEditedRowIndex").
     /// </summary>
     public bool NeedsRebuild => RowIndex.NeedsRebuild;
 
@@ -193,7 +196,7 @@ public sealed class RawEditController
     private RawEditOutcome Apply(long start, long removed, ReadOnlySpan<byte> inserted)
     {
         if (!RowIndex.CanAbsorbEditAt(start))
-            return RawEditOutcome.TooFarFromOtherEdits;
+            return RawEditOutcome.NoRoomForAnotherEditSite;
 
         long caretBefore = Caret.Caret.Offset;
         var extent = removed > 0

@@ -81,31 +81,38 @@ until it lands an edited document cannot be written back.
   at 4.4MB for 250 edits, 65MB for 1,000 and 187MB for 2,000, against 1.5MB for the piece table
   and row index together. A step now holds the *run* of the piece list each edit rewrote, which
   for typing is one piece: 3.6MB at 2,000 edits, and linear.
-- **Chained spans, to bound the walk an edit early in a very long line costs.** The last piece of
-  the long-line problem. An edit early in a 105MB line still walks to the line's end - about 50ms
-  per keystroke - because that is the first place the edited and original streams can be *shown*
-  to have rejoined. Edits late in such a line, and past it, are already instant.
+- **Bounding the walk an edit early in a very long line costs.** Still open, and the two designs
+  written here before it were both wrong, so the reasoning is kept rather than replaced.
 
-  A bare cap on rows per span does not work: a span cannot stop before convergence, because
-  convergence is precisely what says how to describe every row after it. It works if the capped
-  spans **chain** - span *k+1* starts exactly where span *k* ended, taking its start offset, row
-  and line state from its predecessor rather than from an anchor of the original index, and only
-  the last span in the chain converges back to that index.
+  An edit early in a 105MB unbroken line walks to the line's end - about 40ms per keystroke -
+  because that is the first place the edited and original streams can be *shown* to have rejoined.
+  Edits late in such a line, and past it, are already instant.
 
-  It is cheaper than it looks on both counts one would expect to concede:
-  - **No extra anchors.** 1.3M rows is 20,488 anchors whether that is one span or twenty-seven.
-    The budget is unchanged; the anchors are merely partitioned.
-  - **No extra re-derivation.** An edit early in the line re-derives only the capped span it
-    lands in. Every later span in the chain shifts by the edit's delta, but its *content* is
-    unchanged - the edit is entirely before it - so its rows relative to its own start are
-    untouched. And the chain's final convergence survives without being re-checked: it holds when
-    `originalStart + totalDelta == currentStart`, and the edit adds the same delta to both sides.
+  **Why the obvious bounds do not work.** `RawLongLineReflowTests` measures the property they all
+  rest on, and it is the opposite of what it looks like:
+  - Over **ASCII**, an insert leaves every later break inside the line at the *same absolute
+    offset* - forced breaks are pure arithmetic from the row start when nothing backs off. The
+    boundaries do not move, but the bytes at them do.
+  - Over **multi-byte** content the backoff follows the characters, so breaks move to *old offset
+    plus the byte delta* - 194 of 200 in the measurement.
 
-  The structural cost is that a span's start stops being an anchor of the original index, which is
-  currently how it knows its starting offset, row, line number and line-start state. Those become
-  explicit fields, sourced either from an anchor or from the previous span's end, and the prefix
-  sums treat a chain as one unit. Roughly 150-200 lines in `RawEditedRowIndex`; the from-scratch
-  oracle in `RawEditedRowIndexTests` covers it.
+  The convergence test looks for the second shape, and a large JSON or log file is the first, so
+  it walks to the newline. Converging on the first shape instead is unsound: the bytes being read
+  there are not the bytes the original index was built over, so nothing beyond the next boundary
+  is proven. Chaining capped spans and checking that each one's end did not move has the same hole
+  one level down - the check says nothing about the *next* member, whose content has also shifted.
+
+  **What is left.** Either accept the walk and let the background re-index below dissolve the span,
+  or make row boundaries inside a line independent of content - breaks at exact multiples of
+  `WrapWidth` from the line start, with a straddling character drawn whole by the row above rather
+  than moving the boundary. That second one makes the whole question analytic (a line's row count
+  becomes arithmetic, and an edit moves no later boundary at all), and it is a change to what a
+  `RawRowInfo` means, rippling into `RawRowDecoder`, `RawCaretStops`, selection and the caret
+  readout. Not small, but it is the only version that removes the walk rather than hiding it.
+
+  Orthogonal and cheaper than either: re-derive on idle rather than per keystroke, so typing does
+  not pay the walk and the index catches up in the pause. That needs a provisional row count while
+  the walk is outstanding, which is its own design.
 - **Re-index over the piece table, for when `NeedsRebuild` fires.** The budget is now the only
   cap: past 65,536 derived rows — about a thousand separate places edited, or one edit re-flowing
   a very long line — `CanAbsorbEditAt` refuses to open a span somewhere new

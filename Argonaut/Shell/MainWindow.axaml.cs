@@ -198,6 +198,17 @@ public partial class MainWindow : Window
 
         if (e.Key == Key.Escape && viewModel.IsFileOpen)
         {
+            // Escape is the way out of the raw editor's edit mode, and this handler tunnels -
+            // it sees the key before the surface does. Dismissing the find bar also pulls focus
+            // back to the content area, so handling it here while the user is typing would end
+            // the edit session's focus as well as its mode.
+            if (viewModel.CurrentDocument is Features.Raw.RawViewModel { IsEditing: true } editing)
+            {
+                editing.SetEditing(false);
+                e.Handled = true;
+                return;
+            }
+
             CloseFindBar();
             e.Handled = true;
             return;

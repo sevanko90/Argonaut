@@ -5,10 +5,12 @@ settle *where* editing would live and *how* an edit is represented before any of
 scheduled, because the naive answer (mutate bytes, re-index) is the one answer that a multi-GB
 tool cannot afford.
 
-**Status (2026-09-17):** step 1 of the [Outcome](#outcome) is built, step 2 is part-built (caret,
-selection, copy and a position readout; no typing yet), steps 3-4 are not started. The sections
-"What step 1 actually became" and "What step 2 has become so far" at the end are the current
-record; §1-§6 are the reasoning as written.
+**Status (2026-09-21):** step 1 of the [Outcome](#outcome) is built, step 2 is built apart from
+IME composition (caret, selection, copy, a position readout, and an edit mode in which typing,
+deletion, Enter, paste and undo/redo change the document), steps 3-4 are not started - so an
+edited document cannot yet be saved. The sections "What step 1 actually became", "What step 2 has
+become so far" and "What typing became" at the end are the current record; §1-§6 are the reasoning
+as written.
 
 Every cost claim in §1-§6 was checked against the code at the time of writing (branch `main`,
 2026-09-09), with file/line references kept so a future reader can tell whether the reasoning
@@ -433,10 +435,9 @@ caret was before a jump across a multi-GB file. Caret movement kept the minimal 
 are separate operations rather than one with a flag, since centring on every arrow key would leap
 half a screen.
 
-Still to do: typing and deletion against the piece table, edit mode gated on the scan having
-finished (`AllItemsPublished` - `RawEditedRowIndex` already refuses to start without it),
-undo/redo wired to the `RawEditJournal` that is built but unused, paste, and making the window's
-tunnelling Escape handler mode-aware.
+Typing, deletion, paste and undo/redo are now done - see "What typing became" below. Still to do
+from this step: IME and dead-key composition, which `Avalonia.Headless` cannot test because it
+posts finished text rather than composition events.
 
 **Done: a caret position readout.** The caret knew three things the user could not see —
 the byte offset into the file, the row and column, and the size of the selection — and on a
@@ -489,6 +490,56 @@ Edits are gated on a completed scan. The scan's append log is read lock-free pre
 nothing already written ever changes, and a shift log mutated on the UI thread while the scan
 consulted it would end that. The wait is largely notional in the motivating case: revealing a byte
 offset already waits for the scan to cover it.
+
+## What typing became
+
+Edit mode is a toggle in the raw view's toolbar, enabled once the scan finishes, and
+`RawEditController` is the one thing that sits behind it: it constructs the piece table, the
+`RawEditedRowIndex` over it, the `RawEditJournal` and the `RawCaretController`, and every
+keystroke reaches the document through it. All four are built there rather than handed in,
+because three of them are only meaningful over exactly the fourth's coordinate space, and pairing
+a caret with the wrong row index is not a mistake that shows up quickly.
+
+Five things are worth recording.
+
+**A mode, not an always-on editor.** This is the viewer of last resort - what a user opens a 4GB
+file in to *look* at it - so a stray keypress silently altering the document would be the worst
+possible default. The toggle also gave Escape something to mean: the window's tunnelling Escape
+handler, which otherwise dismisses the find bar and pulls focus back to the content area, now
+leaves edit mode instead while the raw view is in it, because handling it the old way would have
+ended the editing session's focus as well as its mode.
+
+**Deletion is a character question, and `RawCaretStops` already answered it.** Backspace removes
+the span between the previous caret stop and the caret, which makes a multi-byte character, a
+surrogate pair, a `\r\n` and a whole run of invalid bytes that drew as one U+FFFD each go in one
+press - and at the start of a row the previous stop is before the line ending, so backspace there
+joins the lines with no special case for it. Nothing in the edit path knows what a character is.
+
+**The order inside one edit is load-bearing at both ends.** `RawEditedRowIndex.ApplyEdit` has to
+run before the caret moves, because the caret snaps to a legal position by asking the row index
+where the rows are; and the "document changed" notification has to fire before the caret moves,
+so whatever caches rows has dropped them by the time the caret's own notification has the view
+drawing. Forward delete is the case that shows why the caret cannot be the signal at all: it
+leaves the caret exactly where it was, so `RawCaretController` raises nothing, and a view that
+redrew only on caret movement would show the deleted character still there.
+
+**The row index's `NeedsRebuild` is not enough on its own, and the gap is now a refusal.** Edits
+coalesce into a single dirty span, so a second edit a gigabyte from the first would have
+`Rederive` hold every row in between - tens of millions of them - *before* anything could react
+to the flag. `RawEditedRowIndex.CanAbsorbEditAt` is asked first and the edit is refused with a
+toast. That is an interim answer, not the designed one: the real answer is the background
+re-index over the piece table §3 describes, which needs edits frozen while it runs and so is
+sequenced with save rather than before it. Editing in one place, which is what editing normally
+is, never approaches the threshold - the span stays at one anchor bucket plus the row or two it
+takes the two byte streams to re-converge.
+
+**Two capabilities are switched off while a piece table exists**, both for the same missing
+piece. Re-wrapping is refused, because re-wrapping an edited document means a fresh scan over the
+edited bytes - the same background re-index a rebuild needs. And search still reads the file on
+disk through the origin, which is §5's recorded decision ("search reflects the last save, and the
+document carries a dirty flag that says so"); what is new is that a reveal from a search hit now
+also places the caret, so past the first edit its offsets land near rather than on the match. The
+status gutter says "Edited — not saved" for the whole of it.
 
 ## Related
 

@@ -11,8 +11,9 @@ Nothing here is scheduled. Items are grouped by area, and roughly ordered by val
 Options weighed, and the sequencing, are in [editing-options.md](editing-options.md). The decision
 recorded there is to build the byte layer once in the raw view rather than starting in the JSON
 tree, because the raw index is a pure function of the bytes and can be re-derived where the JSON
-index cannot. Step 1 is built and step 2 is part-built: the raw view now has a caret, a selection
-and copy-out. Nothing is editable yet - typing is the next piece of work.
+index cannot. Steps 1 and 2 are built: the raw view has a caret, a selection, copy-out and an
+edit mode in which typing changes the document. Step 3 - saving - is the next piece of work, and
+until it lands an edited document cannot be written back.
 
 - ~~**Piece table over (original mapping, append-only scratch).**~~ **Built** (`Features/Raw/`:
   `RawPieceTable`, `RawEditedRowIndex`, `RawRowDecoder`, `RawCaretStops`, `RawEditJournal`,
@@ -21,13 +22,15 @@ and copy-out. Nothing is editable yet - typing is the next piece of work.
   its threshold. No UI change — verified headlessly against a from-scratch index of the edited
   bytes. Measured: ~1.6-12.5ns per offset resolution (1 to 1024 pieces, no allocation), ~10us per
   keystroke including re-derivation.
-- **Editing UI in the raw view.** *Part-built.* `RawTextSurface` replaced the `ListBox`: it draws
-  every visible row itself, implements `ILogicalScrollable`, and holds the caret
-  (`RawCaretController`, `RawCaret`), selection across rows, and copy. Still to do: **typing and
-  deletion** wired to the piece table, edit mode gated on `RawSegmentIndex.AllItemsPublished`, undo/redo
-  wired to `RawEditJournal` (built, unused), paste, and making `MainWindow`'s tunnelling Escape
-  handler mode-aware. IME/dead-key composition is deferred past v1 — `Avalonia.Headless` posts
-  finished text rather than composition events, so it cannot be tested here.
+- **Editing UI in the raw view.** *Built*, apart from IME. `RawTextSurface` replaced the
+  `ListBox`: it draws every visible row itself, implements `ILogicalScrollable`, and holds the
+  caret (`RawCaretController`, `RawCaret`), selection across rows, and copy. Edit mode is a
+  toolbar toggle gated on `RawSegmentIndex.AllItemsPublished`, and `RawEditController` is what
+  sits behind it — typing, Enter, backspace and forward delete against the piece table, paste,
+  and undo/redo through `RawEditJournal`. `MainWindow`'s tunnelling Escape leaves edit mode
+  rather than dismissing the find bar while the raw view is in it. IME/dead-key composition is
+  deferred past v1 — `Avalonia.Headless` posts finished text rather than composition events, so
+  it cannot be tested here.
 
   The prediction that the caret would be the larger half held. Five defects came out of running
   it on a real 4GB file rather than out of the test suite, and each is worth remembering because
@@ -42,6 +45,18 @@ and copy-out. Nothing is editable yet - typing is the next piece of work.
   - The caret was drawn over the full row height rather than the text's, so it overhung the glyphs.
   - Find highlighting could not span a soft wrap (pre-existing, inherited from the attached-property
     version it replaced).
+- **More than one dirty span in `RawEditedRowIndex`.** Today every edit coalesces into a single
+  span running from the earliest edit to where the re-derivation rejoins the original, and the
+  index holds every row in it. Two edits far apart therefore mean holding every row in between,
+  so `RawEditedRowIndex.CanAbsorbEditAt` refuses the second one
+  (`RawEditOutcome.TooFarFromOtherEdits`, a toast) once the span would pass `MaxDerivedRows`
+  (4096 rows). The piece table itself does not care — this is purely the row index's shape.
+  Two ways out, and they are not alternatives so much as different sizes:
+  a **list of disjoint dirty spans**, each small, found by binary search on lookup, which removes
+  the restriction outright and needs no re-scan; or the **background re-index over the piece
+  table** the design already calls for, which is the general answer but needs edits frozen while
+  it runs and so wants sequencing with save. Until one of them exists, editing in several places
+  at once across a large document is capped.
 - ~~**Caret position readout.**~~ **Built** as a status gutter along the bottom of the raw view
   (`RawCaretReadout`, `RawView.axaml`): the character under the caret named in full on the left
   (`UnicodeNames`, a generated Unicode Character Database table), and byte offset, line/column and
@@ -67,7 +82,10 @@ and copy-out. Nothing is editable yet - typing is the next piece of work.
 - **Structural editing in the JSON tree** (delete, insert, paste) — tombstones and fragment
   indices merged into the row walk. The expensive class. Explicitly not committed to.
 - **Search while a document is dirty.** The chosen answer is that search reflects the last save
-  and the document says so; a merge-iterator over piece-space is a project of its own.
+  and the document says so; a merge-iterator over piece-space is a project of its own. Now that
+  edit mode exists this has a visible consequence: a reveal places the caret as well as
+  scrolling, so past the first edit a search hit lands near the match rather than on it. The
+  raw view's status gutter carries the "Edited — not saved" marker throughout.
 
 ## JSON diff
 

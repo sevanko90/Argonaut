@@ -29,15 +29,33 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
     private int? selectedRowIndex;
     private RawCaretController? caret;
     private RawCaretReadout? caretReadout;
+    private RawEditController? editor;
+    private bool isEditing;
     private int wrapWidth = RawWrapWidthPreference.Default;
 
     protected override IDocumentSession? Session => this.session;
 
     protected override IDisposable? MappedRows => this.rows;
 
+    /// <summary>
+    /// The background scan over the file <i>as it is on disk</i>. Stays the scan even while the
+    /// document is edited, because that is what the byte offsets a search produces are in - see
+    /// <see cref="RowIndex"/> for what the view reads.
+    /// </summary>
     internal RawSegmentIndex? Index => this.session?.Index;
 
+    /// <summary>The file's bytes, unedited. <see cref="Document"/> is what is on screen.</summary>
     internal IByteSource? Bytes => this.session?.Bytes;
+
+    /// <summary>
+    /// The bytes the view shows: the file, or the piece table over it once editing has begun.
+    /// Every reader that renders, decodes, measures or copies goes through this rather than
+    /// <see cref="Bytes"/>.
+    /// </summary>
+    internal IByteSource? Document => this.editor?.Document ?? this.session?.Bytes;
+
+    /// <summary>The rows of <see cref="Document"/>.</summary>
+    internal IRawRowIndex? RowIndex => (IRawRowIndex?)this.editor?.RowIndex ?? this.session?.Index;
 
     /// <summary>Fires when this document begins tearing down, for
     /// <see cref="ISearchNavigator.DocumentTearingDown"/>. Deliberately the mapping-lifetime
@@ -45,7 +63,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
     /// <see cref="RawIndexSession.TearingDown"/>.</summary>
     internal CancellationToken TearingDown => this.session?.TearingDown ?? default;
 
-    public int RowCount => this.session?.Index.RowCount ?? 0;
+    public int RowCount => RowIndex?.RowCount ?? 0;
 
     /// <summary>Byte cap per display row. Observable so the view can recompute its pan range.</summary>
     public int WrapWidth
@@ -136,6 +154,220 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
         }
     }
 
+
+    // ---- editing ------------------------------------------------------------------------
+    //
+    // docs/editing-options.md §2B: the raw view is where editing lives, because its row index is
+    // a pure function of the bytes and can be re-derived where the JSON index cannot. Nothing
+    // here writes to the file - see RawEditController.
+
+    /// <summary>
+    /// True while keystrokes change the document rather than only moving the caret. A mode
+    /// rather than an always-on editor because this is the viewer of last resort: it is what a
+    /// user opens a 4GB file in to look at it, and a stray keypress that silently altered such a
+    /// document would be the worst possible default.
+    /// </summary>
+    public bool IsEditing
+    {
+        get => this.isEditing;
+        private set => SetField(ref this.isEditing, value);
+    }
+
+    /// <summary>
+    /// Whether edit mode can be entered: the scan must have finished. The append log is read
+    /// lock-free because nothing already written ever changes, and layering a mutating
+    /// coordinate system over a log still being appended to would end that
+    /// (<see cref="RawEditedRowIndex"/> refuses outright).
+    /// </summary>
+    public bool CanEdit => !IsDisposed && this.session is { } open && RawEditController.CanEdit(open.Index);
+
+    /// <summary>True once the document reads differently from the file on disk.</summary>
+    public bool IsDirty => this.editor?.IsDirty == true;
+
+    /// <summary>
+    /// Bumped by every edit, so the view drops the row text, layouts and decode maps it is
+    /// holding. Separate from <see cref="IndexGeneration"/> because the two want different
+    /// responses: a wrap change replaces the row collection wholesale, an edit keeps it.
+    /// </summary>
+    public int EditGeneration { get; private set; }
+
+    /// <summary>What the status gutter says about editing: nothing, or that there are unsaved
+    /// changes.</summary>
+    public string EditStatusText => IsDirty ? "Edited — not saved" : string.Empty;
+
+    /// <summary>
+    /// Turns edit mode on or off. Turning it on for the first time builds the piece table and
+    /// swaps the view onto it; turning it off leaves any edits in place - they are the
+    /// document now, and discarding them silently is not an option the toggle gets to take.
+    /// An edit-mode visit that changed nothing is undone completely, so the wrap-width combo
+    /// (which is locked while a piece table exists) comes back.
+    /// </summary>
+    public void SetEditing(bool editing)
+    {
+        if (IsDisposed || this.session is null || editing == IsEditing)
+            return;
+
+        if (editing)
+        {
+            if (!CanEdit)
+            {
+                ToastService.Show("Wait for indexing to finish before editing.");
+                SyncToolbarEditing();
+                return;
+            }
+
+            if (this.editor is null)
+                BeginEditing();
+        }
+        else if (this.editor is { IsDirty: false })
+        {
+            EndEditingUntouched();
+        }
+
+        IsEditing = editing;
+        SyncToolbarEditing();
+    }
+
+    /// <summary>Types text at the caret. Returns false when nothing happened, so the view can
+    /// leave the key for whoever else wants it.</summary>
+    public bool TypeText(string text) => Report(this.editor?.Type(text));
+
+    /// <summary>Inserts a line break at the caret.</summary>
+    public bool InsertNewLine() => Report(this.editor?.InsertNewLine());
+
+    /// <summary>
+    /// Inserts raw bytes at the caret - what a paste is. Bytes rather than a string, so a
+    /// clipboard that offers UTF-8 directly reaches the document without a decode-and-re-encode
+    /// round trip that would silently repair anything invalid in it.
+    /// </summary>
+    public bool Paste(ReadOnlySpan<byte> bytes) => Report(this.editor is null ? null : this.editor.Insert(bytes));
+
+    /// <summary>Backspace.</summary>
+    public bool DeleteBackward() => Report(this.editor?.DeleteBackward());
+
+    /// <summary>Forward delete.</summary>
+    public bool DeleteForward() => Report(this.editor?.DeleteForward());
+
+    public bool Undo() => Report(this.editor?.Undo());
+
+    public bool Redo() => Report(this.editor?.Redo());
+
+    private bool Report(RawEditOutcome? outcome)
+    {
+        switch (outcome)
+        {
+            case RawEditOutcome.Applied:
+                return true;
+
+            case RawEditOutcome.TooFarFromOtherEdits:
+                // Until a re-index over the piece table exists, the row index cannot hold the
+                // rows between two distant edits - so the edit is refused rather than the app
+                // quietly allocating its way through them.
+                ToastService.Show("Too many separate edits to track. Undo some of them first.");
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
+    private void BeginEditing()
+    {
+        var session = this.session!;
+        var editor = new RawEditController(session.Index, session.Bytes);
+        editor.Changed += OnDocumentEdited;
+        this.editor = editor;
+
+        // The caret the editor built is over the piece table; the one being replaced was over
+        // the file. A byte offset means the same thing in both while nothing has been edited, so
+        // the position carries across.
+        long caretOffset = Caret?.Caret.Offset ?? 0;
+        var selection = Caret?.Selection ?? default;
+
+        SwapRows(new RawRowCollection(editor.RowIndex, editor.Document));
+        Caret = editor.Caret;
+        RestoreCaret(caretOffset, selection);
+
+        // A piece table pins the wrap width: re-indexing it would mean a fresh scan over edited
+        // bytes, which is the same background re-index a rebuild needs and is not built.
+        if (this.toolbar is { } toolbar)
+            toolbar.CanChangeWrapWidth = false;
+
+        OnPropertyChanged(nameof(RowCount));
+        OnPropertyChanged(nameof(IsDirty));
+        OnPropertyChanged(nameof(EditStatusText));
+    }
+
+    /// <summary>Leaving edit mode having changed nothing puts the view back on the file itself,
+    /// so nothing downstream has to reason about an idle piece table.</summary>
+    private void EndEditingUntouched()
+    {
+        var session = this.session!;
+        this.editor!.Changed -= OnDocumentEdited;
+        this.editor = null;
+
+        long caretOffset = Caret?.Caret.Offset ?? 0;
+        var selection = Caret?.Selection ?? default;
+
+        SwapRows(new RawRowCollection(session.Index, session.Bytes));
+        Caret = new RawCaretController(session.Index, session.Bytes);
+        RestoreCaret(caretOffset, selection);
+
+        if (this.toolbar is { } toolbar)
+            toolbar.CanChangeWrapWidth = true;
+
+        OnPropertyChanged(nameof(RowCount));
+    }
+
+    private void OnDocumentEdited(object? sender, EventArgs e)
+    {
+        this.rows?.Invalidate();
+        EditGeneration++;
+
+        OnPropertyChanged(nameof(EditGeneration));
+        OnPropertyChanged(nameof(RowCount));
+        OnPropertyChanged(nameof(IsDirty));
+        OnPropertyChanged(nameof(EditStatusText));
+
+        // The caret often sits at the same offset after an edit (forward delete does not move
+        // it), so its own notification cannot be relied on to refresh what is under it.
+        RefreshCaretReadout();
+
+        StatusText = $"{FilePath} — {RowCount:N0} rows — edited, not saved";
+    }
+
+    private void SyncToolbarEditing()
+    {
+        if (this.toolbar is { } toolbar)
+            toolbar.IsEditing = IsEditing;
+    }
+
+    /// <summary>Puts the caret and selection back after the row index under them was replaced.
+    /// Anchor first, then extend, so a selection made right-to-left keeps its direction.</summary>
+    private void RestoreCaret(long caretOffset, RawSelection selection)
+    {
+        if (Caret is not { } caret)
+            return;
+
+        if (selection.IsEmpty)
+        {
+            caret.PlaceAt(caretOffset);
+        }
+        else
+        {
+            caret.PlaceAt(selection.Anchor);
+            caret.ExtendTo(selection.Active);
+        }
+    }
+
+    private void SwapRows(RawRowCollection replacement)
+    {
+        var old = this.rows;
+        this.rows = replacement;
+        old?.Dispose();
+        OnPropertyChanged(nameof(Rows));
+    }
+
     private void OnCaretMoved(object? sender, EventArgs e) => RefreshCaretReadout();
 
     /// <summary>
@@ -144,10 +376,9 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
     /// </summary>
     private void RefreshCaretReadout()
     {
-        CaretReadout = this.caret is null || this.session is null
+        CaretReadout = this.caret is null || RowIndex is not { } rowIndex || Document is not { } document
             ? null
-            : RawCaretReadout.Describe(
-                this.session.Index, this.session.Bytes, this.caret.Caret, this.caret.Selection);
+            : RawCaretReadout.Describe(rowIndex, document, this.caret.Caret, this.caret.Selection);
 
         OnPropertyChanged(nameof(CaretCharacterText));
         OnPropertyChanged(nameof(CaretPositionText));
@@ -244,7 +475,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
         this.Origin = origin;
         this.FilePath = origin.Path ?? origin.DisplayName;
         this.wrapWidth = RawWrapWidthPreference.Load();
-        this.toolbar = new RawToolbarViewModel(this.wrapWidth, SetWrapWidth);
+        this.toolbar = new RawToolbarViewModel(this.wrapWidth, SetWrapWidth, SetEditing);
 
         var session = RawIndexSession.Start(origin.Open(), this.wrapWidth, progressReporter);
         this.session = session;
@@ -275,6 +506,16 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
     {
         if (this.IsDisposed || this.session is null || bytes == this.wrapWidth)
             return;
+
+        // A piece table's rows are derived from the file scan at the wrap width that scan used,
+        // so re-wrapping an edited document means re-scanning the edited bytes - the same
+        // background re-index a dirty-span rebuild needs, and not built. The toolbar disables
+        // the combo for the same reason; this is the guard behind it.
+        if (this.editor is not null)
+        {
+            ToastService.Show("Wrap width cannot change while the document is being edited.");
+            return;
+        }
 
         // Raised BEFORE the Rows swap below - the view reacts by resetting its scroll and
         // re-laying-out against the old collection, so the virtualizer's remembered viewport
@@ -336,7 +577,15 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
     /// <see cref="Argonaut.Features.Raw.RawViewModel.IndexGeneration"/>'s remarks call out as
     /// covering a wrap-width restart retiring this index mid-monitor.</summary>
     protected override void OnIndexingCompleted()
-        => StatusText = $"{FilePath} — {RowCount:N0} rows";
+    {
+        StatusText = $"{FilePath} — {RowCount:N0} rows";
+
+        // Editing waits for the scan, so this is the moment the toggle becomes usable.
+        if (this.toolbar is { } toolbar)
+            toolbar.CanEdit = true;
+
+        OnPropertyChanged(nameof(CanEdit));
+    }
 
     /// <summary>Indexing stopped early (failure, or cancellation on <paramref name="failure"/> null).</summary>
     protected override void OnIndexingFailed(IndexFailure? failure)

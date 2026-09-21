@@ -363,7 +363,20 @@ public class RawTextSurface : Control, ILogicalScrollable
                 InvalidateVisual();
                 break;
 
+            case nameof(RawViewModel.EditGeneration):
+                DropRowCaches();
+                InvalidateScrollable();
+                InvalidateVisual();
+                break;
+
             case nameof(RawViewModel.RowCount):
+                // Not DropLayouts: an edit raises this too, and the pan range must not reset
+                // under the user on every keystroke. The row count itself is read live.
+                DropRowCaches();
+                InvalidateScrollable();
+                InvalidateVisual();
+                break;
+
             case nameof(RawViewModel.Rows):
                 SubscribeRows();
                 DropLayouts();
@@ -374,18 +387,27 @@ public class RawTextSurface : Control, ILogicalScrollable
     }
 
     /// <summary>
-    /// Drops every cached layout. Called whenever the way a row is drawn changes - the font, the
-    /// find term, the document - rather than trying to work out which rows are affected. The
-    /// cache only ever holds a viewport's worth, so rebuilding it is a few dozen layouts.
+    /// Drops the per-row caches without touching <see cref="widestRowWidth"/>. What an edit
+    /// needs: the text of a row, where its characters sit and how many rows there are can all
+    /// change, but the pan range is a high-water mark and resetting it every keystroke would
+    /// have the pan scrollbar jumping under the user's hand as they type.
     /// </summary>
-    private void DropLayouts()
+    private void DropRowCaches()
     {
         this.layouts.Clear();
         this.decoded.Clear();
-
-        // The rows themselves are about to be laid out differently, so what was measured over
-        // them means nothing - including which range it was measured over.
         this.measuredRange = (0, -1);
+    }
+
+    /// <summary>
+    /// Drops every cached layout <i>and</i> the measured pan range. Called whenever the way a
+    /// row is drawn changes - the font, the find term, the document - rather than trying to work
+    /// out which rows are affected. The cache only ever holds a viewport's worth, so rebuilding
+    /// it is a few dozen layouts.
+    /// </summary>
+    private void DropLayouts()
+    {
+        DropRowCaches();
 
         if (this.widestRowWidth == 0)
             return;
@@ -700,9 +722,11 @@ public class RawTextSurface : Control, ILogicalScrollable
     /// to the view, so the surface requests rather than sets.</summary>
     public event EventHandler<double>? PanRequested;
 
-    private IByteSource? Source => this.viewModel?.Bytes;
+    /// <summary>The bytes on screen - the file, or the piece table over it once editing has
+    /// begun. Never <see cref="RawViewModel.Bytes"/>, which is the file as it is on disk.</summary>
+    private IByteSource? Source => this.viewModel?.Document;
 
-    private IRawRowIndex? RowIndex => this.viewModel?.Index;
+    private IRawRowIndex? RowIndex => this.viewModel?.RowIndex;
 
     /// <summary>
     /// Which row the caret draws on. At a soft-wrap boundary one offset belongs to two rows, and
@@ -1082,11 +1106,122 @@ public class RawTextSurface : Control, ILogicalScrollable
                 _ = CopySelectionAsync();
                 break;
 
+            case Key.V when command && IsEditing:
+                _ = PasteAsync();
+                break;
+
+            case Key.Z when command && IsEditing && extend:
+                this.viewModel!.Redo();
+                break;
+
+            case Key.Z when command && IsEditing:
+                this.viewModel!.Undo();
+                break;
+
+            case Key.Y when command && IsEditing:
+                this.viewModel!.Redo();
+                break;
+
+            case Key.Back when IsEditing:
+                this.viewModel!.DeleteBackward();
+                break;
+
+            case Key.Delete when IsEditing:
+                this.viewModel!.DeleteForward();
+                break;
+
+            // Enter and Tab arrive here rather than through OnTextInput, and both would
+            // otherwise be taken by the window (Tab walks focus away from the document).
+            case Key.Enter when IsEditing:
+                this.viewModel!.InsertNewLine();
+                break;
+
+            case Key.Tab when IsEditing:
+                this.viewModel!.TypeText("\t");
+                break;
+
             default:
                 return; // not ours; leave it for the window's own handlers
         }
 
         e.Handled = true;
+    }
+
+    /// <summary>Whether keystrokes change the document rather than only moving the caret.</summary>
+    private bool IsEditing => this.viewModel is { IsEditing: true };
+
+    /// <summary>
+    /// Typed characters. Avalonia delivers these already composed, so this is where a keyboard
+    /// layout, a dead key or a pasted IME commit lands - never a per-key mapping of our own.
+    ///
+    /// Control characters are dropped: they reach <see cref="OnKeyDown"/> as keys, and the ones
+    /// with a meaning here (Enter, Tab, Backspace) are handled there. Letting them through would
+    /// insert a literal 0x08 into the document on some platforms.
+    /// </summary>
+    protected override void OnTextInput(TextInputEventArgs e)
+    {
+        base.OnTextInput(e);
+
+        if (e.Handled || !IsEditing || string.IsNullOrEmpty(e.Text))
+            return;
+
+        string text = e.Text;
+        if (text.Length == 1 && char.IsControl(text[0]))
+            return;
+
+        if (this.viewModel!.TypeText(text))
+            e.Handled = true;
+    }
+
+    /// <summary>
+    /// Clipboard formats that hand over UTF-8 bytes directly, preferred over text so a paste
+    /// into a raw document is the bytes that were copied. Mirrors MainWindow's paste-to-open.
+    /// </summary>
+    private static readonly string[] Utf8ClipboardFormats =
+    {
+        "public.utf8-plain-text",        // macOS
+        "text/plain;charset=utf-8",      // X11 / Wayland
+    };
+
+    /// <summary>
+    /// Pastes the clipboard at the caret. No line-ending translation and no re-encoding: this is
+    /// the viewer that exists for files whose conventions cannot be assumed about, so what was
+    /// copied is what goes in.
+    /// </summary>
+    private async Task PasteAsync()
+    {
+        if (TopLevel.GetTopLevel(this)?.Clipboard is not { } clipboard)
+            return;
+
+        byte[]? bytes = await ReadClipboardUtf8Async(clipboard);
+        if (bytes is not { Length: > 0 } || this.viewModel is not { IsEditing: true } vm)
+            return;
+
+        vm.Paste(bytes);
+    }
+
+    private static async Task<byte[]?> ReadClipboardUtf8Async(IClipboard clipboard)
+    {
+        var transfer = await clipboard.TryGetDataAsync();
+        if (transfer is null)
+            return null;
+
+        try
+        {
+            foreach (string identifier in Utf8ClipboardFormats)
+            {
+                var format = DataFormat.CreateBytesPlatformFormat(identifier);
+                if (transfer.Contains(format) && await transfer.TryGetValueAsync(format) is { Length: > 0 } utf8)
+                    return utf8;
+            }
+
+            string? text = await transfer.TryGetTextAsync();
+            return text is null ? null : System.Text.Encoding.UTF8.GetBytes(text);
+        }
+        finally
+        {
+            (transfer as IDisposable)?.Dispose();
+        }
     }
 
     private int VisibleRowCount() => Math.Max(1, (int)(Bounds.Height / RowHeight) - 1);

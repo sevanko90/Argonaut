@@ -29,15 +29,15 @@ public sealed class RawToolbarViewModelTests : IDisposable
     [Fact]
     public void Ctor_SeedsIndexFromTheInitialWidth()
     {
-        Assert.Equal(0, new RawToolbarViewModel(80, _ => { }).WrapWidthIndex);
-        Assert.Equal(1, new RawToolbarViewModel(160, _ => { }).WrapWidthIndex);
-        Assert.Equal(2, new RawToolbarViewModel(512, _ => { }).WrapWidthIndex);
+        Assert.Equal(0, new RawToolbarViewModel(80, _ => { }, _ => { }).WrapWidthIndex);
+        Assert.Equal(1, new RawToolbarViewModel(160, _ => { }, _ => { }).WrapWidthIndex);
+        Assert.Equal(2, new RawToolbarViewModel(512, _ => { }, _ => { }).WrapWidthIndex);
     }
 
     [Fact]
     public void Ctor_UnknownWidth_FallsBackToTheDefault()
     {
-        var toolbar = new RawToolbarViewModel(999, _ => { });
+        var toolbar = new RawToolbarViewModel(999, _ => { }, _ => { });
         Assert.Equal(Array.IndexOf(RawWrapWidthPreference.Widths, RawWrapWidthPreference.Default), toolbar.WrapWidthIndex);
     }
 
@@ -45,7 +45,7 @@ public sealed class RawToolbarViewModelTests : IDisposable
     public void WrapWidthIndex_Set_PersistsAndInvokesCallback()
     {
         var applied = new List<int>();
-        var toolbar = new RawToolbarViewModel(160, applied.Add);
+        var toolbar = new RawToolbarViewModel(160, applied.Add, _ => { });
 
         toolbar.WrapWidthIndex = 2;
 
@@ -61,7 +61,7 @@ public sealed class RawToolbarViewModelTests : IDisposable
     public void OutOfRangeIndexAssignments_AreIgnored()
     {
         var applied = new List<int>();
-        var toolbar = new RawToolbarViewModel(160, applied.Add);
+        var toolbar = new RawToolbarViewModel(160, applied.Add, _ => { });
 
         toolbar.WrapWidthIndex = -1; // a ComboBox raises -1 during teardown
         toolbar.WrapWidthIndex = RawWrapWidthPreference.Widths.Length;

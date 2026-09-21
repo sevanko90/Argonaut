@@ -102,6 +102,35 @@ public sealed class RawEditedRowIndex : IRawRowIndex
     private int DirtyStartRow => this.hasEdits ? this.dirtyAnchor * RawSegmentIndex.AnchorStride : this.original.RowCount;
 
     /// <summary>
+    /// Whether an edit at <paramref name="offset"/> would leave the dirty span inside
+    /// <see cref="MaxDerivedRows"/>, asked <i>before</i> the edit is made.
+    ///
+    /// <see cref="NeedsRebuild"/> is the after-the-fact signal, and on its own it is not enough
+    /// to keep this class's memory bounded: edits coalesce into one span, so a single edit a
+    /// gigabyte away from the last one would have <see cref="Rederive"/> hold every row in
+    /// between - tens of millions of them - before anything could react to the flag. Until the
+    /// background re-index over the piece table exists (roadmap: "Editing UI in the raw view"),
+    /// the owner refuses that edit instead.
+    ///
+    /// Deliberately an estimate, and one that errs towards refusing: it compares a row in the
+    /// original index's space against one in the edited document's, which differ by the row
+    /// delta the edits have introduced so far - a number far smaller than the threshold in every
+    /// case where the answer is close.
+    /// </summary>
+    public bool CanAbsorbEditAt(long offset)
+    {
+        if (!this.hasEdits)
+            return true;
+
+        int anchorRow = AnchorContaining(OriginalOffsetOf(offset)) * RawSegmentIndex.AnchorStride;
+        int editRow = RowForOffset(offset) ?? RowCount;
+
+        int first = Math.Min(DirtyStartRow, anchorRow);
+        int last = Math.Max(DirtyStartRow + this.derived.Count, editRow);
+        return last - first <= MaxDerivedRows;
+    }
+
+    /// <summary>
     /// Folds one edit in and re-derives whatever it disturbed. Cost is bounded by the dirty
     /// span, not by the file.
     /// </summary>

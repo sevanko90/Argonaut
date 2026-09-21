@@ -74,6 +74,11 @@ public partial class RawView : UserControl
         if (e.PropertyName is null or nameof(RawViewModel.SelectedRowIndex))
             RevealSelectedRow(vm);
 
+        // The toggle that turns editing on lives in the header toolbar, so the click that
+        // enabled it left focus there. Typing has to work without a second click into the text.
+        if ((e.PropertyName is null or nameof(RawViewModel.IsEditing)) && vm.IsEditing)
+            Surface.Focus();
+
         if (e.PropertyName is null or nameof(RawViewModel.WrapWidth))
         {
             // Row geometry is about to change wholesale, so the old vertical offset means

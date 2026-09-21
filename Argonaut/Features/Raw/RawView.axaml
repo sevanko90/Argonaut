@@ -66,6 +66,12 @@
                                 Orientation="Horizontal"
                                 Spacing="16"
                                 VerticalAlignment="Center">
+                        <TextBlock x:Name="EditStatusText"
+                                   Text="{Binding EditStatusText}"
+                                   FontSize="11"
+                                   FontFamily="{DynamicResource AppContentFontFamily}"
+                                   Foreground="{DynamicResource AppAccentBrush}"
+                                   VerticalAlignment="Center" />
                         <TextBlock x:Name="CaretSelectionText"
                                    Text="{Binding CaretSelectionText}"
                                    FontSize="11"

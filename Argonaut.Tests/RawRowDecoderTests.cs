@@ -214,10 +214,15 @@ public class RawRowDecoderTests
     {
         // The gather path: a piece table splits the row, so Decode must stitch it back before
         // decoding - a multi-byte character split across the seam is the case that would break.
+        // The seam falls two bytes into the emoji, which is the character that has to survive it.
         byte[] content = Encoding.UTF8.GetBytes("aé😀b");
+
+        // Tail first, then the head in front of it: consecutive insertions that continue one
+        // another are coalesced into a single piece (RawPieceTable.TryExtendScratchRun), so
+        // writing this the obvious way round would leave nothing split to test.
         var table = new RawPieceTable(new MemoryByteSource([]));
-        table.Insert(0, content.AsSpan(0, 3));
-        table.Insert(3, content.AsSpan(3));
+        table.Insert(0, content.AsSpan(5));
+        table.Insert(0, content.AsSpan(0, 5));
         Assert.True(table.PieceCount > 1);
 
         var split = RawRowDecoder.Decode(table, 0, table.AvailableLength, isSoftWrapped: true);

@@ -569,6 +569,17 @@ rebuild adds a layer, so each byte read afterwards pays one more binary search. 
 same problem more cheaply for the case that motivates it, because a save rewrites the file and
 starts again from a single piece over it.
 
+**Typing coalesces into one piece, and it did not at first.** Every insertion split the piece it
+landed in and described the new bytes as a piece of their own, so four hundred characters typed
+became four hundred pieces of one byte each. That is not merely untidy: `GetContiguousSpan`
+truncates at every piece boundary, so a row scan across a typed run degenerates from a vectorized
+walk into one byte per call, each paying a fresh binary search to be found. An insertion that
+continues where the last one ended now grows that piece instead
+(`RawPieceTable.TryExtendScratchRun`). The conditions it checks are all about staying
+indistinguishable from the insertion it replaces, and one of them is not obvious: an undo rewinds
+the piece list but never scratch, which is append-only, so a run's piece can outlive being the
+tail of scratch and must not be extended once it has.
+
 **There is an internals inspector, because none of the above is visible from the document.**
 Cmd/Ctrl+Shift+D in a Debug build opens `RawEditInspectorWindow`: the piece list, the dirty spans
 with both halves of each delta, how full the row index's budget is, the undo depth, and a map

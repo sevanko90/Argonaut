@@ -139,13 +139,71 @@ public class RawEditSnapshotTests
     }
 
     [Fact]
+    public void TypingARun_CostsOnePieceRatherThanOnePerKeystroke()
+    {
+        var editor = Editing(LongText(200));
+        editor.Caret.PlaceAt(100);
+
+        for (int i = 0; i < 400; i++)
+            editor.Type("x");
+
+        var state = editor.Describe();
+
+        // Split, the whole typed run, remainder. Without coalescing this was 400 pieces of one
+        // byte each - which is not merely untidy: GetContiguousSpan truncates at every piece
+        // boundary, so a row scan across the run would return a single byte per call, each one
+        // paying a fresh binary search to be found.
+        Assert.Equal(3, state.PieceCount);
+        Assert.Equal(400, state.ScratchBytesUsed);
+        Assert.Equal(400, state.Pieces[1].Length);
+        Assert.False(state.Pieces[1].FromOriginal);
+    }
+
+    [Fact]
+    public void TypingAfterAnUndo_DoesNotReuseTheRunItRewound()
+    {
+        // Scratch is append-only and an undo rewinds only the piece list, so the run's piece can
+        // outlive being the tail of scratch. Extending it then would hand the redone bytes to the
+        // wrong place.
+        var editor = Editing("alpha\nbeta\n");
+        editor.Caret.PlaceAt(5);
+        editor.Type("1");
+        editor.Type("2");
+
+        editor.Undo();
+        editor.Type("9");
+
+        var bytes = new byte[editor.Document.AvailableLength];
+        editor.Document.CopyTo(0, bytes);
+        Assert.Equal("alpha9\nbeta\n", Encoding.UTF8.GetString(bytes));
+    }
+
+    [Fact]
+    public void TypingAwayFromTheRun_StartsANewPiece()
+    {
+        var editor = Editing(LongText(200));
+
+        editor.Caret.PlaceAt(100);
+        editor.Type("aa");
+
+        editor.Caret.PlaceAt(500);
+        editor.Type("bb");
+
+        var state = editor.Describe();
+        Assert.Equal(5, state.PieceCount);
+        Assert.Equal(4, state.ScratchBytesUsed);
+    }
+
+    [Fact]
     public void ThePieceListIsCapped_AndSaysHowMuchItLeftOut()
     {
         var editor = Editing(LongText(2_000));
 
+        // Deliberately not one run: each edit is far enough from the last that it cannot extend
+        // the previous piece, which is what makes the list long enough to be capped.
         for (int i = 0; i < 20; i++)
         {
-            editor.Caret.PlaceAt(100 + (i * 3));
+            editor.Caret.PlaceAt(100 + (i * 200));
             editor.Type("q");
         }
 

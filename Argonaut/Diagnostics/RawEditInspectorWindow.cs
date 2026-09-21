@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Globalization;
 using System.Text;
@@ -136,41 +137,93 @@ internal sealed class RawEditInspectorWindow : Window
     private static string DescribeSpans(RawEditSnapshot state)
     {
         if (state.SpanCount == 0)
-            return "  none - the document still reads exactly as the file does.";
+            return "none - the document still reads exactly as the file does.";
 
-        var text = new StringBuilder();
-        text.AppendLine("    #  anchor  orig row   start row  line   rows held  converged  reach     bytes                    own Δb/Δr/Δl      before Δb/Δr/Δl");
-
+        var rows = new List<string[]>(state.SpanCount);
         foreach (var span in state.Spans)
         {
-            text.AppendLine(string.Create(CultureInfo.InvariantCulture,
-                $"  {span.Index,3}  {span.OriginalAnchor,6}  {span.OriginalStartRow,8}  {span.StartRow,10}  "
-                + $"{(span.FirstLineNumber is int line ? line.ToString("N0", CultureInfo.InvariantCulture) : "—"),5}  "
-                + $"{span.RowsHeld,9}  {span.ConvergedOriginalRow,9}  {span.EditReach,7}  "
-                + $"{N(span.StartOffset) + ".." + N(span.EndOffset),-22}  "
-                + $"{Signed(span.ByteDelta) + "/" + Signed(span.RowDelta) + "/" + Signed(span.LineDelta),-16}  "
-                + $"{Signed(span.ByteDeltaBefore) + "/" + Signed(span.RowDeltaBefore) + "/" + Signed(span.LineDeltaBefore)}"));
+            rows.Add(new[]
+            {
+                span.Index.ToString(CultureInfo.InvariantCulture),
+                N(span.OriginalAnchor),
+                N(span.OriginalStartRow),
+                N(span.StartRow),
+                span.FirstLineNumber is int line ? N(line) : "—",
+                N(span.RowsHeld),
+                N(span.ConvergedOriginalRow),
+                N(span.EditReach),
+                $"{N(span.StartOffset)}..{N(span.EndOffset)}",
+                $"{Signed(span.ByteDelta)}/{Signed(span.RowDelta)}/{Signed(span.LineDelta)}",
+                $"{Signed(span.ByteDeltaBefore)}/{Signed(span.RowDeltaBefore)}/{Signed(span.LineDeltaBefore)}",
+            });
         }
 
-        return text.ToString().TrimEnd();
+        return Table(
+            new[] { "#", "anchor", "orig row", "start row", "line", "rows held", "converged", "reach", "bytes", "own Δb/Δr/Δl", "before Δb/Δr/Δl" },
+            rows);
     }
 
     private static string DescribePieces(RawEditSnapshot state)
     {
-        var text = new StringBuilder();
-        text.AppendLine("    #  buffer          buffer offset        length   logical start");
-
+        var rows = new List<string[]>(state.Pieces.Count);
         foreach (var piece in state.Pieces)
         {
-            string buffer = piece.FromOriginal ? "original" : $"scratch #{piece.ScratchChunk}";
-            text.AppendLine(string.Create(CultureInfo.InvariantCulture,
-                $"  {piece.Index,3}  {buffer,-14}  {N(piece.BufferOffset),13}  {N(piece.Length),12}  {N(piece.LogicalStart),14}"));
+            rows.Add(new[]
+            {
+                piece.Index.ToString(CultureInfo.InvariantCulture),
+                piece.FromOriginal ? "original" : $"scratch #{piece.ScratchChunk}",
+                N(piece.BufferOffset),
+                N(piece.Length),
+                N(piece.LogicalStart),
+            });
         }
 
-        if (state.PiecesOmitted > 0)
-            text.AppendLine($"  … {N(state.PiecesOmitted)} more");
+        string table = Table(new[] { "#", "buffer", "buffer offset", "length", "logical start" }, rows);
+        return state.PiecesOmitted > 0 ? $"{table}\n… {N(state.PiecesOmitted)} more" : table;
+    }
+
+    /// <summary>
+    /// Lays a table out by measuring it. The first cut wrote the header as a literal and padded
+    /// the cells to guessed widths, which lined up until the first nine-digit byte offset and
+    /// then never again - on the document this window exists for, every number is nine digits.
+    /// Columns are right-aligned except the one text column, since these are all quantities and
+    /// a ragged right edge is what makes a column of numbers unreadable.
+    /// </summary>
+    private static string Table(string[] headers, IReadOnlyList<string[]> rows)
+    {
+        var widths = new int[headers.Length];
+        for (int column = 0; column < headers.Length; column++)
+        {
+            widths[column] = headers[column].Length;
+            foreach (var row in rows)
+                widths[column] = Math.Max(widths[column], row[column].Length);
+        }
+
+        var text = new StringBuilder();
+        AppendRow(text, headers, widths);
+        foreach (var row in rows)
+            AppendRow(text, row, widths);
 
         return text.ToString().TrimEnd();
+    }
+
+    private static void AppendRow(StringBuilder text, string[] cells, int[] widths)
+    {
+        for (int column = 0; column < cells.Length; column++)
+        {
+            if (column > 0)
+                text.Append("  ");
+
+            // The buffer column is a name, not a quantity, so it reads left-aligned; everything
+            // else lines up on its last digit.
+            bool leftAlign = cells[column].StartsWith("original", StringComparison.Ordinal)
+                             || cells[column].StartsWith("scratch", StringComparison.Ordinal)
+                             || cells[column] == "buffer";
+
+            text.Append(leftAlign ? cells[column].PadRight(widths[column]) : cells[column].PadLeft(widths[column]));
+        }
+
+        text.AppendLine();
     }
 
     private static Control Section(string title, TextBlock body)

@@ -135,12 +135,63 @@ public sealed class RawPieceTable : IByteSource
         if (bytes.IsEmpty)
             return new RawEditExtent(offset, 0, 0);
 
-        int at = SplitAt(offset);
-        this.pieces.InsertRange(at, AppendToScratch(bytes));
-        AvailableLength += bytes.Length;
-        RenumberFrom(at);
+        if (!TryExtendScratchRun(offset, bytes))
+        {
+            int at = SplitAt(offset);
+            this.pieces.InsertRange(at, AppendToScratch(bytes));
+            RenumberFrom(at);
+        }
 
+        AvailableLength += bytes.Length;
         return new RawEditExtent(offset, 0, bytes.Length);
+    }
+
+    /// <summary>
+    /// Grows the scratch piece an insertion continues, instead of describing the new bytes as a
+    /// piece of their own.
+    ///
+    /// Typing is a run of one-byte insertions each starting exactly where the last one ended, so
+    /// without this every keystroke costs a piece: four hundred characters typed became four
+    /// hundred pieces, each one byte long. That is not just untidy. Every read through the table
+    /// is a binary search over the list, and worse, <see cref="GetContiguousSpan"/> truncates at
+    /// every piece boundary - so a row scan across a typed run degenerates from a vectorized walk
+    /// to one byte per call, and each of those bytes pays a fresh binary search to be found.
+    ///
+    /// Four conditions, and each one is what keeps the extension indistinguishable from the
+    /// insertion it replaces: the run must be the tail of the chunk currently being filled, the
+    /// insertion must continue it exactly, the piece must still end where scratch does (an undo
+    /// rewinds the piece list but never scratch, so a piece can outlive being the tail), and the
+    /// bytes must fit in the chunk, because a piece is always physically contiguous.
+    /// </summary>
+    private bool TryExtendScratchRun(long offset, ReadOnlySpan<byte> bytes)
+    {
+        if (offset == 0 || this.pieces.Count == 0 || this.scratchChunks.Count == 0)
+            return false;
+
+        int index = FindPiece(offset - 1);
+        var piece = this.pieces[index];
+
+        if (piece.ChunkIndex != this.scratchChunks.Count - 1)
+            return false;
+
+        if (piece.LogicalStart + piece.Length != offset)
+            return false;
+
+        if (piece.Offset + piece.Length != this.scratchFill)
+            return false;
+
+        var chunk = this.scratchChunks[^1];
+        if (chunk.Length - this.scratchFill < bytes.Length)
+            return false;
+
+        bytes.CopyTo(chunk.AsSpan(this.scratchFill));
+        this.scratchFill += bytes.Length;
+
+        // A record struct, so every snapshot the journal took holds its own copy of the shorter
+        // piece - undo is unaffected by the run growing after it was recorded.
+        this.pieces[index] = piece with { Length = piece.Length + bytes.Length };
+        RenumberFrom(index + 1);
+        return true;
     }
 
     /// <summary>Removes <paramref name="length"/> bytes from <paramref name="offset"/>.</summary>

@@ -74,6 +74,13 @@ until it lands an edited document cannot be written back.
   row walked, so about 20ms per keystroke at 54MB; measured across line lengths in
   `RawEditKeystrokeBenchmarks.TypeCharactersInsideALongLine`, and bounded properly only by the
   re-index below.
+- ~~**The undo journal is O(edits²).**~~ **Fixed.** Every step copied the *whole* piece list, on
+  the reasoning — written into `RawEditJournal` itself — that the list was bounded by the row
+  index's rebuild threshold. It is not: the threshold bounds anchors, and nothing bounds pieces.
+  Editing in n places leaves about 2n of them, so n copies of all of them is quadratic. Measured
+  at 4.4MB for 250 edits, 65MB for 1,000 and 187MB for 2,000, against 1.5MB for the piece table
+  and row index together. A step now holds the *run* of the piece list each edit rewrote, which
+  for typing is one piece: 3.6MB at 2,000 edits, and linear.
 - **Chained spans, to bound the walk an edit early in a very long line costs.** The last piece of
   the long-line problem. An edit early in a 105MB line still walks to the line's end - about 50ms
   per keystroke - because that is the first place the edited and original streams can be *shown*

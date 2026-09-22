@@ -218,6 +218,11 @@ proposed when only tests read it; `JsonPathBuilder`, `JsonPathResolver`, `JsonAr
 
 ## UI
 
+- **Skip the progress bar for work about to finish.** `ProgressBoard` shows anything still
+  running after 450ms. It could also project the time left from the progress reported so far and
+  stay hidden when that is under ~300ms - the slow-start, fast-finish case the delay alone still
+  shows. Worth adding only if a pointless bar is seen in practice.
+
 - **Toolbar UX pass.** Behaviour and layout, on its own branch rather than folded into a feature
   branch. Distinct from the toolbar *styling* that was tried and rejected: borderless tinted pill
   combos are not wanted, the default Fluent bordered combos stay.

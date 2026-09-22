@@ -53,6 +53,8 @@ public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IBackgro
     private const int BackoffShift = 61;                 // bits 61-62
     private const long OffsetMask = (1L << BackoffShift) - 1;
 
+    /// <summary>Bytes scanned between progress reports: often enough that a multi-GB scan moves
+    /// smoothly, rarely enough that reporting never shows in the scan's profile.</summary>
     private const long ProgressReportStride = 4 * 1024 * 1024;
     private const int CancellationCheckRowStride = 1024;
 

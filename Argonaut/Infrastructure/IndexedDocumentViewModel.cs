@@ -89,8 +89,8 @@ public abstract class IndexedDocumentViewModel : ObservableObject, IDocumentView
 
     /// <summary>
     /// Completed until <see cref="Session"/> exists (so a document whose load failed before
-    /// starting one still satisfies IDocumentViewModel.IndexingTask - the shell awaits it in
-    /// StopProgressWhenIndexedAsync), then the session's own task. Read live, so it reflects an
+    /// starting one still satisfies IDocumentViewModel.IndexingTask - the shell finishes the
+    /// load's progress entry when it completes), then the session's own task. Read live, so it reflects an
     /// index the session later swaps out from under a fixed mapping (RawViewModel's wrap-width
     /// restart).
     /// </summary>
@@ -114,10 +114,9 @@ public abstract class IndexedDocumentViewModel : ObservableObject, IDocumentView
     /// awaited still what this document is running?
     ///
     /// MUST be called by the subclass's LoadAsync (or SetWrapWidth-style re-index) BEFORE that
-    /// method returns/completes - the shell registers its own continuation on the same
-    /// IndexingTask afterwards, and StopProgressWhenIndexedAsync's ordering guarantee (the
-    /// document's own final StatusText write must happen first) depends on this one having
-    /// been started already. No-op if no session exists yet.
+    /// method returns/completes, so the completion reaction is registered before anything else
+    /// the shell hangs off the same IndexingTask (the load's progress entry). No-op if no
+    /// session exists yet.
     /// </summary>
     protected void MonitorIndexing()
     {

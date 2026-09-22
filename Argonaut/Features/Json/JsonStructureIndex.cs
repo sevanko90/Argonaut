@@ -200,6 +200,10 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
     // measurable against the per-token budget.
     private const int CancellationCheckMask = 0xFFFF;
 
+    /// <summary>Bytes parsed between progress reports: often enough that a multi-GB parse moves
+    /// smoothly, rarely enough that reporting never shows in the parse's profile.</summary>
+    private const long ProgressReportStride = 4 * 1024 * 1024;
+
     // The no-options overload keeps the exact (IByteSource, IProgressReporter?, CancellationToken)
     // shape IndexedSourceSession.Start's factory delegate expects, so existing call sites keep
     // passing the bare method group - optional parameters don't participate in method-group
@@ -395,10 +399,11 @@ public sealed class JsonStructureIndex : AppendLogIndexBase<JsonStructureIndex.P
         int hashFrameCount = 0;
         ulong pendingNameHash = 0;
 
-        // Progress is reported from inside the token loop in ~5% steps: parsing runs over a
-        // handful of giant windows (usually exactly one), so the outer loop no longer
-        // iterates often enough to hang reporting off it.
-        long reportStep = Math.Max(1, file.AvailableLength / 20);
+        // Progress is reported from inside the token loop: parsing runs over a handful of giant
+        // windows (usually exactly one), so the outer loop does not iterate often enough to hang
+        // reporting off it. A fixed byte stride, not a fraction of the file - how finely progress
+        // is shown is the reporter's decision (see IProgressReporter).
+        const long reportStep = ProgressReportStride;
         long nextReport = reportStep;
 
         while (true)

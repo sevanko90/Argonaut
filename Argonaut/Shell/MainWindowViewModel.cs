@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Features.Json;
 using Argonaut.Features.Json.Diff;
@@ -21,7 +22,7 @@ namespace Argonaut.Shell;
 /// view model instead - see <see cref="IDocumentViewModel.Toolbar"/>.
 ///
 /// All members run on the UI thread; awaits resume there per the app's threading convention
-/// (see CLAUDE.md), so the only explicit marshalling is <see cref="StatusLineProgress"/>,
+/// (see CLAUDE.md), so the only explicit marshalling is in <see cref="ProgressEntry.Report"/>,
 /// which is invoked from a background indexing/search thread.
 ///
 /// Document disposal follows <see cref="IDocumentViewModel"/>'s lifetime contract: this view
@@ -87,10 +88,16 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool isFindAvailable;
     private readonly RequestTicket openRequest = new();
 
-    // The reporter feeding scan progress into the status line for the current load. Held so
-    // every path that puts final text on that line can silence it first - see
-    // StatusLineProgress.Stop. Null before the first load.
-    private StatusLineProgress? indexProgressReporter;
+    // Where every long operation the shell starts is reported - see ProgressBoard.
+    private readonly ProgressBoard progressBoard;
+
+    // The current load on the progress board, finished by every path that replaces or abandons
+    // it so a load that was superseded never lingers in the bar. Null before the first load.
+    private ProgressEntry? loadProgress;
+
+    // The open request whose document is on screen, so stopping a load from the progress bar
+    // knows whether it is closing a published document or abandoning one still loading.
+    private long publishedRequest = -1;
 
     /// <summary>Raised when the find bar's status text should change (null clears it).</summary>
     public event Action<string?>? FindStatusChanged;
@@ -118,12 +125,15 @@ public sealed class MainWindowViewModel : ObservableObject
     /// toast.</param>
     /// <param name="fileReplacer">How a save swaps its content in; <see cref="SiblingFileReplacer"/>
     /// unless a test substitutes one.</param>
+    /// <param name="progressBoard">Where long operations are reported;
+    /// <see cref="ProgressBoard.Shared"/> unless a test substitutes one.</param>
     public MainWindowViewModel(Func<string, Task<bool>> confirmReplace,
         Func<Task<byte[]?>>? readClipboardBytes = null, DocumentLoader? documentLoader = null,
         Func<IByteOrigin, Task<string?>>? pickSaveDestination = null,
         Func<string, Task<UnsavedChangesChoice>>? askAboutUnsavedChanges = null,
         Func<string, Task>? reportFailure = null,
-        IFileReplacer? fileReplacer = null)
+        IFileReplacer? fileReplacer = null,
+        ProgressBoard? progressBoard = null)
     {
         this.confirmReplace = confirmReplace;
         this.readClipboardBytes = readClipboardBytes;
@@ -132,16 +142,20 @@ public sealed class MainWindowViewModel : ObservableObject
         this.askAboutUnsavedChanges = askAboutUnsavedChanges;
         this.reportFailure = reportFailure;
         this.fileReplacer = fileReplacer ?? SiblingFileReplacer.ForCurrentPlatform();
+        this.progressBoard = progressBoard ?? ProgressBoard.Shared;
 
         themeMode = ThemePreference.Load();
         contentFontMode = ContentFontPreference.Load();
 
         findController = new FindController(
             status => FindStatusChanged?.Invoke(status),
-            () => currentFilePath is null ? null : ProgressFor(currentFilePath, openRequest.Current));
+            () => currentFilePath is null ? null : this.progressBoard.Begin($"Searching {FileName}", StopFind));
 
         ReloadRecentFiles();
     }
+
+    /// <summary>What the progress bar shows.</summary>
+    public ProgressBoard Progress => this.progressBoard;
 
     public IDocumentViewModel? CurrentDocument
     {
@@ -311,7 +325,7 @@ public sealed class MainWindowViewModel : ObservableObject
         // The outgoing load's reporter must go quiet first either way.
         DetachFind();
         FindBarResetRequested?.Invoke();
-        indexProgressReporter?.Stop();
+        loadProgress?.Finish();
         StatusText = $"Comparing {leftPath} with {rightPath}…";
 
         var document = new JsonDiffViewModel();
@@ -364,7 +378,7 @@ public sealed class MainWindowViewModel : ObservableObject
         // for why this is not what makes the swap safe.
         DetachFind();
         FindBarResetRequested?.Invoke();
-        indexProgressReporter?.Stop();
+        loadProgress?.Finish();
         string sourceName = request.Origin.Path ?? request.Origin.DisplayName;
         StatusText = $"Opening {request.ArrayPath} as a table…";
 
@@ -658,7 +672,7 @@ public sealed class MainWindowViewModel : ObservableObject
         // swap releases it.
         DetachFind();
         FindBarResetRequested?.Invoke();
-        StatusText = $"Indexing {name}… 0%";
+        StatusText = $"Indexing {name}…";
 
         await LoadAndPublishAsync(fileType, origin, requestId, addToRecents);
     }
@@ -696,7 +710,7 @@ public sealed class MainWindowViewModel : ObservableObject
         // document's own mapping scope is what actually stops a live search before the swap.
         DetachFind();
         FindBarResetRequested?.Invoke();
-        StatusText = $"Indexing {path}… 0%";
+        StatusText = $"Indexing {path}…";
 
         await LoadAndPublishAsync(kind, origin, requestId, addToRecents: false);
     }
@@ -735,19 +749,19 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
-        // Silence the outgoing load's reporter before starting a new one, so a scan being torn
-        // down can't write over the incoming file's progress.
-        indexProgressReporter?.Stop();
-        var reporter = ProgressFor(path, requestId);
-        indexProgressReporter = reporter;
+        // The outgoing load is over as far as the bar is concerned, whatever its scan is doing.
+        loadProgress?.Finish();
+        var progress = this.progressBoard.Begin($"Indexing {origin.DisplayName}", () => StopLoad(requestId));
+        loadProgress = progress;
 
         IDocumentViewModel document;
         try
         {
-            document = await documentLoader(kind, origin, reporter);
+            document = await documentLoader(kind, origin, progress);
         }
         catch (Exception ex)
         {
+            progress.Finish();
             OpenDebugLog.Write($"LoadAndPublish: load threw: {ex}");
             if (openRequest.IsCurrent(requestId))
                 StatusText = $"{path} — failed to open";
@@ -758,44 +772,45 @@ public sealed class MainWindowViewModel : ObservableObject
         // was never published, so nobody else will dispose it) and leave the newer one in place.
         if (!openRequest.IsCurrent(requestId))
         {
+            progress.Finish();
             document.Dispose();
             return;
         }
 
         if (document.IndexFailure is { ItemsIndexed: 0 } failure)
         {
+            progress.Finish();
             document.Dispose();
             ShowIncompatible(origin, kind, attemptedViewName, failure);
             return;
         }
 
         PublishDocument(document, path, kind, addToRecents, origins: new[] { origin });
-        _ = StopProgressWhenIndexedAsync(document, reporter);
+        publishedRequest = requestId;
+
+        // Finished when indexing stops for any reason - completed, failed, or the document closed.
+        progress.FinishWhen(document.IndexingTask);
     }
 
     /// <summary>
-    /// Hands the status line back to <paramref name="document"/> once its indexing stops, so the
-    /// document's final total is the last thing written (see <see cref="StatusLineProgress.Stop"/>).
-    ///
-    /// Ordering matters and is load-bearing: the document registered its own continuation on this
-    /// same task during load, before this one, so its final <see cref="IDocumentViewModel.StatusText"/>
-    /// is written - and mirrored here by <see cref="OnDocumentPropertyChanged"/> - before the
-    /// reporter goes quiet. Fire-and-forget from the UI thread; the await resumes there per the
-    /// app's threading convention.
+    /// The progress bar's Stop for a load. A document that is still indexing has nothing worth
+    /// keeping - a partial index presents itself as the whole file - so stopping closes it; one not
+    /// yet on screen is abandoned, leaving whatever was open before. There is nothing unsaved to
+    /// lose either way: editing waits for indexing to finish.
     /// </summary>
-    private static async Task StopProgressWhenIndexedAsync(IDocumentViewModel document, StatusLineProgress reporter)
+    private void StopLoad(long requestId)
     {
-        try
+        if (!openRequest.IsCurrent(requestId))
+            return;
+
+        if (publishedRequest == requestId)
         {
-            await document.IndexingTask;
-        }
-        catch
-        {
-            // A failed or cancelled scan is the document's to report (IndexFailure/StatusText);
-            // either way progress has stopped being meaningful, so the reporter still goes quiet.
+            CloseCurrentDocument();
+            return;
         }
 
-        reporter.Stop();
+        openRequest.Begin();
+        StatusText = currentDocument?.StatusText ?? "No file loaded";
     }
 
     private static string DisplayNameFor(FileTypeDetector.FileKind kind) =>
@@ -810,8 +825,8 @@ public sealed class MainWindowViewModel : ObservableObject
     /// </summary>
     private void ShowIncompatible(IByteOrigin origin, FileTypeDetector.FileKind kind, string attemptedViewName, IndexFailure failure)
     {
-        // The placeholder's text is final - no scan is still running that could add to it.
-        indexProgressReporter?.Stop();
+        // Nothing is indexing behind the placeholder.
+        loadProgress?.Finish();
 
         string path = origin.Path ?? origin.DisplayName;
         var incompatible = new IncompatibleViewModel(origin, path, attemptedViewName, failure,
@@ -973,7 +988,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private void CloseCurrentDocument()
     {
         openRequest.Begin();
-        indexProgressReporter?.Stop();
+        loadProgress?.Finish();
 
         // UI hygiene and defence in depth (see the remark in OpenDiffAsync) - the outgoing
         // document's own mapping scope is what actually stops a live search before the swap,
@@ -1067,16 +1082,17 @@ public sealed class MainWindowViewModel : ObservableObject
             // mappings that it would otherwise let go of only when it next looks up.
             await findController.StopSearchAndWaitAsync();
 
-            indexProgressReporter?.Stop();
-            string name = destination.Path ?? destination.DisplayName;
-            var reporter = ProgressFor(name, openRequest.Current);
+            string name = destination.Path is { } path ? Path.GetFileName(path) : destination.DisplayName;
+            using var stopping = new CancellationTokenSource();
+            var progress = this.progressBoard.Begin($"Saving {name}", stopping.Cancel);
+            StatusText = $"Saving {name}…";
             try
             {
-                result = await saveable.SaveAsync(destination, this.fileReplacer, reporter);
+                result = await saveable.SaveAsync(destination, this.fileReplacer, progress, stopping.Token);
             }
             finally
             {
-                reporter.Stop();
+                progress.Finish();
             }
         }
         finally
@@ -1104,6 +1120,14 @@ public sealed class MainWindowViewModel : ObservableObject
 
                 ToastService.Show($"Saved {FileName}");
                 return true;
+
+            case DocumentSaveOutcome.Stopped:
+                // Asked for, so said quietly rather than as a failure to acknowledge.
+                if (!ReferenceEquals(destination, current))
+                    destination.Dispose();
+
+                ToastService.Show(result.Message!);
+                return false;
 
             case DocumentSaveOutcome.NotSavedAndDocumentLost:
                 CloseCurrentDocument();
@@ -1193,9 +1217,4 @@ public sealed class MainWindowViewModel : ObservableObject
     public void StopFind() => findController.StopSearch();
 
     private void DetachFind() => findController.Detach();
-
-    /// <summary>Progress for a scan on behalf of open request <paramref name="requestId"/>,
-    /// written to the shell's status line and dropped once a newer open supersedes it.</summary>
-    private StatusLineProgress ProgressFor(string path, long requestId) =>
-        new(path, () => openRequest.IsCurrent(requestId), text => StatusText = text);
 }

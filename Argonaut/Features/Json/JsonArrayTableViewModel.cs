@@ -214,12 +214,22 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
         Origin = origin;
         FilePath = origin.Path ?? origin.DisplayName;
 
-        // Progress is reported by this document rather than through the shell's own reporter,
-        // the way a diff does it - the entry point publishes directly and only silences the
-        // outgoing load's reporter.
-        var session = JsonArrayTableSession.Start(origin, arrayOffset, arrayLength,
-            new ProgressToStatus(this, $"Indexing {origin.DisplayName}"));
+        // Progress is reported by this document rather than through the shell, the way a diff
+        // does it - the entry point publishes directly.
+        var progress = ProgressBoard.Shared.Begin($"Indexing {arrayPath} in {origin.DisplayName}");
+        JsonArrayTableSession session;
+        try
+        {
+            session = JsonArrayTableSession.Start(origin, arrayOffset, arrayLength, progress);
+        }
+        catch
+        {
+            progress.Finish();
+            throw;
+        }
+
         this.session = session;
+        progress.FinishWhen(session.IndexingTask);
 
         // A small initial batch so the first paint isn't an empty grid, and so there is a real
         // sample to width the columns from; a short array completes the wait via MarkAllItemsPublished.
@@ -424,41 +434,4 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
             : token.Length;
 
     private static bool IsContainer(JsonTokenKind kind) => kind is JsonTokenKind.StartObject or JsonTokenKind.StartArray;
-
-    /// <summary>Marshals background progress reports onto the status line - the same shape as
-    /// the shell's StatusProgressReporter and JsonDiffViewModel's: Post (never blocking), ~5%
-    /// buckets, silent once the view model is disposed.</summary>
-    private sealed class ProgressToStatus : IProgressReporter
-    {
-        private readonly JsonArrayTableViewModel owner;
-        private readonly string label;
-        private int lastBucket = -1;
-
-        public ProgressToStatus(JsonArrayTableViewModel owner, string label)
-        {
-            this.owner = owner;
-            this.label = label;
-        }
-
-        public void Report(string message, long? current = null, long? max = null)
-        {
-            string text = this.label;
-            if (current.HasValue && max.HasValue && max.Value > 0)
-            {
-                int percent = (int)Math.Min(100, current.Value * 100L / max.Value);
-                int bucket = percent / 5;
-                if (bucket == this.lastBucket)
-                    return;
-
-                this.lastBucket = bucket;
-                text += $"… ({percent}%)";
-            }
-
-            ProgressPost.ToUiThread(() =>
-            {
-                if (!this.owner.IsDisposed)
-                    this.owner.StatusText = text;
-            });
-        }
-    }
 }

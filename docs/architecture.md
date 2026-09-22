@@ -20,6 +20,15 @@ them). Keep this in sync when the ownership chain changes.
   `(FileKind, IByteOrigin, IProgressReporter)` (tests supply fakes; the real default is
   `DocumentViewCatalog.LoadAsync`). A loader is handed an **origin**, never a path or a source -
   see "Origins and sources" below.
+- **Progress goes to `ProgressBoard`, not the status line.** Every long operation - a load, a
+  re-index, a diff, a search, a save - calls `ProgressBoard.Begin` and reports through the
+  `ProgressEntry` it gets back (the entry is the `IProgressReporter`), finishing it when the work
+  ends (`FinishWhen(task)` is the usual way). `MainWindow` draws the board as a card above the
+  status bar, but only for work that outlasts `ShowAfter`, keeping it for at least `ShowAtLeast`,
+  so the everyday instant operations never flash it. An entry given a stop action gets a Stop
+  button: a load's closes the document, a search's stops the search, a save's stops the copy
+  (the file and the edits are left exactly as they were). The shell's board is injectable;
+  documents reach `ProgressBoard.Shared`. The status line carries only final and summary text.
 - Every input enters through `OpenOriginAsync`: `OpenPathAsync` wraps a path in a
   `FileByteOrigin`, `PasteAsync` wraps the clipboard's bytes in a `MemoryByteOrigin` (declined
   past `MaxPasteBytes`, 64 MB), and `OpenDiffAsync` takes two. From there detection runs on the
@@ -322,8 +331,8 @@ The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLeng
   Its `Dispose()` is the one place the ordering above is encoded for a document:
   `session.RequestStop()` → `rows.Dispose()` → subclass `DisposeCore()` → `session.Dispose()`.
   It also owns `FilePath`/`StatusText`/`IndexFailure` and the indexing-completion monitor
-  (`MonitorIndexing()`, started from `LoadAsync` before it returns — the shell's own
-  continuation on `IndexingTask`, in `StopProgressWhenIndexedAsync`, depends on that ordering);
+  (`MonitorIndexing()`, started from `LoadAsync` before it returns, so it is registered ahead of
+  the shell's own continuation that finishes the load's progress entry);
   subclasses react to completion/failure via `OnIndexingCompleted()`/`OnIndexingFailed(failure)`,
   not by hand-rolling their own monitor loop. There are no escape hatches: `IndexingTask` and
   `MonitorIndexing` are non-virtual, so even `JsonDiffViewModel` expresses its difference

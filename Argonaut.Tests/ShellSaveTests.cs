@@ -82,16 +82,33 @@ public sealed class ShellSaveTests : IDisposable
 
         public List<IByteOrigin> SavedTo { get; } = new();
 
-        public Task<DocumentSaveResult> SaveAsync(IByteOrigin destination, IFileReplacer replacer, IProgressReporter? progress)
+        /// <summary>When set, a save runs until the shell stops it, then reports it stopped.</summary>
+        public bool RunsUntilStopped { get; set; }
+
+        public async Task<DocumentSaveResult> SaveAsync(IByteOrigin destination, IFileReplacer replacer, IProgressReporter? progress,
+            CancellationToken stopping)
         {
             SavedTo.Add(destination);
+            if (RunsUntilStopped)
+            {
+                try
+                {
+                    await Task.Delay(Timeout.Infinite, stopping);
+                }
+                catch (OperationCanceledException)
+                {
+                }
+
+                return DocumentSaveResult.Stopped;
+            }
+
             if (NextResult.Outcome == DocumentSaveOutcome.Saved)
             {
                 Origin = destination;
                 HasUnsavedChanges = false;
             }
 
-            return Task.FromResult(NextResult);
+            return NextResult;
         }
     }
 
@@ -111,6 +128,8 @@ public sealed class ShellSaveTests : IDisposable
         public int ReplaceConfirmations { get; private set; }
 
         public MainWindowViewModel Shell { get; }
+
+        public ProgressBoard Board { get; } = new(TimeProvider.System);
 
         public Harness(byte[]? clipboard = null)
         {
@@ -143,7 +162,8 @@ public sealed class ShellSaveTests : IDisposable
                 {
                     Failures.Add(message);
                     return Task.CompletedTask;
-                });
+                },
+                progressBoard: Board);
         }
     }
 
@@ -353,5 +373,37 @@ public sealed class ShellSaveTests : IDisposable
         Assert.Single(harness.Asked);
         Assert.Same(harness.Document, harness.Shell.CurrentDocument);
         Assert.Equal(kindBefore, harness.Shell.SelectedView);
+    }
+
+    [Fact]
+    public async Task StoppingASaveFromTheProgressBar_IsQuiet_AndKeepsTheChanges()
+    {
+        string path = WriteFile();
+        var harness = new Harness();
+        await harness.Shell.OpenPathAsync(path);
+        harness.Document.HasUnsavedChanges = true;
+        harness.Document.RunsUntilStopped = true;
+
+        ProgressEntry? saving = null;
+        harness.Board.WorkStarted += (_, entry) =>
+        {
+            if (entry.Title.StartsWith("Saving"))
+                saving = entry;
+        };
+
+        var save = harness.Shell.SaveAsync();
+        Assert.NotNull(saving);
+        Assert.Equal("Saving notes.txt", saving.Title);
+        Assert.True(saving.CanStop);
+        Assert.True(harness.Shell.IsSaving);
+
+        saving.RequestStop();
+
+        Assert.False(await save.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Empty(harness.Failures);
+        Assert.True(harness.Shell.HasUnsavedChanges);
+        Assert.False(harness.Shell.IsSaving);
+        Assert.True(saving.IsFinished);
+        Assert.Same(harness.Document, harness.Shell.CurrentDocument);
     }
 }

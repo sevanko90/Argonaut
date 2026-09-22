@@ -1,3 +1,4 @@
+using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Infrastructure;
 
@@ -12,6 +13,10 @@ public enum DocumentSaveOutcome
     /// <summary>Nothing on disk changed, and the document - edits included - is as it was.</summary>
     NotSaved,
 
+    /// <summary>The user stopped it. As <see cref="NotSaved"/>: nothing on disk changed, no staged
+    /// copy is left behind, and the document still has its unsaved changes.</summary>
+    Stopped,
+
     /// <summary>
     /// The swap failed and the original could not be reopened afterwards, so the document can no
     /// longer be shown. What was being saved is kept on disk, and the message says where.
@@ -25,6 +30,8 @@ public readonly record struct DocumentSaveResult(DocumentSaveOutcome Outcome, st
     public static DocumentSaveResult Saved { get; } = new(DocumentSaveOutcome.Saved, null);
 
     public static DocumentSaveResult NotSaved(string message) => new(DocumentSaveOutcome.NotSaved, message);
+
+    public static DocumentSaveResult Stopped { get; } = new(DocumentSaveOutcome.Stopped, "The save was stopped. Nothing was written.");
 }
 
 /// <summary>
@@ -52,8 +59,13 @@ public interface ISaveableDocument
     /// and, when that succeeds, reopens the document over it - so afterwards it reads from the
     /// file it was saved to, with no unsaved changes.
     ///
+    /// <paramref name="stopping"/> stops the save while it is still copying - the only part that
+    /// takes time. Once the copy is done the swap is a rename and is no longer stopped; the result
+    /// says which happened.
+    ///
     /// The caller must have stopped and joined every other reader of the document's current file
     /// first (a running search), because the swap needs that file unmapped. UI thread only.
     /// </summary>
-    Task<DocumentSaveResult> SaveAsync(IByteOrigin destination, IFileReplacer replacer, IProgressReporter? progress);
+    Task<DocumentSaveResult> SaveAsync(IByteOrigin destination, IFileReplacer replacer, IProgressReporter? progress,
+        CancellationToken stopping);
 }

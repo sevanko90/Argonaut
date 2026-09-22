@@ -117,39 +117,48 @@ public sealed class StatusProgressHandoffTests : IDisposable
         }, CancellationToken.None);
     }
 
+    /// <summary>Progress goes to the load's entry on the progress board, not the status line -
+    /// which keeps the document's own text throughout.</summary>
     [Fact]
-    public Task ProgressBeforeIndexingCompletes_StillUpdatesTheStatusLine()
+    public Task ProgressDuringALoad_GoesToTheProgressBoard()
     {
         var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(StatusProgressHandoffTests).Assembly);
         return session.Dispatch(async () =>
         {
             string path = WriteJsonFile();
             var document = new FakeDocument { FilePath = path, StatusText = "250 rows indexed so far" };
+            var board = new ProgressBoard(TimeProvider.System);
 
             IProgressReporter? reporter = null;
             var vm = new MainWindowViewModel(_ => Task.FromResult(true), documentLoader: (_, _, r) =>
             {
                 reporter = r;
                 return Task.FromResult<IDocumentViewModel>(document);
-            });
+            }, progressBoard: board);
 
             await vm.OpenPathAsync(path);
-            Dispatcher.UIThread.RunJobs();
-
-            // Still indexing: live progress is the useful thing to show, so it must win here.
             reporter!.Report("Indexing", 45, 100);
             Dispatcher.UIThread.RunJobs();
 
-            Assert.Contains("45%", vm.StatusText);
+            var entry = Assert.IsType<ProgressEntry>(reporter);
+            Assert.Equal(45, entry.Percent);
+            Assert.Equal("Indexing doc.json", entry.Title);
+            Assert.True(entry.CanStop);
+            Assert.Equal("250 rows indexed so far", vm.StatusText);
+
+            // Indexing ending finishes the entry.
+            document.Indexing.SetResult();
+            await Task.Yield();
+            Dispatcher.UIThread.RunJobs();
+            Assert.True(entry.IsFinished);
             return true;
         }, CancellationToken.None);
     }
 
     /// <summary>
-    /// A wrap-width change re-indexes the whole file, after the shell's progress for the original
-    /// load has stopped - so the document has to report it itself, or a large file shows one
-    /// stale "rows indexed so far" until the total appears. And, as for a load, the final total
-    /// must not be overwritten by a trailing percentage.
+    /// A wrap-width change re-indexes the whole file after the load's own progress has finished,
+    /// so the document reports it itself - otherwise a large file shows one stale "rows indexed
+    /// so far" with no sign of progress until the total appears.
     /// </summary>
     [Fact]
     public Task WrapWidthChange_ReportsReindexProgress_ThenTheFinalTotal()
@@ -161,21 +170,25 @@ public sealed class StatusProgressHandoffTests : IDisposable
             var line = new string('x', 99) + "\n";
             File.WriteAllText(path, string.Concat(Enumerable.Repeat(line, 400_000))); // 40MB, several scan chunks
 
-            var vm = new Argonaut.Features.Raw.RawViewModel();
+            var board = new ProgressBoard(TimeProvider.System);
+            var vm = new Argonaut.Features.Raw.RawViewModel(board);
             try
             {
                 await vm.LoadAsync(new FileByteOrigin(path));
                 await vm.IndexingTask;
-                Dispatcher.UIThread.RunJobs();
 
-                var shown = new List<string>();
-                vm.PropertyChanged += (_, e) =>
+                var percents = new List<int>();
+                ProgressEntry? begun = null;
+                board.WorkStarted += (_, entry) => begun = entry;
+                vm.SetWrapWidth(vm.WrapWidth == 80 ? 160 : 80);
+
+                var reindex = begun!;
+                reindex.PropertyChanged += (_, e) =>
                 {
-                    if (e.PropertyName == nameof(vm.StatusText))
-                        shown.Add(vm.StatusText);
+                    if (e.PropertyName == nameof(ProgressEntry.Percent) && reindex.Percent is int p)
+                        percents.Add(p);
                 };
 
-                vm.SetWrapWidth(vm.WrapWidth == 80 ? 160 : 80);
                 while (!vm.IndexingTask.IsCompleted)
                 {
                     Dispatcher.UIThread.RunJobs();
@@ -189,7 +202,9 @@ public sealed class StatusProgressHandoffTests : IDisposable
                     await Task.Delay(5);
                 }
 
-                Assert.Contains(shown, text => text.Contains('%') && text.Contains("big.txt"));
+                Assert.Equal("Re-indexing big.txt", reindex.Title);
+                Assert.NotEmpty(percents);
+                Assert.True(reindex.IsFinished);
                 Assert.EndsWith("rows", vm.StatusText);
             }
             finally

@@ -76,7 +76,7 @@ public sealed class RawSaveTests : IDisposable
         var vm = await EditedAsync(origin, 5, ",");
         try
         {
-            var result = await vm.SaveAsync(origin, SiblingFileReplacer.ForCurrentPlatform(), progress: null);
+            var result = await vm.SaveAsync(origin, SiblingFileReplacer.ForCurrentPlatform(), progress: null, CancellationToken.None);
 
             Assert.Equal(DocumentSaveOutcome.Saved, result.Outcome);
             Assert.Equal("hello, world", File.ReadAllText(path));
@@ -112,7 +112,7 @@ public sealed class RawSaveTests : IDisposable
         try
         {
             var destination = new FileByteOrigin(copyPath);
-            var result = await vm.SaveAsync(destination, SiblingFileReplacer.ForCurrentPlatform(), progress: null);
+            var result = await vm.SaveAsync(destination, SiblingFileReplacer.ForCurrentPlatform(), progress: null, CancellationToken.None);
 
             Assert.Equal(DocumentSaveOutcome.Saved, result.Outcome);
             Assert.Equal(">hello world", File.ReadAllText(copyPath));
@@ -134,7 +134,7 @@ public sealed class RawSaveTests : IDisposable
         var vm = await EditedAsync(paste, 6, " text");
         try
         {
-            var result = await vm.SaveAsync(new FileByteOrigin(path), SiblingFileReplacer.ForCurrentPlatform(), progress: null);
+            var result = await vm.SaveAsync(new FileByteOrigin(path), SiblingFileReplacer.ForCurrentPlatform(), progress: null, CancellationToken.None);
 
             Assert.Equal(DocumentSaveOutcome.Saved, result.Outcome);
             Assert.Equal("pasted text", File.ReadAllText(path));
@@ -154,7 +154,7 @@ public sealed class RawSaveTests : IDisposable
         var vm = await EditedAsync(origin, 5, ",");
         try
         {
-            var result = await vm.SaveAsync(origin, new FailingCommitReplacer(), progress: null);
+            var result = await vm.SaveAsync(origin, new FailingCommitReplacer(), progress: null, CancellationToken.None);
 
             Assert.Equal(DocumentSaveOutcome.NotSaved, result.Outcome);
             Assert.Contains("Your edits are still open", result.Message);
@@ -186,7 +186,7 @@ public sealed class RawSaveTests : IDisposable
         try
         {
             var replacer = new FailingCommitReplacer(beforeFailing: () => File.Delete(path));
-            var result = await vm.SaveAsync(origin, replacer, progress: null);
+            var result = await vm.SaveAsync(origin, replacer, progress: null, CancellationToken.None);
 
             Assert.Equal(DocumentSaveOutcome.NotSavedAndDocumentLost, result.Outcome);
             string stage = Assert.Single(Stages());
@@ -207,7 +207,7 @@ public sealed class RawSaveTests : IDisposable
         var vm = await EditedAsync(origin, 5, ",");
         try
         {
-            var result = await vm.SaveAsync(origin, new RefusingReplacer(), progress: null);
+            var result = await vm.SaveAsync(origin, new RefusingReplacer(), progress: null, CancellationToken.None);
 
             Assert.Equal(DocumentSaveOutcome.NotSaved, result.Outcome);
             Assert.Contains("disk is full", result.Message);
@@ -230,7 +230,7 @@ public sealed class RawSaveTests : IDisposable
         try
         {
             var replacer = new GatedReplacer();
-            var saving = vm.SaveAsync(origin, replacer, progress: null);
+            var saving = vm.SaveAsync(origin, replacer, progress: null, CancellationToken.None);
             replacer.WriteStarted.Wait(TimeSpan.FromSeconds(5));
 
             Assert.True(vm.IsSaving);
@@ -262,7 +262,7 @@ public sealed class RawSaveTests : IDisposable
 
         var replacer = new GatedReplacer { SlowWrites = true };
         replacer.Release.Set();
-        var saving = vm.SaveAsync(origin, replacer, progress: null);
+        var saving = vm.SaveAsync(origin, replacer, progress: null, CancellationToken.None);
         replacer.WriteStarted.Wait(TimeSpan.FromSeconds(5));
 
         vm.Dispose();
@@ -271,6 +271,158 @@ public sealed class RawSaveTests : IDisposable
         Assert.Equal(DocumentSaveOutcome.NotSaved, result.Outcome);
         Assert.Equal(content.Length, new FileInfo(path).Length);
         Assert.Empty(Stages());
+    }
+
+    /// <summary>Everything in <paramref name="directory"/> except the settings folder, so a test
+    /// can show a stopped save left no file of any name behind.</summary>
+    private static string[] FilesIn(string directory) =>
+        Directory.GetFiles(directory).Select(Path.GetFileName).OrderBy(n => n).ToArray()!;
+
+    /// <summary>Several write chunks, so a stop lands between two of them.</summary>
+    private string WriteLargeFile() => WriteFile(new string('x', ByteSourceReading.WriteChunkBytes * 3));
+
+    [Fact]
+    public async Task StoppingASaveMidCopy_LeavesNothingOnDisk_AndTheDocumentStillEdited()
+    {
+        string path = WriteLargeFile();
+        byte[] original = File.ReadAllBytes(path);
+        string[] filesBefore = FilesIn(tempDir);
+        var origin = new FileByteOrigin(path);
+        var vm = await EditedAsync(origin, 0, "edited:");
+        try
+        {
+            using var stopping = new CancellationTokenSource();
+            var replacer = new GatedReplacer { SlowWrites = true };
+            replacer.Release.Set();
+            var saving = vm.SaveAsync(origin, replacer, progress: null, stopping.Token);
+            replacer.WriteStarted.Wait(TimeSpan.FromSeconds(5));
+
+            stopping.Cancel();
+            var result = await saving;
+
+            Assert.Equal(DocumentSaveOutcome.Stopped, result.Outcome);
+            Assert.Equal(filesBefore, FilesIn(tempDir));
+            Assert.Equal(original, File.ReadAllBytes(path));
+            Assert.True(vm.IsDirty);
+            Assert.True(vm.HasUnsavedChanges);
+            Assert.StartsWith("edited:xxx", DocumentText(vm));
+            Assert.False(vm.IsSaving);
+            Assert.True(vm.CanSave);
+
+            // Editing carries on, and a save after the stopped one goes through.
+            Assert.True(vm.TypeText("!"));
+            var retry = await vm.SaveAsync(origin, SiblingFileReplacer.ForCurrentPlatform(), progress: null, CancellationToken.None);
+            Assert.Equal(DocumentSaveOutcome.Saved, retry.Outcome);
+            Assert.StartsWith("edited:!xxx", File.ReadAllText(path));
+        }
+        finally
+        {
+            vm.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task StoppingASaveAs_LeavesNoNewFile()
+    {
+        string path = WriteLargeFile();
+        string copyPath = Path.Combine(tempDir, "copy.txt");
+        string[] filesBefore = FilesIn(tempDir);
+        var origin = new FileByteOrigin(path);
+        var vm = await EditedAsync(origin, 0, "edited:");
+        try
+        {
+            using var stopping = new CancellationTokenSource();
+            var replacer = new GatedReplacer { SlowWrites = true };
+            replacer.Release.Set();
+            var saving = vm.SaveAsync(new FileByteOrigin(copyPath), replacer, progress: null, stopping.Token);
+            replacer.WriteStarted.Wait(TimeSpan.FromSeconds(5));
+
+            stopping.Cancel();
+            var result = await saving;
+
+            Assert.Equal(DocumentSaveOutcome.Stopped, result.Outcome);
+            Assert.False(File.Exists(copyPath));
+            Assert.Equal(filesBefore, FilesIn(tempDir));
+            Assert.Same(origin, vm.Origin);
+            Assert.True(vm.IsDirty);
+        }
+        finally
+        {
+            vm.Dispose();
+        }
+    }
+
+    /// <summary>The stop arrives after the last byte is written but before the swap - the one
+    /// moment the copy cannot notice it. The swap must still not happen.</summary>
+    [Fact]
+    public async Task AStopThatArrivesAsTheCopyFinishes_StillPreventsTheSwap()
+    {
+        string path = WriteFile("hello world");
+        var origin = new FileByteOrigin(path);
+        string[] filesBefore = FilesIn(tempDir);
+        var vm = await EditedAsync(origin, 5, ",");
+        try
+        {
+            using var stopping = new CancellationTokenSource();
+            var result = await vm.SaveAsync(origin, new StopOnSealReplacer(stopping), progress: null, stopping.Token);
+
+            Assert.Equal(DocumentSaveOutcome.Stopped, result.Outcome);
+            Assert.Equal("hello world", File.ReadAllText(path));
+            Assert.Equal(filesBefore, FilesIn(tempDir));
+            Assert.Equal("hello, world", DocumentText(vm));
+            Assert.True(vm.IsDirty);
+        }
+        finally
+        {
+            vm.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task ASaveStoppedBeforeItStarts_WritesNothing()
+    {
+        string path = WriteFile("hello world");
+        var origin = new FileByteOrigin(path);
+        string[] filesBefore = FilesIn(tempDir);
+        var vm = await EditedAsync(origin, 5, ",");
+        try
+        {
+            var result = await vm.SaveAsync(origin, SiblingFileReplacer.ForCurrentPlatform(), progress: null,
+                new CancellationToken(canceled: true));
+
+            Assert.Equal(DocumentSaveOutcome.Stopped, result.Outcome);
+            Assert.Equal(filesBefore, FilesIn(tempDir));
+            Assert.Equal("hello world", File.ReadAllText(path));
+            Assert.True(vm.IsDirty);
+            Assert.False(vm.IsSaving);
+        }
+        finally
+        {
+            vm.Dispose();
+        }
+    }
+
+    /// <summary>A real stage that requests the stop from inside <see cref="StagedFile.Seal"/>,
+    /// which runs on the copy's thread after its last write and last cancellation check.</summary>
+    private sealed class StopOnSealReplacer(CancellationTokenSource stopping) : IFileReplacer
+    {
+        public StagedFile Stage(IByteOrigin destination, long contentLength) =>
+            new Wrapper(SiblingFileReplacer.ForCurrentPlatform().Stage(destination, contentLength), stopping);
+
+        private sealed class Wrapper(StagedFile inner, CancellationTokenSource stopping) : StagedFile
+        {
+            public override Stream Content => inner.Content;
+            public override string Location => inner.Location;
+            public override void Commit() => inner.Commit();
+            public override void KeepStagedContent() => inner.KeepStagedContent();
+            public override void Dispose() => inner.Dispose();
+
+            public override void Seal()
+            {
+                inner.Seal();
+                stopping.Cancel();
+            }
+        }
     }
 
     /// <summary>Stages for real, then fails the swap - after optionally doing something to the

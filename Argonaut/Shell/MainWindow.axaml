@@ -12,6 +12,7 @@
         xmlns:ndjson="clr-namespace:Argonaut.Features.NdJson"
         xmlns:csv="clr-namespace:Argonaut.Features.Csv"
         xmlns:raw="clr-namespace:Argonaut.Features.Raw"
+        xmlns:infra="clr-namespace:Argonaut.Infrastructure"
         Title="{Binding Title}"
         Background="{DynamicResource AppPanelBackgroundBrush}"
         Width="1000" Height="700">
@@ -179,6 +180,70 @@
         <shell:EmptyStateView Grid.Row="1"
                               x:Name="EmptyState"
                               IsVisible="{Binding !IsFileOpen}" />
+
+        <!-- Work in progress: shown only for operations that outlast ProgressBoard.ShowAfter, kept
+             for at least ShowAtLeast, and faded rather than snapped away - so the everyday
+             instant operations never flash it. The fade length matches ProgressBoard.FadeOut. -->
+        <Border Grid.Row="1"
+                x:Name="ProgressCard"
+                Classes="progressCard"
+                Classes.shown="{Binding Progress.IsVisible}"
+                IsHitTestVisible="{Binding Progress.IsVisible}"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Bottom"
+                Width="340"
+                Margin="0,0,16,16"
+                Padding="12,8"
+                CornerRadius="6"
+                BorderThickness="1"
+                BorderBrush="{DynamicResource AppBorderBrush}"
+                Background="{DynamicResource AppPanelBackgroundBrush}">
+            <Border.Styles>
+                <Style Selector="Border.progressCard">
+                    <Setter Property="Opacity" Value="0" />
+                    <Setter Property="Transitions">
+                        <Transitions>
+                            <DoubleTransition Property="Opacity" Duration="0:0:0.2" />
+                        </Transitions>
+                    </Setter>
+                </Style>
+                <Style Selector="Border.progressCard.shown">
+                    <Setter Property="Opacity" Value="1" />
+                </Style>
+            </Border.Styles>
+            <ItemsControl ItemsSource="{Binding Progress.Shown}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="infra:ProgressEntry">
+                        <Grid ColumnDefinitions="*,Auto,Auto" RowDefinitions="Auto,Auto" Margin="0,4">
+                            <TextBlock Grid.Row="0" Grid.Column="0"
+                                       Text="{Binding Title}"
+                                       FontSize="12"
+                                       TextTrimming="CharacterEllipsis" />
+                            <TextBlock Grid.Row="0" Grid.Column="1"
+                                       Text="{Binding Percent, StringFormat={}{0}%}"
+                                       IsVisible="{Binding !IsIndeterminate}"
+                                       FontSize="12"
+                                       Margin="8,0,0,0"
+                                       Foreground="{DynamicResource AppMutedTextBrush}" />
+                            <Button Grid.Row="0" Grid.RowSpan="2" Grid.Column="2"
+                                    Content="Stop"
+                                    IsVisible="{Binding CanStop}"
+                                    Click="OnStopProgress"
+                                    FontSize="11"
+                                    Padding="8,2"
+                                    Margin="8,0,0,0"
+                                    VerticalAlignment="Center" />
+                            <ProgressBar Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
+                                         Value="{Binding Percent, FallbackValue=0}"
+                                         IsIndeterminate="{Binding IsIndeterminate}"
+                                         Minimum="0" Maximum="100"
+                                         MinHeight="4" Height="4"
+                                         Margin="0,6,0,0" />
+                        </Grid>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </Border>
 
         <Border Grid.Row="1"
                 x:Name="ToastBorder"

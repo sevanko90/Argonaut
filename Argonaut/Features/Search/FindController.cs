@@ -25,7 +25,9 @@ namespace Argonaut.Features.Search;
 public sealed class FindController
 {
     private readonly Action<string?> statusChanged;
-    private readonly Func<IProgressReporter?> progressReporterFactory;
+    /// <summary>Makes the progress entry one scan reports through, or null to report nowhere.
+    /// Each entry is finished here when its scan ends.</summary>
+    private readonly Func<ProgressEntry?> progressFactory;
 
     private ISearchNavigator? navigator;
     private SearchSession[] sessions = Array.Empty<SearchSession>();
@@ -54,10 +56,10 @@ public sealed class FindController
     /// wait for a first match - which over a multi-GB file can last the whole scan - ends now.</summary>
     private CancellationTokenSource? pressCts;
 
-    public FindController(Action<string?> statusChanged, Func<IProgressReporter?> progressReporterFactory)
+    public FindController(Action<string?> statusChanged, Func<ProgressEntry?> progressFactory)
     {
         this.statusChanged = statusChanged;
-        this.progressReporterFactory = progressReporterFactory;
+        this.progressFactory = progressFactory;
     }
 
     /// <summary>
@@ -145,8 +147,9 @@ public sealed class FindController
             cursor.Reset(scanTargets.Count);
             for (int i = 0; i < scanTargets.Count; i++)
             {
-                sessions[i] = SearchSession.Start(scanTargets[i], new LiteralSearchMatcher(term),
-                    progressReporterFactory());
+                var progress = progressFactory();
+                sessions[i] = SearchSession.Start(scanTargets[i], new LiteralSearchMatcher(term), progress);
+                progress?.FinishWhen(sessions[i].ScanTask);
             }
 
             navigator.SetHighlightTerm(term);

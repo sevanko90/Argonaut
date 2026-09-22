@@ -53,6 +53,7 @@ public partial class MainWindow : Window
         viewModel.FindBarResetRequested += () => FindBarControl.Reset();
 
         ToastService.Requested += ShowToast;
+        viewModel.Progress.WorkStarted += (_, _) => StartProgressTicks();
         RawJumpService.Requested += offset => _ = viewModel.JumpToRawOffsetAsync(offset);
         ArrayTableService.Requested += request => _ = viewModel.OpenArrayTableAsync(request);
 
@@ -558,6 +559,32 @@ public partial class MainWindow : Window
             return;
 
         await viewModel.OpenPathAsync(path);
+    }
+
+    private DispatcherTimer? progressTimer;
+
+    /// <summary>
+    /// Drives the progress board's show/hide rules while it has anything to decide - pending,
+    /// shown or fading - and stops once it has not, so an idle app runs no timer.
+    /// </summary>
+    private void StartProgressTicks()
+    {
+        progressTimer ??= new DispatcherTimer(TimeSpan.FromMilliseconds(100), DispatcherPriority.Background, OnProgressTick);
+        progressTimer.Start();
+    }
+
+    private void OnProgressTick(object? sender, EventArgs e)
+    {
+        var board = viewModel.Progress;
+        board.Tick();
+        if (!board.HasWork)
+            progressTimer!.Stop();
+    }
+
+    private void OnStopProgress(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if ((sender as Control)?.DataContext is ProgressEntry entry)
+            entry.RequestStop();
     }
 
     private void ShowToast(string message)

@@ -160,27 +160,6 @@ public class RawPieceTableTests
     }
 
     [Fact]
-    public void RepointOriginal_KeepsEditsReadableOverEquivalentBytes()
-    {
-        var table = TableOver("hello world");
-        table.Insert(5, Bytes(" big"));
-        Assert.Equal(Bytes("hello big world"), ReadAll(table));
-
-        // What a save does when the rename fails: the mapping is gone, so re-open and carry on.
-        table.RepointOriginal(new MemoryByteSource(Bytes("hello world")));
-
-        Assert.Equal(Bytes("hello big world"), ReadAll(table));
-    }
-
-    [Fact]
-    public void RepointOriginal_RejectsADifferentLength()
-    {
-        var table = TableOver("hello world");
-
-        Assert.Throws<ArgumentException>(() => table.RepointOriginal(new MemoryByteSource(Bytes("shorter"))));
-    }
-
-    [Fact]
     public void UndoingAChange_PutsTheRunBackAsItWas()
     {
         var table = TableOver("hello world");

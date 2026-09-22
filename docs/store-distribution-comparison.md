@@ -91,10 +91,10 @@ for this codebase:
     Whether the `Process.Start` reveal itself works sandboxed is unverified.
 
   Pasted documents are unaffected: they have no path, so all three already skip them.
-- **Saving (not yet built) needs a sandbox-specific implementation.** A picker grant covers the
-  chosen file, not its folder, so the planned temp-file-beside-the-original save is denied. The
-  save path is designed around this - see `IFileReplacer` in
-  [save-plan.md](save-plan.md) - and needs the
+- **Saving needs a sandbox-specific implementation.** A picker grant covers the chosen file, not
+  its folder, so the shipped save (`SiblingFileReplacer`, a temp file beside the original) is
+  denied. The save path is built behind `IFileReplacer` for this reason - see
+  [save-plan.md](save-plan.md) for the replacement - and needs the
   `com.apple.security.files.user-selected.read-write` entitlement plus read-write (not read-only)
   security-scoped bookmarks for recent files that should stay saveable.
 - `MMapFile`/`Utf8JsonReader` etc. operate on whatever `SafeFileHandle`/stream the

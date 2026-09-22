@@ -17,7 +17,7 @@
                       FontSize="12"
                       Margin="0,0,8,0"
                       VerticalAlignment="Center"
-                      ToolTip.Tip="Type to change the document. Changes are held in memory; saving is not implemented yet." />
+                      ToolTip.Tip="Type to change the document. Changes are held in memory until you save (Ctrl+S or Cmd+S)." />
         <ComboBox x:Name="WrapWidthCombo"
                   SelectedIndex="{Binding WrapWidthIndex, Mode=TwoWay}"
                   IsEnabled="{Binding CanChangeWrapWidth}"

@@ -10,9 +10,9 @@ Nothing here is scheduled. Items are grouped by area, and roughly ordered by val
 
 The raw view has an edit mode: a toolbar toggle, enabled once the row scan finishes, behind which
 `RawEditController` edits a `RawPieceTable` over (original mapping, append-only scratch). Memory
-grows with edits, not file size, and nothing is written to disk. It is in the raw view rather than
-the JSON tree because the raw row index is a pure function of the bytes and can be re-derived where
-the JSON index cannot. Built:
+grows with edits, not file size, and nothing is written to disk until a save. It is in the raw view
+rather than the JSON tree because the raw row index is a pure function of the bytes and can be
+re-derived where the JSON index cannot. Built:
 
 - Caret, selection across rows, keyboard navigation and copy, drawn by `RawTextSurface`.
 - Typing, Enter, backspace/forward delete by character (`RawCaretStops`), paste, and undo/redo
@@ -24,25 +24,29 @@ the JSON index cannot. Built:
   line/column and selection size, with "Edited — not saved" while dirty.
 - Edit overview strip beside the scrollbar (`RawEditOverview`), click to jump to an edit.
 - Debug-only internals inspector, Cmd/Ctrl+Shift+D (`Diagnostics/RawEditInspectorWindow`).
+- Save (Cmd/Ctrl+S, toolbar button) and Save As (Cmd/Ctrl+Shift+S): a background streaming copy
+  into a stage beside the file, then unmap, atomic swap (`SiblingFileReplacer`) and a fresh
+  re-index with the caret put back. A failed swap leaves the file untouched and the edits open.
+  Save / Don't Save / Cancel is asked before closing, opening, pasting, switching view, quitting
+  or restarting for an update would drop unsaved edits.
 
 Queued:
 
-- **Save.** Streaming rewrite into a staged file, atomic swap behind `IFileReplacer`, background
-  re-index. The next piece of work; until it lands an edited document cannot be written back.
-  Plan: [save-plan.md](save-plan.md).
+- **A macOS `IFileReplacer` over `NSFileManager`.** Needed for a Mac App Store build, and would
+  keep Finder tags and ACLs that today's `rename` loses. Plan: [save-plan.md](save-plan.md).
 - **IME and dead-key composition.** Deferred past v1; `Avalonia.Headless` posts finished text
   rather than composition events, so it cannot be tested here.
 - **In-memory rebuild when `NeedsRebuild` fires.** Past 524,288 line records (~half a million
   separate places edited) edits in new places are refused with a toast. A save clears this more
   cheaply, so a rebuild over the piece table is only worth building if that ever proves not enough.
 - **Re-wrap while edited, and search over edited bytes.** Both are off while a piece table exists;
-  search reads the file and so lands near rather than on a match past the first edit. Save brings
+  search reads the file and so lands near rather than on a match past the first edit. Saving brings
   both back; a merge-iterator over piece-space would be a project of its own.
 - **Unicode descriptors elsewhere.** The JSON views could name the character under the cursor the
   same way.
 - **An internals inspector for the JSON indexes**, if the raw one earns its keep.
 - **Scalar edits in the JSON tree.** An offset-keyed replacement overlay served at the
-  `IByteSource` seam, with no index change. Decide after save ships.
+  `IByteSource` seam, with no index change. Now that save exists, this is the next decision.
 - **Structural editing in the JSON tree** (delete, insert, paste): tombstones and fragment indices
   merged into the row walk. The expensive class; explicitly not committed to. Saving from raw and
   re-indexing may make it unnecessary.
@@ -68,8 +72,8 @@ and [json-array-nesting-options.md](json-array-nesting-options.md).
 - **Export a subtree to file.** Carried over from an earlier feature list, and the reason the
   table has no "export this back out" action: the useful version of it is a document-level feature
   (export any container from the tree, not just a table), so it wants sizing on its own rather
-  than as a table button. Shares the streaming-write path with
-  [save-plan.md](save-plan.md).
+  than as a table button. The write path exists: `ByteSourceReading.WriteTo` into an
+  `IFileReplacer` stage, as save uses it.
 - **Editing cells.**
 - **Sorting and filtering the table.**
 - **Searching within the table.** `CreateSearchNavigator` is where this would land.
@@ -182,9 +186,9 @@ same origin rather than re-materialising it.
 - **Path-keyed features already degrade.** The three that exist - recent files, the
   `<file>.schema.json` sidecar and the remembered schema binding - consult `IByteOrigin.Path` and
   skip when it is null; `JsonSchemaCatalog.GatherForDocument` takes a null path and offers the
-  user folder's schemas with no sidecar and nothing preselected. There is no save, reload or
-  "open containing folder" in the app yet, so there is no enabled state to drive; whenever one of
-  those arrives it reads `Path` and disables itself when there is none.
+  user folder's schemas with no sidecar and nothing preselected. Save follows the same rule the
+  other way: with no `Path` it becomes Save As. There is no reload or "open containing folder" yet;
+  whenever one arrives it reads `Path` and disables itself when there is none.
 - **One accepted edge case.** Disposing a temp-file-backed origin while a search is still scanning
   it deletes the file under that scan. `SearchSession.Scan` already catches every exception into
   `OpenFailure` ("an unreadable/vanished target is an outcome rather than a fault"), so it

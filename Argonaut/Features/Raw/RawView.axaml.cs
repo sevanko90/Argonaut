@@ -86,12 +86,13 @@ public partial class RawView : UserControl
         else if (e.PropertyName is nameof(RawViewModel.EditGeneration))
             EditOverview.Refresh();
 
-        if (e.PropertyName is null or nameof(RawViewModel.WrapWidth))
+        if (e.PropertyName is null or nameof(RawViewModel.WrapWidth) or nameof(RawViewModel.IndexGeneration))
         {
-            // Row geometry is about to change wholesale, so the old vertical offset means
-            // nothing against the new rows - and leaving it in place would have the surface
-            // draw a viewport far past the end of a row set that starts near-empty and then
-            // grows by millions of rows a second.
+            // Row geometry is about to change wholesale (a re-wrap, or the fresh scan a save
+            // reopens the document with), so the old vertical offset means nothing against the
+            // new rows - and leaving it in place would have the surface draw a viewport far past
+            // the end of a row set that starts near-empty and then grows by millions of rows a
+            // second. A save's reopen puts the caret back with a reveal once the scan reaches it.
             ResetScroll();
             UpdatePanRange();
         }

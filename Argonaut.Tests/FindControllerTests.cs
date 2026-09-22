@@ -77,6 +77,38 @@ public class FindControllerTests
         }
     }
 
+    /// <summary>
+    /// A save cannot replace the file while a scan still holds a chunk mapping of it, so it waits
+    /// for every scan - including ones retired earlier by a term change, which nothing else joins.
+    /// </summary>
+    [Fact]
+    public async Task StopSearchAndWait_CompletesOnlyOnceEveryScanHasLetGo()
+    {
+        string path = Path.GetTempFileName();
+        try
+        {
+            // Big enough that the scans are still running when they are stopped.
+            File.WriteAllBytes(path, Encoding.UTF8.GetBytes(new string('a', 32 * 1024 * 1024) + "needle"));
+            var navigator = new StubNavigator(path);
+            var controller = new FindController(_ => { }, () => null);
+            controller.Attach(navigator);
+
+            _ = controller.FindAsync("first", direction: 1);
+            _ = controller.FindAsync("second", direction: 1);
+
+            await controller.StopSearchAndWaitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+
+            // Nothing is left holding the file: on Windows this delete would fail otherwise.
+            File.Delete(path);
+            Assert.False(File.Exists(path));
+        }
+        finally
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+    }
+
     private static async Task WithController(string content,
         Func<FindController, StubNavigator, List<string?>, Task> test)
     {

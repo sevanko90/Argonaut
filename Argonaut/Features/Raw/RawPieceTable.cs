@@ -25,9 +25,9 @@ public readonly record struct RawEditExtent(long Offset, long BytesRemoved, long
 /// handful of comparisons; the row index collapses it back to a single piece by rebuilding
 /// once the list grows past its threshold.
 ///
-/// <b>The original is held behind <see cref="RepointOriginal"/> rather than as a fixed
-/// reference</b>: saving unmaps the file before the rename, and a rename that then fails has to
-/// leave the user's edits intact over a freshly-opened mapping of the same bytes.
+/// The original is read through whatever the caller hands in. For a document on disk that is a
+/// <see cref="Argonaut.Infrastructure.RemappableByteSource"/>, which is how a save can unmap the
+/// file for its rename and put the mapping back if the rename fails, with every piece still valid.
 ///
 /// Not thread-safe: edits and reads happen on the UI thread. Background readers are given the
 /// table only once editing is quiescent.
@@ -55,7 +55,7 @@ public sealed class RawPieceTable : IByteSource
     private readonly List<byte[]> scratchChunks = new();
     private readonly List<RawPiece> pieces = new();
 
-    private IByteSource original;
+    private readonly IByteSource original;
     private int scratchFill; // bytes used in the last scratch chunk
 
     public RawPieceTable(IByteSource original)
@@ -146,23 +146,6 @@ public sealed class RawPieceTable : IByteSource
 
             return false;
         }
-    }
-
-    /// <summary>
-    /// Swaps the original buffer for an equivalent one - a re-opened mapping of the same bytes
-    /// after a save unmapped the old one. Rejects a replacement of a different length, because
-    /// every piece offset into the original would then mean something different.
-    /// </summary>
-    public void RepointOriginal(IByteSource replacement)
-    {
-        ArgumentNullException.ThrowIfNull(replacement);
-        if (replacement.AvailableLength != this.original.AvailableLength)
-            throw new ArgumentException(
-                $"Replacement is {replacement.AvailableLength} bytes; the original was {this.original.AvailableLength}. " +
-                "Piece offsets are only meaningful against bytes of the same length.",
-                nameof(replacement));
-
-        this.original = replacement;
     }
 
     public ReadOnlySpan<byte> GetContiguousSpan(long offset, int maxLength)

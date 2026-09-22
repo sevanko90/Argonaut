@@ -56,6 +56,15 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly Func<Task<byte[]?>>? readClipboardBytes;
     private readonly DocumentLoader documentLoader;
     private readonly FindController findController;
+    private readonly Func<IByteOrigin, Task<string?>>? pickSaveDestination;
+    private readonly Func<string, Task<UnsavedChangesChoice>>? askAboutUnsavedChanges;
+    private readonly Func<string, Task>? reportFailure;
+    private readonly IFileReplacer fileReplacer;
+
+    // True from the moment a save starts until it has finished, failed or been abandoned. Every
+    // path that would change the document on screen, or read its file, waits it out: the save
+    // is about to unmap that file and swap it.
+    private bool isSaving;
 
     private IDocumentViewModel? currentDocument;
 
@@ -97,12 +106,32 @@ public sealed class MainWindowViewModel : ObservableObject
     /// Overrides how documents are built (defaults to the real memory-mapped view models);
     /// tests inject fakes to exercise the lifecycle without real files or indexing.
     /// </param>
+    /// <param name="pickSaveDestination">
+    /// Asks where to save the given document, resolving to a path or null when the user cancels.
+    /// Without one there is no Save As, and a document with no path cannot be saved.
+    /// </param>
+    /// <param name="askAboutUnsavedChanges">
+    /// Asks Save / Don't Save / Cancel before something would drop unsaved edits. Without one,
+    /// edits are dropped without asking - which is only ever right in a test.
+    /// </param>
+    /// <param name="reportFailure">Shows a message the user has to acknowledge. Falls back to a
+    /// toast.</param>
+    /// <param name="fileReplacer">How a save swaps its content in; <see cref="SiblingFileReplacer"/>
+    /// unless a test substitutes one.</param>
     public MainWindowViewModel(Func<string, Task<bool>> confirmReplace,
-        Func<Task<byte[]?>>? readClipboardBytes = null, DocumentLoader? documentLoader = null)
+        Func<Task<byte[]?>>? readClipboardBytes = null, DocumentLoader? documentLoader = null,
+        Func<IByteOrigin, Task<string?>>? pickSaveDestination = null,
+        Func<string, Task<UnsavedChangesChoice>>? askAboutUnsavedChanges = null,
+        Func<string, Task>? reportFailure = null,
+        IFileReplacer? fileReplacer = null)
     {
         this.confirmReplace = confirmReplace;
         this.readClipboardBytes = readClipboardBytes;
         this.documentLoader = documentLoader ?? DocumentViewCatalog.LoadAsync;
+        this.pickSaveDestination = pickSaveDestination;
+        this.askAboutUnsavedChanges = askAboutUnsavedChanges;
+        this.reportFailure = reportFailure;
+        this.fileReplacer = fileReplacer ?? SiblingFileReplacer.ForCurrentPlatform();
 
         themeMode = ThemePreference.Load();
         contentFontMode = ContentFontPreference.Load();
@@ -167,7 +196,16 @@ public sealed class MainWindowViewModel : ObservableObject
                 return;
 
             if (value is not null && currentFilePath is not null && value.Kind != currentKind)
-                _ = SwitchViewAsync(value.Kind);
+            {
+                // The switch may ask about unsaved changes first, and a dialog opening inside the
+                // switcher's own selection commit is the re-entrancy CLAUDE.md warns about; the
+                // switch also puts the selection back if the user cancels.
+                var kind = value.Kind;
+                if (HasUnsavedChanges || isSaving)
+                    UiDeferral.AfterCurrentInput(() => _ = SwitchViewAsync(kind));
+                else
+                    _ = SwitchViewAsync(kind);
+            }
         }
     }
 
@@ -503,7 +541,17 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
-        if (currentFilePath is not null && !string.Equals(currentFilePath, normalizedPath, StringComparison.OrdinalIgnoreCase))
+        if (RefusedWhileSaving())
+            return;
+
+        if (HasUnsavedChanges)
+        {
+            // Asked instead of the replace confirmation, not as well as it: this question already
+            // says the document is going, and offers the one thing worth doing about it.
+            if (!await ResolveUnsavedChangesAsync($"opening \"{Path.GetFileName(normalizedPath)}\""))
+                return;
+        }
+        else if (currentFilePath is not null && !string.Equals(currentFilePath, normalizedPath, StringComparison.OrdinalIgnoreCase))
         {
             var confirmed = await confirmReplace(
                 $"Replace the currently loaded file with \"{Path.GetFileName(normalizedPath)}\"?");
@@ -558,7 +606,15 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
-        if (IsFileOpen)
+        if (RefusedWhileSaving())
+            return;
+
+        if (HasUnsavedChanges)
+        {
+            if (!await ResolveUnsavedChangesAsync("opening the clipboard contents"))
+                return;
+        }
+        else if (IsFileOpen)
         {
             var confirmed = await confirmReplace("Replace the currently loaded file with the clipboard contents?");
             if (!confirmed)
@@ -615,6 +671,18 @@ public sealed class MainWindowViewModel : ObservableObject
     /// </summary>
     public async Task SwitchViewAsync(FileTypeDetector.FileKind kind)
     {
+        if (this.ownedOrigins.Count == 0 || kind == currentKind)
+            return;
+
+        if (RefusedWhileSaving() || !await ResolveUnsavedChangesAsync($"switching to the {DisplayNameFor(kind)} view"))
+        {
+            // Put the switcher back on the view that is still showing.
+            SelectedView = DocumentViewCatalog.Options.FirstOrDefault(o => o.Kind == currentKind);
+            return;
+        }
+
+        // A save the user just chose may have reopened the document; the view switch goes on
+        // over whatever input is current now.
         if (this.ownedOrigins.Count == 0 || kind == currentKind)
             return;
 
@@ -856,6 +924,7 @@ public sealed class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(FilePath));
         OnPropertyChanged(nameof(CanCompare));
         NotifyFailurePropertiesChanged();
+        NotifySavePropertiesChanged();
     }
 
     private void NotifyFailurePropertiesChanged()
@@ -879,6 +948,9 @@ public sealed class MainWindowViewModel : ObservableObject
         if (e.PropertyName is null or nameof(IDocumentViewModel.StatusText))
             StatusText = currentDocument!.StatusText;
 
+        if (e.PropertyName is null or nameof(ISaveableDocument.HasUnsavedChanges) or nameof(ISaveableDocument.CanSave))
+            NotifySavePropertiesChanged();
+
         if (e.PropertyName is (null or nameof(IDocumentViewModel.IndexFailure)) && currentDocument!.IndexFailure is { } failure)
         {
             if (failure.ItemsIndexed == 0)
@@ -889,6 +961,16 @@ public sealed class MainWindowViewModel : ObservableObject
     }
 
     public async Task CloseFileAsync()
+    {
+        if (RefusedWhileSaving() || !await ResolveUnsavedChangesAsync("closing it"))
+            return;
+
+        CloseCurrentDocument();
+    }
+
+    /// <summary>Closes the document with no questions asked - the tail of
+    /// <see cref="CloseFileAsync"/>, and what a save that lost its document falls back to.</summary>
+    private void CloseCurrentDocument()
     {
         openRequest.Begin();
         indexProgressReporter?.Stop();
@@ -904,9 +986,209 @@ public sealed class MainWindowViewModel : ObservableObject
         ReloadRecentFiles();
     }
 
+    // ── Save ────────────────────────────────────────────────────────────────────────────
+    //
+    // The document owns the save itself (ISaveableDocument); the shell owns what surrounds it -
+    // where it goes, stopping search before the file is swapped, adopting a new origin after a
+    // Save As, and asking before anything would drop unsaved edits. See docs/save-plan.md.
+
+    /// <summary>True when the current document is one that can be saved at all; drives whether the
+    /// toolbar shows a Save button.</summary>
+    public bool IsSaveAvailable => currentDocument is ISaveableDocument;
+
+    /// <summary>True while a save is running. See <see cref="isSaving"/>.</summary>
+    public bool IsSaving => isSaving;
+
+    /// <summary>True when the current document reads differently from its file.</summary>
+    public bool HasUnsavedChanges => currentDocument is ISaveableDocument { HasUnsavedChanges: true };
+
+    /// <summary>Whether the Save button does anything now: there are changes, the document is
+    /// ready to write them, and no save is already running.</summary>
+    public bool CanSave => !isSaving && currentDocument is ISaveableDocument { CanSave: true, HasUnsavedChanges: true };
+
+    /// <summary>
+    /// Saves the current document over its file, or asks where to put it when it has none (a
+    /// paste). True when the document was saved, or had nothing to save; false when the user
+    /// cancelled or the save failed - which is what lets an unsaved-changes prompt know whether it
+    /// may go on.
+    /// </summary>
+    public Task<bool> SaveAsync() => SaveCoreAsync(chooseDestination: false);
+
+    /// <summary>Saves the current document to a file the user picks, which it then reads from.</summary>
+    public Task<bool> SaveAsAsync() => SaveCoreAsync(chooseDestination: true);
+
+    private async Task<bool> SaveCoreAsync(bool chooseDestination)
+    {
+        if (isSaving || currentDocument is not ISaveableDocument saveable || this.ownedOrigins.Count == 0)
+            return false;
+
+        if (!saveable.CanSave)
+        {
+            ToastService.Show("The document can be saved once it has finished loading.");
+            return false;
+        }
+
+        var current = this.ownedOrigins[0];
+        IByteOrigin destination;
+        if (!chooseDestination && current.Path is not null)
+        {
+            if (!saveable.HasUnsavedChanges)
+                return true;
+
+            destination = current;
+        }
+        else
+        {
+            if (this.pickSaveDestination is null)
+                return false;
+
+            string? picked = await this.pickSaveDestination(current);
+            if (picked is null || !ReferenceEquals(currentDocument, saveable))
+                return false;
+
+            // Saving as the file already open is an ordinary save; the origin is kept, not
+            // replaced by a second one naming the same file.
+            string full = Path.GetFullPath(picked);
+            destination = current.Path is { } open && PathsEqual(open, full) ? current : new FileByteOrigin(full);
+        }
+
+        return await RunSaveAsync(saveable, current, destination);
+    }
+
+    private async Task<bool> RunSaveAsync(ISaveableDocument saveable, IByteOrigin current, IByteOrigin destination)
+    {
+        isSaving = true;
+        NotifySavePropertiesChanged();
+
+        DocumentSaveResult result;
+        try
+        {
+            // The swap needs every mapping of the file gone, and a search holds its own chunk
+            // mappings that it would otherwise let go of only when it next looks up.
+            await findController.StopSearchAndWaitAsync();
+
+            indexProgressReporter?.Stop();
+            string name = destination.Path ?? destination.DisplayName;
+            var reporter = new StatusProgressReporter(this, name, openRequest.Current);
+            try
+            {
+                result = await saveable.SaveAsync(destination, this.fileReplacer, reporter);
+            }
+            finally
+            {
+                reporter.Stop();
+            }
+        }
+        finally
+        {
+            isSaving = false;
+            NotifySavePropertiesChanged();
+        }
+
+        // Whatever happened, the document's own line is the true one again - including when a
+        // failed save put back text identical to what it had, which raises no change to mirror.
+        if (currentDocument is not null)
+            StatusText = currentDocument.StatusText;
+
+        switch (result.Outcome)
+        {
+            case DocumentSaveOutcome.Saved:
+                if (!ReferenceEquals(destination, current))
+                    AdoptSavedAs(destination);
+
+                if (destination.Path is { } savedPath)
+                {
+                    RecentFileHistory.Add(savedPath);
+                    ReloadRecentFiles();
+                }
+
+                ToastService.Show($"Saved {FileName}");
+                return true;
+
+            case DocumentSaveOutcome.NotSavedAndDocumentLost:
+                CloseCurrentDocument();
+                await ReportFailureAsync(result.Message!);
+                return false;
+
+            default:
+                if (!ReferenceEquals(destination, current))
+                    destination.Dispose();
+
+                await ReportFailureAsync(result.Message!);
+                return false;
+        }
+    }
+
+    /// <summary>After a Save As the document reads from a different input, so the shell takes
+    /// ownership of it and releases the one it replaced (a paste's array, for instance).</summary>
+    private void AdoptSavedAs(IByteOrigin destination)
+    {
+        AdoptOrigins(destination);
+
+        currentFilePath = destination.Path ?? destination.DisplayName;
+        FileName = Path.GetFileName(currentFilePath);
+        Title = currentDocument?.WindowTitle ?? $"{DefaultTitle} — {FileName}";
+        OnPropertyChanged(nameof(FilePath));
+    }
+
+    /// <summary>
+    /// Asks what to do about unsaved changes before <paramref name="beforeWhat"/> ("closing it",
+    /// "opening x.json"), and saves if asked to. True when it is fine to go on: there was nothing
+    /// unsaved, the user chose not to keep it, or the save succeeded.
+    /// </summary>
+    public async Task<bool> ResolveUnsavedChangesAsync(string beforeWhat)
+    {
+        if (isSaving)
+            return false;
+
+        if (!HasUnsavedChanges || this.askAboutUnsavedChanges is null)
+            return true;
+
+        var choice = await this.askAboutUnsavedChanges($"Save your changes to \"{FileName}\" before {beforeWhat}?");
+        return choice switch
+        {
+            UnsavedChangesChoice.Discard => true,
+            UnsavedChangesChoice.Save => await SaveAsync(),
+            _ => false,
+        };
+    }
+
+    /// <summary>True, with a toast saying why, while a save is running.</summary>
+    private bool RefusedWhileSaving()
+    {
+        if (!isSaving)
+            return false;
+
+        ToastService.Show("Wait for the save to finish.");
+        return true;
+    }
+
+    private Task ReportFailureAsync(string message)
+    {
+        if (this.reportFailure is { } report)
+            return report(message);
+
+        ToastService.Show(message);
+        return Task.CompletedTask;
+    }
+
+    private void NotifySavePropertiesChanged()
+    {
+        OnPropertyChanged(nameof(IsSaving));
+        OnPropertyChanged(nameof(IsSaveAvailable));
+        OnPropertyChanged(nameof(HasUnsavedChanges));
+        OnPropertyChanged(nameof(CanSave));
+    }
+
+    /// <summary>Whether two full paths name the same file, by the platform's usual case rule -
+    /// Windows and macOS file systems are case-insensitive by default, Linux's are not.</summary>
+    private static bool PathsEqual(string first, string second) =>
+        string.Equals(first, second, OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase);
+
     // ── Find ────────────────────────────────────────────────────────────────────────────
 
-    public Task FindAsync(string term, int direction) => findController.FindAsync(term, direction);
+    public Task FindAsync(string term, int direction) =>
+        isSaving ? Task.CompletedTask : findController.FindAsync(term, direction);
 
     public void StopFind() => findController.StopSearch();
 

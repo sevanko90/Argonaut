@@ -15,7 +15,8 @@ namespace Argonaut.Features.Search;
 /// Stopping a scan is a request, never a join: each scan owns its mappings, so a retired one
 /// winding down holds nothing the document needs back. The only part of find tied to the
 /// document's lifetime is the REVEAL, which links
-/// <see cref="ISearchNavigator.DocumentTearingDown"/>.
+/// <see cref="ISearchNavigator.DocumentTearingDown"/>. The one exception is a save, which
+/// replaces the file itself and so waits via <see cref="StopSearchAndWaitAsync"/>.
 ///
 /// All public members run on the UI thread; awaits resume there, and a monotonic request id
 /// (the codebase's staleness idiom) guards every post-await continuation against a newer
@@ -28,6 +29,10 @@ public sealed class FindController
 
     private ISearchNavigator? navigator;
     private SearchSession[] sessions = Array.Empty<SearchSession>();
+
+    /// <summary>Scans asked to stop that may still be finishing their last chunk. Nothing waits
+    /// for them except <see cref="StopSearchAndWaitAsync"/>; pruned as they complete.</summary>
+    private readonly List<Task> windingDown = new();
     private string? sessionTerm;
 
     private readonly FindCursor cursor = new();
@@ -242,6 +247,20 @@ public sealed class FindController
         StopSessions();
     }
 
+    /// <summary>
+    /// <see cref="StopSearch"/>, then waits for the retired scans to let go of their chunk
+    /// mappings. The one caller that needs the join is a save: Windows will not replace a file
+    /// while any mapping of it is open, and a retired scan still holds one for up to a chunk's
+    /// work. Everything else stops without waiting, as the class remarks say.
+    /// </summary>
+    public Task StopSearchAndWaitAsync()
+    {
+        StopSearch();
+
+        // ScanTask never faults (see StopSessions), so there is nothing to observe.
+        return this.windingDown.Count == 0 ? Task.CompletedTask : Task.WhenAll(this.windingDown.ToArray());
+    }
+
     /// <summary>Stops the active search and forgets the current document's navigator.</summary>
     public void Detach()
     {
@@ -270,8 +289,13 @@ public sealed class FindController
         sessionTerm = null;
         cursor.Reset(0);
 
+        this.windingDown.RemoveAll(scan => scan.IsCompleted);
         foreach (var session in old)
+        {
             session.RequestStop();
+            if (!session.ScanTask.IsCompleted)
+                this.windingDown.Add(session.ScanTask);
+        }
     }
 
     /// <summary>

@@ -18,11 +18,15 @@ namespace Argonaut.Features.Raw;
 /// whole new instance rather than reset in place, so the ListBox rebinds cleanly and the
 /// disposed old collection reports empty for Avalonia's trailing ItemsSource walk.
 /// </summary>
-public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigable
+public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigable, ISaveableDocument
 {
     private const int InitialIndexedRowTarget = 250;
 
     private RawIndexSession? session;
+
+    /// <summary>The session's bytes, held as what they are so a save can unmap and remap them -
+    /// see <see cref="RemappableByteSource"/>.</summary>
+    private RemappableByteSource? fileBytes;
     private RawRowCollection? rows;
     private RawToolbarViewModel? toolbar;
     private string? highlightTerm;
@@ -31,6 +35,14 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
     private RawCaretReadout? caretReadout;
     private RawEditController? editor;
     private bool isEditing;
+    private bool isSaving;
+
+    /// <summary>The background half of a save - the copy into the stage - which disposal must
+    /// stop and join before the session releases the mapping it reads.</summary>
+    private Task saveCopy = Task.CompletedTask;
+
+    private CancellationTokenSource? saveCts;
+
     private int wrapWidth = RawWrapWidthPreference.Default;
 
     protected override IDocumentSession? Session => this.session;
@@ -73,8 +85,9 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
     }
 
     /// <summary>
-    /// Bumped each time <see cref="SetWrapWidth"/> replaces the index, so an in-flight search
-    /// reveal can detect that it resolved against a retired index and re-resolve.
+    /// Bumped each time the index is replaced - by <see cref="SetWrapWidth"/>, or by a save
+    /// reopening the document - so an in-flight search reveal can detect that it resolved against
+    /// a retired index and re-resolve. Observable, so the view resets its scroll.
     /// </summary>
     public int IndexGeneration { get; private set; }
 
@@ -157,9 +170,9 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
 
     // ---- editing ------------------------------------------------------------------------
     //
-    // The raw view is where editing lives, because its row index is
-    // a pure function of the bytes and can be re-derived where the JSON index cannot. Nothing
-    // here writes to the file - see RawEditController.
+    // The raw view is where editing lives, because its row index is a pure function of the
+    // bytes and can be re-derived where the JSON index cannot. Nothing here writes to the file;
+    // only SaveAsync, below, does.
 
     /// <summary>
     /// True while keystrokes change the document rather than only moving the caret. A mode
@@ -184,6 +197,27 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
     /// <summary>True once the document reads differently from the file on disk.</summary>
     public bool IsDirty => this.editor?.IsDirty == true;
 
+    /// <summary>See <see cref="ISaveableDocument.HasUnsavedChanges"/>; the same as
+    /// <see cref="IsDirty"/>, under the name the shell asks by.</summary>
+    public bool HasUnsavedChanges => IsDirty;
+
+    /// <summary>True while a save is writing the document out. Edits, re-wrapping and the edit
+    /// toggle are all refused meanwhile: the copy is reading the piece table on the background,
+    /// and the piece table is not safe to change under a reader.</summary>
+    public bool IsSaving
+    {
+        get => this.isSaving;
+        private set
+        {
+            if (SetField(ref this.isSaving, value))
+                OnPropertyChanged(nameof(CanSave));
+        }
+    }
+
+    /// <summary>See <see cref="ISaveableDocument.CanSave"/>. Waits for the scan for the same
+    /// reason editing does, and because the save reopens the document over a fresh one.</summary>
+    public bool CanSave => !IsSaving && CanEdit;
+
     /// <summary>
     /// Bumped by every edit, so the view drops the row text, layouts and decode maps it is
     /// holding. Separate from <see cref="IndexGeneration"/> because the two want different
@@ -206,6 +240,13 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
     {
         if (IsDisposed || this.session is null || editing == IsEditing)
             return;
+
+        if (IsSaving)
+        {
+            ToastService.Show("Wait for the save to finish.");
+            SyncToolbarEditing();
+            return;
+        }
 
         if (editing)
         {
@@ -237,27 +278,38 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
 
     /// <summary>Types text at the caret. Returns false when nothing happened, so the view can
     /// leave the key for whoever else wants it.</summary>
-    public bool TypeText(string text) => Report(this.editor?.Type(text));
+    public bool TypeText(string text) => EditsPaused() || Report(this.editor?.Type(text));
 
     /// <summary>Inserts a line break at the caret.</summary>
-    public bool InsertNewLine() => Report(this.editor?.InsertNewLine());
+    public bool InsertNewLine() => EditsPaused() || Report(this.editor?.InsertNewLine());
 
     /// <summary>
     /// Inserts raw bytes at the caret - what a paste is. Bytes rather than a string, so a
     /// clipboard that offers UTF-8 directly reaches the document without a decode-and-re-encode
     /// round trip that would silently repair anything invalid in it.
     /// </summary>
-    public bool Paste(ReadOnlySpan<byte> bytes) => Report(this.editor is null ? null : this.editor.Insert(bytes));
+    public bool Paste(ReadOnlySpan<byte> bytes) => EditsPaused() || Report(this.editor is null ? null : this.editor.Insert(bytes));
 
     /// <summary>Backspace.</summary>
-    public bool DeleteBackward() => Report(this.editor?.DeleteBackward());
+    public bool DeleteBackward() => EditsPaused() || Report(this.editor?.DeleteBackward());
 
     /// <summary>Forward delete.</summary>
-    public bool DeleteForward() => Report(this.editor?.DeleteForward());
+    public bool DeleteForward() => EditsPaused() || Report(this.editor?.DeleteForward());
 
-    public bool Undo() => Report(this.editor?.Undo());
+    public bool Undo() => EditsPaused() || Report(this.editor?.Undo());
 
-    public bool Redo() => Report(this.editor?.Redo());
+    public bool Redo() => EditsPaused() || Report(this.editor?.Redo());
+
+    /// <summary>True - so the key counts as handled and goes nowhere else - when a save is
+    /// running and the edit must not happen. See <see cref="IsSaving"/>.</summary>
+    private bool EditsPaused()
+    {
+        if (!IsSaving || this.editor is null)
+            return false;
+
+        ToastService.Show("Saving — editing resumes when it finishes.");
+        return true;
+    }
 
     private bool Report(RawEditOutcome? outcome)
     {
@@ -303,6 +355,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
 
         OnPropertyChanged(nameof(RowCount));
         OnPropertyChanged(nameof(IsDirty));
+        OnPropertyChanged(nameof(HasUnsavedChanges));
         OnPropertyChanged(nameof(EditStatusText));
     }
 
@@ -335,6 +388,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
         OnPropertyChanged(nameof(EditGeneration));
         OnPropertyChanged(nameof(RowCount));
         OnPropertyChanged(nameof(IsDirty));
+        OnPropertyChanged(nameof(HasUnsavedChanges));
         OnPropertyChanged(nameof(EditStatusText));
 
         // The caret often sits at the same offset after an edit (forward delete does not move
@@ -485,8 +539,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
         this.wrapWidth = RawWrapWidthPreference.Load();
         this.toolbar = new RawToolbarViewModel(this.wrapWidth, SetWrapWidth, SetEditing);
 
-        var session = RawIndexSession.Start(origin.Open(), this.wrapWidth, progressReporter);
-        this.session = session;
+        var session = StartSession(origin, progressReporter);
 
         // Await a small initial batch so the first paint isn't an empty list; RowCount then
         // tracks the published row count live as indexing continues in the background.
@@ -519,7 +572,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
         // so re-wrapping an edited document means re-scanning the edited bytes - the same
         // background re-index a dirty-span rebuild needs, and not built. The toolbar disables
         // the combo for the same reason; this is the guard behind it.
-        if (this.editor is not null)
+        if (this.editor is not null || IsSaving)
         {
             ToastService.Show("Wrap width cannot change while the document is being edited.");
             return;
@@ -531,6 +584,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
         // ResetScrollBeforeSourceSwap). Reordering this method breaks that contract.
         WrapWidth = bytes;
         IndexGeneration++;
+        OnPropertyChanged(nameof(IndexGeneration));
 
         // Clear selection before the swap - stale indexes must never be applied to the new list.
         SelectedRowIndex = null;
@@ -568,6 +622,232 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
         MonitorIndexing();
     }
 
+    /// <summary>Opens <paramref name="origin"/> and starts scanning it, reading through a
+    /// <see cref="RemappableByteSource"/> so a later save can unmap it.</summary>
+    private RawIndexSession StartSession(IByteOrigin origin, IProgressReporter? progressReporter)
+    {
+        var bytes = new RemappableByteSource(origin.Open());
+        var session = RawIndexSession.Start(bytes, this.wrapWidth, progressReporter);
+        this.fileBytes = bytes;
+        this.session = session;
+        return session;
+    }
+
+    // ---- saving -------------------------------------------------------------------------
+    //
+    // docs/save-plan.md. The order is fixed by Windows, which cannot replace a file while any
+    // mapping of it is open - yet the copy reads the original through exactly that mapping:
+    //
+    //   stage -> copy the document into it and flush (background) -> unmap -> commit -> reopen
+    //
+    // A failed commit leaves the file untouched, so the mapping is put back and the edits carry
+    // on over it as if nothing happened. The caller has already stopped and joined search, the
+    // only other reader of this file.
+
+    /// <inheritdoc />
+    public async Task<DocumentSaveResult> SaveAsync(IByteOrigin destination, IFileReplacer replacer, IProgressReporter? progress)
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+        ArgumentNullException.ThrowIfNull(replacer);
+
+        if (!CanSave || Document is not { } document || this.fileBytes is not { } fileBytes)
+            return DocumentSaveResult.NotSaved("The document can be saved once it has finished loading.");
+
+        string statusBefore = StatusText;
+        long length = document.AvailableLength;
+        IsSaving = true;
+
+        StagedFile? stagedOrNull = null;
+        try
+        {
+            stagedOrNull = replacer.Stage(destination, length);
+
+            var cts = new CancellationTokenSource();
+            this.saveCts = cts;
+            var stage = stagedOrNull;
+            this.saveCopy = Task.Run(() =>
+            {
+                document.WriteTo(stage.Content, progress, cts.Token);
+                stage.Seal();
+            });
+
+            await this.saveCopy;
+        }
+        catch (Exception ex)
+        {
+            stagedOrNull?.Dispose();
+            IsSaving = false;
+            if (!IsDisposed)
+                StatusText = statusBefore;
+
+            return ex is OperationCanceledException
+                ? DocumentSaveResult.NotSaved("The save was stopped.")
+                : DocumentSaveResult.NotSaved($"Couldn't save: {ex.Message}");
+        }
+        finally
+        {
+            this.saveCts = null;
+        }
+
+        var staged = stagedOrNull;
+
+        // Closed while the copy ran: disposal joined the copy, and the session is gone.
+        if (IsDisposed)
+        {
+            staged.Dispose();
+            return DocumentSaveResult.NotSaved("The document was closed before the save finished.");
+        }
+
+        try
+        {
+            var result = CommitAndReopen(staged, destination, fileBytes);
+            if (result.Outcome != DocumentSaveOutcome.Saved)
+                StatusText = statusBefore;
+
+            return result;
+        }
+        finally
+        {
+            staged.Dispose();
+            IsSaving = false;
+        }
+    }
+
+    /// <summary>
+    /// The synchronous middle of a save, on the UI thread so nothing draws or reads the document
+    /// while its mapping is gone: unmap, swap, and either reopen over the result or put the old
+    /// mapping back.
+    /// </summary>
+    private DocumentSaveResult CommitAndReopen(StagedFile staged, IByteOrigin destination, RemappableByteSource fileBytes)
+    {
+        var origin = Origin!;
+        long mappedLength = fileBytes.AvailableLength;
+
+        fileBytes.Unmap();
+        try
+        {
+            staged.Commit();
+        }
+        catch (Exception commitFailure)
+        {
+            try
+            {
+                fileBytes.Remap(origin.Open(), mappedLength);
+            }
+            catch (Exception reopenFailure)
+            {
+                // The swap may have failed half way (Windows can remove the destination and then
+                // fail to rename the replacement into place), so the stage may be the only copy
+                // of anything - the edits, and possibly the file itself. Never delete it here.
+                staged.KeepStagedContent();
+                return new DocumentSaveResult(DocumentSaveOutcome.NotSavedAndDocumentLost,
+                    $"Couldn't save: {commitFailure.Message} The file couldn't be reopened either ({reopenFailure.Message}). " +
+                    $"What was being saved is in {staged.Location}.");
+            }
+
+            return DocumentSaveResult.NotSaved($"Couldn't save: {commitFailure.Message} Your edits are still open.");
+        }
+
+        // Before reopening: a small file can finish its fresh scan synchronously inside
+        // ReopenOver, and resuming edit mode from there must not find a save still running.
+        IsSaving = false;
+        ReopenOver(destination);
+        return DocumentSaveResult.Saved;
+    }
+
+    /// <summary>
+    /// Replaces everything this document reads with a fresh scan of <paramref name="destination"/>,
+    /// which now holds exactly what was on screen - so the edits, the undo history and the piece
+    /// table are all retired, and the caret goes back to the same byte offset, which means the same
+    /// place in the saved file as it did in the edited document.
+    ///
+    /// Everything is swapped before anything is announced: the outgoing session reads a mapping
+    /// that is already gone, and a property notification is what would make the view read it.
+    /// </summary>
+    private void ReopenOver(IByteOrigin destination)
+    {
+        long caretOffset = Caret?.Caret.Offset ?? 0;
+        bool wasEditing = IsEditing;
+
+        if (this.editor is { } editor)
+        {
+            editor.Changed -= OnDocumentEdited;
+            this.editor = null;
+        }
+
+        var retiredRows = this.rows;
+        var retiredSession = this.session;
+
+        var session = StartSession(destination, progressReporter: null);
+        this.rows = new RawRowCollection(session.Index, session.Bytes);
+        retiredRows?.Dispose();
+        retiredSession?.Dispose();
+
+        this.isEditing = false;
+        Origin = destination;
+        IndexGeneration++;
+
+        FilePath = destination.Path ?? destination.DisplayName;
+        SelectedRowIndex = null;
+        IndexFailure = null;
+        Caret = new RawCaretController(session.Index, session.Bytes);
+
+        if (this.toolbar is { } toolbar)
+        {
+            toolbar.CanEdit = false;
+            toolbar.CanChangeWrapWidth = true;
+            toolbar.IsEditing = false;
+        }
+
+        OnPropertyChanged(nameof(IndexGeneration));
+        OnPropertyChanged(nameof(Rows));
+        OnPropertyChanged(nameof(RowCount));
+        OnPropertyChanged(nameof(IsEditing));
+        OnPropertyChanged(nameof(IsDirty));
+        OnPropertyChanged(nameof(HasUnsavedChanges));
+        OnPropertyChanged(nameof(EditStatusText));
+        OnPropertyChanged(nameof(CanEdit));
+        OnPropertyChanged(nameof(CanSave));
+
+        StatusText = $"{FilePath} — saved — {RowCount:N0} rows indexed so far";
+        MonitorIndexing();
+
+        _ = RestoreAfterReopenAsync(caretOffset, wasEditing);
+    }
+
+    /// <summary>
+    /// Puts the caret back where it was, then - if the save happened in edit mode - turns edit
+    /// mode back on once the fresh scan allows it. One sequence rather than two independent
+    /// continuations, so the caret is always placed before edit mode takes its position over.
+    /// </summary>
+    private async Task RestoreAfterReopenAsync(long caretOffset, bool resumeEditing)
+    {
+        await JumpToByteOffsetAsync(caretOffset);
+        if (!resumeEditing || IsDisposed)
+            return;
+
+        var indexing = IndexingTask;
+        try
+        {
+            await indexing;
+        }
+        catch
+        {
+            return; // failed or cancelled: OnIndexingFailed reports it, and there is nothing to edit
+        }
+
+        if (!IsDisposed && ReferenceEquals(indexing, IndexingTask) && CanEdit)
+            SetEditing(true);
+    }
+
+    /// <summary>A save still copying when the document closes is stopped and joined here, before
+    /// the session releases the mapping the copy reads.</summary>
+    protected override void DisposeCore()
+    {
+        this.saveCts?.Cancel();
+        try { this.saveCopy.Wait(); } catch { /* observed only to unblock disposal; SaveAsync reports it */ }
+    }
+
     public override ISearchNavigator? CreateSearchNavigator() => new RawSearchNavigator(this);
 
     /// <summary>
@@ -593,6 +873,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
             toolbar.CanEdit = true;
 
         OnPropertyChanged(nameof(CanEdit));
+        OnPropertyChanged(nameof(CanSave));
     }
 
     /// <summary>Indexing stopped early (failure, or cancellation on <paramref name="failure"/> null).</summary>

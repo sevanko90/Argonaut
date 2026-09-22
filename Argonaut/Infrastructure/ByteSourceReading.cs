@@ -1,5 +1,7 @@
 using System;
+using System.IO;
 using System.Text;
+using System.Threading;
 
 namespace Argonaut.Infrastructure;
 
@@ -92,4 +94,46 @@ public static class ByteSourceReading
     /// their own sources and release those; nobody releases a source handed to them.
     /// </summary>
     public static void Release(this IByteSource source) => (source as IDisposable)?.Dispose();
+
+    /// <summary>How much <see cref="WriteTo"/> asks for per read. Bounds the gap between
+    /// cancellation checks and progress reports, not memory - nothing is copied into a buffer.</summary>
+    internal const int WriteChunkBytes = 4 * 1024 * 1024;
+
+    /// <summary>
+    /// Writes the whole of <paramref name="source"/> to <paramref name="destination"/>, in order,
+    /// handing each contiguous run straight from the source to the stream - so a piece table is
+    /// written piece by piece and a mapping in multi-megabyte runs, with no intermediate buffer.
+    /// Returns the number of bytes written.
+    ///
+    /// Throws rather than returning short when the source ends before its
+    /// <see cref="IByteSource.AvailableLength"/>: this is what a save writes a user's file from,
+    /// and a silently truncated write would be committed over the original as if it were whole.
+    /// For a settled source only; a background caller, since a multi-GB copy takes seconds.
+    /// </summary>
+    public static long WriteTo(this IByteSource source, Stream destination,
+        IProgressReporter? progress, CancellationToken stopping)
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+        if (!source.LengthSettled)
+            throw new InvalidOperationException("Only a source whose length is settled can be written out whole.");
+
+        // Snapshotted once, which CLAUDE.md warns against for scan loops - but only over a
+        // source that can still grow, and that is the case refused above.
+        long length = source.AvailableLength;
+        long written = 0;
+        while (written < length)
+        {
+            stopping.ThrowIfCancellationRequested();
+
+            var run = source.GetContiguousSpan(written, (int)Math.Min(WriteChunkBytes, length - written));
+            if (run.IsEmpty)
+                throw new IOException($"The document ended at byte {written:N0} of {length:N0} while it was being written.");
+
+            destination.Write(run);
+            written += run.Length;
+            progress?.Report("Saving", written, length);
+        }
+
+        return written;
+    }
 }

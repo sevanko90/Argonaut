@@ -43,7 +43,10 @@ public partial class MainWindow : Window
 
         viewModel = new MainWindowViewModel(
             message => ConfirmDialog.Show(this, message),
-            readClipboardBytes: ReadClipboardBytesAsync);
+            readClipboardBytes: ReadClipboardBytesAsync,
+            pickSaveDestination: PickSaveDestinationAsync,
+            askAboutUnsavedChanges: message => UnsavedChangesDialog.Show(this, message),
+            reportFailure: message => ConfirmDialog.Inform(this, message));
         DataContext = viewModel;
         viewModel.PropertyChanged += OnViewModelPropertyChanged;
         viewModel.FindStatusChanged += status => FindBarControl.SetStatus(status);
@@ -178,6 +181,17 @@ public partial class MainWindow : Window
     private void OnGlobalKeyDown(object? sender, KeyEventArgs e)
     {
         bool cmdOrCtrl = (e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Meta)) != 0;
+
+        if (e.Key == Key.S && cmdOrCtrl)
+        {
+            if (viewModel.IsSaveAvailable)
+            {
+                _ = (e.KeyModifiers & KeyModifiers.Shift) != 0 ? viewModel.SaveAsAsync() : viewModel.SaveAsync();
+                e.Handled = true;
+            }
+
+            return;
+        }
 
         if (e.Key == Key.F && cmdOrCtrl)
         {
@@ -331,6 +345,69 @@ public partial class MainWindow : Window
         await viewModel.CloseFileAsync();
     }
 
+    private async void OnSaveFile(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        await viewModel.SaveAsync();
+    }
+
+    /// <summary>
+    /// Asks where to save <paramref name="current"/>, starting beside its file and under its name
+    /// when it has one. The picker asks about overwriting an existing file itself.
+    /// </summary>
+    private async Task<string?> PickSaveDestinationAsync(IByteOrigin current)
+    {
+        var options = new FilePickerSaveOptions
+        {
+            Title = "Save as",
+            SuggestedFileName = current.Path is { } path ? System.IO.Path.GetFileName(path) : $"{current.DisplayName}.txt",
+            ShowOverwritePrompt = true,
+        };
+
+        if (current.Path is { } file && System.IO.Path.GetDirectoryName(file) is { } folder)
+            options.SuggestedStartLocation = await StorageProvider.TryGetFolderFromPathAsync(folder);
+
+        var picked = await StorageProvider.SaveFilePickerAsync(options);
+        return picked?.TryGetLocalPath();
+    }
+
+    // Set once the user has dealt with unsaved changes, so the Close that follows goes through.
+    private bool closeAgreed;
+
+    /// <summary>
+    /// Closing the window would drop unsaved edits, so it is held while the user is asked -
+    /// Avalonia's close cannot wait on a dialog, so this cancels it and closes again once the
+    /// answer allows. A save still running holds the close outright: it is part way through
+    /// swapping the user's file.
+    /// </summary>
+    protected override void OnClosing(WindowClosingEventArgs e)
+    {
+        base.OnClosing(e);
+        if (e.Cancel || this.closeAgreed)
+            return;
+
+        if (viewModel.IsSaving)
+        {
+            e.Cancel = true;
+            ToastService.Show("Wait for the save to finish.");
+            return;
+        }
+
+        if (!viewModel.HasUnsavedChanges)
+            return;
+
+        e.Cancel = true;
+        _ = CloseAfterResolvingUnsavedChangesAsync();
+    }
+
+    private async Task CloseAfterResolvingUnsavedChangesAsync()
+    {
+        if (!await viewModel.ResolveUnsavedChangesAsync("quitting"))
+            return;
+
+        this.closeAgreed = true;
+        Close();
+    }
+
     private async void OnShowAbout(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         await AboutDialog.ShowAbout(this);
@@ -417,7 +494,7 @@ public partial class MainWindow : Window
 
         bool restart = await ConfirmDialog.Show(
             this, $"Update downloaded (v{version}). Restart Argonaut now to apply it?", "Restart");
-        if (restart)
+        if (restart && await viewModel.ResolveUnsavedChangesAsync("restarting"))
             updateService.ApplyUpdatesAndRestart(info);
     }
 

@@ -107,6 +107,22 @@ and virtualization-by-arithmetic are exactly what rendering gives up.
   and footnotes are document-global, so rendering the visible window still needs a whole-file
   pre-pass - two indexes, not one - and giant markdown is not the common artefact giant JSON is.
 
+## XML
+
+Not designed yet; this is the starting idea.
+
+- **XML detection.** In `FileTypeDetector`: the document starts with `<?xml`, or its first
+  characters form a tag (`<name ...>`). Skip a BOM and leading whitespace first. A bare tag is
+  also what HTML starts with, so that case may want a second signal before it wins.
+- **A collapsible XML tree view.** Like the JSON tree, with elements as the collapsible nodes in
+  place of `{}`/`[]`, virtualized the same way.
+- **An XML structure index.** Built on the background like `JsonStructureIndex`: per node its
+  kind, depth, byte offsets, end index for skipping subtrees, and attributes. Needs a span-based
+  scanner over `IByteSource` in the `Utf8JsonReader` mould rather than `XmlReader`, which
+  allocates a string for every name and value. Decide how comments, CDATA, processing
+  instructions and mixed text content show up as rows.
+- **Syntax colouring.** Separate colours for element names, attribute names and attribute values.
+
 ## Input sources
 
 Both halves of the seam are now in place.

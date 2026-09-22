@@ -18,8 +18,8 @@ until it lands an edited document cannot be written back.
 - ~~**Piece table over (original mapping, append-only scratch).**~~ **Built** (`Features/Raw/`:
   `RawPieceTable`, `RawEditedRowIndex`, `RawRowDecoder`, `RawCaretStops`, `RawEditJournal`,
   `RawTextExtractor`, over the `IByteSource` seam). Raw reads are in piece-space; the row index
-  re-derives only the span an edit disturbed and reports `NeedsRebuild` when that span grows past
-  its threshold. No UI change — verified headlessly against a from-scratch index of the edited
+  describes only the lines an edit touched and reports `NeedsRebuild` when the spans grow past
+  their budget. No UI change — verified headlessly against a from-scratch index of the edited
   bytes. Measured: ~1.6-12.5ns per offset resolution (1 to 1024 pieces, no allocation), ~10us per
   keystroke including re-derivation.
 - **Editing UI in the raw view.** *Built*, apart from IME. `RawTextSurface` replaced the
@@ -47,10 +47,8 @@ until it lands an edited document cannot be written back.
     version it replaced).
 - ~~**More than one dirty span in `RawEditedRowIndex`.**~~ **Built.** Edits no longer coalesce
   into a single span from the earliest edit to the re-convergence point; spans are disjoint, one
-  per *place* edited, so two edits a gigabyte apart cost two anchor buckets rather than every row
-  in between. Widen-or-open is decided by the index's own `AnchorStride` rather than a tuned
-  number, and part of that rule is a correctness guard (an edit in an anchor bucket the previous
-  span already covers must join it, or the spans overlap) rather than a preference.
+  per *place* edited, so two edits a gigabyte apart cost two line records rather than every row
+  in between. (Spans have since become runs of whole lines - see the long-line bullet below.)
 - ~~**A window onto the editor's internals.**~~ **Built**, Debug only: Cmd/Ctrl+Shift+D opens
   `Diagnostics/RawEditInspectorWindow` — piece list, dirty spans with both halves of each delta,
   budget fullness, undo depth, and a map drawing spans and pieces on one scale, refreshed per
@@ -73,7 +71,7 @@ until it lands an edited document cannot be written back.
   same edit costs about 10,500 anchors and 170KB. What remains is a time cost of roughly 30ns per
   row walked, so about 20ms per keystroke at 54MB; measured across line lengths in
   `RawEditKeystrokeBenchmarks.TypeCharactersInsideALongLine`, and bounded properly only by the
-  re-index below.
+  re-index below. *Superseded:* the walk itself is gone - see the long-line bullet below.
 - ~~**The undo journal is O(edits²).**~~ **Fixed.** Every step copied the *whole* piece list, on
   the reasoning — written into `RawEditJournal` itself — that the list was bounded by the row
   index's rebuild threshold. It is not: the threshold bounds anchors, and nothing bounds pieces.
@@ -81,22 +79,18 @@ until it lands an edited document cannot be written back.
   at 4.4MB for 250 edits, 65MB for 1,000 and 187MB for 2,000, against 1.5MB for the piece table
   and row index together. A step now holds the *run* of the piece list each edit rewrote, which
   for typing is one piece: 3.6MB at 2,000 edits, and linear.
-- **Bounding the walk an edit early in a very long line costs.** Open, and written up on its own
-  in [long-line-reflow-options.md](long-line-reflow-options.md) because the analysis that picks
-  between the options is more work than the options are to describe.
-
-  An edit early in a ~105MB unbroken line walks to the line's end, about 40ms per keystroke;
-  edits later in the same line, and past it, are already instant. Two shortcuts were written into
-  this file before it and both were wrong — the measurement that killed them is
-  `RawLongLineReflowTests`, and it is kept in the options document so nobody re-derives them.
-
-  Three ways out, none built: accept the walk and let the re-index below dissolve the span;
-  re-derive on idle so typing does not pay it; or make a row's boundaries independent of its
-  content, which is the only one that removes the walk rather than hiding it. The leaning is
-  towards the third, which needs analysis first — the options document lists exactly what.
+- ~~**Bounding the walk an edit early in a very long line costs.**~~ **Fixed** — the walk is gone
+  rather than bounded. An edit early in a ~105MB unbroken line used to walk to the line's end,
+  about 40ms per keystroke. Forced breaks are now cap-anchored (measured from the line's
+  arithmetic cap, not the previous row's end), so a line's rows are arithmetic from its start
+  (`RawLineRows`), and a dirty span is a run of whole lines holding one 12-byte record per line.
+  An edit costs the bytes it inserted plus the lines it touched: ~520ns a keystroke in an 8MB or a
+  128MB line alike, the same as in short lines (`RawEditKeystrokeBenchmarks`). Decision record:
+  [long-line-edit-plan.md](long-line-edit-plan.md); the options it was chosen from:
+  [long-line-reflow-options.md](long-line-reflow-options.md).
 - **Re-index over the piece table, for when `NeedsRebuild` fires.** The budget is now the only
-  cap: past 65,536 derived rows — about a thousand separate places edited, or one edit re-flowing
-  a very long line — `CanAbsorbEditAt` refuses to open a span somewhere new
+  cap: past 524,288 line records (~6MB) — about half a million separate places edited, or pastes
+  adding that many lines — `CanAbsorbEditAt` refuses to open a span somewhere new
   (`RawEditOutcome.NoRoomForAnotherEditSite`, a toast), while editing where changes already exist
   keeps working and every lookup stays correct.
 

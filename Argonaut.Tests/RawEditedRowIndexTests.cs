@@ -21,7 +21,7 @@ public class RawEditedRowIndexTests
         private readonly byte[] originalBytes;
         private readonly int wrapWidth;
 
-        public EditedDocument(byte[] original, int wrapWidth, int maxHeldAnchors = int.MaxValue)
+        public EditedDocument(byte[] original, int wrapWidth, int maxHeldLines = int.MaxValue, int maxLinesPerRun = RawEditedRowIndex.MaxLinesPerRun)
         {
             this.originalBytes = original;
             this.wrapWidth = wrapWidth;
@@ -31,7 +31,7 @@ public class RawEditedRowIndexTests
             Original.IndexingTask.GetAwaiter().GetResult();
 
             Table = new RawPieceTable(OriginalSource);
-            Rows = new RawEditedRowIndex(Original, OriginalSource, Table, maxHeldAnchors);
+            Rows = new RawEditedRowIndex(Original, Table, maxHeldLines, maxLinesPerRun);
             Oracle = new List<byte>(original);
         }
 
@@ -42,9 +42,9 @@ public class RawEditedRowIndexTests
         public List<byte> Oracle { get; }
 
         /// <summary>
-        /// Where a row of the <i>original</i> index starts. Anchor-boundary tests need this
-        /// before any editing, because that is the only coordinate space in which "row 64" means
-        /// the same thing before and after an edit.
+        /// Where a row of the <i>original</i> index starts. Line-boundary tests need this before
+        /// any editing, because that is the only coordinate space in which "row 256" means the
+        /// same thing before and after an edit.
         /// </summary>
         public long OriginalRowStart(int row) => Original.GetRowInfo(row).Start;
 
@@ -237,15 +237,13 @@ public class RawEditedRowIndexTests
     }
 
     /// <summary>Many lines, so edits can be put a long way apart.</summary>
-    private const int RawSegmentIndexAnchorStride = 64;
-
-    private static EditedDocument LongDocument(int lines, int wrapWidth = 80, int maxHeldAnchors = int.MaxValue)
+    private static EditedDocument LongDocument(int lines, int wrapWidth = 80, int maxHeldLines = int.MaxValue, int maxLinesPerRun = RawEditedRowIndex.MaxLinesPerRun)
     {
         var text = new StringBuilder();
         for (int i = 0; i < lines; i++)
             text.Append($"line {i}\n");
 
-        return new EditedDocument(Bytes(text.ToString()), wrapWidth, maxHeldAnchors);
+        return new EditedDocument(Bytes(text.ToString()), wrapWidth, maxHeldLines, maxLinesPerRun);
     }
 
     [Fact]
@@ -257,26 +255,12 @@ public class RawEditedRowIndexTests
         document.Insert(document.Table.AvailableLength - 1, Bytes("z"));
 
         // The whole point of several spans: the cost tracks the number of places edited, not the
-        // distance between them. One span would have held every row of the 20,000 in between.
+        // distance between them. One span would have held every line of the 20,000 in between.
         Assert.Equal(2, document.Rows.SpanCount);
-        Assert.True(document.Rows.TotalDerivedRows < 4 * RawSegmentIndexAnchorStride,
-            $"held {document.Rows.TotalDerivedRows} rows for two edits");
+        Assert.Equal(2, document.Rows.HeldLines);
         Assert.False(document.Rows.NeedsRebuild);
 
         document.AssertMatchesAFreshIndex("two edits at opposite ends");
-    }
-
-    [Fact]
-    public void EditsCloseTogether_ShareOneSpan()
-    {
-        var document = LongDocument(20_000);
-
-        document.Insert(1000, Bytes("z"));
-        document.Insert(1010, Bytes("z"));
-        document.Insert(990, Bytes("z"));
-
-        Assert.Equal(1, document.Rows.SpanCount);
-        document.AssertMatchesAFreshIndex("three edits within a few bytes");
     }
 
     [Fact]
@@ -299,20 +283,20 @@ public class RawEditedRowIndexTests
     [Fact]
     public void EnoughSeparateEditSites_RaiseNeedsRebuild()
     {
-        // Each site costs its own anchor bucket, so the budget is what eventually says a full
+        // Each site costs its own line record, so the budget is what eventually says a full
         // re-index is the better deal - not the distance between the edits. Sites are spaced
-        // well past one anchor stride so each opens a span of its own.
+        // well apart so each opens a span of its own.
         //
-        // Against a budget rather than the production one: a megabyte of anchors would take a
-        // third of a gigabyte of document to reach, and the mechanism under test is the same
+        // Against a budget rather than the production one: half a million line records would
+        // take half a million edit sites to reach, and the mechanism under test is the same
         // either way.
         const int SiteSpacing = 1500;
         const int Budget = 40;
-        var document = LongDocument(300_000, maxHeldAnchors: Budget);
+        var document = LongDocument(300_000, maxHeldLines: Budget);
         Assert.False(document.Rows.NeedsRebuild);
 
         int sites = 0;
-        while (document.Rows.HeldAnchors <= Budget)
+        while (document.Rows.HeldLines <= Budget)
         {
             long at = SiteSpacing + (sites * (long)SiteSpacing);
             Assert.True(at < document.Table.AvailableLength, "ran out of document before the budget");
@@ -320,15 +304,13 @@ public class RawEditedRowIndexTests
             sites++;
         }
 
-        // A site normally opens a span of its own. A few land close enough to the previous
-        // span's convergence point to be absorbed into it instead, which is the cheaper of the
-        // two and is exactly what the anchor-stride rule is for - so this is "about one span per
-        // site", not "exactly one".
-        Assert.True(document.Rows.SpanCount <= sites);
-        Assert.True(document.Rows.SpanCount > sites * 9 / 10,
-            $"{sites} edit sites produced only {document.Rows.SpanCount} spans");
-
+        Assert.Equal(sites, document.Rows.SpanCount);
+        Assert.Equal(sites, document.Rows.HeldLines);
         Assert.True(document.Rows.NeedsRebuild);
+
+        // Over budget, a new place is refused and an existing one is not.
+        Assert.False(document.Rows.CanAbsorbEditAt(document.Table.AvailableLength - 10));
+        Assert.True(document.Rows.CanAbsorbEditAt(SiteSpacing));
 
         // Correctness does not depend on the rebuild happening - it is an efficiency signal.
         document.AssertMatchesAFreshIndex("budget exhausted");
@@ -346,7 +328,7 @@ public class RawEditedRowIndexTests
         if (!unfinished.AllItemsPublished)
         {
             Assert.Throws<ArgumentException>(() =>
-                new RawEditedRowIndex(unfinished, source, new RawPieceTable(source)));
+                new RawEditedRowIndex(unfinished, new RawPieceTable(source)));
         }
 
         unfinished.IndexingTask.GetAwaiter().GetResult();
@@ -396,186 +378,161 @@ public class RawEditedRowIndexTests
             document.AssertMatchesAFreshIndex($"seed {seed}, step {step}");
         }
     }
-    // ---- anchor boundaries ----------------------------------------------------------------
+    // ---- line boundaries ------------------------------------------------------------------
     //
-    // A span can only begin at an anchor - every 64th row of the ORIGINAL index - so an anchor
-    // boundary is where every decision this class makes changes its answer: which anchor a new
-    // span starts at, whether an edit is close enough to widen the span before it, and whether a
-    // re-derivation ran past the span after it. An off-by-one in any of those is invisible
-    // everywhere else in the file and certain here, so the boundary cases are tested directly
-    // rather than left to the random scripts to stumble on.
+    // A span is a run of whole lines, so a line boundary is where every decision this class makes
+    // changes its answer: which line an edit's first and last byte belong to, whether an edit
+    // joins the span before or after it, and where the rebuilt run's original coordinates come
+    // from. An off-by-one in any of those is invisible everywhere else in the file and certain
+    // here, so the boundary cases are tested directly rather than left to the random scripts.
 
-    /// <summary>Row <paramref name="row"/> of the original index must be an anchor row for these
-    /// to be testing what they claim; the harness asserts it rather than assuming it.</summary>
-    private static long AnchorRowStart(EditedDocument document, int anchorIndex)
+    /// <summary>Where line <paramref name="line"/> (0-based) of a <see cref="LongDocument"/> starts.
+    /// Every line there is one row at the widths used, which the harness asserts rather than
+    /// assumes.</summary>
+    private static long LineStart(EditedDocument document, int line)
     {
-        int row = anchorIndex * RawSegmentIndexAnchorStride;
-        Assert.True(row < document.Original.RowCount, $"document has no anchor {anchorIndex}");
-        return document.OriginalRowStart(row);
+        var info = document.Original.GetRowInfo(line);
+        Assert.Equal(line + 1, info.LineNumber);
+        return info.Start;
     }
 
     [Theory]
-    [InlineData(-1)]  // the byte before an anchor row starts
-    [InlineData(0)]   // exactly on it
+    [InlineData(-1)]  // the newline ending the line before
+    [InlineData(0)]   // exactly on the line start
     [InlineData(1)]   // just inside it
-    public void InsertAtAnAnchorBoundary_MatchesAFreshIndex(int nudge)
+    public void InsertAtALineBoundary_MatchesAFreshIndex(int nudge)
     {
         var document = LongDocument(2_000, wrapWidth: 40);
-        long at = AnchorRowStart(document, 4) + nudge;
+        long at = LineStart(document, 256) + nudge;
 
         document.Insert(at, Bytes("INSERTED"));
 
         Assert.Equal(1, document.Rows.SpanCount);
-        document.AssertMatchesAFreshIndex($"insert at anchor 4 {nudge:+0;-0;+0}");
+        document.AssertMatchesAFreshIndex($"insert at line 256 {nudge:+0;-0;+0}");
     }
 
     [Theory]
     [InlineData(-1)]
     [InlineData(0)]
     [InlineData(1)]
-    public void InsertingANewlineAtAnAnchorBoundary_MatchesAFreshIndex(int nudge)
+    public void InsertingANewlineAtALineBoundary_MatchesAFreshIndex(int nudge)
     {
-        // A newline is the insertion that changes the row count as well as the offsets, so the
-        // anchor arithmetic and the line arithmetic both have to hold across the boundary.
+        // A newline is the insertion that changes the line count as well as the offsets, so the
+        // row arithmetic and the line arithmetic both have to hold across the boundary.
         var document = LongDocument(2_000, wrapWidth: 40);
-        long at = AnchorRowStart(document, 4) + nudge;
+        long at = LineStart(document, 256) + nudge;
 
         document.Insert(at, Bytes("\n"));
 
-        document.AssertMatchesAFreshIndex($"newline at anchor 4 {nudge:+0;-0;+0}");
+        document.AssertMatchesAFreshIndex($"newline at line 256 {nudge:+0;-0;+0}");
     }
 
     [Theory]
     [InlineData(0, 6)]    // starts exactly on the boundary
     [InlineData(-6, 6)]   // ends exactly on it
     [InlineData(-3, 6)]   // straddles it
-    [InlineData(-3, 200)] // straddles it and takes several rows with it
-    public void DeleteAcrossAnAnchorBoundary_MatchesAFreshIndex(int startNudge, int length)
+    [InlineData(-3, 200)] // straddles it and takes several lines with it
+    public void DeleteAcrossALineBoundary_MatchesAFreshIndex(int startNudge, int length)
     {
         var document = LongDocument(2_000, wrapWidth: 40);
-        long at = AnchorRowStart(document, 4) + startNudge;
+        long at = LineStart(document, 256) + startNudge;
 
         document.Delete(at, length);
 
-        document.AssertMatchesAFreshIndex($"delete {length} from anchor 4 {startNudge:+0;-0;+0}");
+        document.AssertMatchesAFreshIndex($"delete {length} from line 256 {startNudge:+0;-0;+0}");
     }
 
     [Theory]
     [InlineData(0)]
     [InlineData(-3)]
-    public void ReplaceAcrossAnAnchorBoundary_MatchesAFreshIndex(int startNudge)
+    public void ReplaceAcrossALineBoundary_MatchesAFreshIndex(int startNudge)
     {
         // Same length in and out, so nothing moves - but the bytes a forced break backs off from
         // do change, which is the one way a zero-delta edit can still re-flow rows.
         var document = LongDocument(2_000, wrapWidth: 40);
-        long at = AnchorRowStart(document, 4) + startNudge;
+        long at = LineStart(document, 256) + startNudge;
 
         document.Replace(at, 6, Bytes("éé\nZ"));
 
-        document.AssertMatchesAFreshIndex($"replace at anchor 4 {startNudge:+0;-0;+0}");
+        document.AssertMatchesAFreshIndex($"replace at line 256 {startNudge:+0;-0;+0}");
     }
 
     [Fact]
-    public void EditsEitherSideOfAnAnchorBoundary_ShareOneSpan()
+    public void EditsInTheSameLine_ShareOneSpanOfOneLine()
     {
         var document = LongDocument(2_000, wrapWidth: 40);
-        long boundary = AnchorRowStart(document, 4);
+        long line = LineStart(document, 256);
 
-        document.Insert(boundary - 2, Bytes("a"));
-        document.Insert(boundary + 3, Bytes("b"));
+        document.Insert(line + 1, Bytes("a"));
+        document.Insert(line + 4, Bytes("b"));
+        document.Insert(line, Bytes("c"));
 
-        // Both are inside the same anchor bucket's reach, so there is nothing for a second span
-        // to describe that the first does not already cover.
-        Assert.Equal(1, document.Rows.SpanCount);
-        document.AssertMatchesAFreshIndex("edits either side of an anchor boundary");
+        var span = Assert.Single(EnumerateSpans(document));
+        Assert.Equal(1, span.LinesHeld);
+        document.AssertMatchesAFreshIndex("three edits in one line");
     }
 
     [Fact]
-    public void EditsInTheSameAnchorBucket_MustShareOneSpan()
+    public void EditsOnAdjacentLines_MergeIntoOneSpan()
     {
         var document = LongDocument(2_000, wrapWidth: 40);
 
-        document.Insert(AnchorRowStart(document, 4), Bytes("a"));
+        document.Insert(LineStart(document, 256) + 1, Bytes("a"));
+        document.Insert(LineStart(document, 257) + 2, Bytes("b"));   // the line after
+        document.Insert(LineStart(document, 255) + 1, Bytes("c"));   // the line before
 
-        // The first insert shifted everything after it by a byte, so this offset - taken from
-        // the original index - now maps back into anchor bucket 4, the one the first span has
-        // already re-derived past. Both reasons to widen apply here; what is pinned is that the
-        // result is one span, because the cost of getting this particular case wrong is two
-        // overlapping spans and therefore wrong answers, not merely a wasteful one.
-        document.Insert(AnchorRowStart(document, 5), Bytes("b"));
-
-        Assert.Equal(1, document.Rows.SpanCount);
-        document.AssertMatchesAFreshIndex("second edit inside the first span's anchor bucket");
+        var span = Assert.Single(EnumerateSpans(document));
+        Assert.Equal(3, span.LinesHeld);
+        document.AssertMatchesAFreshIndex("edits on three adjacent lines");
     }
 
     [Fact]
-    public void AnEditWithinAStrideOfTheLastSpan_WidensItRatherThanOpeningAnother()
+    public void OneUntouchedLineBetweenEdits_GivesTwoSpans()
     {
         var document = LongDocument(2_000, wrapWidth: 40);
 
-        document.Insert(AnchorRowStart(document, 4), Bytes("a"));
-
-        // Far enough in that it genuinely belongs to the next anchor bucket - so the spans would
-        // not overlap - but still under one stride from where the first span re-converged, which
-        // is the point at which widening costs less than a new span's own anchor walk.
-        document.Insert(AnchorRowStart(document, 5) + 32, Bytes("b"));
-
-        Assert.Equal(1, document.Rows.SpanCount);
-        document.AssertMatchesAFreshIndex("second edit one anchor on");
-    }
-
-    [Fact]
-    public void AnEditMoreThanAStrideAway_OpensItsOwnSpan()
-    {
-        var document = LongDocument(2_000, wrapWidth: 40);
-
-        document.Insert(AnchorRowStart(document, 4), Bytes("a"));
-        document.Insert(AnchorRowStart(document, 6) + 32, Bytes("b"));
+        document.Insert(LineStart(document, 256) + 1, Bytes("a"));
+        document.Insert(LineStart(document, 258) + 2, Bytes("b"));
 
         Assert.Equal(2, document.Rows.SpanCount);
-        document.AssertMatchesAFreshIndex("second edit two anchors on");
+        document.AssertMatchesAFreshIndex("edits either side of one untouched line");
+
+        // Editing the line between touches neither span's lines, but abuts both: it joins them.
+        document.Insert(LineStart(document, 257) + 1, Bytes("c"));
+
+        var span = Assert.Single(EnumerateSpans(document));
+        Assert.Equal(3, span.LinesHeld);
+        document.AssertMatchesAFreshIndex("the line between, edited too");
     }
 
     [Fact]
-    public void EditsSeveralAnchorsApart_OpenSeparateSpans()
-    {
-        var document = LongDocument(2_000, wrapWidth: 40);
-
-        document.Insert(AnchorRowStart(document, 4), Bytes("a"));
-        document.Insert(AnchorRowStart(document, 12), Bytes("b"));
-
-        Assert.Equal(2, document.Rows.SpanCount);
-        document.AssertMatchesAFreshIndex("edits eight anchors apart");
-    }
-
-    [Fact]
-    public void EditingBackwardsAcrossAnchors_KeepsTheSpansInOrder()
+    public void EditingBackwardsAcrossLines_KeepsTheSpansInOrder()
     {
         // Opening spans out of order is the case where an insert into the middle of the list has
         // to renumber every span after it; doing it in reverse guarantees that path runs.
         var document = LongDocument(2_000, wrapWidth: 40);
 
-        foreach (int anchorIndex in new[] { 20, 14, 8, 2 })
+        foreach (int line in new[] { 1280, 896, 512, 128 })
         {
-            document.Insert(AnchorRowStart(document, anchorIndex), Bytes("z"));
-            document.AssertMatchesAFreshIndex($"inserted at anchor {anchorIndex}");
+            document.Insert(LineStart(document, line), Bytes("z"));
+            document.AssertMatchesAFreshIndex($"inserted at line {line}");
         }
 
         Assert.Equal(4, document.Rows.SpanCount);
     }
 
     [Fact]
-    public void ADeleteThatSwallowsAnotherSpan_AbsorbsIt()
+    public void ADeleteSpanningSpans_LeavesOne()
     {
         var document = LongDocument(2_000, wrapWidth: 40);
 
-        long first = AnchorRowStart(document, 4);
-        long second = AnchorRowStart(document, 12);
+        long first = LineStart(document, 256);
+        long second = LineStart(document, 768);
         document.Insert(first, Bytes("a"));
         document.Insert(second, Bytes("b"));
         Assert.Equal(2, document.Rows.SpanCount);
 
-        // A delete running from the first edit past the second: the second span's rows no longer
+        // A delete running from the first edit past the second: the second span's lines no longer
         // exist, and its byte delta has to survive inside the first span or the document's total
         // delta stops adding up.
         document.Delete(first, (int)(second + 1 - first) + 20);
@@ -585,52 +542,52 @@ public class RawEditedRowIndexTests
     }
 
     [Fact]
-    public void AnEditInsideAVeryLongLine_HoldsAnchorsRatherThanEveryRow()
+    public void ANewlineAtALineStartAndAtTheEnd_MatchAFreshIndex()
     {
-        // The case that came out of running the editor on a 4GB document: a 48-byte edit inside
-        // a ~54MB unbroken line produced a span of 676,661 rows and 21MB of RawRowInfo, which was
-        // ten times the budget and refused every further edit anywhere in the file.
-        //
-        // Why the whole line has to be walked at all is in the class remarks: the appealing
-        // shortcut - "a soft-wrapped line breaks every WrapWidth bytes, so an insert leaves the
-        // later breaks where they were" - is untrue, because a forced break backs off up to 3
-        // bytes to avoid splitting a character and that chains. What is avoidable is keeping
-        // every row the walk passes.
-        const int WrapWidth = 80;
-        var text = new StringBuilder();
-        text.Append(new string('a', 400_000)).Append('\n');
-        for (int i = 0; i < 200; i++)
-            text.Append($"line {i}\n");
+        var document = Document("alpha\nbeta\ngamma\n");
 
-        var document = new EditedDocument(Bytes(text.ToString()), WrapWidth);
-        document.Insert(100, Bytes("EDIT"));
+        document.Insert(6, Bytes("\n"));
+        document.AssertMatchesAFreshIndex("newline at the start of line 2");
 
-        var span = Assert.Single(EnumerateSpans(document));
-        Assert.True(span.RowsHeld > 4_000, $"the walk should have covered the line; it covered {span.RowsHeld} rows");
-        Assert.Equal((span.RowsHeld + RawSegmentIndexAnchorStride - 1) / RawSegmentIndexAnchorStride, span.AnchorsHeld);
-        Assert.False(document.Rows.NeedsRebuild);
+        document.Insert(document.Table.AvailableLength, Bytes("\n"));
+        document.AssertMatchesAFreshIndex("newline after the trailing newline");
 
-        document.AssertMatchesAFreshIndex("one edit inside a 400KB line");
+        document.Insert(document.Table.AvailableLength, Bytes("tail"));
+        document.AssertMatchesAFreshIndex("an unterminated line after that");
+
+        document.Delete(document.Table.AvailableLength - 6, 6);
+        document.AssertMatchesAFreshIndex("both trailing lines deleted again");
     }
 
     [Fact]
-    public void RowsDeepInsideALongLinesSpan_AreRecoveredFromTheNearestAnchor()
+    public void ARunReachingMaxLinesPerRun_SplitsAndStillMatches()
     {
-        // The anchors are only worth having if a row between two of them still comes back
-        // correct, so this reads every row of the span rather than only its edges - the oracle
-        // above does too, but this one says out loud which mechanism it is exercising.
-        var text = new StringBuilder();
-        text.Append(new string('b', 60_000)).Append('\n');
-        text.Append("after\n");
+        // At a cap of 8 lines per run, a 30-line paste has to become several adjacent runs - and
+        // then an edit inside one of them rebuilds only that one.
+        const int Cap = 8;
+        var document = LongDocument(200, wrapWidth: 40, maxLinesPerRun: Cap);
 
-        var document = new EditedDocument(Bytes(text.ToString()), 80);
-        document.Insert(40, Bytes("Z"));
+        var paste = new StringBuilder();
+        for (int i = 0; i < 30; i++)
+            paste.Append($"pasted {i}\n");
 
-        document.AssertMatchesAFreshIndex("every row of a long line's span");
+        document.Insert(LineStart(document, 100), Bytes(paste.ToString()));
+        document.AssertMatchesAFreshIndex("30-line paste at a cap of 8");
+
+        var spans = EnumerateSpans(document).ToList();
+        Assert.True(spans.Count >= 4, $"{spans.Count} spans for 31 lines at a cap of {Cap}");
+        Assert.All(spans, span => Assert.True(span.LinesHeld <= Cap, $"span {span.Index} holds {span.LinesHeld} lines"));
+
+        document.Insert(LineStart(document, 100) + 100, Bytes("typed"));
+        Assert.True(document.Rows.LinesRebuiltInLastEdit <= Cap,
+            $"typing inside the paste rebuilt {document.Rows.LinesRebuiltInLastEdit} lines");
+        document.AssertMatchesAFreshIndex("typing inside the paste");
+
+        document.Delete(LineStart(document, 100) + 50, 120);
+        document.AssertMatchesAFreshIndex("deleting across runs of the paste");
     }
 
-    private static IEnumerable<RawSpanSnapshot> EnumerateSpans(EditedDocument document)
-        => document.Rows.DescribeSpans();
+    // ---- long lines -----------------------------------------------------------------------
 
     /// <summary>
     /// A long line, plus ordinary lines after it, so an edit can be placed inside the line, at
@@ -647,62 +604,118 @@ public class RawEditedRowIndexTests
     }
 
     [Fact]
-    public void AnEditLateInALongLinesSpan_ResumesTheWalkRatherThanRestartingIt()
+    public void AnEditInsideAVeryLongLine_HoldsOneLineRecordAndScansOnlyTheInsert()
     {
-        // Rows before the earliest byte an edit touched cannot have moved, and their anchors are
-        // stored relative to the span's start, so the walk picks up at the last one the edit
-        // could not have disturbed. Without it, typing at the end of a long line costs the same
-        // as typing at its start - which on a 4GB document is the difference between instant and
-        // a visible stutter on every keystroke.
+        // The case that came out of running the editor on a 4GB document: a 48-byte edit inside a
+        // ~54MB unbroken line once produced a span of 676,661 rows and 21MB, then - holding anchors
+        // instead - a walk of every row to the line's newline on every keystroke. Neither is
+        // needed: the line's rows are arithmetic from its start.
         var (document, lineEnd) = LongLineDocument(400_000);
 
-        document.Insert(100, Bytes("x"));
-        long fromTheStart = document.Rows.RowsWalkedInLastEdit;
+        document.Insert(100, Bytes("EDIT"));
 
+        var span = Assert.Single(EnumerateSpans(document));
+        Assert.Equal(1, span.LinesHeld);
+        Assert.Equal(4, document.Rows.BytesScannedInLastEdit);
+        Assert.Equal(1, document.Rows.LinesRebuiltInLastEdit);
+
+        // A second edit near the line's far end: the same span, the same one record.
         document.Insert(lineEnd - 500, Bytes("y"));
-        long fromNearTheEnd = document.Rows.RowsWalkedInLastEdit;
 
-        Assert.True(fromTheStart > 4_000, $"the first edit should have walked the line; it walked {fromTheStart}");
-        Assert.True(fromNearTheEnd < fromTheStart / 100,
-            $"resumed walk covered {fromNearTheEnd} rows against {fromTheStart} for the whole line");
+        Assert.Equal(1, document.Rows.SpanCount);
+        Assert.Equal(1, document.Rows.HeldLines);
+        Assert.Equal(1, document.Rows.BytesScannedInLastEdit);
+        Assert.Equal(1, document.Rows.LinesRebuiltInLastEdit);
 
-        document.AssertMatchesAFreshIndex("edits at both ends of a long line");
+        document.AssertMatchesAFreshIndex("edits at both ends of a 400KB line");
     }
 
     [Fact]
-    public void AnEditPastALargeSpan_OpensItsOwnSpanRatherThanWideningIt()
+    public void RowsDeepInsideALongLinesSpan_ComeOutOfTheLineGeometry()
     {
-        // Widening re-walks the whole span, so "near enough to widen" has to weigh what widening
-        // would cost. Next to a span covering a long line it never pays, and treating it as
-        // though it did is what made an edit just past such a line as slow as one inside it.
+        // Every row of a long line's span is computed rather than stored, so this reads every row
+        // rather than only its edges - over multi-byte content, where the backoffs are real.
+        var text = new StringBuilder();
+        while (text.Length < 60_000)
+            text.Append("bébé日x");
+        text.Append('\n').Append("after\n");
+
+        var document = new EditedDocument(Bytes(text.ToString()), 80);
+        document.Insert(40, Bytes("Z"));
+
+        document.AssertMatchesAFreshIndex("every row of a long line's span");
+    }
+
+    [Fact]
+    public void AnEditPastALongLinesSpan_IsCheapToo()
+    {
         var (document, lineEnd) = LongLineDocument(400_000);
 
         document.Insert(100, Bytes("x"));
-        Assert.Equal(1, document.Rows.SpanCount);
-
-        // Two anchor buckets past where the long line's span rejoined the original - close
-        // enough that the old rule would have widened it.
         document.Insert(lineEnd + 2_000, Bytes("y"));
 
         Assert.Equal(2, document.Rows.SpanCount);
-        Assert.True(document.Rows.RowsWalkedInLastEdit < 500,
-            $"opening a span should cost an anchor bucket; it walked {document.Rows.RowsWalkedInLastEdit} rows");
+        Assert.Equal(1, document.Rows.LinesRebuiltInLastEdit);
 
         document.AssertMatchesAFreshIndex("edit past a long line's span");
     }
 
     [Fact]
-    public void AnEditBesideASmallSpan_StillWidensIt()
+    public void AnEditInA32MBLine_ScansOnlyWhatItInserted()
     {
-        // The counterpart: widening is still right when the span is small, which is every
-        // ordinary edit. Otherwise this change would trade one cost for span proliferation.
-        var document = LongDocument(2_000, wrapWidth: 40);
+        // Too big for the per-offset oracle, so spot checks: the row count, the rows around the
+        // edit and at the line's end, and the first row after it.
+        const int LineBytes = 32 * 1024 * 1024;
+        var content = new byte[LineBytes + 6];
+        Array.Fill(content, (byte)'q', 0, LineBytes);
+        "\nlast\n"u8.CopyTo(content.AsSpan(LineBytes));
 
-        document.Insert(AnchorRowStart(document, 4), Bytes("a"));
-        document.Insert(AnchorRowStart(document, 5) + 32, Bytes("b"));
+        var document = new EditedDocument(content, 80);
+        document.Insert(1_000, Bytes("inserted"));
 
-        Assert.Equal(1, document.Rows.SpanCount);
+        Assert.Equal(8, document.Rows.BytesScannedInLastEdit);
+        Assert.Equal(1, document.Rows.HeldLines);
+
+        var fresh = RawSegmentIndex.StartIndexing(new MemoryByteSource(document.Oracle.ToArray()), 80);
+        fresh.IndexingTask.GetAwaiter().GetResult();
+        Assert.Equal(fresh.RowCount, document.Rows.RowCount);
+        foreach (int row in new[] { 0, 11, 12, 13, 5000, fresh.RowCount - 3, fresh.RowCount - 2, fresh.RowCount - 1 })
+        {
+            Assert.Equal(fresh.GetRowInfo(row), document.Rows.GetRowInfo(row));
+            Assert.Equal(fresh.LineContaining(row), document.Rows.LineContaining(row));
+        }
+
+        foreach (long offset in new long[] { 0, 999, 1_000, 1_007, 1_008, 1_000_000, LineBytes + 7, LineBytes + 8 })
+            Assert.Equal(fresh.RowForOffset(offset), document.Rows.RowForOffset(offset));
     }
+
+    [Fact]
+    public void TypingInsideAnExistingSpan_AllocatesNothing()
+    {
+        // The ordinary keystroke - one edit inside one span - reuses that span's records and the
+        // rebuild scratch list, so once they have grown it allocates nothing. Only the row index
+        // is measured: the piece table's own bookkeeping is not this class's to account for.
+        var (document, _) = LongLineDocument(400_000);
+        for (int i = 0; i < 16; i++)
+            document.Insert(1_000 + i, Bytes("w"));
+
+        var extents = new RawEditExtent[64];
+        long allocated = 0;
+        for (int i = 0; i < extents.Length; i++)
+        {
+            var extent = document.Table.Insert(2_000 + i, "z"u8);
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            document.Rows.ApplyEdit(extent);
+            allocated += GC.GetAllocatedBytesForCurrentThread() - before;
+            document.Oracle.Insert(2_000 + i, (byte)'z');
+        }
+
+        Assert.Equal(0, allocated);
+        Assert.Equal(1, document.Rows.HeldLines);
+    }
+
+    private static IEnumerable<RawSpanSnapshot> EnumerateSpans(EditedDocument document)
+        => document.Rows.DescribeSpans();
 
     /// <summary>
     /// The same oracle over a document big enough that random edits land in many different
@@ -749,12 +762,62 @@ public class RawEditedRowIndexTests
     }
 
     /// <summary>
-    /// The same property under conditions chosen to stress re-convergence rather than reflow: a
+    /// The random script again at a cap of three lines per run, so nearly every edit splits a
+    /// region into several runs, joins abutting ones, or deletes across them - the bookkeeping
+    /// the default cap only reaches inside a big paste.
+    /// </summary>
+    [Theory]
+    [InlineData(21, 8)]
+    [InlineData(22, 16)]
+    [InlineData(23, 40)]
+    public void RandomEditScriptAtATinyRunCap_AlwaysMatchesAFreshIndex(int seed, int wrapWidth)
+    {
+        var random = new Random(seed);
+
+        var text = new StringBuilder();
+        while (text.Length < 1500)
+        {
+            text.Append(random.Next(3) == 0 ? new string('日', random.Next(0, 30)) : new string('x', random.Next(0, 70)));
+            text.Append(random.Next(8) == 0 ? "\r\n" : "\n");
+        }
+
+        var document = new EditedDocument(Bytes(text.ToString()), wrapWidth, maxLinesPerRun: 3);
+
+        for (int step = 0; step < 60; step++)
+        {
+            long length = document.Table.AvailableLength;
+            int choice = random.Next(100);
+            if (length > 0 && choice < 35)
+            {
+                int offset = random.Next((int)length);
+                document.Delete(offset, random.Next(1, Math.Min(80, (int)length - offset + 1)));
+            }
+            else if (length > 0 && choice < 45)
+            {
+                int offset = random.Next((int)length);
+                document.Replace(offset, random.Next(0, Math.Min(10, (int)length - offset + 1)), Bytes("😀\n"));
+            }
+            else
+            {
+                document.Insert(random.Next((int)length + 1), Bytes(random.Next(4) switch
+                {
+                    0 => "\n",
+                    1 => "a\nb\nc\nd\ne\n",
+                    2 => new string('é', random.Next(1, 60)),
+                    _ => new string('q', random.Next(1, 90))
+                }));
+            }
+
+            document.AssertMatchesAFreshIndex($"tiny cap seed {seed}, step {step}");
+        }
+    }
+
+    /// <summary>
+    /// The same property under conditions chosen to stress line boundaries rather than reflow: a
     /// tiny wrap cap and newline-dense content, so rows are short, forced breaks and real line
-    /// ends alternate constantly, and edits routinely land on the byte immediately before a
-    /// candidate convergence point. That byte is the one place the two streams can reach the same
-    /// offset while disagreeing about whether a line starts there - it is still inside the edit,
-    /// so it is not required to match.
+    /// ends alternate constantly, and edits routinely land on a newline, beside one, or at the
+    /// start of a line - exactly where the line an edit belongs to, and whether it joins the span
+    /// before or after it, changes its answer.
     /// </summary>
     [Theory]
     [InlineData(1)]
@@ -803,18 +866,13 @@ public class RawEditedRowIndexTests
         }
     }
     /// <summary>
-    /// Re-convergence needs the two streams to agree that a line starts there, not merely to sit
-    /// at the same offset - and the offset alone is not enough precisely because the byte before
-    /// a convergence point can be the last byte an edit inserted, which is not required to match.
-    ///
-    /// Constructed to be exactly that case: the original wraps 16 x's at a cap of 8, so the row
-    /// beginning at byte 8 is a continuation. Inserting a newline at byte 8 makes the edited row
-    /// end there for real - same offset once the one-byte delta is applied, opposite line-start
-    /// state. Accepting that as convergence hands the rest of the document line numbers taken
-    /// from continuation rows, so the row that genuinely starts line 2 reports a blank gutter.
+    /// A newline inserted exactly onto a soft-wrap boundary: the original wraps 16 x's at a cap of
+    /// 8, so the row beginning at byte 8 is a continuation, and after the insert the row starting
+    /// there begins line 2 for real. The line records have to say so - the row that genuinely
+    /// starts line 2 must not report the blank gutter the original continuation row had.
     /// </summary>
     [Fact]
-    public void ConvergenceRequiresAgreementOnWhereLinesStart()
+    public void ANewlineOnASoftWrapBoundary_StartsARealLine()
     {
         var document = Document(new string('x', 16), wrapWidth: 8);
 

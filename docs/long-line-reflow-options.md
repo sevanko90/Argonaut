@@ -4,10 +4,12 @@ Decision record for the one case the raw editor is still slow at, written up bec
 that picks between the options is more work than the options are to describe, and two earlier
 attempts at a shortcut were both wrong.
 
-**Status (2026-09-21):** open. Nothing here is built. The leaning is towards
-[option C](#c--make-a-rows-boundaries-independent-of-its-content), which needs further analysis
-before it is committed to — [what C still needs settling](#what-c-still-needs-settling) is the
-list.
+**Status (2026-09-22):** decided and built — a variant of
+[option C](#c--make-a-rows-boundaries-independent-of-its-content) that keeps the UTF-8 backoff but
+measures it from the line's arithmetic cap, together with spans that are runs of whole lines. See
+[long-line-edit-plan.md](long-line-edit-plan.md) for where it departs from C and why; the analysis
+below is kept as the reasoning that led there. Status as first written (2026-09-21): open, leaning
+towards C.
 
 ## The problem, precisely
 

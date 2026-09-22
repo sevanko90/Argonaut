@@ -6,25 +6,23 @@ namespace Argonaut.Tests;
 
 /// <summary>
 /// What an insert does to the row boundaries after it, <i>inside a single soft-wrapped line</i>.
-/// This is the property every attempt to bound the long-line re-derivation has foundered on, and
-/// the answer is counter-intuitive enough that it is pinned here rather than argued about.
+/// This is the property every attempt to bound the long-line re-derivation foundered on, so it is
+/// pinned here rather than argued about.
 ///
-/// A forced break falls <see cref="RawSegmentIndex.WrapWidth"/> bytes from the row start, backed
-/// off up to 3 bytes so a multi-byte character is not split. Those two rules pull in opposite
-/// directions when bytes are inserted earlier in the line:
+/// Forced breaks are cap-anchored (<see cref="RawRowBoundary"/>): the caps sit at
+/// <c>lineStart + k·W</c> and each break backs off from its own cap by 0..3 bytes, depending only
+/// on the bytes at that cap. So an insert earlier in the line can move a later boundary by at most
+/// the backoff range, and cannot chain:
 ///
-/// - Over <b>ASCII</b> there is never any backoff, so the breaks are pure arithmetic from the row
-///   start and land on exactly the same absolute offsets as before. The content at those offsets
-///   has shifted, but the boundaries have not.
-/// - Over <b>multi-byte</b> content the backoff follows the characters, so the breaks move with
-///   the content - to the old offset plus the number of bytes inserted.
+/// - Over <b>ASCII</b> there is never any backoff, so every later boundary stays at exactly the
+///   same absolute offset.
+/// - Over <b>multi-byte</b> content the backoff at a cap changes with the bytes now sitting there,
+///   so a boundary moves by up to 3 - and the next one is measured from the next cap regardless.
 ///
-/// Which is why the re-derivation cannot stop early. Its convergence test looks for the second
-/// case (offsets differing by exactly the byte delta), and ASCII - which is what a large JSON or
-/// log file is - produces the first, right up until the line's real newline forces them back
-/// together. And the first case cannot be treated as a convergence of its own, because the bytes
-/// being read there are <i>not</i> the bytes the original index was built over, so nothing about
-/// the boundaries beyond the next one is proven. See docs/roadmap.md.
+/// Before the rule was cap-anchored a break was measured from the previous row's end, and over
+/// multi-byte content the boundaries moved <i>with the content</i>, all the way to the line's
+/// newline; that is what made typing early in a 100MB line cost ~40ms. See
+/// docs/long-line-edit-plan.md.
 /// </summary>
 public class RawLongLineReflowTests
 {
@@ -34,14 +32,22 @@ public class RawLongLineReflowTests
     private const long ProbeFrom = 2_000;
     private const int BoundariesProbed = 200;
 
+    /// <summary>
+    /// Starts of <paramref name="count"/> rows from the row whose cap-grid position is
+    /// <paramref name="from"/>, walking the line from its start - the only place a walk can begin
+    /// that knows where the caps are. Selected by row number rather than offset, so the same row
+    /// is compared on both sides of the insert even when its start moves across the probe point.
+    /// </summary>
     private static List<long> RowStartsFrom(IByteSource source, long from, int count)
     {
         var starts = new List<long>(count);
-        long at = from;
-        for (int i = 0; i < count && at < source.AvailableLength; i++)
+        var cursor = RawRowCursor.StartOfLine(0, 1, WrapWidth);
+        for (long row = 0; starts.Count < count && cursor.Start < source.AvailableLength; row++)
         {
-            starts.Add(at);
-            at = RawRowBoundary.Next(source, WrapWidth, at).End;
+            if (row >= from / WrapWidth)
+                starts.Add(cursor.Start);
+
+            cursor.Advance(source, WrapWidth);
         }
 
         return starts;
@@ -71,16 +77,16 @@ public class RawLongLineReflowTests
     }
 
     [Fact]
-    public void OverMultiByteContent_BoundariesPastAnInsertMoveWithTheContent()
+    public void OverMultiByteContent_BoundariesPastAnInsertMoveByAtMostTheBackoff()
     {
-        var (before, after) = BoundariesEitherSideOfAnInsert("abcdéfghij");
+        var (before, after) = BoundariesEitherSideOfAnInsert("abcdéfghij日");
 
-        // Not every one, and not from the first boundary: a break that happens to fall clear of
-        // a character does not move, and whether it does depends on where the walk started. The
-        // shift emerges over the run, which is why this is asserted in aggregate rather than at
-        // one index - measured, 194 of 200.
-        int movedByTheInsert = before.Zip(after, (b, a) => a == b + 1).Count(moved => moved);
-        Assert.True(movedByTheInsert > before.Count * 9 / 10,
-            $"only {movedByTheInsert} of {before.Count} boundaries moved with the content");
+        Assert.Equal(before.Count, after.Count);
+        for (int i = 0; i < before.Count; i++)
+            Assert.InRange(after[i] - before[i], -RawRowBoundary.MaxUtf8Backoff, RawRowBoundary.MaxUtf8Backoff);
+
+        // And the insert really did change some of them - otherwise this is the ASCII case again
+        // and proves nothing about multi-byte content.
+        Assert.Contains(before.Zip(after), pair => pair.First != pair.Second);
     }
 }

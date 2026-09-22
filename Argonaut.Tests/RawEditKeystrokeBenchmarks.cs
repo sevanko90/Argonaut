@@ -8,7 +8,7 @@ namespace Argonaut.Tests;
 
 /// <summary>
 /// The cost every <i>keystroke</i> pays: folding one edit into <see cref="RawEditedRowIndex"/>,
-/// which re-derives the dirty span. This is the number the whole editing design exists to keep
+/// which rebuilds the line records of the dirty span it lands in. This is the number the whole editing design exists to keep
 /// small - the alternative it replaces is re-deriving the tail of the file, which at multi-GB is
 /// seconds per character.
 ///
@@ -33,11 +33,13 @@ public class RawEditKeystrokeBenchmarks
     private const int KeystrokeBurst = 64;
 
     /// <summary>
-    /// A single unbroken line, for the case that decides how the spans are stored: an edit
-    /// inside one has to walk to its end before the two byte streams can be shown to have
-    /// rejoined, so the keystroke cost here is the walk and nothing else.
+    /// A single unbroken line, for the case that decided how spans are stored. Parameterised over
+    /// a 16× range because the claim is that it makes no difference: a line's rows are arithmetic
+    /// from its start, so an edit anywhere in it costs one line record whatever its length. Before
+    /// forced breaks were cap-anchored this walked the rest of the line, ~30ns a row.
     /// </summary>
-    private const int LongLineBytes = 8 * 1024 * 1024;
+    [Params(8 * 1024 * 1024, 128 * 1024 * 1024)]
+    public int LongLineBytes { get; set; }
 
     private MemoryByteSource source = null!;
     private RawSegmentIndex index = null!;
@@ -50,6 +52,7 @@ public class RawEditKeystrokeBenchmarks
     private RawPieceTable longLineDocument = null!;
     private RawEditedRowIndex longLineRows = null!;
     private long longLineCaret;
+    private long longLineTailCaret;
 
     [GlobalSetup]
     public void Setup()
@@ -73,12 +76,13 @@ public class RawEditKeystrokeBenchmarks
     public void ResetDocument()
     {
         this.document = new RawPieceTable(this.source);
-        this.rows = new RawEditedRowIndex(this.index, this.source, this.document);
+        this.rows = new RawEditedRowIndex(this.index, this.document);
         this.caret = this.source.AvailableLength / 2;
 
         this.longLineDocument = new RawPieceTable(this.longLineSource);
-        this.longLineRows = new RawEditedRowIndex(this.longLineIndex, this.longLineSource, this.longLineDocument);
+        this.longLineRows = new RawEditedRowIndex(this.longLineIndex, this.longLineDocument);
         this.longLineCaret = 1024;
+        this.longLineTailCaret = LongLineBytes - 1024;
     }
 
     [Benchmark(OperationsPerInvoke = KeystrokeBurst)]
@@ -94,10 +98,9 @@ public class RawEditKeystrokeBenchmarks
     }
 
     /// <summary>
-    /// The same keystroke inside one unbroken line, which is the worst case the design has and
-    /// the one that decided spans hold anchors rather than rows. It is reported per character so
-    /// it sits beside <see cref="TypeCharacters"/>, but it is not the same kind of number: this
-    /// one grows with the length of the line, at roughly 30ns per row walked.
+    /// The same keystroke early in one unbroken line - the case that used to walk the rest of the
+    /// line on every character. Should be flat across <see cref="LongLineBytes"/> and within about
+    /// 2× of <see cref="TypeCharacters"/>.
     /// </summary>
     [Benchmark(OperationsPerInvoke = KeystrokeBurst)]
     public int TypeCharactersInsideALongLine()
@@ -106,6 +109,20 @@ public class RawEditKeystrokeBenchmarks
         {
             this.longLineRows.ApplyEdit(this.longLineDocument.Insert(this.longLineCaret, "z"u8));
             this.longLineCaret++;
+        }
+
+        return this.longLineRows.RowCount;
+    }
+
+    /// <summary>The same keystroke 1KB before the end of the line, which the old walk resumed
+    /// from a late anchor for; it should cost exactly what typing early does now.</summary>
+    [Benchmark(OperationsPerInvoke = KeystrokeBurst)]
+    public int TypeCharactersNearTheEndOfALongLine()
+    {
+        for (int i = 0; i < KeystrokeBurst; i++)
+        {
+            this.longLineRows.ApplyEdit(this.longLineDocument.Insert(this.longLineTailCaret, "z"u8));
+            this.longLineTailCaret++;
         }
 
         return this.longLineRows.RowCount;

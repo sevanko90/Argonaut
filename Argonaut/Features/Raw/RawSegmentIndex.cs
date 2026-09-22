@@ -15,9 +15,11 @@ public readonly record struct RawRowInfo(long Start, long End, bool IsSoftWrappe
 /// <summary>
 /// One sparse index entry: the full position state at the start of an anchor row. Unlike a
 /// dense per-row index, neither the byte offset nor the line number is derivable from the
-/// entry's index, so both are stored: bits 0-62 of <see cref="PackedOffset"/> are the anchor
-/// row's start offset, bit 63 (the sign bit) marks a continuation row (the anchor row does
-/// NOT start a real line), and <see cref="LineNumber"/> is the 1-based number of the line
+/// entry's index, so both are stored: bits 0-60 of <see cref="PackedOffset"/> are the anchor
+/// row's start offset, bits 61-62 how far that start was backed off from its cap (0 on a line
+/// start - it is what puts a resumed walk back on the line's cap grid, see
+/// <see cref="RawRowBoundary"/>), bit 63 (the sign bit) marks a continuation row (the anchor row
+/// does NOT start a real line), and <see cref="LineNumber"/> is the 1-based number of the line
 /// containing the anchor row.
 /// </summary>
 public readonly record struct RawRowAnchor(long PackedOffset, int LineNumber);
@@ -28,7 +30,7 @@ public readonly record struct RawRowAnchor(long PackedOffset, int LineNumber);
 /// every <see cref="AnchorStride"/>th row boundary is stored. The rows in between are
 /// re-derived on demand by re-running the (deterministic, byte-driven) segmentation rules
 /// forward from the preceding anchor - a bounded rescan of at most
-/// AnchorStride × (WrapWidth + 1) mapped bytes, which is what keeps the index at ~16 bytes
+/// AnchorStride × (WrapWidth + 4) mapped bytes, which is what keeps the index at ~16 bytes
 /// per 64 rows (a dense per-row index on a multi-GB file runs to hundreds of MB).
 ///
 /// Anchoring by display row rather than by line is what makes pathological lines free: a
@@ -36,7 +38,7 @@ public readonly record struct RawRowAnchor(long PackedOffset, int LineNumber);
 /// so no dense/sparse switching is ever needed.
 ///
 /// The scan and the on-demand rescan share one boundary implementation
-/// (<see cref="RawRowBoundary.Next"/>), so they cannot disagree. <see cref="RowCount"/> is
+/// (<see cref="RawRowCursor"/>), so they cannot disagree. <see cref="RowCount"/> is
 /// published at anchor boundaries (and finally at completion), guaranteeing every published
 /// row's bucket anchor is already visible; the base class's item (= anchor) waiter machinery
 /// underpins <see cref="WaitForRowCountAsync"/>.
@@ -44,11 +46,12 @@ public readonly record struct RawRowAnchor(long PackedOffset, int LineNumber);
 public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IBackgroundIndex, IRawRowIndex
 {
     /// <summary>Rows per stored anchor. The RAM/rescan trade: 16 bytes per stride rows of
-    /// index, at most stride × (WrapWidth + 1) bytes rescanned per row lookup.</summary>
+    /// index, at most stride × (WrapWidth + 4) bytes rescanned per row lookup.</summary>
     internal const int AnchorStride = 64;
 
     private const long ContinuationFlag = long.MinValue; // bit 63 - the sign bit
-    private const long OffsetMask = long.MaxValue;       // bits 0-62
+    private const int BackoffShift = 61;                 // bits 61-62
+    private const long OffsetMask = (1L << BackoffShift) - 1;
 
     private const long ProgressReportStride = 4 * 1024 * 1024;
     private const int CancellationCheckRowStride = 1024;
@@ -86,28 +89,13 @@ public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IBackgro
             throw new ArgumentOutOfRangeException(nameof(rowIndex));
 
         int anchorIndex = rowIndex / AnchorStride;
-        var anchor = this.items.ItemRef(anchorIndex);
-        long start = anchor.PackedOffset & OffsetMask;
-        bool atLineStart = anchor.PackedOffset >= 0;
-        int lineNumber = anchor.LineNumber;
-
+        var cursor = AnchorAt(anchorIndex);
         for (int row = anchorIndex * AnchorStride; ; row++)
         {
-            var (end, softWrap) = RawRowBoundary.Next(this.source, WrapWidth, start);
+            var before = cursor;
+            var (end, softWrap) = cursor.Advance(this.source, WrapWidth);
             if (row == rowIndex)
-                return new RawRowInfo(start, end, softWrap, atLineStart ? lineNumber : null);
-
-            if (softWrap)
-            {
-                atLineStart = false;
-            }
-            else
-            {
-                lineNumber++;
-                atLineStart = true;
-            }
-
-            start = end;
+                return new RawRowInfo(before.Start, end, softWrap, before.AtLineStart ? before.LineNumber : null);
         }
     }
 
@@ -122,33 +110,32 @@ public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IBackgro
             return null;
 
         int anchorIndex = rowIndex / AnchorStride;
-        var anchor = this.items.ItemRef(anchorIndex);
-        long start = anchor.PackedOffset & OffsetMask;
-        int lineNumber = anchor.LineNumber;
-
+        var cursor = AnchorAt(anchorIndex);
         for (int row = anchorIndex * AnchorStride; row < rowIndex; row++)
-        {
-            var (end, softWrap) = RawRowBoundary.Next(this.source, WrapWidth, start);
-            if (!softWrap)
-                lineNumber++;
+            cursor.Advance(this.source, WrapWidth);
 
-            start = end;
-        }
-
-        return lineNumber;
+        return cursor.LineNumber;
     }
 
     /// <summary>
-    /// The full position state stored at anchor <paramref name="anchorIndex"/>: where its row
-    /// starts, whether that row begins a real line, and the line it sits in.
-    /// <see cref="GetRowInfo"/> cannot answer this - it reports a null line number on a
-    /// continuation row, which is right for a gutter but useless to a caller that needs to keep
-    /// counting lines forward from there (see <see cref="RawEditedRowIndex"/>).
+    /// The full position state stored at anchor <paramref name="anchorIndex"/>, as a cursor a walk
+    /// can resume from: where its row starts, the cap its row ends against, whether that row begins
+    /// a real line, and the line it sits in. <see cref="GetRowInfo"/> cannot answer this - it
+    /// reports a null line number on a continuation row, which is right for a gutter but useless to
+    /// a caller that needs to keep counting lines forward from there.
     /// </summary>
-    internal (long Start, bool AtLineStart, int LineNumber) AnchorAt(int anchorIndex)
+    internal RawRowCursor AnchorAt(int anchorIndex)
     {
         var anchor = this.items.ItemRef(anchorIndex);
-        return (anchor.PackedOffset & OffsetMask, anchor.PackedOffset >= 0, anchor.LineNumber);
+        long start = anchor.PackedOffset & OffsetMask;
+        int backoff = (int)((anchor.PackedOffset >> BackoffShift) & 3);
+        return new RawRowCursor
+        {
+            Start = start,
+            NextCap = start + backoff + WrapWidth,
+            AtLineStart = anchor.PackedOffset >= 0,
+            LineNumber = anchor.LineNumber,
+        };
     }
 
     /// <summary>Anchors stored so far. Every published row's anchor is among them.</summary>
@@ -169,14 +156,167 @@ public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IBackgro
         // the newest anchor's bucket is still empty (RowCount stops at that anchor's row).
         int coveredAnchors = (rowCount + AnchorStride - 1) / AnchorStride;
 
-        // Greatest anchor starting at or before the offset.
-        int lo = 0, hi = coveredAnchors - 1, anchorIndex = 0;
+        int anchorIndex = AnchorAtOrBefore(offset, coveredAnchors);
+        var cursor = AnchorAt(anchorIndex);
+        int lastRow = Math.Min(rowCount, (anchorIndex + 1) * AnchorStride) - 1;
+        for (int row = anchorIndex * AnchorStride; row <= lastRow; row++)
+        {
+            if (offset < cursor.Advance(this.source, WrapWidth).End)
+                return row;
+        }
+
+        return null; // beyond the published rows
+    }
+
+    /// <summary>
+    /// Where the line holding <paramref name="offset"/> begins: its start offset, its first row
+    /// and its number. What <see cref="RawEditedRowIndex"/> needs to open a run of whole lines
+    /// around an edit without walking the line.
+    ///
+    /// One bucket walk when the line begins inside the bucket holding the offset - every line
+    /// shorter than a few rows. A longer line began in an earlier bucket, and the anchors carry
+    /// line numbers, so a binary search finds the first anchor in that line and at most one more
+    /// bucket walk reaches its start: O(log anchors) either way, however long the line.
+    ///
+    /// At or past the end of the data this is the phantom empty line after a trailing '\n' (or of
+    /// an empty source) - no rows, starting at the end - and otherwise the last line. Requires a
+    /// complete scan.
+    /// </summary>
+    internal (long Start, int FirstRow, int LineNumber) LineStartContaining(long offset)
+    {
+        int rowCount = RowCount;
+        if (rowCount == 0)
+            return (0, 0, 1);
+
+        long length = this.source.AvailableLength;
+        if (offset >= length)
+        {
+            if (RawRowBoundary.ByteAt(this.source, length - 1) == (byte)'\n')
+                return (length, rowCount, LineContaining(rowCount - 1)!.Value + 1);
+
+            offset = length - 1;
+        }
+
+        int coveredAnchors = AnchorCount;
+        int anchorIndex = AnchorAtOrBefore(Math.Max(offset, 0), coveredAnchors);
+        var cursor = AnchorAt(anchorIndex);
+        int row = anchorIndex * AnchorStride;
+        long lineStart = -1;
+        int lineStartRow = 0;
+        int line;
+        while (true)
+        {
+            var at = cursor;
+            if (at.AtLineStart)
+            {
+                lineStart = at.Start;
+                lineStartRow = row;
+            }
+
+            if (offset < cursor.Advance(this.source, WrapWidth).End)
+            {
+                line = at.LineNumber;
+                break;
+            }
+
+            row++;
+        }
+
+        if (lineStart >= 0)
+            return (lineStart, lineStartRow, line);
+
+        // The line began before this bucket. Anchors are in line order, and the first one in this
+        // line is either its first row or a continuation - in which case the line began in the
+        // bucket before it.
+        int first = FirstAnchorInLineAtLeast(line, coveredAnchors);
+        cursor = AnchorAt(first);
+        if (cursor.AtLineStart)
+            return (cursor.Start, first * AnchorStride, line);
+
+        cursor = AnchorAt(first - 1);
+        row = (first - 1) * AnchorStride;
+        while (!(cursor.AtLineStart && cursor.LineNumber == line))
+        {
+            cursor.Advance(this.source, WrapWidth);
+            row++;
+        }
+
+        return (cursor.Start, row, line);
+    }
+
+    /// <summary>
+    /// Where the line holding <paramref name="offset"/> ends: the exclusive end of its last row
+    /// (the '\n' included), whether it has a '\n' at all, the row after its last, and its number.
+    /// The counterpart of <see cref="LineStartContaining"/>, bounded the same way: the walk that
+    /// finds the offset carries on to the line's end, and a line that outruns the bucket is ended
+    /// by binary-searching for the first anchor in a later line and walking the bucket before it.
+    /// Same end-of-data behaviour as <see cref="LineStartContaining"/>. Requires a complete scan.
+    /// </summary>
+    internal (long End, bool Terminated, int RowsEnd, int LineNumber) LineEndContaining(long offset)
+    {
+        int rowCount = RowCount;
+        if (rowCount == 0)
+            return (0, false, 0, 1);
+
+        long length = this.source.AvailableLength;
+        if (offset >= length)
+        {
+            if (RawRowBoundary.ByteAt(this.source, length - 1) == (byte)'\n')
+                return (length, false, rowCount, LineContaining(rowCount - 1)!.Value + 1);
+
+            offset = length - 1;
+        }
+
+        int coveredAnchors = AnchorCount;
+        int anchorIndex = AnchorAtOrBefore(Math.Max(offset, 0), coveredAnchors);
+        var cursor = AnchorAt(anchorIndex);
+        int row = anchorIndex * AnchorStride;
+        int bucketEnd = Math.Min(rowCount, (anchorIndex + 1) * AnchorStride);
+        int line = 0;
+        bool found = false;
+        for (; row < bucketEnd; row++)
+        {
+            var at = cursor;
+            var (end, softWrap) = cursor.Advance(this.source, WrapWidth);
+            if (!found && offset < end)
+            {
+                found = true;
+                line = at.LineNumber;
+            }
+
+            if (found && !softWrap)
+                return (end, EndsInNewline(end), row + 1, line);
+        }
+
+        // The line outran the bucket. It ends in the bucket before the first anchor of a later
+        // line - or in the last bucket, when it is the last line.
+        int next = FirstAnchorInLineAtLeast(line + 1, coveredAnchors);
+        cursor = AnchorAt(next - 1);
+        row = (next - 1) * AnchorStride;
+        while (true)
+        {
+            var at = cursor;
+            var (end, softWrap) = cursor.Advance(this.source, WrapWidth);
+            if (!softWrap && at.LineNumber == line)
+                return (end, EndsInNewline(end), row + 1, line);
+
+            row++;
+        }
+    }
+
+    private bool EndsInNewline(long end) => end > 0 && RawRowBoundary.ByteAt(this.source, end - 1) == (byte)'\n';
+
+    /// <summary>Greatest of the first <paramref name="coveredAnchors"/> anchors starting at or
+    /// before <paramref name="offset"/>.</summary>
+    private int AnchorAtOrBefore(long offset, int coveredAnchors)
+    {
+        int lo = 0, hi = coveredAnchors - 1, found = 0;
         while (lo <= hi)
         {
             int mid = lo + (hi - lo) / 2;
             if ((this.items.ItemRef(mid).PackedOffset & OffsetMask) <= offset)
             {
-                anchorIndex = mid;
+                found = mid;
                 lo = mid + 1;
             }
             else
@@ -185,17 +325,29 @@ public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IBackgro
             }
         }
 
-        long start = this.items.ItemRef(anchorIndex).PackedOffset & OffsetMask;
-        int lastRow = Math.Min(rowCount, (anchorIndex + 1) * AnchorStride) - 1;
-        for (int row = anchorIndex * AnchorStride; row <= lastRow; row++)
+        return found;
+    }
+
+    /// <summary>First anchor whose row sits in line <paramref name="line"/> or later, or
+    /// <paramref name="coveredAnchors"/> when there is none.</summary>
+    private int FirstAnchorInLineAtLeast(int line, int coveredAnchors)
+    {
+        int lo = 0, hi = coveredAnchors - 1, found = coveredAnchors;
+        while (lo <= hi)
         {
-            long end = RawRowBoundary.Next(this.source, WrapWidth, start).End;
-            if (offset < end)
-                return row;
-            start = end;
+            int mid = lo + (hi - lo) / 2;
+            if (this.items.ItemRef(mid).LineNumber >= line)
+            {
+                found = mid;
+                hi = mid - 1;
+            }
+            else
+            {
+                lo = mid + 1;
+            }
         }
 
-        return null; // beyond the published rows
+        return found;
     }
 
     /// <summary>Exclusive end offset of the last published row; 0 when nothing is published.
@@ -245,16 +397,14 @@ public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IBackgro
     /// Scans the file row by row, storing an anchor every <see cref="AnchorStride"/> rows.
     /// Per-row rather than chunked like FileOffsetIndex: the newline search is still the
     /// SIMD-vectorized span IndexOf, capped at the wrap width, and sharing
-    /// <see cref="RawRowBoundary.Next"/> with the on-demand rescan is what guarantees the two
-    /// always agree on where rows fall.
+    /// <see cref="RawRowCursor"/> with the on-demand rescan is what guarantees the two always
+    /// agree on where rows fall.
     /// </summary>
     /// <remarks>Invoked in the background via a task</remarks>
     private void ProduceRows(IProgressReporter? progressReporter, CancellationToken cancellationToken)
     {
-        long start = 0;
+        var cursor = RawRowCursor.StartOfLine(0, 1, WrapWidth);
         int rows = 0;
-        int lineNumber = 1;
-        bool atLineStart = true;
         long nextProgressReport = ProgressReportStride;
 
         // Cached, not snapshotted: this loop runs once per row rather than once per chunk, so
@@ -272,21 +422,24 @@ public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IBackgro
                 if (rows % CancellationCheckRowStride == 0)
                     cancellationToken.ThrowIfCancellationRequested();
 
-                if (start >= available)
+                if (cursor.Start >= available)
                 {
                     available = this.source.AvailableLength;
                     settled = this.source.LengthSettled;
-                    if (start >= available)
+                    if (cursor.Start >= available)
                     {
                         if (settled)
                             break;
 
-                        this.source.WaitForLength(start + 1, cancellationToken);
+                        this.source.WaitForLength(cursor.Start + 1, cancellationToken);
                         continue;
                     }
                 }
 
-                var (end, softWrap) = RawRowBoundary.Next(this.source, WrapWidth, start);
+                // Advanced on a copy: a step abandoned below to wait for more data must leave the
+                // cursor where it was.
+                var next = cursor;
+                long end = next.Advance(this.source, WrapWidth).End;
 
                 // A row that ends exactly where the data currently does may only look finished
                 // because the rest has not arrived - its newline could be the next byte, or it
@@ -304,24 +457,14 @@ public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IBackgro
                 }
 
                 if (rows % AnchorStride == 0)
-                    AppendAnchor(start, atLineStart, lineNumber, rows);
-
-                if (softWrap)
-                {
-                    atLineStart = false;
-                }
-                else
-                {
-                    lineNumber++;
-                    atLineStart = true;
-                }
+                    AppendAnchor(cursor, rows);
 
                 rows++;
-                start = end;
-                if (start >= nextProgressReport)
+                cursor = next;
+                if (cursor.Start >= nextProgressReport)
                 {
-                    progressReporter?.Report("Indexing", start, available);
-                    nextProgressReport = start + ProgressReportStride;
+                    progressReporter?.Report("Indexing", cursor.Start, available);
+                    nextProgressReport = cursor.Start + ProgressReportStride;
                 }
             }
         }
@@ -332,13 +475,14 @@ public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IBackgro
             // count is safe to publish even on cancellation - unlike the dense indexers,
             // there is no un-scanned remainder to mis-record.
             Volatile.Write(ref this.publishedRowCount, rows);
-            progressReporter?.Report("Indexing", start, start);
+            progressReporter?.Report("Indexing", cursor.Start, cursor.Start);
         }
     }
 
-    private void AppendAnchor(long start, bool atLineStart, int lineNumber, int rowsSoFar)
+    private void AppendAnchor(RawRowCursor cursor, int rowsSoFar)
     {
-        this.items.Add(new RawRowAnchor(atLineStart ? start : start | ContinuationFlag, lineNumber));
+        long packed = cursor.Start | ((long)cursor.BackoffFromCap(WrapWidth) << BackoffShift);
+        this.items.Add(new RawRowAnchor(cursor.AtLineStart ? packed : packed | ContinuationFlag, cursor.LineNumber));
 
         // Publish the rows of the PREVIOUS buckets (all boundaries below this anchor are
         // determined). Row count before waiter wake-up, so a released waiter sees it.

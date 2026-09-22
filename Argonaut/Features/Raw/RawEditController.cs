@@ -70,7 +70,7 @@ public sealed class RawEditController
 
         this.originalLength = originalBytes.AvailableLength;
         Document = new RawPieceTable(originalBytes);
-        RowIndex = new RawEditedRowIndex(scan, originalBytes, Document);
+        RowIndex = new RawEditedRowIndex(scan, Document);
         Caret = new RawCaretController(RowIndex, Document);
         this.journal = new RawEditJournal(Document);
 
@@ -135,9 +135,10 @@ public sealed class RawEditController
             RowIndex.OriginalRowCount,
             RowIndex.SpanCount,
             RowIndex.TotalDerivedRows,
-            RowIndex.HeldAnchors,
-            RawEditedRowIndex.MaxHeldAnchors,
-            RowIndex.RowsWalkedInLastEdit,
+            RowIndex.HeldLines,
+            RawEditedRowIndex.MaxHeldLines,
+            RowIndex.BytesScannedInLastEdit,
+            RowIndex.LinesRebuiltInLastEdit,
             RowIndex.NeedsRebuild,
             RowIndex.DescribeSpans(),
             this.journal.Depth,

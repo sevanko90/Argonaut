@@ -1,6 +1,12 @@
 # Editing inside a very long line at constant cost — implementation plan
 
-**Status (2026-09-22):** planned, not built. Supersedes the leaning recorded in
+**Status (2026-09-22):** built. Departures from the plan as written: the two line queries live on
+`RawSegmentIndex` only (internal) rather than on `IRawRowIndex` - the edited index answers its own
+pre-edit line questions from its runs, so nothing needed them on the interface - and
+`LineEndContaining` also returns the line number, which the rebuilt run's line accounting needs.
+`RawEditedRowIndex` no longer takes the original bytes, which it had only used for the
+convergence walk. The cursor's factory is `RawRowCursor.StartOfLine`, since C# will not let a
+static method share the `AtLineStart` field's name. Supersedes the leaning recorded in
 [long-line-reflow-options.md](long-line-reflow-options.md); that document's analysis is kept, and
 §"Checks against the options document" below says where this plan departs from it and why.
 

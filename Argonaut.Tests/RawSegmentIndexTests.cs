@@ -33,64 +33,67 @@ public class RawSegmentIndexTests
         }
     }
 
-    private readonly record struct NaiveRow(long Start, long End, bool SoftWrap, int? LineNumber);
+    internal readonly record struct NaiveRow(long Start, long End, bool SoftWrap, int? LineNumber);
 
-    /// <summary>Independent dense implementation of the segmentation and numbering rules.</summary>
-    private static List<NaiveRow> NaiveScan(byte[] bytes, int wrapWidth)
+    /// <summary>
+    /// Independent dense implementation of the segmentation and numbering rules. Forced breaks
+    /// are cap-anchored: the caps of a line sit at lineStart + k·W, a break is its cap backed off
+    /// over up to 3 trailing continuation bytes, and the next cap is W past the last one however
+    /// far that break backed off.
+    /// </summary>
+    internal static List<NaiveRow> NaiveScan(byte[] bytes, int wrapWidth)
     {
+        static bool IsContinuation(byte b) => (b & 0xC0) == 0x80;
+
         var rows = new List<NaiveRow>();
         long start = 0;
+        long cap = wrapWidth;
         int line = 1;
         bool atLineStart = true;
         while (start < bytes.Length)
         {
             long end;
             bool soft;
-            long limit = Math.Min(start + wrapWidth, bytes.Length);
+            long limit = Math.Min(cap, bytes.Length);
             int newline = Array.IndexOf(bytes, (byte)'\n', (int)start, (int)(limit - start));
             if (newline >= 0)
             {
                 end = newline + 1;
                 soft = false;
             }
-            else if (start + wrapWidth >= bytes.Length)
+            else if (cap >= bytes.Length)
             {
                 // File ends before (or exactly at) the cap: a real end, no wrap marker.
                 end = bytes.Length;
                 soft = false;
             }
+            else if (bytes[cap] == (byte)'\n')
+            {
+                end = cap + 1; // newline peek-extension
+                soft = false;
+            }
             else
             {
-                long capEnd = start + wrapWidth;
-                if (bytes[capEnd] == (byte)'\n')
-                {
-                    end = capEnd + 1; // newline peek-extension
-                    soft = false;
-                }
-                else
-                {
-                    end = capEnd;
-                    for (int back = 0; back < 3 && end - 1 > start; back++)
-                    {
-                        if ((bytes[end] & 0xC0) != 0x80)
-                            break;
-                        end--;
-                    }
-                    if ((bytes[end] & 0xC0) == 0x80)
-                        end = capEnd;
-                    soft = true;
-                }
+                int back = 0;
+                while (back < 3 && IsContinuation(bytes[cap - back]))
+                    back++;
+                if (back == 3 && IsContinuation(bytes[cap - 3]))
+                    back = 0; // four continuation bytes: not UTF-8, break at the cap
+                end = cap - back;
+                soft = true;
             }
 
             rows.Add(new NaiveRow(start, end, soft, atLineStart ? line : null));
             if (soft)
             {
                 atLineStart = false;
+                cap += wrapWidth;
             }
             else
             {
                 line++;
                 atLineStart = true;
+                cap = end + wrapWidth;
             }
 
             start = end;
@@ -113,7 +116,7 @@ public class RawSegmentIndexTests
                 Assert.Equal(expected[i].End, info.End);
                 Assert.Equal(expected[i].SoftWrap, info.IsSoftWrapped);
                 Assert.Equal(expected[i].LineNumber, info.LineNumber);
-                Assert.InRange(info.End - info.Start, 1, wrapWidth + 1);
+                Assert.InRange(info.End - info.Start, 1, wrapWidth + RawRowBoundary.MaxUtf8Backoff + 1);
             }
         });
     }
@@ -418,5 +421,96 @@ public class RawSegmentIndexTests
             Assert.Equal(LinesBeyondOneAnchorBucket, expectedLine);
             Assert.Null(index.LineContaining(index.RowCount));
         });
+    }
+
+    // ---- line queries ---------------------------------------------------------------------
+
+    /// <summary>
+    /// <see cref="RawSegmentIndex.LineStartContaining"/> and <see cref="RawSegmentIndex.LineEndContaining"/>
+    /// against the naive scan, for every offset and one past the end - so a line that begins or
+    /// ends exactly on a bucket edge, one that spans many buckets, and both kinds of end of data
+    /// all get asked.
+    /// </summary>
+    private static void AssertLineQueriesMatchNaiveScan(byte[] content, int wrapWidth)
+    {
+        var rows = NaiveScan(content, wrapWidth);
+        var index = RawSegmentIndex.StartIndexing(new MemoryByteSource(content), wrapWidth);
+        index.IndexingTask.GetAwaiter().GetResult();
+
+        // Per row: the row that starts its line, and the row that ends it.
+        var lineFirst = new int[rows.Count];
+        var lineLast = new int[rows.Count];
+        for (int row = 0; row < rows.Count; row++)
+            lineFirst[row] = rows[row].LineNumber is null ? lineFirst[row - 1] : row;
+        for (int row = rows.Count - 1; row >= 0; row--)
+            lineLast[row] = rows[row].SoftWrap ? lineLast[row + 1] : row;
+
+        int rowAt = 0;
+        for (long offset = 0; offset < content.Length; offset++)
+        {
+            while (rows[rowAt].End <= offset)
+                rowAt++;
+
+            var first = rows[lineFirst[rowAt]];
+            var lastRow = rows[lineLast[rowAt]];
+            int line = first.LineNumber!.Value;
+            Assert.Equal((first.Start, lineFirst[rowAt], line), index.LineStartContaining(offset));
+            Assert.Equal((lastRow.End, content[lastRow.End - 1] == (byte)'\n', lineLast[rowAt] + 1, line),
+                index.LineEndContaining(offset));
+        }
+
+        // One past the end: the phantom line after a trailing newline, else the last line.
+        int lines = rows.Count(r => r.LineNumber is not null);
+        if (content.Length == 0 || content[^1] == (byte)'\n')
+        {
+            Assert.Equal((content.Length, rows.Count, lines + 1), index.LineStartContaining(content.Length));
+            Assert.Equal((content.Length, false, rows.Count, lines + 1), index.LineEndContaining(content.Length));
+        }
+        else
+        {
+            Assert.Equal(lines, index.LineStartContaining(content.Length).LineNumber);
+            Assert.Equal((content.Length, false, rows.Count, lines), index.LineEndContaining(content.Length));
+        }
+    }
+
+    [Fact]
+    public void LineQueries_ShortLinesAcrossBucketEdges()
+    {
+        var text = new StringBuilder();
+        for (int i = 0; i < 400; i++)
+            text.Append(new string('x', i % 23)).Append('\n');
+
+        AssertLineQueriesMatchNaiveScan(Encoding.UTF8.GetBytes(text.ToString()), 8);
+    }
+
+    [Fact]
+    public void LineQueries_ALongLineSpanningManyBuckets()
+    {
+        // ~500 rows at W=8 for the long line: the start and the end are both several buckets from
+        // most of its offsets, so both binary-search paths run.
+        var text = new StringBuilder("short\nlines\nfirst\n");
+        for (int i = 0; i < 400; i++)
+            text.Append(i % 3 == 0 ? "é日" : "abcd");
+        text.Append("\nand\nafter\n");
+
+        AssertLineQueriesMatchNaiveScan(Encoding.UTF8.GetBytes(text.ToString()), 8);
+    }
+
+    [Fact]
+    public void LineQueries_AtTheEndOfData()
+    {
+        AssertLineQueriesMatchNaiveScan("one\ntwo\n"u8.ToArray(), 8);
+        AssertLineQueriesMatchNaiveScan("one\ntwo, unterminated and wrapping"u8.ToArray(), 8);
+        AssertLineQueriesMatchNaiveScan(Encoding.UTF8.GetBytes(new string('z', 3000)), 8);
+    }
+
+    [Fact]
+    public void LineQueries_OnAnEmptySource()
+    {
+        var index = RawSegmentIndex.StartIndexing(new MemoryByteSource([]), 8);
+        index.IndexingTask.GetAwaiter().GetResult();
+
+        Assert.Equal((0L, 0, 1), index.LineStartContaining(0));
+        Assert.Equal((0L, false, 0, 1), index.LineEndContaining(0));
     }
 }

@@ -23,18 +23,19 @@ public readonly record struct RawPieceSnapshot(
 /// of every span before it. The second is what displaces the untouched rows that follow, so
 /// seeing them apart is the difference between a readable picture and a list of numbers.
 /// </summary>
+/// <param name="OriginalStartRow">First original row the span replaced.</param>
+/// <param name="OriginalRowsEnd">The original row after the last one it replaced.</param>
+/// <param name="LinesHeld">Line records the span holds - what the budget counts.</param>
 public readonly record struct RawSpanSnapshot(
     int Index,
-    int OriginalAnchor,
     int OriginalStartRow,
+    int OriginalRowsEnd,
     int StartRow,
     long StartOffset,
     long EndOffset,
     int RowsHeld,
-    int AnchorsHeld,
-    int ConvergedOriginalRow,
-    long EditReach,
-    int? FirstLineNumber,
+    int LinesHeld,
+    int FirstLineNumber,
     long ByteDelta,
     int RowDelta,
     int LineDelta,
@@ -68,9 +69,10 @@ public sealed record RawEditSnapshot(
     int OriginalRowCount,
     int SpanCount,
     int TotalDerivedRows,
-    int HeldAnchors,
-    int MaxHeldAnchors,
-    long RowsWalkedInLastEdit,
+    int HeldLines,
+    int MaxHeldLines,
+    long BytesScannedInLastEdit,
+    int LinesRebuiltInLastEdit,
     bool NeedsRebuild,
     IReadOnlyList<RawSpanSnapshot> Spans,
     int UndoDepth,
@@ -82,9 +84,9 @@ public sealed record RawEditSnapshot(
 {
     /// <summary>
     /// How much of the row index's budget the spans have taken, 0 to 1. The budget counts
-    /// anchors rather than rows: a row inside a span costs nothing to hold, only to re-walk.
+    /// line records rather than rows: a row inside a span is arithmetic, and costs nothing to hold.
     /// </summary>
-    public double BudgetUsed => MaxHeldAnchors == 0 ? 0 : (double)HeldAnchors / MaxHeldAnchors;
+    public double BudgetUsed => MaxHeldLines == 0 ? 0 : (double)HeldLines / MaxHeldLines;
 
     /// <summary>Bytes the document has gained or lost against the file on disk.</summary>
     public long ByteDelta => DocumentLength - OriginalLength;

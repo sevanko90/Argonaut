@@ -18,7 +18,7 @@ still holds or the code has moved out from under it. Some has since moved: the
 `MMapFile.GetSpan` chokepoint those sections cite is now the `IByteSource` seam (whole ranges via
 `ByteSourceReading.RequireContiguous`, which kept `GetSpan`'s exact-or-throw contract), and
 `FileSearchSession` is `SearchSession`, reading through `IByteOrigin.OpenRange`, and
-`RawSegmentIndex.NextRowBoundary` is now `RawRowBoundary.Next`. The argument is
+`RawSegmentIndex.NextRowBoundary` is now `RawRowBoundary.Next`, walked through `RawRowCursor`. The argument is
 unchanged by either rename; the line numbers are not current.
 
 The constraint that drives every choice: the app never holds a document in memory. It holds a
@@ -400,7 +400,10 @@ sharpened, what this document anticipated:
   there. That last condition is load-bearing rather than belt-and-braces — the byte before a
   convergence point can be the last byte an edit inserted, so a newline inserted onto a soft-wrap
   boundary produces two streams at the same offset that disagree about it
-  (`RawEditedRowIndexTests.ConvergenceRequiresAgreementOnWhereLinesStart`).
+  (`RawEditedRowIndexTests.ANewlineOnASoftWrapBoundary_StartsARealLine`). *Since superseded:*
+  forced breaks are now cap-anchored, which makes §3's intuition true to within 3 bytes and
+  non-chaining, and spans are runs of whole lines with no convergence walk at all — see "What
+  typing became".
 
 - **§6's warning about the caret understates one part of it.** The caret's hardest dependency is
   not rendering but decoding: `RawRowReader` is lossy in four directions at once (multi-byte
@@ -530,77 +533,54 @@ two characters a gigabyte apart meant materialising every row of the gigabyte be
 the second edit had to be refused outright to stop it. Spans are disjoint now - one per *place*
 edited - so the cost tracks how many places, not how far apart they are.
 
-What decides between widening a span and opening a new one is the index's own anchor stride,
-not a tuned number. A span can only begin at an anchor, because an anchor is the only place the
-original stream's state is known without walking to it, so a new span already pays up to 64 rows
-of walking before it reaches the edit; an edit closer than that is cheaper to absorb. Part of the
-same rule is not about cost at all: an edit in an anchor bucket the previous span has already
-re-derived past *must* join it, or the two spans overlap and every binary search in the class
-stops meaning anything. A re-derivation that runs past the span after it swallows that one
-instead, so spans stay disjoint and ordered without anyone predicting where a walk will stop.
-The anchor boundaries are where all of this changes its answer, so they are tested directly
-(`RawEditedRowIndexTests`, the anchor-boundary section) rather than left to the random scripts.
+**A span is a run of whole lines, holding one 12-byte record per line and no rows.** This is the
+second design; the first is worth a paragraph because the reason it failed is the reason this one
+works. Spans used to begin at an anchor of the original index and run until two byte streams -
+the original and the edited - could be proven to have re-converged, storing an anchor every 64
+rows on the way. Inside a single line that proof could only arrive at the line's newline, so an
+edit early in a ~100MB line walked to its end on every keystroke: ~30ns a row, ~40ms a character,
+on a document where everything else was instant. The walk was needed because a forced break was
+measured from the previous row's end, so one changed UTF-8 backoff moved every later break in the
+line. (Before *that*, spans held every row they derived, and one 48-byte edit in a 54MB line made
+a span of 676,661 rows and 21MB.)
 
-The consequences: editing in one place costs one anchor bucket plus the row or two it takes the
-two byte streams to re-converge; going back and forth between two places gives two spans, not
-more, because a span is a place and not a keystroke; and what is now unbounded is the *number* of
-places, which is what the budget in `NeedsRebuild` is for.
+What removed the walk is a change to the boundary rule, not to the span: forced breaks are now
+**cap-anchored**. A line's caps sit at `lineStart + k·W`, a break is its cap backed off 0..3 bytes
+over trailing continuation bytes, and the next cap is `W` past the last one whatever the backoff
+was (`RawRowBoundary`, walked by `RawRowCursor`). Every boundary then depends only on the four
+bytes at its own cap, so a line's rows are arithmetic from where it starts and ends
+(`RawLineRows`): counting them reads nothing, locating one peeks four bytes. Rows became W±3 bytes
+instead of W-3..W, which nothing can see - rows were already ragged in glyph count - and no
+decoder, caret or surface code changed. The decision record is
+[long-line-edit-plan.md](long-line-edit-plan.md); the option it was chosen over (breaking exactly
+at the cap and splitting characters across rows) is in
+[long-line-reflow-options.md](long-line-reflow-options.md).
 
-**A span holds anchors, not rows — which is the only reason a long line is survivable.** The
-first cut held every row a span derived. That is fine while a span is the sixty-odd rows an
-ordinary edit disturbs, and it is not fine at all when it is not: running the editor on the 4GB
-test document, a 48-byte edit inside a ~54MB unbroken line produced a span of 676,661 rows and
-21MB of `RawRowInfo`, ten times the budget, after which every further edit anywhere in the file
-was refused. A span now stores one marker every `AnchorStride` rows and re-walks the bucket on
-demand, exactly as `RawSegmentIndex` does over the file — the same edit costs about 10,500
-anchors and 170KB.
+With that rule a span needs only to begin at a line start and end at a line end. The original
+lines either side of it are provably unchanged - their bytes are the file's and their cap grids
+start where they always did - and every row inside it is computed from its line records. An edit
+finds the lines it touched (from the span they lie in, or from the original through
+`RawSegmentIndex.LineStartContaining`/`LineEndContaining`: a binary search plus at most two
+bounded bucket walks, however long the line), scans only the bytes it inserted for newlines, and
+rebuilds the records of the one span it lands in. Measured (Apple M5, Release,
+`RawEditKeystrokeBenchmarks`): ~520ns a keystroke, the same inside an 8MB line, a 128MB line, 1KB
+from the end of one, and in ordinary short lines; the row index allocates nothing per keystroke.
 
-The shortcut that would avoid the walk entirely is unsound, and it is worth recording because it
-is the obvious idea. Inside a soft-wrapped line the breaks fall every `WrapWidth` bytes from the
-line start, so it looks as though an insert leaves every later break exactly where it was, and
-the span could converge immediately at zero displacement. `RawRowBoundary.BreakAtCap` backs a
-forced break off by up to 3 bytes to avoid splitting a UTF-8 character, and which bytes sit at the
-cap has just changed — so one different backoff moves the next row, and that chains to the end of
-the line. It holds for ASCII and cannot be assumed, which is not a standard a row index gets to
-work to. The line really must be walked.
-
-What the walk costs is therefore the residual problem, and it is a time cost rather than a memory
-one: roughly 30ns per row (Apple M5, Release, `RawEditKeystrokeBenchmarks.TypeCharactersInsideALongLine`).
-
-Two things keep the walk off work it does not need to do, and both came out of the same report —
-that editing *near* a long line was as slow as editing inside it, and that the lag had no edge a
-user could point at.
-
-**A span resumes rather than restarts.** Rows before the earliest byte an edit touched cannot have
-moved, and a span's anchors are stored relative to its own start, so the walk picks up at the last
-anchor the edit could not have disturbed. Typing at the far end of a span covering a long line
-went from the whole line to the tail of it — measured on a 32MB line, 13ms to 0.01ms.
-
-**The original stream is positioned, not walked to.** Convergence cannot be declared before the
-edits' reach, so until then the original index is not consulted at all; at the reach the
-corresponding original row is found by lookup — two bounded anchor walks — and only from there do
-the two move in lockstep. Before this, the original was walked row by row from the span's start
-purely to arrive at a position a binary search could have given.
-
-**And widening a span now weighs what widening costs.** An edit within an anchor stride of a
-span's convergence point used to join that span on the grounds that a new span would cost an
-anchor bucket anyway. True next to an ordinary sixty-row span; badly false next to one covering a
-million rows of a long line, where widening means re-walking all of it. That is why the lag had no
-edge: it extended an anchor bucket past the end of the line, and a bucket is a distance in *rows*,
-which on a 4GB document is no distance at all on screen.
-
-What remains is an edit *early* inside a very long line, which must still walk to the line's end
-because that is where the two streams can first be shown to have rejoined: about 16ms on a 32MB
-line, 40ms on a 105MB one. Everything else - later in the same line, and past it - is instant.
-That last case has its own decision record,
-[long-line-reflow-options.md](long-line-reflow-options.md), which carries the measurement, the two
-shortcuts that turned out to be unsound, and the three ways out.
+The consequences: editing in one place costs one line record; edits on the same line or on
+adjacent lines share a span; going back and forth between two places gives two spans, not more,
+because a span is a place and not a keystroke; a delete across spans leaves one. A span holds at
+most `MaxLinesPerRun` (4096) lines, and a paste needing more becomes several adjacent spans, which
+is what keeps typing inside a million-line paste at microseconds - an edit rebuilds the whole span
+it lands in. What is unbounded is the *number* of places, which is what the budget in
+`NeedsRebuild` is for. The line boundaries are where all of this changes its answer, so they are
+tested directly (`RawEditedRowIndexTests`, the line-boundary section), and the geometry is checked
+against a real cursor walk by a property test (`RawLineRowsTests`).
 
 **`NeedsRebuild` is honest about being unimplemented, and about what it is not.** It fires when
-the spans together hold more than 65,536 anchors — a megabyte of them, about four million rows of
-coverage — and the only thing that happens is that edits in *new* places are refused; editing
-where changes already exist keeps working, and lookups stay correct throughout. It is a budget on
-what is *kept*, deliberately not on the per-keystroke walk above, which anchors do not bound.
+the spans together hold more than 524,288 line records — about 6MB, and about half a million
+separate places edited or lines pasted — and the only thing that happens is that edits in *new*
+places are refused; editing where changes already exist keeps working, and lookups stay correct
+throughout.
 
 The rebuild it names is worth stating precisely, because the obvious reading of it is wrong. It is
 not a re-index of the file: the rows on screen come from the piece table, and the bytes on disk

@@ -112,10 +112,10 @@ internal sealed class RawEditInspectorWindow : Window
             + (state.IsUnedited ? "unedited" : "edited");
 
         this.budget.Text =
-            $"row-index budget {N(state.HeldAnchors)} / {N(state.MaxHeldAnchors)} anchors "
+            $"row-index budget {N(state.HeldLines)} / {N(state.MaxHeldLines)} lines "
             + $"({state.BudgetUsed * 100:0.00}%) covering {N(state.TotalDerivedRows)} rows "
             + $"across {state.SpanCount} span(s)"
-            + $"    last edit walked {N(state.RowsWalkedInLastEdit)} rows"
+            + $"    last edit scanned {N(state.BytesScannedInLastEdit)} bytes, rebuilt {N(state.LinesRebuiltInLastEdit)} lines"
             + (state.NeedsRebuild ? "    NEEDS REBUILD - new edit sites are being refused" : string.Empty);
         this.budgetBar.Value = Math.Clamp(state.BudgetUsed * 1000, 0, 1000);
 
@@ -147,14 +147,11 @@ internal sealed class RawEditInspectorWindow : Window
             rows.Add(new[]
             {
                 span.Index.ToString(CultureInfo.InvariantCulture),
-                N(span.OriginalAnchor),
-                N(span.OriginalStartRow),
+                $"{N(span.OriginalStartRow)}..{N(span.OriginalRowsEnd)}",
                 N(span.StartRow),
-                span.FirstLineNumber is int line ? N(line) : "—",
+                N(span.FirstLineNumber),
                 N(span.RowsHeld),
-                N(span.AnchorsHeld),
-                N(span.ConvergedOriginalRow),
-                N(span.EditReach),
+                N(span.LinesHeld),
                 $"{N(span.StartOffset)}..{N(span.EndOffset)}",
                 $"{Signed(span.ByteDelta)}/{Signed(span.RowDelta)}/{Signed(span.LineDelta)}",
                 $"{Signed(span.ByteDeltaBefore)}/{Signed(span.RowDeltaBefore)}/{Signed(span.LineDeltaBefore)}",
@@ -162,7 +159,7 @@ internal sealed class RawEditInspectorWindow : Window
         }
 
         return Table(
-            new[] { "#", "anchor", "orig row", "start row", "line", "rows", "anchors", "converged", "reach", "bytes", "own Δb/Δr/Δl", "before Δb/Δr/Δl" },
+            new[] { "#", "orig rows", "start row", "line", "rows", "lines", "bytes", "own Δb/Δr/Δl", "before Δb/Δr/Δl" },
             rows);
     }
 

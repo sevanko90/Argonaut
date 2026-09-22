@@ -111,6 +111,24 @@ Other rules that fall out of the split:
 - **`FilePath` on a view model is display text** (`Path ?? DisplayName`). Anything that touches the
   file system reads `Origin.Path` instead.
 
+## Raw row boundaries are cap-anchored
+
+A forced break in the raw view is measured from the **line's arithmetic cap**, not from the
+previous row's end: a line's caps sit at `lineStart + k·W`, the break at a cap backs off 0..3 bytes
+so a UTF-8 character is not split, and the next cap is `W` further on whatever that backoff was
+(`RawRowBoundary`). Each boundary depends only on the four bytes at its own cap, which is what
+makes a line's rows arithmetic from its start (`RawLineRows`) and lets `RawEditedRowIndex` hold
+one record per edited line instead of walking the line on every keystroke.
+
+- **New code that walks rows uses `RawRowCursor`**, which carries the cap from row to row. Never
+  derive a boundary from the previous row's end, and never start a walk mid-line without the
+  cap - `RawSegmentIndex.AnchorAt` returns a cursor with the anchor's stored backoff for exactly
+  this reason.
+- **Rows are W-3..W+3 bytes** (W+4 with a peek-extended newline), not at most `W`. Anything that
+  sizes a buffer or asserts a row length from the wrap width allows for the backoff.
+- `RawLineRowsTests` checks the geometry against a cursor walk; if the rule ever changes, that test
+  and `RawSegmentIndexTests.NaiveScan` change with it.
+
 ## UI-threading convention: rely on the dispatcher's SynchronizationContext
 
 Avalonia installs a `SynchronizationContext` on the UI thread, so an `await` in a method that *started* on the

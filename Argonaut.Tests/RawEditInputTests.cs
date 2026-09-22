@@ -1,6 +1,7 @@
 using System.Text;
 using Argonaut.Features.Raw;
 using Argonaut.Infrastructure;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Input;
@@ -323,5 +324,56 @@ public sealed class RawEditInputTests : IDisposable
             await PumpAsync();
 
             Assert.Equal(before, vm.WrapWidth);
+        });
+
+    // ---- edit overview --------------------------------------------------------------------
+
+    private static string ManyLines(int count)
+    {
+        var text = new StringBuilder();
+        for (int i = 0; i < count; i++)
+            text.Append($"line {i:D4}\n");
+
+        return text.ToString();
+    }
+
+    [Fact]
+    public Task EditOverview_IsHiddenUntilThereIsAnEditor()
+        => WithView(ManyLines(10), async (window, vm, _) =>
+        {
+            var overview = window.GetVisualDescendants().OfType<RawEditOverview>().Single();
+            Assert.False(overview.IsVisible);
+
+            vm.SetEditing(true);
+            await PumpAsync();
+
+            Assert.True(overview.IsVisible);
+            Assert.Empty(overview.Marks);
+        });
+
+    [Fact]
+    public Task EditOverview_MarksAnEditAndClickingItPutsTheCaretThere()
+        => WhileEditing(ManyLines(2000), async (window, vm, _) =>
+        {
+            var overview = window.GetVisualDescendants().OfType<RawEditOverview>().Single();
+            long editAt = vm.RowIndex!.GetRowInfo(1500).Start + 2;
+            vm.Caret!.PlaceAt(editAt);
+            await PumpAsync();
+            TypeText(window, "Q");
+            await PumpAsync();
+
+            var mark = Assert.Single(overview.Marks);
+            Assert.Equal(editAt, mark.Offset);
+            Assert.InRange(mark.Top, overview.Bounds.Height * 0.7, overview.Bounds.Height * 0.8);
+
+            // Somewhere else entirely, then back via the mark.
+            vm.Caret.PlaceAt(0);
+            await PumpAsync();
+            var point = overview.TranslatePoint(new Avalonia.Point(overview.Bounds.Width / 2, mark.Top + 1), window)!.Value;
+            window.MouseDown(point, MouseButton.Left);
+            window.MouseUp(point, MouseButton.Left);
+            await PumpAsync();
+
+            Assert.Equal(editAt, vm.Caret.Caret.Offset);
         });
 }

@@ -49,6 +49,13 @@ until it lands an edited document cannot be written back.
   into a single span from the earliest edit to the re-convergence point; spans are disjoint, one
   per *place* edited, so two edits a gigabyte apart cost two line records rather than every row
   in between. (Spans have since become runs of whole lines - see the long-line bullet below.)
+- ~~**Edit overview beside the scrollbar.**~~ **Built** (`RawEditOverview`). The inspector's
+  piece-table bar turned on its side: an orange mark wherever the document differs from the file,
+  placed by row so it agrees with the scrollbar, and a click on one puts the caret on that edit.
+  Deletions are marked too - they leave no scratch piece, only a seam between original pieces
+  (`RawPieceTable.EnumerateEditedRanges`). Marks are computed per pixel, so the row lookups are
+  bounded by the strip's height rather than by how many places were edited, and undoing back to
+  the file clears them.
 - ~~**A window onto the editor's internals.**~~ **Built**, Debug only: Cmd/Ctrl+Shift+D opens
   `Diagnostics/RawEditInspectorWindow` — piece list, dirty spans with both halves of each delta,
   budget fullness, undo depth, and a map drawing spans and pieces on one scale, refreshed per

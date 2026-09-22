@@ -79,6 +79,76 @@ public sealed class RawPieceTable : IByteSource
     public int PieceCount => this.pieces.Count;
 
     /// <summary>
+    /// Where the document differs from the original, in document order: every run of inserted
+    /// bytes as its range, and every place original bytes were removed as an empty range at the
+    /// seam. A deletion leaves no scratch piece behind - only two original pieces that no longer
+    /// meet - so reading the scratch pieces alone would miss every delete.
+    ///
+    /// A struct enumerator over the live piece list: no allocation, and not valid across an edit.
+    /// </summary>
+    internal EditedRangeEnumerator EnumerateEditedRanges() => new(this);
+
+    /// <summary>See <see cref="EnumerateEditedRanges"/>.</summary>
+    internal struct EditedRangeEnumerator
+    {
+        private readonly RawPieceTable table;
+        private int next;
+        private long originalReached;
+        private bool endChecked;
+
+        public EditedRangeEnumerator(RawPieceTable table)
+        {
+            this.table = table;
+            this.next = 0;
+            this.originalReached = 0;
+            this.endChecked = false;
+            Current = default;
+        }
+
+        /// <summary>Logical range; <c>Start == End</c> for a deletion seam.</summary>
+        public (long Start, long End) Current { get; private set; }
+
+        public readonly EditedRangeEnumerator GetEnumerator() => this;
+
+        public bool MoveNext()
+        {
+            var pieces = this.table.pieces;
+            while (this.next < pieces.Count)
+            {
+                var piece = pieces[this.next++];
+                if (piece.ChunkIndex != OriginalChunk)
+                {
+                    Current = (piece.LogicalStart, piece.LogicalStart + piece.Length);
+                    return true;
+                }
+
+                // Original pieces only ever appear in increasing buffer order, so a gap between
+                // where the last one ended and where this one starts is bytes that were removed.
+                bool removedBefore = piece.Offset != this.originalReached;
+                this.originalReached = piece.Offset + piece.Length;
+                if (removedBefore)
+                {
+                    Current = (piece.LogicalStart, piece.LogicalStart);
+                    return true;
+                }
+            }
+
+            // Bytes removed from the end of the original leave no piece to notice them by.
+            if (!this.endChecked)
+            {
+                this.endChecked = true;
+                if (this.originalReached != this.table.original.AvailableLength)
+                {
+                    Current = (this.table.AvailableLength, this.table.AvailableLength);
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Swaps the original buffer for an equivalent one - a re-opened mapping of the same bytes
     /// after a save unmapped the old one. Rejects a replacement of a different length, because
     /// every piece offset into the original would then mean something different.

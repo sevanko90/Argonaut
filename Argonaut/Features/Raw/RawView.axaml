@@ -10,7 +10,7 @@
             CornerRadius="8"
             Background="{DynamicResource AppWindowBackgroundBrush}"
             ClipToBounds="True">
-        <Grid RowDefinitions="*,Auto,Auto">
+        <Grid RowDefinitions="*,Auto,Auto" ColumnDefinitions="*,Auto">
             <!-- The surface draws every visible row itself and implements ILogicalScrollable, so
                  the ScrollViewer supplies the wheel, the scrollbar and page keys while the
                  surface supplies only the viewport arithmetic. Horizontal scrolling stays
@@ -31,6 +31,15 @@
                                     CaretBrush="{DynamicResource AppTextBrush}" />
             </ScrollViewer>
 
+            <!-- Where the edits are, on the scrollbar's scale: the inspector's piece-table bar
+                 turned on its side. Shown only once there is an editor. -->
+            <raw:RawEditOverview x:Name="EditOverview"
+                                 Grid.Row="0"
+                                 Grid.Column="1"
+                                 Width="8"
+                                 IsVisible="False"
+                                 MarkBrush="{DynamicResource AppEditMarkBrush}" />
+
             <ScrollBar x:Name="PanScrollBar"
                        Grid.Row="1"
                        Orientation="Horizontal"
@@ -43,6 +52,7 @@
                  panel-coloured strip under a top border - so a reader recognises it as the view
                  talking about its selection rather than as part of the document. -->
             <Border Grid.Row="2"
+                    Grid.ColumnSpan="2"
                     BorderBrush="{DynamicResource AppBorderBrush}"
                     BorderThickness="0,1,0,0"
                     Background="{DynamicResource AppPanelBackgroundBrush}"

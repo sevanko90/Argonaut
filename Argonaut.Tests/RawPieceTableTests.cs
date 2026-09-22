@@ -334,4 +334,67 @@ public class RawPieceTableTests
             Assert.Equal(whole[offset], span[0]);
         }
     }
+
+    // ---- edited ranges --------------------------------------------------------------------
+
+    private static List<(long Start, long End)> EditedRanges(RawPieceTable table)
+    {
+        var ranges = new List<(long, long)>();
+        foreach (var range in table.EnumerateEditedRanges())
+            ranges.Add(range);
+
+        return ranges;
+    }
+
+    [Fact]
+    public void EditedRanges_UneditedTableHasNone()
+        => Assert.Empty(EditedRanges(TableOver("hello world")));
+
+    [Fact]
+    public void EditedRanges_AnInsertIsItsRange()
+    {
+        var table = TableOver("hello world");
+        table.Insert(5, Bytes(", big"));
+
+        Assert.Equal([(5L, 10L)], EditedRanges(table));
+    }
+
+    [Theory]
+    [InlineData(0, 3, 0)]   // from the start: the seam is at 0
+    [InlineData(4, 3, 4)]   // from the middle
+    [InlineData(8, 3, 8)]   // to the end: no piece follows it, so the seam is the document's end
+    public void EditedRanges_ADeleteIsAnEmptyRangeAtItsSeam(int offset, int length, long seam)
+    {
+        var table = TableOver("hello world");
+        table.Delete(offset, length);
+
+        Assert.Equal([(seam, seam)], EditedRanges(table));
+    }
+
+    [Fact]
+    public void EditedRanges_AreInDocumentOrder()
+    {
+        var table = TableOver("0123456789abcdef");
+        table.Insert(12, Bytes("X"));
+        table.Delete(2, 2);
+        table.Replace(6, 1, Bytes("YY"));
+
+        var ranges = EditedRanges(table);
+        Assert.Contains((2L, 2L), ranges);
+        Assert.Contains((6L, 8L), ranges);
+        Assert.Contains((11L, 12L), ranges);
+        Assert.Equal(ranges.OrderBy(r => r.Start).ToList(), ranges);
+    }
+
+    [Fact]
+    public void EditedRanges_UndoingAnInsertByDeletingItLeavesNone()
+    {
+        // Two original pieces that meet again are not a deletion, even though the table no longer
+        // reports itself unedited.
+        var table = TableOver("hello world");
+        table.Insert(5, Bytes("XYZ"));
+        table.Delete(5, 3);
+
+        Assert.Empty(EditedRanges(table));
+    }
 }

@@ -406,4 +406,45 @@ public sealed class ShellSaveTests : IDisposable
         Assert.True(saving.IsFinished);
         Assert.Same(harness.Document, harness.Shell.CurrentDocument);
     }
+
+    /// <summary>The split button's two halves: Save needs something to save, Save As only needs a
+    /// document ready to write - so on a clean document the dropdown works and Save does not.</summary>
+    [Fact]
+    public async Task SaveNeedsChanges_ButSaveAsDoesNot()
+    {
+        string path = WriteFile();
+        var harness = new Harness();
+        await harness.Shell.OpenPathAsync(path);
+        var changed = new List<string?>();
+        harness.Shell.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        Assert.True(harness.Shell.CanSaveAs);
+        Assert.False(harness.Shell.CanSave);
+
+        harness.Document.HasUnsavedChanges = true;
+
+        Assert.True(harness.Shell.CanSave);
+        Assert.Contains(nameof(MainWindowViewModel.CanSave), changed);
+    }
+
+    [Fact]
+    public async Task WhileSaving_NeitherHalfIsAvailable()
+    {
+        string path = WriteFile();
+        var harness = new Harness();
+        await harness.Shell.OpenPathAsync(path);
+        harness.Document.HasUnsavedChanges = true;
+        harness.Document.RunsUntilStopped = true;
+
+        ProgressEntry? saving = null;
+        harness.Board.WorkStarted += (_, entry) => saving = entry;
+        var save = harness.Shell.SaveAsync();
+
+        Assert.False(harness.Shell.CanSaveAs);
+        Assert.False(harness.Shell.CanSave);
+
+        saving!.RequestStop();
+        await save.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.True(harness.Shell.CanSaveAs);
+    }
 }

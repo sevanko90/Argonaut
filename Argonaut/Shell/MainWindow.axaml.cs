@@ -57,6 +57,15 @@ public partial class MainWindow : Window
         RawJumpService.Requested += offset => _ = viewModel.JumpToRawOffsetAsync(offset);
         ArrayTableService.Requested += request => _ = viewModel.OpenArrayTableAsync(request);
 
+        // The platform's own modifier, so the menu shows the shortcut the key handler honours.
+        // Reached through the button rather than by name: a control named inside a flyout is not
+        // reliably in the window's name scope, and would be null here.
+        if (SaveOptionsButton.Flyout is MenuFlyout { Items: [MenuItem saveAs, ..] })
+        {
+            saveAs.InputGesture = new KeyGesture(Key.S,
+                (OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control) | KeyModifiers.Shift);
+        }
+
         EmptyState.ChooseFileRequested += async (_, _) => await BrowseForFile();
         EmptyState.PasteRequested += async (_, _) => await viewModel.PasteAsync();
         EmptyState.SetPasteAvailable(viewModel.CanPaste);
@@ -349,6 +358,11 @@ public partial class MainWindow : Window
     private async void OnSaveFile(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         await viewModel.SaveAsync();
+    }
+
+    private async void OnSaveFileAs(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        await viewModel.SaveAsAsync();
     }
 
     /// <summary>

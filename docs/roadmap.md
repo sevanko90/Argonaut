@@ -24,7 +24,7 @@ re-derived where the JSON index cannot. Built:
   line/column and selection size, with "Edited — not saved" while dirty.
 - Edit overview strip beside the scrollbar (`RawEditOverview`), click to jump to an edit.
 - Debug-only internals inspector, Cmd/Ctrl+Shift+D (`Diagnostics/RawEditInspectorWindow`).
-- Save (Cmd/Ctrl+S, toolbar button) and Save As (Cmd/Ctrl+Shift+S): a background streaming copy
+- Save (Cmd/Ctrl+S) and Save As (Cmd/Ctrl+Shift+S), on a toolbar split button: a background streaming copy
   into a stage beside the file, then unmap, atomic swap (`SiblingFileReplacer`) and a fresh
   re-index with the caret put back. A failed swap leaves the file untouched and the edits open.
   Save / Don't Save / Cancel is asked before closing, opening, pasting, switching view, quitting

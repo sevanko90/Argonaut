@@ -1017,9 +1017,13 @@ public sealed class MainWindowViewModel : ObservableObject
     /// <summary>True when the current document reads differently from its file.</summary>
     public bool HasUnsavedChanges => currentDocument is ISaveableDocument { HasUnsavedChanges: true };
 
-    /// <summary>Whether the Save button does anything now: there are changes, the document is
-    /// ready to write them, and no save is already running.</summary>
+    /// <summary>Whether Save does anything now: there are changes, the document is ready to write
+    /// them, and no save is already running.</summary>
     public bool CanSave => !isSaving && currentDocument is ISaveableDocument { CanSave: true, HasUnsavedChanges: true };
+
+    /// <summary>Whether Save As can start: as <see cref="CanSave"/> but without needing changes -
+    /// writing an unedited document to a new file is a copy, and a reasonable thing to want.</summary>
+    public bool CanSaveAs => !isSaving && currentDocument is ISaveableDocument { CanSave: true };
 
     /// <summary>
     /// Saves the current document over its file, or asks where to put it when it has none (a
@@ -1202,6 +1206,7 @@ public sealed class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(IsSaveAvailable));
         OnPropertyChanged(nameof(HasUnsavedChanges));
         OnPropertyChanged(nameof(CanSave));
+        OnPropertyChanged(nameof(CanSaveAs));
     }
 
     /// <summary>Whether two full paths name the same file, by the platform's usual case rule -

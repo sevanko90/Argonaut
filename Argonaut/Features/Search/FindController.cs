@@ -46,6 +46,14 @@ public sealed class FindController
     private bool running;
     private readonly Queue<(string Term, int Direction)> queued = new();
 
+    /// <summary>The term of the newest press, in flight or queued - what a new press is compared
+    /// against to tell "next match" from "search for something else".</summary>
+    private string? latestTerm;
+
+    /// <summary>Cancelled when a press for a different term supersedes the one in flight, so its
+    /// wait for a first match - which over a multi-GB file can last the whole scan - ends now.</summary>
+    private CancellationTokenSource? pressCts;
+
     public FindController(Action<string?> statusChanged, Func<IProgressReporter?> progressReporterFactory)
     {
         this.statusChanged = statusChanged;
@@ -71,17 +79,33 @@ public sealed class FindController
     /// pile up faster than they drain and the window stops painting. Queued presses still each
     /// advance one match; only a leaned-on key past <see cref="MaxQueuedFinds"/> is dropped,
     /// which is the case where the user cannot be tracking individual steps anyway.
+    ///
+    /// A press for a DIFFERENT term is not queued behind the one in flight: it replaces anything
+    /// queued and interrupts the press still running, whose wait for a match - or for its reveal -
+    /// would otherwise hold the new search back until the old scan found something or finished.
     /// </summary>
     public async Task FindAsync(string term, int direction)
     {
         if (running)
         {
-            if (queued.Count < MaxQueuedFinds)
+            if (!string.Equals(term, latestTerm, StringComparison.Ordinal))
+            {
+                queued.Clear();
                 queued.Enqueue((term, direction));
+                latestTerm = term;
+                pressCts?.Cancel();
+                CancelReveal();
+            }
+            else if (queued.Count < MaxQueuedFinds)
+            {
+                queued.Enqueue((term, direction));
+            }
+
             return;
         }
 
         running = true;
+        latestTerm = term;
         try
         {
             await FindCoreAsync(term, direction);
@@ -107,6 +131,9 @@ public sealed class FindController
         long request = findRequest.Begin();
         CancelReveal();
 
+        var press = new CancellationTokenSource();
+        pressCts = press;
+
         if (sessions.Length == 0 || !string.Equals(term, sessionTerm, StringComparison.Ordinal))
         {
             // Synchronous - the retired scans own their mappings, so nothing needs joining.
@@ -128,7 +155,7 @@ public sealed class FindController
 
         if (direction >= 0)
         {
-            if (!await EnsureStopAfterPositionAsync(request))
+            if (!await EnsureStopAfterPositionAsync(request, press.Token))
                 return;
         }
         else
@@ -168,7 +195,7 @@ public sealed class FindController
     /// when a newer request took over mid-wait. Matches the viewer cannot show are folded away
     /// by the cursor, so a long run of them costs one pass, not one wait each.
     /// </summary>
-    private async Task<bool> EnsureStopAfterPositionAsync(long request)
+    private async Task<bool> EnsureStopAfterPositionAsync(long request, CancellationToken superseded)
     {
         while (true)
         {
@@ -197,7 +224,15 @@ public sealed class FindController
             if (waits.Count == 0)
                 continue;
 
-            await Task.WhenAny(waits);
+            try
+            {
+                await Task.WhenAny(waits).WaitAsync(superseded);
+            }
+            catch (OperationCanceledException)
+            {
+                return false;
+            }
+
             if (!findRequest.IsCurrent(request))
                 return false;
         }
@@ -241,6 +276,7 @@ public sealed class FindController
     public void StopSearch()
     {
         findRequest.Begin();
+        pressCts?.Cancel();
         CancelReveal();
         navigator?.SetHighlightTerm(null);
         statusChanged(null);

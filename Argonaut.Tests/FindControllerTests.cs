@@ -78,6 +78,98 @@ public class FindControllerTests
     }
 
     /// <summary>
+    /// Serves the first chunk at once and holds every later one until released - a multi-GB
+    /// scan that is still running, without needing gigabytes. A term missing from the first
+    /// chunk therefore leaves its press waiting for as long as the test likes.
+    /// </summary>
+    private sealed class HeldBackOrigin(byte[] bytes) : IByteOrigin
+    {
+        private readonly MemoryByteOrigin inner = new(bytes, "held back");
+
+        public ManualResetEventSlim Release { get; } = new();
+
+        public string DisplayName => inner.DisplayName;
+        public string? Path => null;
+        public long AvailableLength => inner.AvailableLength;
+        public IByteSource Open() => inner.Open();
+        public void Dispose() => Release.Set();
+
+        public IByteSource OpenRange(long offset, long length)
+        {
+            if (offset > 0)
+                Release.Wait(TimeSpan.FromSeconds(30));
+
+            return inner.OpenRange(offset, length);
+        }
+    }
+
+    private sealed class OriginNavigator(IByteOrigin origin) : ISearchNavigator
+    {
+        public ScanTarget ScanTarget { get; } = new(origin);
+        public List<SearchMatch> Revealed { get; } = new();
+        public CancellationToken DocumentTearingDown => default;
+        public void SetHighlightTerm(string? term) { }
+
+        public Task RevealAsync(SearchMatch match, CancellationToken ct)
+        {
+            Revealed.Add(match);
+            return Task.CompletedTask;
+        }
+    }
+
+    /// <summary>
+    /// The bug: presses are serialised, and a press waiting for the first match of a term the
+    /// scan has not found yet held a new term's press in the queue until the old scan found
+    /// something or reached the end of a 4GB file. A different term must interrupt it instead.
+    /// </summary>
+    [Fact]
+    public async Task ANewTerm_InterruptsAPressStillWaitingForTheOldOne()
+    {
+        var content = new byte[3 * 4 * 1024 * 1024];
+        Array.Fill(content, (byte)'a');
+        Encoding.UTF8.GetBytes("needle").CopyTo(content, 100);
+        using var origin = new HeldBackOrigin(content);
+        var navigator = new OriginNavigator(origin);
+        var controller = new FindController(_ => { }, () => null);
+        controller.Attach(navigator);
+
+        try
+        {
+            var waitingForAbsent = controller.FindAsync("absent", direction: 1);
+            var newTerm = controller.FindAsync("needle", direction: 1);
+
+            // Both presses finish while the old scan is still held part way through the file.
+            await Task.WhenAll(waitingForAbsent, newTerm).WaitAsync(TimeSpan.FromSeconds(10));
+
+            Assert.Equal(new SearchMatch(100, 6), Assert.Single(navigator.Revealed));
+        }
+        finally
+        {
+            origin.Release.Set();
+            controller.Detach();
+        }
+    }
+
+    /// <summary>Holding Enter on one term still steps match by match, rather than each repeat
+    /// cancelling the one before it.</summary>
+    [Fact]
+    public async Task RepeatedPressesOfTheSameTerm_StillEachAdvance()
+    {
+        await WithController("needle x needle x needle", async (controller, navigator, _) =>
+        {
+            var presses = new[]
+            {
+                controller.FindAsync("needle", 1),
+                controller.FindAsync("needle", 1),
+                controller.FindAsync("needle", 1),
+            };
+            await Task.WhenAll(presses).WaitAsync(TimeSpan.FromSeconds(5));
+
+            Assert.Equal(new long[] { 0, 9, 18 }, navigator.Revealed.Select(m => m.Offset));
+        });
+    }
+
+    /// <summary>
     /// A save cannot replace the file while a scan still holds a chunk mapping of it, so it waits
     /// for every scan - including ones retired earlier by a term change, which nothing else joins.
     /// </summary>

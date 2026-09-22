@@ -21,8 +21,7 @@ namespace Argonaut.Tests;
 ///
 /// Before the rule was cap-anchored a break was measured from the previous row's end, and over
 /// multi-byte content the boundaries moved <i>with the content</i>, all the way to the line's
-/// newline; that is what made typing early in a 100MB line cost ~40ms. See
-/// docs/long-line-edit-plan.md.
+/// newline; that is what made typing early in a 100MB line cost ~40ms.
 /// </summary>
 public class RawLongLineReflowTests
 {

@@ -157,7 +157,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
 
     // ---- editing ------------------------------------------------------------------------
     //
-    // docs/editing-options.md §2B: the raw view is where editing lives, because its row index is
+    // The raw view is where editing lives, because its row index is
     // a pure function of the bytes and can be re-derived where the JSON index cannot. Nothing
     // here writes to the file - see RawEditController.
 

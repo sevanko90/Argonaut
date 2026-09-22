@@ -37,7 +37,7 @@ public enum RawEditOutcome
 ///
 /// <b>Nothing here touches the file on disk.</b> The document reads as the edited bytes; the
 /// original mapping is never written. Saving is a separate, streaming rewrite - see
-/// docs/editing-options.md §4 - and until it exists an edited document is an in-memory
+/// docs/save-plan.md - and until it exists an edited document is an in-memory
 /// difference from what is on disk, which is what <see cref="IsDirty"/> says.
 ///
 /// UI thread only: <see cref="RawPieceTable"/> is not thread-safe, and editing is gated on the

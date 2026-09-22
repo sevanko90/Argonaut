@@ -8,138 +8,44 @@ Nothing here is scheduled. Items are grouped by area, and roughly ordered by val
 
 ## Editing
 
-Options weighed, and the sequencing, are in [editing-options.md](editing-options.md). The decision
-recorded there is to build the byte layer once in the raw view rather than starting in the JSON
-tree, because the raw index is a pure function of the bytes and can be re-derived where the JSON
-index cannot. Steps 1 and 2 are built: the raw view has a caret, a selection, copy-out and an
-edit mode in which typing changes the document. Step 3 - saving - is the next piece of work, and
-until it lands an edited document cannot be written back.
+The raw view has an edit mode: a toolbar toggle, enabled once the row scan finishes, behind which
+`RawEditController` edits a `RawPieceTable` over (original mapping, append-only scratch). Memory
+grows with edits, not file size, and nothing is written to disk. It is in the raw view rather than
+the JSON tree because the raw row index is a pure function of the bytes and can be re-derived where
+the JSON index cannot. Built:
 
-- ~~**Piece table over (original mapping, append-only scratch).**~~ **Built** (`Features/Raw/`:
-  `RawPieceTable`, `RawEditedRowIndex`, `RawRowDecoder`, `RawCaretStops`, `RawEditJournal`,
-  `RawTextExtractor`, over the `IByteSource` seam). Raw reads are in piece-space; the row index
-  describes only the lines an edit touched and reports `NeedsRebuild` when the spans grow past
-  their budget. No UI change — verified headlessly against a from-scratch index of the edited
-  bytes. Measured: ~1.6-12.5ns per offset resolution (1 to 1024 pieces, no allocation), ~10us per
-  keystroke including re-derivation.
-- **Editing UI in the raw view.** *Built*, apart from IME. `RawTextSurface` replaced the
-  `ListBox`: it draws every visible row itself, implements `ILogicalScrollable`, and holds the
-  caret (`RawCaretController`, `RawCaret`), selection across rows, and copy. Edit mode is a
-  toolbar toggle gated on `RawSegmentIndex.AllItemsPublished`, and `RawEditController` is what
-  sits behind it — typing, Enter, backspace and forward delete against the piece table, paste,
-  and undo/redo through `RawEditJournal`. `MainWindow`'s tunnelling Escape leaves edit mode
-  rather than dismissing the find bar while the raw view is in it. IME/dead-key composition is
-  deferred past v1 — `Avalonia.Headless` posts finished text rather than composition events, so
-  it cannot be tested here.
+- Caret, selection across rows, keyboard navigation and copy, drawn by `RawTextSurface`.
+- Typing, Enter, backspace/forward delete by character (`RawCaretStops`), paste, and undo/redo
+  through `RawEditJournal`; consecutive typing coalesces into one piece.
+- Constant-cost edits anywhere, including inside a 100MB+ unbroken line: forced row breaks are
+  cap-anchored (see CLAUDE.md), so `RawEditedRowIndex` holds one 12-byte record per edited line.
+  ~520ns a keystroke.
+- Caret readout gutter: named character under the caret (`UnicodeNames`), byte offset,
+  line/column and selection size, with "Edited — not saved" while dirty.
+- Edit overview strip beside the scrollbar (`RawEditOverview`), click to jump to an edit.
+- Debug-only internals inspector, Cmd/Ctrl+Shift+D (`Diagnostics/RawEditInspectorWindow`).
 
-  The prediction that the caret would be the larger half held. Five defects came out of running
-  it on a real 4GB file rather than out of the test suite, and each is worth remembering because
-  the tests could not have found them:
-  - The surface never took keyboard focus. Every input test called `Focus()` in its own setup, so
-    all of them passed against an app where none of the keyboard worked.
-  - A cached scroll extent went stale between the row count growing and anything refreshing it,
-    so a reveal clamped ~1.6M rows short on a 4GB file. Extents are computed live now.
-  - Placing the caret before revealing let the caret's own minimal scroll park the row on the
-    bottom edge, after which the centred reveal found it "already visible". Two correct behaviours
-    cancelling out; ordering is load-bearing and now tested end to end.
-  - The caret was drawn over the full row height rather than the text's, so it overhung the glyphs.
-  - Find highlighting could not span a soft wrap (pre-existing, inherited from the attached-property
-    version it replaced).
-- ~~**More than one dirty span in `RawEditedRowIndex`.**~~ **Built.** Edits no longer coalesce
-  into a single span from the earliest edit to the re-convergence point; spans are disjoint, one
-  per *place* edited, so two edits a gigabyte apart cost two line records rather than every row
-  in between. (Spans have since become runs of whole lines - see the long-line bullet below.)
-- ~~**Edit overview beside the scrollbar.**~~ **Built** (`RawEditOverview`). The inspector's
-  piece-table bar turned on its side: an orange mark wherever the document differs from the file,
-  placed by row so it agrees with the scrollbar, and a click on one puts the caret on that edit.
-  Deletions are marked too - they leave no scratch piece, only a seam between original pieces
-  (`RawPieceTable.EnumerateEditedRanges`). Marks are computed per pixel, so the row lookups are
-  bounded by the strip's height rather than by how many places were edited, and undoing back to
-  the file clears them.
-- ~~**A window onto the editor's internals.**~~ **Built**, Debug only: Cmd/Ctrl+Shift+D opens
-  `Diagnostics/RawEditInspectorWindow` — piece list, dirty spans with both halves of each delta,
-  budget fullness, undo depth, and a map drawing spans and pieces on one scale, refreshed per
-  keystroke. The folder is excluded from non-Debug builds; the `RawEditSnapshot` behind it is
-  ordinary tested code. Nothing equivalent exists for the JSON indexes, which is the obvious
-  place to take this next if it earns its keep.
-- ~~**Editing inside a very long line holds every row of it.**~~ **Fixed**, and the fix was not
-  the one first written here. Found by running the editor on the 4GB test document: a 48-byte edit
-  inside a ~54MB unbroken line produced a span of 676,661 rows and 21MB of `RawRowInfo`, ten times
-  the budget, after which every further edit anywhere was refused.
+Queued:
 
-  The fix first proposed — converge immediately at zero displacement, since a soft-wrapped line
-  breaks every `WrapWidth` bytes from the line start — is **unsound**, and the note is kept because
-  it is the obvious idea: `RawRowBoundary.BreakAtCap` backs a forced break off up to 3 bytes to
-  avoid splitting a UTF-8 character, which bytes sit at the cap has just changed, and one different
-  backoff chains. The line genuinely has to be walked.
-
-  What was avoidable is *keeping* every row it walks past. A span now stores one anchor every
-  `AnchorStride` rows and re-walks the bucket on demand, exactly as `RawSegmentIndex` does — the
-  same edit costs about 10,500 anchors and 170KB. What remains is a time cost of roughly 30ns per
-  row walked, so about 20ms per keystroke at 54MB; measured across line lengths in
-  `RawEditKeystrokeBenchmarks.TypeCharactersInsideALongLine`, and bounded properly only by the
-  re-index below. *Superseded:* the walk itself is gone - see the long-line bullet below.
-- ~~**The undo journal is O(edits²).**~~ **Fixed.** Every step copied the *whole* piece list, on
-  the reasoning — written into `RawEditJournal` itself — that the list was bounded by the row
-  index's rebuild threshold. It is not: the threshold bounds anchors, and nothing bounds pieces.
-  Editing in n places leaves about 2n of them, so n copies of all of them is quadratic. Measured
-  at 4.4MB for 250 edits, 65MB for 1,000 and 187MB for 2,000, against 1.5MB for the piece table
-  and row index together. A step now holds the *run* of the piece list each edit rewrote, which
-  for typing is one piece: 3.6MB at 2,000 edits, and linear.
-- ~~**Bounding the walk an edit early in a very long line costs.**~~ **Fixed** — the walk is gone
-  rather than bounded. An edit early in a ~105MB unbroken line used to walk to the line's end,
-  about 40ms per keystroke. Forced breaks are now cap-anchored (measured from the line's
-  arithmetic cap, not the previous row's end), so a line's rows are arithmetic from its start
-  (`RawLineRows`), and a dirty span is a run of whole lines holding one 12-byte record per line.
-  An edit costs the bytes it inserted plus the lines it touched: ~520ns a keystroke in an 8MB or a
-  128MB line alike, the same as in short lines (`RawEditKeystrokeBenchmarks`). Decision record:
-  [long-line-edit-plan.md](long-line-edit-plan.md); the options it was chosen from:
-  [long-line-reflow-options.md](long-line-reflow-options.md).
-- **Re-index over the piece table, for when `NeedsRebuild` fires.** The budget is now the only
-  cap: past 524,288 line records (~6MB) — about half a million separate places edited, or pastes
-  adding that many lines — `CanAbsorbEditAt` refuses to open a span somewhere new
-  (`RawEditOutcome.NoRoomForAnotherEditSite`, a toast), while editing where changes already exist
-  keeps working and every lookup stays correct.
-
-  The rebuild is **not** a re-index of the file, and the distinction is the whole difficulty: the
-  rows on screen come from the piece table, so the scan has to run over the piece table, and a
-  scan is only sound over bytes that then never change. The shape is freeze the piece table, scan
-  it, and layer a fresh single-piece `RawPieceTable` over the frozen one as the new baseline — a
-  merge of the edits into the baseline, which is what `RawPieceTable`'s "collapses it back to a
-  single piece" means. Hence the sequencing with save: edits are frozen for the whole scan
-  (seconds to minutes on a multi-GB document), `RawEditJournal`'s snapshots belong to the
-  outgoing table so undo history either ends at a rebuild or must cross one, and each rebuild adds
-  a layer that every later read pays a binary search for. A save rewrites the file and starts
-  again from one piece over it, which answers the motivating case more cheaply.
-- ~~**Caret position readout.**~~ **Built** as a status gutter along the bottom of the raw view
-  (`RawCaretReadout`, `RawView.axaml`): the character under the caret named in full on the left
-  (`UnicodeNames`, a generated Unicode Character Database table), and byte offset, line/column and
-  selection size on the right. It went in the view rather than the app's status bar, which is tight
-  and has no per-view injectable region.
-
-  Deliberately **not** included: a character offset into the file. It cannot be answered without
-  decoding from byte 0, and the row scan finds breaks with a vectorized newline search that never
-  decodes — so the number would cost either a full decode per caret move or a permanently slower
-  index. The column and the selection's character count are capped for the same reason
-  (`ColumnScanBytes` 1MB, `SelectionScanBytes`) and report "—" past it; the line number is not
-  capped, since `IRawRowIndex.LineContaining` gets it from the anchor walk the index already does.
-- **Unicode descriptors elsewhere.** The name lookup is not raw-specific; the JSON views could
-  identify a character under the cursor the same way.
-- **Save as a streaming rewrite.** Staged temp file, atomic swap, background re-index. The copy is
-  one sequential pass and not where the difficulty lives; the swap is platform code behind
-  `IFileReplacer`, because the Mac App Store sandbox forbids a temp file beside the original and
-  Windows forbids replacing a file that is still mapped. Design in
-  [editing-options.md](editing-options.md) §4.
-- **Scalar edits in the JSON tree.** An offset-keyed replacement overlay served at
-  the `IByteSource` seam, with no index change, is a small self-contained feature on its own. Decide
-  it *after* the raw editor ships, not before.
-- **Structural editing in the JSON tree** (delete, insert, paste) — tombstones and fragment
-  indices merged into the row walk. The expensive class. Explicitly not committed to.
-- **Search while a document is dirty.** The chosen answer is that search reflects the last save
-  and the document says so; a merge-iterator over piece-space is a project of its own. Now that
-  edit mode exists this has a visible consequence: a reveal places the caret as well as
-  scrolling, so past the first edit a search hit lands near the match rather than on it. The
-  raw view's status gutter carries the "Edited — not saved" marker throughout.
+- **Save.** Streaming rewrite into a staged file, atomic swap behind `IFileReplacer`, background
+  re-index. The next piece of work; until it lands an edited document cannot be written back.
+  Plan: [save-plan.md](save-plan.md).
+- **IME and dead-key composition.** Deferred past v1; `Avalonia.Headless` posts finished text
+  rather than composition events, so it cannot be tested here.
+- **In-memory rebuild when `NeedsRebuild` fires.** Past 524,288 line records (~half a million
+  separate places edited) edits in new places are refused with a toast. A save clears this more
+  cheaply, so a rebuild over the piece table is only worth building if that ever proves not enough.
+- **Re-wrap while edited, and search over edited bytes.** Both are off while a piece table exists;
+  search reads the file and so lands near rather than on a match past the first edit. Save brings
+  both back; a merge-iterator over piece-space would be a project of its own.
+- **Unicode descriptors elsewhere.** The JSON views could name the character under the cursor the
+  same way.
+- **An internals inspector for the JSON indexes**, if the raw one earns its keep.
+- **Scalar edits in the JSON tree.** An offset-keyed replacement overlay served at the
+  `IByteSource` seam, with no index change. Decide after save ships.
+- **Structural editing in the JSON tree** (delete, insert, paste): tombstones and fragment indices
+  merged into the row walk. The expensive class; explicitly not committed to. Saving from raw and
+  re-indexing may make it unnecessary.
 
 ## JSON diff
 
@@ -163,7 +69,7 @@ and [json-array-nesting-options.md](json-array-nesting-options.md).
   table has no "export this back out" action: the useful version of it is a document-level feature
   (export any container from the tree, not just a table), so it wants sizing on its own rather
   than as a table button. Shares the streaming-write path with
-  [editing-options.md](editing-options.md) §4.
+  [save-plan.md](save-plan.md).
 - **Editing cells.**
 - **Sorting and filtering the table.**
 - **Searching within the table.** `CreateSearchNavigator` is where this would land.

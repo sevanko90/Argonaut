@@ -94,7 +94,7 @@ for this codebase:
 - **Saving (not yet built) needs a sandbox-specific implementation.** A picker grant covers the
   chosen file, not its folder, so the planned temp-file-beside-the-original save is denied. The
   save path is designed around this - see `IFileReplacer` in
-  [editing-options.md](editing-options.md) §4 - and needs the
+  [save-plan.md](save-plan.md) - and needs the
   `com.apple.security.files.user-selected.read-write` entitlement plus read-write (not read-only)
   security-scoped bookmarks for recent files that should stay saveable.
 - `MMapFile`/`Utf8JsonReader` etc. operate on whatever `SafeFileHandle`/stream the

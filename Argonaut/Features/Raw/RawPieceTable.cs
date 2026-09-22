@@ -18,7 +18,7 @@ public readonly record struct RawEditExtent(long Offset, long BytesRemoved, long
 /// untouched and never written) and an append-only scratch buffer holding everything typed or
 /// pasted. An edit splits at most two pieces and inserts one; no byte is ever moved or mutated,
 /// so memory is proportional to the number of edits rather than to the size of the file - the
-/// whole reason a multi-GB document can be edited at all. See docs/editing-options.md §1D.
+/// whole reason a multi-GB document can be edited at all.
 ///
 /// A logical offset resolves to a physical one by binary search over the piece list, which is
 /// the one cost every read pays. The list is as long as the number of edits, so that is a

@@ -21,7 +21,7 @@ namespace Argonaut.Shell;
 /// view model instead - see <see cref="IDocumentViewModel.Toolbar"/>.
 ///
 /// All members run on the UI thread; awaits resume there per the app's threading convention
-/// (see CLAUDE.md), so the only explicit marshalling is <see cref="StatusProgressReporter"/>,
+/// (see CLAUDE.md), so the only explicit marshalling is <see cref="StatusLineProgress"/>,
 /// which is invoked from a background indexing/search thread.
 ///
 /// Document disposal follows <see cref="IDocumentViewModel"/>'s lifetime contract: this view
@@ -89,8 +89,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
     // The reporter feeding scan progress into the status line for the current load. Held so
     // every path that puts final text on that line can silence it first - see
-    // StatusProgressReporter.Stop. Null before the first load.
-    private StatusProgressReporter? indexProgressReporter;
+    // StatusLineProgress.Stop. Null before the first load.
+    private StatusLineProgress? indexProgressReporter;
 
     /// <summary>Raised when the find bar's status text should change (null clears it).</summary>
     public event Action<string?>? FindStatusChanged;
@@ -138,7 +138,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
         findController = new FindController(
             status => FindStatusChanged?.Invoke(status),
-            () => currentFilePath is null ? null : new StatusProgressReporter(this, currentFilePath, openRequest.Current));
+            () => currentFilePath is null ? null : ProgressFor(currentFilePath, openRequest.Current));
 
         ReloadRecentFiles();
     }
@@ -738,7 +738,7 @@ public sealed class MainWindowViewModel : ObservableObject
         // Silence the outgoing load's reporter before starting a new one, so a scan being torn
         // down can't write over the incoming file's progress.
         indexProgressReporter?.Stop();
-        var reporter = new StatusProgressReporter(this, path, requestId);
+        var reporter = ProgressFor(path, requestId);
         indexProgressReporter = reporter;
 
         IDocumentViewModel document;
@@ -775,7 +775,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
     /// <summary>
     /// Hands the status line back to <paramref name="document"/> once its indexing stops, so the
-    /// document's final total is the last thing written (see <see cref="StatusProgressReporter.Stop"/>).
+    /// document's final total is the last thing written (see <see cref="StatusLineProgress.Stop"/>).
     ///
     /// Ordering matters and is load-bearing: the document registered its own continuation on this
     /// same task during load, before this one, so its final <see cref="IDocumentViewModel.StatusText"/>
@@ -783,7 +783,7 @@ public sealed class MainWindowViewModel : ObservableObject
     /// reporter goes quiet. Fire-and-forget from the UI thread; the await resumes there per the
     /// app's threading convention.
     /// </summary>
-    private static async Task StopProgressWhenIndexedAsync(IDocumentViewModel document, StatusProgressReporter reporter)
+    private static async Task StopProgressWhenIndexedAsync(IDocumentViewModel document, StatusLineProgress reporter)
     {
         try
         {
@@ -1069,7 +1069,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
             indexProgressReporter?.Stop();
             string name = destination.Path ?? destination.DisplayName;
-            var reporter = new StatusProgressReporter(this, name, openRequest.Current);
+            var reporter = ProgressFor(name, openRequest.Current);
             try
             {
                 result = await saveable.SaveAsync(destination, this.fileReplacer, reporter);
@@ -1194,75 +1194,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private void DetachFind() => findController.Detach();
 
-    /// <summary>
-    /// Writes indexing/search scan progress into <see cref="StatusText"/>. Report is called
-    /// from a background scan thread, so it marshals with Dispatcher.UIThread.Post (never a
-    /// blocking InvokeAsync) per the app's threading convention. A monotonic request id drops
-    /// updates from a superseded open.
-    ///
-    /// Progress is the shell's only claim on the status line, and it is a temporary one: while
-    /// a scan runs, the document's own text is a stale partial count ("250 rows indexed so
-    /// far"), so live progress is the more useful thing to show. Once the scan stops, the
-    /// document's text becomes the real total and the shell must get out of the way - see
-    /// <see cref="Stop"/>.
-    /// </summary>
-    private sealed class StatusProgressReporter : IProgressReporter
-    {
-        private const int BucketSize = 5;
-
-        private readonly MainWindowViewModel owner;
-        private readonly string path;
-        private readonly long requestId;
-        private int lastBucket = -1;
-
-        // Set on the UI thread once indexing stops; read on the UI thread inside the posted
-        // update. Volatile because Report itself runs on the scan thread.
-        private volatile bool stopped;
-
-        public StatusProgressReporter(MainWindowViewModel owner, string path, long requestId)
-        {
-            this.owner = owner;
-            this.path = path;
-            this.requestId = requestId;
-        }
-
-        /// <summary>
-        /// Permanently stops this reporter writing to the status line. Called on the UI thread
-        /// when the document's indexing task completes, which is what keeps the final "N tokens"
-        /// from being overwritten by a trailing "Indexing… (100%)": the last progress reports are
-        /// posted from the scan thread just before the scan completes, so they can still be
-        /// sitting in the dispatcher queue at that point. Re-checking the flag inside the posted
-        /// action (rather than only before posting) is what drops those already-queued updates -
-        /// both sides of that check run on the UI thread, so there is no race left.
-        /// </summary>
-        public void Stop() => stopped = true;
-
-        public void Report(string message, long? current = null, long? max = null)
-        {
-            if (stopped || !owner.openRequest.IsCurrent(requestId))
-                return;
-
-            string text = $"{message} {path}…";
-
-            if (current.HasValue && max.HasValue && max.Value > 0)
-            {
-                int percent = (int)Math.Min(100, (current.Value * 100L) / max.Value);
-
-                // Only act once per 5% step - a raw byte-offset stream would otherwise post
-                // to the UI thread far more often than the status text can usefully change.
-                int bucket = percent / BucketSize;
-                if (bucket == lastBucket)
-                    return;
-
-                lastBucket = bucket;
-                text += $" ({percent}%)";
-            }
-
-            ProgressPost.ToUiThread(() =>
-            {
-                if (!stopped && owner.openRequest.IsCurrent(requestId))
-                    owner.StatusText = text;
-            });
-        }
-    }
+    /// <summary>Progress for a scan on behalf of open request <paramref name="requestId"/>,
+    /// written to the shell's status line and dropped once a newer open supersedes it.</summary>
+    private StatusLineProgress ProgressFor(string path, long requestId) =>
+        new(path, () => openRequest.IsCurrent(requestId), text => StatusText = text);
 }

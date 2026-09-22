@@ -43,6 +43,11 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
 
     private CancellationTokenSource? saveCts;
 
+    /// <summary>Progress for a re-index this document started itself - a wrap-width change, or
+    /// the reopen after a save. The shell reports the first load; its reporter has stopped by the
+    /// time either of these can happen.</summary>
+    private StatusLineProgress? reindexProgress;
+
     private int wrapWidth = RawWrapWidthPreference.Default;
 
     protected override IDocumentSession? Session => this.session;
@@ -593,7 +598,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
         // new scan fails.
         IndexFailure = null;
 
-        this.session.RestartIndex(bytes);
+        this.session.RestartIndex(bytes, StartReindexProgress(FilePath));
 
         var old = this.rows;
         this.rows = new RawRowCollection(this.session.Index, this.session.Bytes);
@@ -620,6 +625,16 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
 
         StatusText = $"{FilePath} — {RowCount:N0} rows indexed so far";
         MonitorIndexing();
+    }
+
+    /// <summary>Retires any re-index progress still reporting and starts a fresh one, naming the
+    /// document as <paramref name="subject"/>.</summary>
+    private StatusLineProgress StartReindexProgress(string subject)
+    {
+        this.reindexProgress?.Stop();
+        var progress = new StatusLineProgress(subject, () => !IsDisposed, text => StatusText = text);
+        this.reindexProgress = progress;
+        return progress;
     }
 
     /// <summary>Opens <paramref name="origin"/> and starts scanning it, reading through a
@@ -778,7 +793,8 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
         var retiredRows = this.rows;
         var retiredSession = this.session;
 
-        var session = StartSession(destination, progressReporter: null);
+        // Named for where it now reads from - after a Save As, the new file.
+        var session = StartSession(destination, StartReindexProgress(destination.Path ?? destination.DisplayName));
         this.rows = new RawRowCollection(session.Index, session.Bytes);
         retiredRows?.Dispose();
         retiredSession?.Dispose();
@@ -844,6 +860,8 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
     /// the session releases the mapping the copy reads.</summary>
     protected override void DisposeCore()
     {
+        this.reindexProgress?.Stop();
+
         this.saveCts?.Cancel();
         try { this.saveCopy.Wait(); } catch { /* observed only to unblock disposal; SaveAsync reports it */ }
     }
@@ -866,6 +884,9 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
     /// covering a wrap-width restart retiring this index mid-monitor.</summary>
     protected override void OnIndexingCompleted()
     {
+        // Before the final text, so a last "(100%)" still queued on the dispatcher is dropped.
+        this.reindexProgress?.Stop();
+
         StatusText = $"{FilePath} — {RowCount:N0} rows";
 
         // Editing waits for the scan, so this is the moment the toggle becomes usable.
@@ -879,6 +900,8 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
     /// <summary>Indexing stopped early (failure, or cancellation on <paramref name="failure"/> null).</summary>
     protected override void OnIndexingFailed(IndexFailure? failure)
     {
+        this.reindexProgress?.Stop();
+
         IndexFailure = failure;
         StatusText = failure is { } f
             ? $"{FilePath} — indexing stopped — {f.ItemsIndexed:N0} rows shown"

@@ -144,4 +144,60 @@ public sealed class StatusProgressHandoffTests : IDisposable
             return true;
         }, CancellationToken.None);
     }
+
+    /// <summary>
+    /// A wrap-width change re-indexes the whole file, after the shell's progress for the original
+    /// load has stopped - so the document has to report it itself, or a large file shows one
+    /// stale "rows indexed so far" until the total appears. And, as for a load, the final total
+    /// must not be overwritten by a trailing percentage.
+    /// </summary>
+    [Fact]
+    public Task WrapWidthChange_ReportsReindexProgress_ThenTheFinalTotal()
+    {
+        var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(StatusProgressHandoffTests).Assembly);
+        return session.Dispatch(async () =>
+        {
+            string path = Path.Combine(tempDir, "big.txt");
+            var line = new string('x', 99) + "\n";
+            File.WriteAllText(path, string.Concat(Enumerable.Repeat(line, 400_000))); // 40MB, several scan chunks
+
+            var vm = new Argonaut.Features.Raw.RawViewModel();
+            try
+            {
+                await vm.LoadAsync(new FileByteOrigin(path));
+                await vm.IndexingTask;
+                Dispatcher.UIThread.RunJobs();
+
+                var shown = new List<string>();
+                vm.PropertyChanged += (_, e) =>
+                {
+                    if (e.PropertyName == nameof(vm.StatusText))
+                        shown.Add(vm.StatusText);
+                };
+
+                vm.SetWrapWidth(vm.WrapWidth == 80 ? 160 : 80);
+                while (!vm.IndexingTask.IsCompleted)
+                {
+                    Dispatcher.UIThread.RunJobs();
+                    await Task.Delay(5);
+                }
+
+                try { await vm.IndexingTask; } catch { }
+                for (int i = 0; i < 5; i++)
+                {
+                    Dispatcher.UIThread.RunJobs();
+                    await Task.Delay(5);
+                }
+
+                Assert.Contains(shown, text => text.Contains('%') && text.Contains("big.txt"));
+                Assert.EndsWith("rows", vm.StatusText);
+            }
+            finally
+            {
+                vm.Dispose();
+            }
+
+            return true;
+        }, CancellationToken.None);
+    }
 }

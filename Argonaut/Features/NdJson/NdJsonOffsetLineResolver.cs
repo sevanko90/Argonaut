@@ -1,5 +1,6 @@
 using System.Threading;
 using System.Threading.Tasks;
+using Argonaut.Engine.Indexing.Lines;
 
 namespace Argonaut.Features.NdJson;
 

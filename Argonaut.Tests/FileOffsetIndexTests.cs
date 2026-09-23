@@ -1,5 +1,5 @@
 using System.Text;
-using Argonaut.Features.NdJson;
+using Argonaut.Engine.Indexing.Lines;
 using Argonaut.Infrastructure;
 
 namespace Argonaut.Tests;
@@ -8,7 +8,7 @@ namespace Argonaut.Tests;
 /// Verifies the NDJSON line indexer against an independent naive byte scan: span
 /// offsets/lengths, trailing-newline handling, CRLF, empty lines, lines that straddle or
 /// end exactly on the indexer's internal scan-chunk boundaries, and text round-tripping
-/// through <see cref="NdJsonLineReader"/>.
+/// through <see cref="LineReader"/>.
 /// </summary>
 public class FileOffsetIndexTests
 {
@@ -166,8 +166,8 @@ public class FileOffsetIndexTests
             Assert.Equal(2, index.LineCount);
             Assert.Equal(new FileLineSpan(0, 5), index.GetLineSpan(0));
             Assert.Equal(new FileLineSpan(5, 5), index.GetLineSpan(1));
-            Assert.Equal("one", NdJsonLineReader.ReadLine(file, index.GetLineSpan(0)));
-            Assert.Equal("two", NdJsonLineReader.ReadLine(file, index.GetLineSpan(1)));
+            Assert.Equal("one", LineReader.ReadLine(file, index.GetLineSpan(0)));
+            Assert.Equal("two", LineReader.ReadLine(file, index.GetLineSpan(1)));
         });
     }
 
@@ -260,7 +260,7 @@ public class FileOffsetIndexTests
         {
             Assert.Equal(lines.Length, index.LineCount);
             for (int i = 0; i < lines.Length; i++)
-                Assert.Equal(lines[i], NdJsonLineReader.ReadLine(file, index.GetLineSpan(i)));
+                Assert.Equal(lines[i], LineReader.ReadLine(file, index.GetLineSpan(i)));
         });
     }
 }

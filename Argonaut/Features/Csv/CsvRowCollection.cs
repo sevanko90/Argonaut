@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Specialized;
 using Avalonia.Threading;
-using Argonaut.Features.NdJson;
+using Argonaut.Engine.Indexing.Lines;
 using Argonaut.Infrastructure;
 
 namespace Argonaut.Features.Csv;

@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text;
+using Argonaut.Engine.Indexing.Lines;
 using Argonaut.Features.Json;
-using Argonaut.Features.NdJson;
 using Argonaut.Features.Raw;
 using Argonaut.Infrastructure;
 

@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using Argonaut.Features.NdJson;
+using Argonaut.Engine.Indexing.Lines;
 using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
 

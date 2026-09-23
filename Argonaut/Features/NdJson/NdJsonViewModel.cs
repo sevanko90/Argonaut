@@ -2,6 +2,7 @@ using System;
 using System.ComponentModel;
 using System.Threading;
 using System.Threading.Tasks;
+using Argonaut.Engine.Indexing.Lines;
 using Argonaut.Features.Json;
 using Argonaut.Features.Json.Hints;
 using Argonaut.Features.Json.Schema;
@@ -271,14 +272,14 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel
 
     public string GetLineText(int lineIndex)
     {
-        return NdJsonLineReader.ReadLine(this.Bytes!, this.Index!.GetLineSpan(lineIndex));
+        return LineReader.ReadLine(this.Bytes!, this.Index!.GetLineSpan(lineIndex));
     }
 
     public void LoadSelectedLine(int lineIndex)
     {
         var lineSpan = this.Index!.GetLineSpan(lineIndex);
         // Display text only - the JSON tree below is parsed from lineSpan itself, uncapped.
-        SelectedLine = new NdJsonSelectedLine(lineIndex + 1, NdJsonLineReader.ReadDisplayLine(this.Bytes!, lineSpan));
+        SelectedLine = new NdJsonSelectedLine(lineIndex + 1, LineReader.ReadDisplayLine(this.Bytes!, lineSpan));
 
         var requestId = selectionRequest.Begin();
         var previous = SelectedLineJsonViewModel;
@@ -296,7 +297,7 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel
 
     private async Task LoadSelectedLineJsonAsync(long requestId, FileLineSpan lineSpan)
     {
-        var trimmed = NdJsonLineReader.TrimTrailingNewline(this.Bytes!, lineSpan);
+        var trimmed = LineReader.TrimTrailingNewline(this.Bytes!, lineSpan);
         var jsonViewModel = new JsonViewModel { DefaultExpandDepth = DefaultExpandDepth };
         try
         {

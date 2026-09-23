@@ -1,13 +1,13 @@
 using Argonaut.Infrastructure;
 
-namespace Argonaut.Features.NdJson;
+namespace Argonaut.Engine.Indexing.Lines;
 
 /// <summary>
-/// Decodes one indexed NDJSON line to text straight from the mapped file bytes.
+/// Decodes one indexed line (NDJSON, CSV) to text straight from the mapped file bytes.
 /// The trailing newline bytes are trimmed from the span before decoding, so only
 /// one string is ever allocated per line.
 /// </summary>
-public static class NdJsonLineReader
+public static class LineReader
 {
     public static string ReadLine(IByteSource file, FileLineSpan lineSpan)
     {

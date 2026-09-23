@@ -1,6 +1,6 @@
 using System.Text;
+using Argonaut.Engine.Indexing.Lines;
 using Argonaut.Features.Csv;
-using Argonaut.Features.NdJson;
 using Argonaut.Infrastructure;
 
 namespace Argonaut.Tests;
@@ -56,7 +56,7 @@ public class NewlinelessFileDisplayCapTests
             var span = index.GetLineSpan(0);
             Assert.True(span.Length > DisplayText.MaxLength, "payload must exceed the cap to be a useful test");
 
-            string text = NdJsonLineReader.ReadDisplayLine(file, span);
+            string text = LineReader.ReadDisplayLine(file, span);
 
             Assert.True(text.Length <= DisplayText.MaxLength + 1, $"line decoded to {text.Length} chars");
             Assert.EndsWith("…", text);
@@ -66,8 +66,8 @@ public class NewlinelessFileDisplayCapTests
     public void NdJsonDisplayLine_ShortLineIsUnchanged()
         => WithFile("{\"a\":1}\n{\"b\":2}\n", (file, index) =>
         {
-            Assert.Equal("{\"a\":1}", NdJsonLineReader.ReadDisplayLine(file, index.GetLineSpan(0)));
-            Assert.Equal("{\"b\":2}", NdJsonLineReader.ReadDisplayLine(file, index.GetLineSpan(1)));
+            Assert.Equal("{\"a\":1}", LineReader.ReadDisplayLine(file, index.GetLineSpan(0)));
+            Assert.Equal("{\"b\":2}", LineReader.ReadDisplayLine(file, index.GetLineSpan(1)));
         });
 
     [Fact]

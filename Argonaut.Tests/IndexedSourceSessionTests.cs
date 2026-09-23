@@ -1,6 +1,6 @@
 using System.Reflection;
 using System.Text;
-using Argonaut.Features.NdJson;
+using Argonaut.Engine.Indexing.Lines;
 using Argonaut.Infrastructure;
 
 namespace Argonaut.Tests;

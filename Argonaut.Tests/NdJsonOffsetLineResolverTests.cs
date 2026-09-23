@@ -1,4 +1,5 @@
 using System.Text;
+using Argonaut.Engine.Indexing.Lines;
 using Argonaut.Features.NdJson;
 using Argonaut.Infrastructure;
 

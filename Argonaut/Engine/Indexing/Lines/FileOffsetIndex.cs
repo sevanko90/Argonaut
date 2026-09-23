@@ -3,7 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Infrastructure;
 
-namespace Argonaut.Features.NdJson;
+namespace Argonaut.Engine.Indexing.Lines;
 
 /// <summary>
 /// Record used to hold data for the index of a large memory-mapped file to allow fast seeking and loading of arbitrary lines

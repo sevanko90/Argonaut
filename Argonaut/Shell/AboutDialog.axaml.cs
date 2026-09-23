@@ -1,4 +1,4 @@
-using Argonaut.Infrastructure;
+using Argonaut.Engine.Settings;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using System.Diagnostics;

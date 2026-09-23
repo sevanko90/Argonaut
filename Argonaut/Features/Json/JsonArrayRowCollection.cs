@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Specialized;
-using Argonaut.Infrastructure;
+using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Collections;
+using Argonaut.Ui.Documents;
 using Argonaut.Ui.TableGrid;
 
 namespace Argonaut.Features.Json;

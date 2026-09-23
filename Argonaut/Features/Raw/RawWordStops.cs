@@ -1,6 +1,6 @@
 using System;
 using System.Text;
-using Argonaut.Infrastructure;
+using Argonaut.Engine.Bytes;
 
 namespace Argonaut.Features.Raw;
 

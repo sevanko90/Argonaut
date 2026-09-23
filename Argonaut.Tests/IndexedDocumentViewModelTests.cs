@@ -1,4 +1,6 @@
-using Argonaut.Infrastructure;
+using Argonaut.Engine.Detection;
+using Argonaut.Engine.Indexing;
+using Argonaut.Ui.Documents;
 using Argonaut.Ui.Find;
 
 namespace Argonaut.Tests;

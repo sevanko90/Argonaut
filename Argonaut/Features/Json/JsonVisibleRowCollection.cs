@@ -4,9 +4,11 @@ using System.Collections.Specialized;
 using System.Text;
 using System.Threading.Tasks;
 using Avalonia.Threading;
+using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Collections;
 using Argonaut.Features.Json.Hints;
 using Argonaut.Features.Json.Schema;
-using Argonaut.Infrastructure;
+using Argonaut.Ui.Documents;
 
 namespace Argonaut.Features.Json;
 

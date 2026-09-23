@@ -1,6 +1,6 @@
+using Argonaut.Engine.Bytes;
 using Argonaut.Features.Json;
 using Argonaut.Features.Json.Hints;
-using Argonaut.Infrastructure;
 
 namespace Argonaut.Tests;
 

@@ -1,8 +1,8 @@
 using System;
 using System.Buffers;
 using System.Text;
-using Argonaut.Infrastructure;
-using Argonaut.Infrastructure.Unicode;
+using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Text;
 
 namespace Argonaut.Features.Raw;
 

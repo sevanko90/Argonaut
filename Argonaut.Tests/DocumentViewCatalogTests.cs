@@ -1,9 +1,10 @@
 using System.Text;
+using Argonaut.Engine.Detection;
+using Argonaut.Engine.Progress;
 using Argonaut.Features.Csv;
 using Argonaut.Features.Json;
 using Argonaut.Features.NdJson;
 using Argonaut.Features.Raw;
-using Argonaut.Infrastructure;
 using Argonaut.Shell;
 using Argonaut.Ui.Documents;
 

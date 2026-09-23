@@ -1,5 +1,5 @@
 using System;
-using Argonaut.Infrastructure;
+using Argonaut.Engine.Bytes;
 
 namespace Argonaut.Features.Raw;
 

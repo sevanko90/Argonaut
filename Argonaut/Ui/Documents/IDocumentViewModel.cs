@@ -1,7 +1,9 @@
 using System;
 using System.ComponentModel;
 using System.Threading.Tasks;
-using Argonaut.Infrastructure;
+using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Detection;
+using Argonaut.Engine.Indexing;
 using Argonaut.Ui.Find;
 
 namespace Argonaut.Ui.Documents;

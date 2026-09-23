@@ -4,13 +4,18 @@ using System.ComponentModel;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Detection;
+using Argonaut.Engine.Indexing;
+using Argonaut.Engine.Progress;
 using Argonaut.Engine.Search;
+using Argonaut.Engine.Settings;
 using Argonaut.Features.Json.Hints;
 using Argonaut.Features.Json.Schema;
-using Argonaut.Infrastructure;
 using Argonaut.Ui.Documents;
 using Argonaut.Ui.Documents.Navigation;
 using Argonaut.Ui.Find;
+using Argonaut.Ui.Notifications;
 
 namespace Argonaut.Features.Json;
 

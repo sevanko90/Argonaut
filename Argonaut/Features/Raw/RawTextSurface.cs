@@ -12,8 +12,10 @@ using Avalonia.Media.TextFormatting;
 using Avalonia.Threading;
 using System.Threading.Tasks;
 using Avalonia.Interactivity;
+using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Search;
-using Argonaut.Infrastructure;
+using Argonaut.Ui.Notifications;
+using Argonaut.Ui.ViewModels;
 
 namespace Argonaut.Features.Raw;
 

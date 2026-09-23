@@ -1,9 +1,15 @@
 using System.Threading;
+using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Detection;
+using Argonaut.Engine.Indexing;
+using Argonaut.Engine.Progress;
 using Argonaut.Engine.Search;
-using Argonaut.Infrastructure;
+using Argonaut.Engine.Settings;
 using Argonaut.Shell;
 using Argonaut.Ui.Documents;
 using Argonaut.Ui.Find;
+using Argonaut.Ui.Progress;
+using Argonaut.Ui.ViewModels;
 using Avalonia.Headless;
 using Avalonia.Threading;
 

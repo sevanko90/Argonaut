@@ -1,7 +1,8 @@
+using Argonaut.Engine.Settings;
 using Argonaut.Features.Json;
 using Argonaut.Features.Json.Hints;
 using Argonaut.Features.Json.Schema;
-using Argonaut.Infrastructure;
+using Argonaut.Ui.ViewModels;
 
 namespace Argonaut.Tests;
 

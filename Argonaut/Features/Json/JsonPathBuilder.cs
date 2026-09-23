@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using System.Text;
 using System.Text.RegularExpressions;
-using Argonaut.Infrastructure;
+using Argonaut.Engine.Bytes;
 
 namespace Argonaut.Features.Json;
 

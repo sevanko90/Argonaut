@@ -1,7 +1,8 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using Argonaut.Infrastructure;
+using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Progress;
 
 namespace Argonaut.Engine.Indexing.Lines;
 

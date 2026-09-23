@@ -1,6 +1,7 @@
 using System.Text;
+using Argonaut.Engine.Detection;
 using Argonaut.Features.Json;
-using Argonaut.Infrastructure;
+using Argonaut.Ui.Notifications;
 using Argonaut.Ui.TableGrid;
 
 namespace Argonaut.Tests;

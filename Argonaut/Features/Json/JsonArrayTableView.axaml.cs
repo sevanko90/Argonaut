@@ -1,7 +1,7 @@
 using System;
 using System.ComponentModel;
-using Argonaut.Infrastructure;
 using Argonaut.Ui.TableGrid;
+using Argonaut.Ui.ViewModels;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;

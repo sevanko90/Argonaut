@@ -2,13 +2,18 @@ using System;
 using System.ComponentModel;
 using System.Threading;
 using System.Threading.Tasks;
+using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Detection;
+using Argonaut.Engine.Indexing;
 using Argonaut.Engine.Indexing.Lines;
+using Argonaut.Engine.Progress;
+using Argonaut.Engine.Settings;
 using Argonaut.Features.Json;
 using Argonaut.Features.Json.Hints;
 using Argonaut.Features.Json.Schema;
-using Argonaut.Infrastructure;
 using Argonaut.Ui.Documents;
 using Argonaut.Ui.Find;
+using Argonaut.Ui.ViewModels;
 
 namespace Argonaut.Features.NdJson;
 

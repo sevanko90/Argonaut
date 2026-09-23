@@ -12,7 +12,7 @@
         xmlns:ndjson="clr-namespace:Argonaut.Features.NdJson"
         xmlns:csv="clr-namespace:Argonaut.Features.Csv"
         xmlns:raw="clr-namespace:Argonaut.Features.Raw"
-        xmlns:infra="clr-namespace:Argonaut.Infrastructure"
+        xmlns:progress="clr-namespace:Argonaut.Ui.Progress"
         Title="{Binding Title}"
         Background="{DynamicResource AppPanelBackgroundBrush}"
         Width="1000" Height="700">
@@ -237,7 +237,7 @@
             </Border.Styles>
             <ItemsControl ItemsSource="{Binding Progress.Shown}">
                 <ItemsControl.ItemTemplate>
-                    <DataTemplate x:DataType="infra:ProgressEntry">
+                    <DataTemplate x:DataType="progress:ProgressEntry">
                         <Grid ColumnDefinitions="*,Auto,Auto" RowDefinitions="Auto,Auto" Margin="0,4">
                             <TextBlock Grid.Row="0" Grid.Column="0"
                                        Text="{Binding Title}"

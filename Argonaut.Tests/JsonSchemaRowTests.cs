@@ -1,9 +1,9 @@
 using System.Collections.Specialized;
 using System.Text;
+using Argonaut.Engine.Bytes;
 using Argonaut.Features.Json;
 using Argonaut.Features.Json.Hints;
 using Argonaut.Features.Json.Schema;
-using Argonaut.Infrastructure;
 
 namespace Argonaut.Tests;
 

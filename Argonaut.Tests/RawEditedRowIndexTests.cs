@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using System.Text;
+using Argonaut.Engine.Bytes;
 using Argonaut.Features.Raw;
-using Argonaut.Infrastructure;
 
 namespace Argonaut.Tests;
 

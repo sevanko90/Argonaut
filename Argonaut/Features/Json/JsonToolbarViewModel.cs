@@ -2,9 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Threading.Tasks;
+using Argonaut.Engine.Settings;
 using Argonaut.Features.Json.Hints;
 using Argonaut.Features.Json.Schema;
-using Argonaut.Infrastructure;
+using Argonaut.Ui.ViewModels;
 
 namespace Argonaut.Features.Json;
 

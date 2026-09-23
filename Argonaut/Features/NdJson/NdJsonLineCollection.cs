@@ -2,8 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Specialized;
 using Avalonia.Threading;
+using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Indexing.Lines;
-using Argonaut.Infrastructure;
+using Argonaut.Ui.Documents;
 
 namespace Argonaut.Features.NdJson;
 

@@ -1,7 +1,7 @@
 using System.Text;
-using Argonaut.Infrastructure;
+using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Text;
 using Argonaut.Features.Raw;
-using Argonaut.Infrastructure.Unicode;
 using BenchmarkDotNet.Attributes;
 
 namespace Argonaut.Tests;

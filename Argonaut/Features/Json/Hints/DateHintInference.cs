@@ -1,4 +1,4 @@
-using Argonaut.Infrastructure;
+using Argonaut.Engine.Bytes;
 
 namespace Argonaut.Features.Json.Hints;
 

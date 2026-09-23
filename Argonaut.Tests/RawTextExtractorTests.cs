@@ -1,5 +1,5 @@
 using System.Text;
-using Argonaut.Infrastructure;
+using Argonaut.Engine.Bytes;
 using Argonaut.Features.Raw;
 
 namespace Argonaut.Tests;
@@ -97,7 +97,7 @@ public class RawTextExtractorTests
     }
 
     /// <summary>Claims a large length without allocating it, so the cap can be tested cheaply.</summary>
-    private sealed class OversizedSource : Argonaut.Infrastructure.IByteSource
+    private sealed class OversizedSource : Argonaut.Engine.Bytes.IByteSource
     {
         private readonly byte[] window = new byte[4096];
 

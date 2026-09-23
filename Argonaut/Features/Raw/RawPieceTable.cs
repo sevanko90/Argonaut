@@ -1,6 +1,6 @@
 using System;
 using System.Collections.Generic;
-using Argonaut.Infrastructure;
+using Argonaut.Engine.Bytes;
 
 namespace Argonaut.Features.Raw;
 
@@ -26,7 +26,7 @@ public readonly record struct RawEditExtent(long Offset, long BytesRemoved, long
 /// once the list grows past its threshold.
 ///
 /// The original is read through whatever the caller hands in. For a document on disk that is a
-/// <see cref="Argonaut.Infrastructure.RemappableByteSource"/>, which is how a save can unmap the
+/// <see cref="Argonaut.Engine.Bytes.RemappableByteSource"/>, which is how a save can unmap the
 /// file for its rename and put the mapping back if the rename fails, with every piece still valid.
 ///
 /// Not thread-safe: edits and reads happen on the UI thread. Background readers are given the

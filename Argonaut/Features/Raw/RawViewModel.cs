@@ -2,10 +2,17 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using Argonaut.Infrastructure;
+using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Detection;
+using Argonaut.Engine.Indexing;
+using Argonaut.Engine.Progress;
+using Argonaut.Engine.Saving;
+using Argonaut.Engine.Settings;
 using Argonaut.Ui.Documents;
 using Argonaut.Ui.Documents.Navigation;
 using Argonaut.Ui.Find;
+using Argonaut.Ui.Notifications;
+using Argonaut.Ui.Progress;
 
 namespace Argonaut.Features.Raw;
 

@@ -2,7 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
-        xmlns:infra="clr-namespace:Argonaut.Infrastructure"
+        xmlns:dialogs="clr-namespace:Argonaut.Shell.Dialogs"
         mc:Ignorable="d"
         x:Class="Argonaut.Shell.NoticesDialog"
         Title="Licenses and third-party notices"
@@ -20,7 +20,7 @@
                  BorderThickness="1"
                  CornerRadius="8">
             <ListBox.ItemTemplate>
-                <DataTemplate x:DataType="infra:LicenseNotice">
+                <DataTemplate x:DataType="dialogs:LicenseNotice">
                     <TextBlock Text="{Binding Component}" TextTrimming="CharacterEllipsis" />
                 </DataTemplate>
             </ListBox.ItemTemplate>

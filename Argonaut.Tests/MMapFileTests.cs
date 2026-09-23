@@ -1,5 +1,5 @@
 using System.Text;
-using Argonaut.Infrastructure;
+using Argonaut.Engine.Bytes;
 
 namespace Argonaut.Tests;
 

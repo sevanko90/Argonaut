@@ -1,6 +1,6 @@
 using System.Linq;
+using Argonaut.Engine.Bytes;
 using Argonaut.Features.Json;
-using Argonaut.Infrastructure;
 
 namespace Argonaut.Tests;
 

@@ -1,9 +1,10 @@
 using System.Collections.Concurrent;
 using System.Text;
+using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Indexing.Lines;
+using Argonaut.Engine.Progress;
 using Argonaut.Features.Json;
 using Argonaut.Features.Raw;
-using Argonaut.Infrastructure;
 
 namespace Argonaut.Tests;
 

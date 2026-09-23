@@ -1,4 +1,4 @@
-using Argonaut.Infrastructure.Unicode;
+using Argonaut.Engine.Text;
 
 namespace Argonaut.Tests;
 

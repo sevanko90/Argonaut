@@ -1,6 +1,6 @@
 using System.Text;
+using Argonaut.Engine.Detection;
 using Argonaut.Features.Json.Diff;
-using Argonaut.Infrastructure;
 
 namespace Argonaut.Tests;
 

@@ -1,7 +1,7 @@
 using System;
 using System.Buffers;
 using System.Text;
-using Argonaut.Infrastructure;
+using Argonaut.Engine.Bytes;
 
 namespace Argonaut.Features.Raw;
 

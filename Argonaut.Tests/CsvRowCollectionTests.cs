@@ -1,7 +1,7 @@
 using System.Text;
+using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Indexing.Lines;
 using Argonaut.Features.Csv;
-using Argonaut.Infrastructure;
 using Argonaut.Ui.TableGrid;
 
 namespace Argonaut.Tests;

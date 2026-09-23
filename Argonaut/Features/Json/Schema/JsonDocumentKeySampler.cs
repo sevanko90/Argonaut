@@ -1,6 +1,6 @@
 using System;
 using System.Collections.Generic;
-using Argonaut.Infrastructure;
+using Argonaut.Engine.Bytes;
 
 namespace Argonaut.Features.Json.Schema;
 

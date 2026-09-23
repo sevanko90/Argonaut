@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
+using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Indexing;
 using Argonaut.Features.Json;
-using Argonaut.Infrastructure;
 
 namespace Argonaut.Tests;
 

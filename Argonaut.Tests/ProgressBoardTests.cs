@@ -1,4 +1,4 @@
-using Argonaut.Infrastructure;
+using Argonaut.Ui.Progress;
 
 namespace Argonaut.Tests;
 

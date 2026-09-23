@@ -1,5 +1,5 @@
 using System;
-using Argonaut.Infrastructure;
+using Argonaut.Ui.ViewModels;
 
 namespace Argonaut.Features.Json.Diff;
 

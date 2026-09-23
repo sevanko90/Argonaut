@@ -1,8 +1,11 @@
 using System;
 using System.Threading.Tasks;
-using Argonaut.Infrastructure;
+using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Detection;
+using Argonaut.Engine.Indexing;
 using Argonaut.Ui.Documents;
 using Argonaut.Ui.Find;
+using Argonaut.Ui.ViewModels;
 
 namespace Argonaut.Shell;
 

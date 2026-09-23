@@ -1,4 +1,5 @@
-using Argonaut.Infrastructure;
+using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Text;
 
 namespace Argonaut.Engine.Indexing.Lines;
 

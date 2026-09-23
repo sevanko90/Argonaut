@@ -3,7 +3,8 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Collections.Specialized;
 using Avalonia.Threading;
-using Argonaut.Infrastructure;
+using Argonaut.Engine.Bytes;
+using Argonaut.Ui.Documents;
 
 namespace Argonaut.Features.Raw;
 

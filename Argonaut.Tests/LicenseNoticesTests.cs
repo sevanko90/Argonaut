@@ -1,4 +1,4 @@
-using Argonaut.Infrastructure;
+using Argonaut.Shell.Dialogs;
 
 namespace Argonaut.Tests;
 

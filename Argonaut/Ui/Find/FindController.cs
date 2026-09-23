@@ -3,7 +3,8 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Engine.Search;
-using Argonaut.Infrastructure;
+using Argonaut.Ui.Progress;
+using Argonaut.Ui.ViewModels;
 
 namespace Argonaut.Ui.Find;
 

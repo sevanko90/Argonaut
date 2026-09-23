@@ -1,5 +1,5 @@
 using System.Text;
-using Argonaut.Infrastructure;
+using Argonaut.Engine.Bytes;
 using Argonaut.Features.Raw;
 using BenchmarkDotNet.Attributes;
 

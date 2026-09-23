@@ -1,6 +1,6 @@
 using System.Text;
 using Argonaut.Features.Json;
-using Argonaut.Infrastructure;
+using Argonaut.Ui.Documents.Navigation;
 
 namespace Argonaut.Tests;
 

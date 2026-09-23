@@ -1,7 +1,9 @@
 using System.Text;
+using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Detection;
 using Argonaut.Engine.Indexing.Lines;
+using Argonaut.Engine.Text;
 using Argonaut.Features.Csv;
-using Argonaut.Infrastructure;
 
 namespace Argonaut.Tests;
 

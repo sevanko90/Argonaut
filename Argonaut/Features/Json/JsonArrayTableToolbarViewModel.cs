@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using Argonaut.Infrastructure;
+using Argonaut.Ui.ViewModels;
 
 namespace Argonaut.Features.Json;
 

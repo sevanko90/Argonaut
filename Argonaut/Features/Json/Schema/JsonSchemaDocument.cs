@@ -64,7 +64,7 @@ public sealed class JsonSchemaDocument
     public int DocumentRootId { get; }
 
     /// <summary>Which of <see cref="NamedRoots"/> is currently bound, or null for the document
-    /// root. Round-tripped through <see cref="Infrastructure.SchemaSelectionPreference"/>.</summary>
+    /// root. Round-tripped through <see cref="Argonaut.Engine.Settings.SchemaSelectionPreference"/>.</summary>
     public string? RootName { get; }
 
     /// <summary>

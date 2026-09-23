@@ -2,8 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Detection;
+using Argonaut.Engine.Indexing;
 using Argonaut.Engine.Indexing.Lines;
-using Argonaut.Infrastructure;
+using Argonaut.Engine.Progress;
+using Argonaut.Ui.Documents;
 using Argonaut.Ui.Find;
 using Argonaut.Ui.TableGrid;
 

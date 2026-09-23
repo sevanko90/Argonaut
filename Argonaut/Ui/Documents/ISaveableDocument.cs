@@ -1,6 +1,8 @@
 using System.Threading;
 using System.Threading.Tasks;
-using Argonaut.Infrastructure;
+using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Progress;
+using Argonaut.Engine.Saving;
 using Argonaut.Ui.Documents.Navigation;
 
 namespace Argonaut.Ui.Documents;

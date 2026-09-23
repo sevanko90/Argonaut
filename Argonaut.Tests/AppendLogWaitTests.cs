@@ -1,4 +1,4 @@
-using Argonaut.Infrastructure;
+using Argonaut.Engine.Indexing;
 
 namespace Argonaut.Tests;
 

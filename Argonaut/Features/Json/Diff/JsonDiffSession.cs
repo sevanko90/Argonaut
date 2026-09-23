@@ -1,6 +1,8 @@
 using System.Threading;
 using System.Threading.Tasks;
-using Argonaut.Infrastructure;
+using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Indexing;
+using Argonaut.Engine.Progress;
 
 namespace Argonaut.Features.Json.Diff;
 

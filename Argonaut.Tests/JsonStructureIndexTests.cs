@@ -1,7 +1,7 @@
 using System.Text;
 using System.Text.Json;
+using Argonaut.Engine.Bytes;
 using Argonaut.Features.Json;
-using Argonaut.Infrastructure;
 
 namespace Argonaut.Tests;
 

@@ -9,7 +9,12 @@ using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Styling;
 using Avalonia.Threading;
-using Argonaut.Infrastructure;
+using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Settings;
+using Argonaut.Shell.Updates;
+using Argonaut.Ui.Documents.Navigation;
+using Argonaut.Ui.Notifications;
+using Argonaut.Ui.Progress;
 using System.Threading.Tasks;
 using Velopack;
 

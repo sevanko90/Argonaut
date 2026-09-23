@@ -3,7 +3,8 @@ using System.Globalization;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
-using Argonaut.Infrastructure;
+using Argonaut.Engine.Settings;
+using Argonaut.Ui.ViewModels;
 
 namespace Argonaut.Ui.TableGrid;
 

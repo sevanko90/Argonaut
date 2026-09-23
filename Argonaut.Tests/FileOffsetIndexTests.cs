@@ -1,6 +1,7 @@
 using System.Text;
+using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Indexing.Lines;
-using Argonaut.Infrastructure;
+using Argonaut.Engine.Progress;
 
 namespace Argonaut.Tests;
 

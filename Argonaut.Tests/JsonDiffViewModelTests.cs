@@ -2,7 +2,6 @@ using System.Text;
 using Argonaut.Features.Json.Diff;
 using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
-using Argonaut.Shell;
 
 namespace Argonaut.Tests;
 

@@ -1,7 +1,6 @@
 using System.Collections;
 using System.Collections.Specialized;
 using Argonaut.Features.Csv;
-using Argonaut.Infrastructure;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;

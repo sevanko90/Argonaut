@@ -5,7 +5,6 @@ using System.Threading.Tasks;
 using Argonaut.Features.NdJson;
 using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
-using Argonaut.Shell;
 
 namespace Argonaut.Features.Csv;
 

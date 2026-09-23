@@ -4,7 +4,6 @@ using Argonaut.Features.Csv;
 using Argonaut.Features.Json;
 using Argonaut.Features.NdJson;
 using Argonaut.Features.Raw;
-using Argonaut.Infrastructure;
 
 namespace Argonaut.Tests;
 

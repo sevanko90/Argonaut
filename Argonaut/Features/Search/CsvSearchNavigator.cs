@@ -2,7 +2,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Features.Csv;
 using Argonaut.Features.NdJson;
-using Argonaut.Infrastructure;
 
 namespace Argonaut.Features.Search;
 

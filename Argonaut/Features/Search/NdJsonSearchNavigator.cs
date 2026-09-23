@@ -3,7 +3,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Features.Json;
 using Argonaut.Features.NdJson;
-using Argonaut.Infrastructure;
 
 namespace Argonaut.Features.Search;
 

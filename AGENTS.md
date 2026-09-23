@@ -6,9 +6,43 @@ Feature design should take this into account and consider algorithms and types t
 allocations and GC pressure. Operations that require heavy processing or full file scans should be
 done on the background to keep the UI responsive. 
 
+## Project structure: four layers, dependencies point down
+
+Folders are namespaces, and each is named for what it holds. The top level is four layers, and a
+layer may only reference the ones below it:
+
+- **`Shell`** - the window that hosts documents: `MainWindow`, `DocumentViewCatalog`, dialogs,
+  updates.
+- **`Features`** - the user-facing views (Csv, Json, NdJson, Raw), each owning its view models,
+  its own format's indexes, and the `ISearchNavigator` that lets find step through it.
+- **`Ui`** - shared Avalonia plumbing every view builds on: the document contracts and base view
+  model (`Ui/Documents`), the find bar, the table grid, progress, toasts.
+- **`Engine`** - format-agnostic logic with no Avalonia reference: byte sources, background
+  indexing, search, saving, settings, text.
+
+`App`, `Program` and `AppInfo` sit in the root namespace. `Diagnostics` is Debug-only and may
+reach anything. `ArchitectureTests` enforces the direction, so a violation fails the build's tests
+rather than waiting for review.
+
+- **An interface lives with the code that consumes it, in the lowest layer that uses it** - never
+  in a `Contracts`/`Interfaces` folder. `ISearchNavigator` is in `Ui/Find` because find consumes
+  it, and every feature implements it from above. In a single assembly a namespace buys no
+  dependency isolation; what matters is that the interface is below everything that implements it.
+- **No loose files at the root of `Engine` or `Ui`.** Every file goes in a subfolder named for its
+  concern. A shared root that accepts anything is how `Infrastructure` became a 49-file dumping
+  ground; `ArchitectureTests` rejects a type in `Argonaut.Engine` or `Argonaut.Ui` itself.
+- **Something two features share moves down, not sideways.** When a feature needs another's code,
+  that code is either generic (the line index went to `Engine/Indexing/Lines`) or shared UI (the
+  grid went to `Ui/TableGrid`). A feature referencing another is legitimate only as composition -
+  NdJson hosting a `JsonViewModel` for the selected line.
+- **A doc-comment `cref` must not pull in a `using` from a higher layer.** Refer to an upper
+  layer's type with `<c>Name</c>` instead.
+- **Tests mirror the source** (`Argonaut.Tests/Features/Raw/Rows` tests `Argonaut/Features/Raw/Rows`);
+  shared test helpers go in `Support`, BenchmarkDotNet suites in `Benchmarks`.
+
 ## Memory-mapped files: always use explicit, OS-reported data length
 
-When working with `MemoryMappedFile`/`MemoryMappedViewAccessor` (see `Argonaut/Infrastructure/MMapFile.cs`), never treat
+When working with `MemoryMappedFile`/`MemoryMappedViewAccessor` (see `Argonaut/Engine/Bytes/MMapFile.cs`), never treat
 `MemoryMappedViewAccessor.Capacity` as the file's data length. `Capacity` is rounded up to the platform's memory
 allocation granularity (this rounding differs between Windows and macOS), so it can be larger than the actual file
 size and expose trailing zero-padding bytes as if they were real content.

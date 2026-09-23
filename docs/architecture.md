@@ -39,7 +39,7 @@ them). Keep this in sync when the ownership chain changes.
 
 ## Documents
 
-- `IDocumentViewModel` (`Shell/IDocumentViewModel.cs`) is the shell's slim view of one open
+- `IDocumentViewModel` (`Ui/Documents/IDocumentViewModel.cs`) is the shell's slim view of one open
   document: `FilePath`, observable `StatusText`, `CreateSearchNavigator()` (nullable — null for
   a document with nothing searchable), `CanHandleFileType(FileKind)`, observable
   `IndexFailure`, and `Toolbar`. Implemented by `JsonViewModel`, `NdJsonViewModel`,
@@ -97,8 +97,8 @@ them). Keep this in sync when the ownership chain changes.
 
 ## Index failures & the incompatible-file placeholder
 
-- `IBackgroundIndex.Failure` (`Infrastructure/IBackgroundIndex.cs`, record in
-  `Infrastructure/IndexFailure.cs`) is non-null when a background scan
+- `IBackgroundIndex.Failure` (`Engine/Indexing/IBackgroundIndex.cs`, record in
+  `Engine/Indexing/IndexFailure.cs`) is non-null when a background scan
   stopped because of an error, null on success *and* on cancellation. `AppendLogIndexBase.RunIndexing`
   is the one place that catches a scan's exception, records it (via the overridable
   `DescribeFailure`, which `JsonStructureIndex` enriches with line/column/byte-offset from a
@@ -164,14 +164,14 @@ them). Keep this in sync when the ownership chain changes.
   outgoing document before publishing this one. Entered explicitly from a JSON array row's
   "view as table" link (raised through `ArrayTableService`, with `MainWindow` the sole
   subscriber — the same view-to-shell decoupling as `RawJumpService`) and published like a diff:
-  directly, with `FileKind.Unknown`, never via `DocumentViewCatalog`. It reuses CSV's
-  presentation types (`CsvStructure`, `CsvCell`, `CsvVisibleRow`) plus its own
+  directly, with `FileKind.Unknown`, never via `DocumentViewCatalog`. It reuses the
+  shared grid types (`TableStructure`, `TableCell`, `TableRow`, in `Ui/TableGrid`) plus its own
   `JsonArrayRowCollection`, and renders through the same grid `CsvView` does: Avalonia 12.1's
   `TableView`. It derives from `ListBox`, so the lazily-realized row collections virtualize
   exactly as the hand-rolled grid did (`TableGridVirtualizationTests`), and it owns the sticky
   header, its horizontal-scroll tracking and the column resizer that both views used to build by
   hand. Columns are data, not markup, so `TableGridColumns` — shared by both grids — builds them
-  in code-behind from the view model's `CsvStructure`: one `TableViewColumn` per column, each
+  in code-behind from the view model's `TableStructure`: one `TableViewColumn` per column, each
   binding its cells by index (`Cells[i].Text`), plus the find-term binding `CsvView` needs to
   highlight matches in cells and headers. A re-shape (a different column count or different
   discovered widths) rebuilds them; a pure relabelling — CSV's "first row is header" tickbox —
@@ -200,7 +200,7 @@ them). Keep this in sync when the ownership chain changes.
   `CellTextMetrics.Current` is a settable seam (like `AppDataPaths.RootOverride`) for tests with no
   Avalonia platform, where the fallback is one em per character: no face exceeds its em, so the
   estimate errs wide rather than trimming. Because widths are derived rather than stored,
-  `CsvColumn` keeps the character count and `CsvCell` carries only text — a realized row holds no
+  `TableColumn` keeps the character count and `TableCell` carries only text — a realized row holds no
   geometry, so nothing goes stale when a column is resized or the content font is swapped. The
   status bar's font toggle is wired through: `TableGridColumns` watches the two font resources,
   re-measures the metrics and re-applies the discovered width to every column the user has not
@@ -217,24 +217,24 @@ them). Keep this in sync when the ownership chain changes.
 The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLength` growth,
 `RequireContiguous`) are specified in CLAUDE.md; this section is about who owns what.
 
-- **`IByteOrigin` (`Infrastructure/IByteOrigin.cs`) is where the bytes came from.** It carries
+- **`IByteOrigin` (`Engine/Bytes/IByteOrigin.cs`) is where the bytes came from.** It carries
   `DisplayName`, `Path` (null for a document that is not a file) and the arrival state
   (`AvailableLength`/`LengthSettled`/`WaitForLength`), and it is the only thing that hands out
   sources: `Open()` for the whole document, `OpenRange(offset, length)` for one NDJSON line, an
   array's bytes as a table, or one search chunk. Implemented by `FileByteOrigin` (holds no
   handle; every `Open` is a new `MMapFile`) and `MemoryByteOrigin` (a paste). It lives as long as
   the open input and is owned by the shell (above).
-- **`IByteSource` (`Infrastructure/IByteSource.cs`) is one session's reader.** Every consumer is
+- **`IByteSource` (`Engine/Bytes/IByteSource.cs`) is one session's reader.** Every consumer is
   typed to it. Implemented by `MMapFile`, `RawPieceTable` (a piece table over (mapping,
   scratch), which is why a span can come back short) and `MemoryByteSource`, the in-memory
   source behind `MemoryByteOrigin`. A caller that opened a source owns it and calls `Release()`
   (`ByteSourceReading`); nobody releases a source handed to them.
-- `MMapFile` (`Infrastructure/MMapFile.cs`) is the file-backed source: a read-only zero-copy
+- `MMapFile` (`Engine/Bytes/MMapFile.cs`) is the file-backed source: a read-only zero-copy
   view, whole-file or `(path, offset, length)`. `AvailableLength` always comes from `FileInfo`,
   never the accessor capacity (see CLAUDE.md), and a mapping never grows. `GetContiguousSpan`
   throws `ObjectDisposedException` after `Dispose` — a use-after-free is a catchable managed
   error, never a silent access violation.
-- `IndexedSourceSession<TIndex>` (`Infrastructure/IndexedSourceSession.cs`) owns the trio
+- `IndexedSourceSession<TIndex>` (`Engine/Indexing/IndexedSourceSession.cs`) owns the trio
   {source, background index, CancellationTokenSource} and encodes teardown ordering:
   cancel → join indexing task → join dependent tasks → release source. It owns the source once
   `Start` is called (releases it even if the index factory throws). `StartDependentRead`
@@ -275,7 +275,7 @@ The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLeng
 
 ## Virtualized ItemsSources
 
-- `VirtualizingItemsSourceBase` (`Infrastructure/VirtualizingItemsSourceBase.cs`) is the shared
+- `VirtualizingItemsSourceBase` (`Ui/Documents/VirtualizingItemsSourceBase.cs`) is the shared
   base for the list ItemsSources: `JsonVisibleRowCollection`, `NdJsonLineCollection`,
   `CsvRowCollection`, `JsonArrayRowCollection`, `JsonDiffRowCollection` and `RawRowCollection`.
   It supplies the read-only `IList` +
@@ -325,7 +325,7 @@ The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLeng
   harmless.
 - Nested per-line `JsonViewModel` (inside NDJSON) is owned by `NdJsonViewModel`: disposed on
   each new line selection (`LoadSelectedLine` disposes the previous) and in its `DisposeCore`.
-- `IndexedDocumentViewModel` (`Infrastructure/IndexedDocumentViewModel.cs`) is the base class
+- `IndexedDocumentViewModel` (`Ui/Documents/IndexedDocumentViewModel.cs`) is the base class
   behind `JsonViewModel`/`CsvViewModel`/`NdJsonViewModel`/`RawViewModel`/`JsonDiffViewModel`/
   `JsonArrayTableViewModel`.
   Its `Dispose()` is the one place the ordering above is encoded for a document:
@@ -407,7 +407,7 @@ The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLeng
 
 ## Staleness primitive
 
-- `RequestTicket` (`Infrastructure/RequestTicket.cs`) formalizes the codebase's "monotonic
+- `RequestTicket` (`Ui/ViewModels/RequestTicket.cs`) formalizes the codebase's "monotonic
   counter + comparison" idiom used to detect a newer request superseding an in-flight one:
   `Begin()` issues a ticket, `IsCurrent(ticket)` reads it back, `Current` reads the active
   ticket without issuing one. Backs `MainWindowViewModel.openRequest`,

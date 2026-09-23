@@ -4,9 +4,10 @@ using System.Collections.Generic;
 using System.Collections.Specialized;
 using Avalonia.Threading;
 using Argonaut.Engine.Bytes;
+using Argonaut.Features.Raw.Rows;
 using Argonaut.Ui.Documents;
 
-namespace Argonaut.Features.Raw.Rows;
+namespace Argonaut.Features.Raw;
 
 /// <summary>
 /// Model for one visible display row of the raw viewer. <see cref="LineNumber"/> is null on

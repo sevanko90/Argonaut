@@ -1,7 +1,7 @@
 using System.Collections;
-using Argonaut.Features.Raw.Rows;
+using Argonaut.Features.Raw;
 
-namespace Argonaut.Tests.Features.Raw.Rows;
+namespace Argonaut.Tests.Features.Raw;
 
 /// <summary>
 /// The growth notification's allocation-free placeholder list is handed straight to Avalonia

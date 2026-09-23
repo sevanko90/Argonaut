@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
+using Argonaut.Ui.Find;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;

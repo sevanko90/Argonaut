@@ -1,8 +1,8 @@
 using System;
 using System.ComponentModel;
 using System.Threading.Tasks;
-using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
+using Argonaut.Ui.Find;
 
 namespace Argonaut.Shell;
 

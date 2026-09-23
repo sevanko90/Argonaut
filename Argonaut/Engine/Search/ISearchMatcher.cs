@@ -1,6 +1,6 @@
 using System;
 
-namespace Argonaut.Features.Search;
+namespace Argonaut.Engine.Search;
 
 /// <summary>
 /// Strategy for locating matches inside one chunk of raw file bytes. Implementations are

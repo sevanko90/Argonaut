@@ -2,9 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Argonaut.Engine.Search;
 using Argonaut.Infrastructure;
 
-namespace Argonaut.Features.Search;
+namespace Argonaut.Ui.Find;
 
 /// <summary>
 /// UI-side orchestration of find / find next for the currently open document: the scans'

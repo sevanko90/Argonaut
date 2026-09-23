@@ -1,9 +1,10 @@
 using System.Threading;
 using System.Threading.Tasks;
-using Argonaut.Features.Csv;
+using Argonaut.Engine.Search;
 using Argonaut.Features.NdJson;
+using Argonaut.Ui.Find;
 
-namespace Argonaut.Features.Search;
+namespace Argonaut.Features.Csv;
 
 /// <summary>
 /// Single-stage reveal strategy for the CSV/TSV grid (no nested per-row view model to wait on,

@@ -6,9 +6,9 @@ using Argonaut.Engine.Indexing.Lines;
 using Argonaut.Features.Json;
 using Argonaut.Features.Json.Hints;
 using Argonaut.Features.Json.Schema;
-using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
 using Argonaut.Shell;
+using Argonaut.Ui.Find;
 
 namespace Argonaut.Features.NdJson;
 

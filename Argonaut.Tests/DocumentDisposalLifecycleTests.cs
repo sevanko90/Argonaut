@@ -1,10 +1,10 @@
 using System.Text;
+using Argonaut.Engine.Search;
 using Argonaut.Features.Csv;
 using Argonaut.Features.Json;
 using Argonaut.Features.Json.Diff;
 using Argonaut.Features.NdJson;
 using Argonaut.Features.Raw;
-using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
 
 namespace Argonaut.Tests;

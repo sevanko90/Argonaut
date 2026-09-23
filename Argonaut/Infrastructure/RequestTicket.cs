@@ -1,7 +1,7 @@
 namespace Argonaut.Infrastructure;
 
 /// <summary>
-/// The codebase's staleness idiom (see <see cref="Argonaut.Features.Search.FindController"/>'s
+/// The codebase's staleness idiom (see <see cref="Argonaut.Ui.Find.FindController"/>'s
 /// class remarks), formalized as one primitive instead of three hand-rolled monotonic counters
 /// (<c>MainWindowViewModel.openRequestId</c>, <c>NdJsonViewModel.selectionRequestId</c>,
 /// <c>FindController.requestId</c>): a request begins, gets a ticket, and any continuation that

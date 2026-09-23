@@ -57,7 +57,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Update="Features\Search\FindBar.axaml.cs">
+    <Compile Update="Ui\Find\FindBar.axaml.cs">
       <DependentUpon>FindBar.axaml</DependentUpon>
     </Compile>
     <Compile Update="Features\Json\JsonToolbarView.axaml.cs">

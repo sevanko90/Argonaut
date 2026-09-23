@@ -1,8 +1,9 @@
 using System.Threading;
 using System.Threading.Tasks;
-using Argonaut.Features.Json;
+using Argonaut.Engine.Search;
+using Argonaut.Ui.Find;
 
-namespace Argonaut.Features.Search;
+namespace Argonaut.Features.Json;
 
 /// <summary>
 /// Reveal strategy for a whole-file JSON view: resolve the match's byte offset to a token

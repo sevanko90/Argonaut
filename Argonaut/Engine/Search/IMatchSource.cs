@@ -1,4 +1,4 @@
-namespace Argonaut.Features.Search;
+namespace Argonaut.Engine.Search;
 
 /// <summary>
 /// A growing, randomly-addressable run of matches - what <see cref="FindCursor"/> folds from.

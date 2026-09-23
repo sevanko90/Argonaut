@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Argonaut.Features.Search;
+namespace Argonaut.Engine.Search;
 
 /// <summary>
 /// Splits a display string into match/non-match segments for the current find term

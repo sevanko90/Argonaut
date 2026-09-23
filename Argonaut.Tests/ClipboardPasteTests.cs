@@ -1,7 +1,7 @@
 using System.Text;
-using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
 using Argonaut.Shell;
+using Argonaut.Ui.Find;
 
 namespace Argonaut.Tests;
 

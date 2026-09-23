@@ -2,8 +2,9 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using Argonaut.Features.Search;
+using Argonaut.Engine.Search;
 using Argonaut.Infrastructure;
+using Argonaut.Ui.Find;
 using Avalonia.Threading;
 
 namespace Argonaut.Features.Json.Diff;

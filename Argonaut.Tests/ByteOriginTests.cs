@@ -1,8 +1,8 @@
 using System.Text;
+using Argonaut.Engine.Search;
 using Argonaut.Features.Json;
-using Argonaut.Features.NdJson;
 using Argonaut.Features.Json.Schema;
-using Argonaut.Features.Search;
+using Argonaut.Features.NdJson;
 using Argonaut.Infrastructure;
 
 namespace Argonaut.Tests;

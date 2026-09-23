@@ -8,8 +8,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Features.Json;
 using Argonaut.Features.Json.Diff;
-using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
+using Argonaut.Ui.Find;
 using Avalonia.Threading;
 
 namespace Argonaut.Shell;

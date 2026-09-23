@@ -1,4 +1,4 @@
-namespace Argonaut.Features.Search;
+namespace Argonaut.Ui.Find;
 
 /// <summary>
 /// The find bar's status line - a pure function of the search's state, so all five shapes and

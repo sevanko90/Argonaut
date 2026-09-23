@@ -1,6 +1,7 @@
 using System.Text;
-using Argonaut.Features.Search;
+using Argonaut.Engine.Search;
 using Argonaut.Infrastructure;
+using Argonaut.Ui.Find;
 
 namespace Argonaut.Tests;
 

@@ -1,7 +1,7 @@
 using System;
 using System.Threading.Tasks;
-using Argonaut.Features.Search;
 using Argonaut.Shell;
+using Argonaut.Ui.Find;
 
 namespace Argonaut.Infrastructure;
 

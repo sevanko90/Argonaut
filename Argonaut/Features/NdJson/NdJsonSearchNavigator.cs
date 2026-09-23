@@ -1,10 +1,11 @@
 using System.ComponentModel;
 using System.Threading;
 using System.Threading.Tasks;
+using Argonaut.Engine.Search;
 using Argonaut.Features.Json;
-using Argonaut.Features.NdJson;
+using Argonaut.Ui.Find;
 
-namespace Argonaut.Features.Search;
+namespace Argonaut.Features.NdJson;
 
 /// <summary>
 /// Two-stage reveal strategy for the NDJSON view: resolve the match's byte offset to a line

@@ -12,7 +12,7 @@ using Avalonia.Media.TextFormatting;
 using Avalonia.Threading;
 using System.Threading.Tasks;
 using Avalonia.Interactivity;
-using Argonaut.Features.Search;
+using Argonaut.Engine.Search;
 using Argonaut.Infrastructure;
 
 namespace Argonaut.Features.Raw;

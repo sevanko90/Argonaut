@@ -1,8 +1,9 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
+using Argonaut.Engine.Search;
 
-namespace Argonaut.Features.Search;
+namespace Argonaut.Ui.Find;
 
 /// <summary>
 /// Attached properties that render a TextBlock's text with every occurrence of the current

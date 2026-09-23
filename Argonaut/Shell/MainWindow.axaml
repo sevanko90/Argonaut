@@ -6,7 +6,7 @@
         x:Class="Argonaut.Shell.MainWindow"
         x:DataType="shell:MainWindowViewModel"
         xmlns:shell="clr-namespace:Argonaut.Shell"
-        xmlns:search="clr-namespace:Argonaut.Features.Search"
+        xmlns:search="clr-namespace:Argonaut.Ui.Find"
         xmlns:json="clr-namespace:Argonaut.Features.Json"
         xmlns:diff="clr-namespace:Argonaut.Features.Json.Diff"
         xmlns:ndjson="clr-namespace:Argonaut.Features.NdJson"

@@ -1,9 +1,10 @@
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using Argonaut.Features.Json.Diff;
+using Argonaut.Engine.Search;
+using Argonaut.Ui.Find;
 
-namespace Argonaut.Features.Search;
+namespace Argonaut.Features.Json.Diff;
 
 /// <summary>
 /// Search strategy for the diff: two scanned files (source and target) feeding one find bar.

@@ -1,4 +1,4 @@
-using Argonaut.Features.Search;
+using Argonaut.Ui.Find;
 
 namespace Argonaut.Tests;
 

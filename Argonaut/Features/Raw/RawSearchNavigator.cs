@@ -1,8 +1,9 @@
 using System.Threading;
 using System.Threading.Tasks;
-using Argonaut.Features.Raw;
+using Argonaut.Engine.Search;
+using Argonaut.Ui.Find;
 
-namespace Argonaut.Features.Search;
+namespace Argonaut.Features.Raw;
 
 /// <summary>
 /// Single-stage reveal strategy for the raw viewer (like CsvSearchNavigator - no nested view

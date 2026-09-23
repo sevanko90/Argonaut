@@ -2,9 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
-using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
 using Argonaut.Shell;
+using Argonaut.Ui.Find;
 using Argonaut.Ui.TableGrid;
 using Avalonia.Threading;
 

@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 
-namespace Argonaut.Features.Search;
+namespace Argonaut.Engine.Search;
 
 /// <summary>One place find will stop: a match, plus where it sorts in the merged order.</summary>
 public readonly record struct FindStop(int Source, int MatchIndex, long Key);
@@ -23,7 +23,7 @@ public readonly record struct FindCursorMove(bool Moved, FindStop Stop, bool Wra
 ///
 /// Knows nothing about files, scans, view models or the dispatcher: matches arrive through
 /// <see cref="IMatchSource"/> and their display order as an OPAQUE long from the caller's key
-/// function (<see cref="ISearchNavigator.OrderKey"/> in the app). Policy stays with the viewer;
+/// function (<c>ISearchNavigator.OrderKey</c> in the app). Policy stays with the viewer;
 /// the mechanism here is pure, and directly testable.
 ///
 /// Two things drive its design, both consequences of matches still arriving while the user

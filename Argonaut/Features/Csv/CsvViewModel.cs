@@ -3,8 +3,8 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Engine.Indexing.Lines;
-using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
+using Argonaut.Ui.Find;
 using Argonaut.Ui.TableGrid;
 
 namespace Argonaut.Features.Csv;

@@ -1,7 +1,8 @@
 using System.Threading;
-using Argonaut.Features.Search;
+using Argonaut.Engine.Search;
 using Argonaut.Infrastructure;
 using Argonaut.Shell;
+using Argonaut.Ui.Find;
 
 namespace Argonaut.Tests;
 

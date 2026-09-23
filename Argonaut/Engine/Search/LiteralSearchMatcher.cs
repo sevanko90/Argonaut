@@ -1,7 +1,7 @@
 using System;
 using System.Text;
 
-namespace Argonaut.Features.Search;
+namespace Argonaut.Engine.Search;
 
 /// <summary>
 /// Finds literal occurrences of a term in raw UTF-8 file bytes. Case-insensitivity is

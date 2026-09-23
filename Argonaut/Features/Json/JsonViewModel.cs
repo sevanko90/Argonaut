@@ -4,11 +4,12 @@ using System.ComponentModel;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using Argonaut.Engine.Search;
 using Argonaut.Features.Json.Hints;
 using Argonaut.Features.Json.Schema;
-using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
 using Argonaut.Shell;
+using Argonaut.Ui.Find;
 
 namespace Argonaut.Features.Json;
 

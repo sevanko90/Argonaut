@@ -5,7 +5,7 @@ namespace Argonaut.Features.Json.Hints;
 /// <summary>
 /// Strategy for classifying a scalar token's raw bytes and formatting a hint for it, decoupled
 /// from where/how the hint is rendered. This is the extension point for future hint kinds
-/// beyond dates (mirrors <see cref="Argonaut.Features.Search.ISearchMatcher"/>).
+/// beyond dates (mirrors <see cref="Argonaut.Engine.Search.ISearchMatcher"/>).
 /// </summary>
 public interface IValueHintProvider
 {

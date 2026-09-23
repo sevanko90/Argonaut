@@ -2,7 +2,7 @@ using System;
 using Avalonia.Controls;
 using Avalonia.Input;
 
-namespace Argonaut.Features.Search;
+namespace Argonaut.Ui.Find;
 
 /// <summary>
 /// The find controls hosted inline in MainWindow's toolbar: term box, previous/next,

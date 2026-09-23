@@ -2,11 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Detection;
+using Argonaut.Engine.Progress;
 using Argonaut.Features.Csv;
 using Argonaut.Features.Json;
 using Argonaut.Features.NdJson;
 using Argonaut.Features.Raw;
-using Argonaut.Infrastructure;
+using Argonaut.Ui.Documents;
 
 namespace Argonaut.Shell;
 

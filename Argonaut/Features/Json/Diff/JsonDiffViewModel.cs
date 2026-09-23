@@ -2,8 +2,15 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using Argonaut.Features.Search;
-using Argonaut.Infrastructure;
+using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Detection;
+using Argonaut.Engine.Indexing;
+using Argonaut.Engine.Search;
+using Argonaut.Features.Json.Indexing;
+using Argonaut.Features.Json.Paths;
+using Argonaut.Ui.Documents;
+using Argonaut.Ui.Find;
+using Argonaut.Ui.Progress;
 using Avalonia.Threading;
 
 namespace Argonaut.Features.Json.Diff;

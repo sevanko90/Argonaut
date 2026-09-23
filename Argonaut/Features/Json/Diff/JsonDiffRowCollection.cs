@@ -2,7 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Threading.Tasks;
-using Argonaut.Infrastructure;
+using Argonaut.Engine.Collections;
+using Argonaut.Features.Json.Indexing;
+using Argonaut.Features.Json.Paths;
+using Argonaut.Ui.Documents;
 
 namespace Argonaut.Features.Json.Diff;
 
@@ -673,7 +676,7 @@ public sealed class JsonDiffRowCollection : VirtualizingItemsSourceBase
     /// <summary>
     /// Where <paramref name="token"/> falls in the merged display order, as a sortable key -
     /// what lets one find bar interleave matches from both documents into a single sequence
-    /// (see <see cref="Search.ISearchNavigator.OrderKey"/>). Keyed on the owning RECORD, not on
+    /// (see <see cref="Argonaut.Ui.Find.ISearchNavigator.OrderKey"/>). Keyed on the owning RECORD, not on
     /// a visible row position, so it stays put as the user expands and collapses; long.MaxValue
     /// for a token no record covers yet, which parks it at the end rather than at the start.
     ///

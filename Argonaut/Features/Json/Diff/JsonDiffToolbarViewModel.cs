@@ -1,11 +1,11 @@
 using System;
-using Argonaut.Infrastructure;
+using Argonaut.Ui.ViewModels;
 
 namespace Argonaut.Features.Json.Diff;
 
 /// <summary>
 /// The diff document's header toolbar, reached through the existing
-/// <see cref="Argonaut.Shell.IDocumentViewModel.Toolbar"/> seam (one type-keyed
+/// <see cref="Argonaut.Ui.Documents.IDocumentViewModel.Toolbar"/> seam (one type-keyed
 /// DataTemplate in MainWindow.axaml, no other shell change): the "changes only" filter and
 /// the diff-stepping buttons. The file names live in the window title instead - one place,
 /// where they identify the document rather than competing with what the toolbar is for. The

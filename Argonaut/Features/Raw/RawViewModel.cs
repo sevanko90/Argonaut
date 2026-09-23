@@ -2,9 +2,19 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using Argonaut.Features.Search;
-using Argonaut.Infrastructure;
-using Argonaut.Shell;
+using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Detection;
+using Argonaut.Engine.Indexing;
+using Argonaut.Engine.Progress;
+using Argonaut.Engine.Saving;
+using Argonaut.Engine.Settings;
+using Argonaut.Features.Raw.Editing;
+using Argonaut.Features.Raw.Rows;
+using Argonaut.Ui.Documents;
+using Argonaut.Ui.Documents.Navigation;
+using Argonaut.Ui.Find;
+using Argonaut.Ui.Notifications;
+using Argonaut.Ui.Progress;
 
 namespace Argonaut.Features.Raw;
 
@@ -508,7 +518,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
     /// Resolves <paramref name="byteOffset"/> to a display row - waiting for indexing to reach
     /// it (or finish) if necessary - and reveals it. Used by the "jump to failure location"
     /// link on another document's incompatible/partial-failure display, which switches this
-    /// view in then calls here. Mirrors <see cref="Argonaut.Features.Search.RawSearchNavigator.RevealAsync"/>'s
+    /// view in then calls here. Mirrors <see cref="Argonaut.Features.Raw.RawSearchNavigator.RevealAsync"/>'s
     /// generation re-check for a wrap-width change racing the resolve, and its own disposal:
     /// if the document is closed/switched away while resolving, resuming touches an
     /// already-unmapped file, which surfaces as a catchable <see cref="ObjectDisposedException"/>

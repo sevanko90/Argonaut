@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using Argonaut.Infrastructure;
+using Argonaut.Engine.Settings;
 
 namespace Argonaut.Features.Json.Schema;
 

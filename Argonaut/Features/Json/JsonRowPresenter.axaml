@@ -1,7 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:json="clr-namespace:Argonaut.Features.Json"
-             xmlns:search="clr-namespace:Argonaut.Features.Search"
+             xmlns:find="clr-namespace:Argonaut.Ui.Find"
              x:Class="Argonaut.Features.Json.JsonRowPresenter"
              x:DataType="json:JsonRow">
     <!-- The read-only content of one JSON row (name, value, truncation note), shared by the
@@ -20,9 +20,9 @@
     <Grid ColumnDefinitions="Auto,*"
           IsVisible="{Binding Converter={x:Static json:IsNotNullConverter.Instance}}">
         <TextBlock Grid.Column="0"
-                   search:SearchHighlight.Text="{Binding Name}"
-                   search:SearchHighlight.Suffix=": "
-                   search:SearchHighlight.Term="{Binding $parent[json:JsonRowPresenter].HighlightTerm}"
+                   find:SearchHighlight.Text="{Binding Name}"
+                   find:SearchHighlight.Suffix=": "
+                   find:SearchHighlight.Term="{Binding $parent[json:JsonRowPresenter].HighlightTerm}"
                    IsVisible="{Binding Name, Converter={x:Static json:IsNotNullConverter.Instance}}"
                    Foreground="{DynamicResource AppAccentBrush}"
                    TextWrapping="NoWrap"
@@ -31,8 +31,8 @@
                    VerticalAlignment="Center"
                    FontFamily="{DynamicResource AppContentFontFamily}" />
         <TextBlock Grid.Column="1"
-                   search:SearchHighlight.Text="{Binding Value}"
-                   search:SearchHighlight.Term="{Binding $parent[json:JsonRowPresenter].HighlightTerm}"
+                   find:SearchHighlight.Text="{Binding Value}"
+                   find:SearchHighlight.Term="{Binding $parent[json:JsonRowPresenter].HighlightTerm}"
                    Classes="rowValue"
                    Classes.jsonString="{Binding IsStringValue}"
                    Classes.jsonNumber="{Binding IsNumberValue}"

@@ -2,10 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using Argonaut.Features.NdJson;
-using Argonaut.Features.Search;
-using Argonaut.Infrastructure;
-using Argonaut.Shell;
+using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Detection;
+using Argonaut.Engine.Indexing;
+using Argonaut.Engine.Indexing.Lines;
+using Argonaut.Engine.Progress;
+using Argonaut.Ui.Documents;
+using Argonaut.Ui.Find;
+using Argonaut.Ui.TableGrid;
 
 namespace Argonaut.Features.Csv;
 
@@ -15,7 +19,7 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
 
     private IndexedSourceSession<FileOffsetIndex>? session;
     private CsvRowCollection? rows;
-    private CsvStructure? structure;
+    private TableStructure? structure;
     private string[] headerFields = [];
     private byte delimiter;
     private bool isHeaderRow = true;
@@ -45,7 +49,7 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
     /// <summary>CSV has no header-region toolbar (no date hints, no tree to expand).</summary>
     public override object? Toolbar => null;
 
-    public CsvStructure Structure => this.structure ?? throw new InvalidOperationException("LoadAsync must complete before Structure is accessed.");
+    public TableStructure Structure => this.structure ?? throw new InvalidOperationException("LoadAsync must complete before Structure is accessed.");
 
     /// <summary>Columns discovered so far - 0 until <see cref="LoadAsync"/> has published a
     /// <see cref="Structure"/>, which is what the view waits for before building columns.</summary>
@@ -129,7 +133,7 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
             ? CsvFieldReader.ReadFields(session.Bytes, session.Index.GetLineSpan(0), delimiter)
             : [];
 
-        this.structure = CsvStructure.FromMaxChars(ColumnNames(), MeasureColumns(session));
+        this.structure = TableStructure.FromMaxChars(ColumnNames(), MeasureColumns(session));
         this.rows = new CsvRowCollection(session.Index, session.Bytes, delimiter, this.isHeaderRow ? 1 : 0);
 
         OnPropertyChanged(nameof(Rows));

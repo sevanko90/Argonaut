@@ -3,7 +3,9 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Collections.Specialized;
 using Avalonia.Threading;
-using Argonaut.Infrastructure;
+using Argonaut.Engine.Bytes;
+using Argonaut.Features.Raw.Rows;
+using Argonaut.Ui.Documents;
 
 namespace Argonaut.Features.Raw;
 
@@ -82,7 +84,7 @@ public sealed class RawRowCollection : VirtualizingItemsSourceBase
     /// The growth monitor starts only for a scan that is still running. That is a type test
     /// rather than a member on <see cref="IRawRowIndex"/> on purpose: growth belongs to a
     /// background scan of a file, and the other implementation
-    /// (<see cref="RawEditedRowIndex"/>) exists only once a scan has finished - its row count
+    /// (<see cref="Editing.RawEditedRowIndex"/>) exists only once a scan has finished - its row count
     /// changes by user edits, which the owner announces (see
     /// <see cref="Invalidate"/>) rather than something a timer could discover.
     /// </summary>

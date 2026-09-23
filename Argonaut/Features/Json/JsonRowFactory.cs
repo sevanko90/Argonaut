@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Generic;
+using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Collections;
+using Argonaut.Engine.Text;
 using Argonaut.Features.Json.Hints;
+using Argonaut.Features.Json.Indexing;
 using Argonaut.Features.Json.Schema;
-using Argonaut.Infrastructure;
 
 namespace Argonaut.Features.Json;
 

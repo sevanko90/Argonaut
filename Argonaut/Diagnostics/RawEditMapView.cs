@@ -2,7 +2,7 @@ using System;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
-using Argonaut.Features.Raw;
+using Argonaut.Features.Raw.Editing;
 
 namespace Argonaut.Diagnostics;
 

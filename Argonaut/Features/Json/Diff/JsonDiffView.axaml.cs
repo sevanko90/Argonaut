@@ -2,7 +2,7 @@ using System;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Threading.Tasks;
-using Argonaut.Infrastructure;
+using Argonaut.Ui.Notifications;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Input.Platform;

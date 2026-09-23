@@ -3,6 +3,7 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:json="clr-namespace:Argonaut.Features.Json"
+             xmlns:schema="clr-namespace:Argonaut.Features.Json.Schema"
              mc:Ignorable="d"
              x:Class="Argonaut.Features.Json.JsonToolbarView"
              x:DataType="json:JsonToolbarViewModel">
@@ -144,14 +145,14 @@
                             <ListBox.Styles>
                                 <!-- Headers ride in the same list so it stays one scrollable,
                                      filterable surface; this is what stops them being picked. -->
-                                <Style Selector="ListBoxItem" x:DataType="json:SchemaRootPick">
+                                <Style Selector="ListBoxItem" x:DataType="schema:SchemaRootPick">
                                     <Setter Property="IsEnabled" Value="{Binding IsSelectable}" />
                                     <Setter Property="Padding" Value="8,4" />
                                     <Setter Property="MinHeight" Value="0" />
                                 </Style>
                             </ListBox.Styles>
                             <ListBox.ItemTemplate>
-                                <DataTemplate x:DataType="json:SchemaRootPick">
+                                <DataTemplate x:DataType="schema:SchemaRootPick">
                                   <StackPanel>
                                     <Border Height="1"
                                             Margin="0,6,0,8"

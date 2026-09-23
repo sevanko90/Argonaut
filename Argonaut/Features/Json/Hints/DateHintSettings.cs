@@ -1,6 +1,6 @@
 using System;
 using System.Collections.Generic;
-using Argonaut.Infrastructure;
+using Argonaut.Ui.ViewModels;
 
 namespace Argonaut.Features.Json.Hints;
 

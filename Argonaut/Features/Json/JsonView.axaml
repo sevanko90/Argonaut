@@ -3,7 +3,8 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:json="clr-namespace:Argonaut.Features.Json"
-             xmlns:search="clr-namespace:Argonaut.Features.Search"
+             xmlns:paths="clr-namespace:Argonaut.Features.Json.Paths"
+             xmlns:find="clr-namespace:Argonaut.Ui.Find"
              xmlns:converters="clr-namespace:Avalonia.Data.Converters;assembly=Avalonia.Base"
              x:Class="Argonaut.Features.Json.JsonView"
              x:DataType="json:JsonViewModel">
@@ -199,15 +200,15 @@
                                      indented relative to their leaf siblings at the same depth. -->
                                 <TextBlock IsVisible="{Binding !HasChildren}"
                                            Width="20" />
-                                <TextBlock search:SearchHighlight.Text="{Binding Name}"
-                                           search:SearchHighlight.Suffix=": "
-                                           search:SearchHighlight.Term="{Binding $parent[json:JsonView].((json:JsonViewModel)DataContext).HighlightTerm}"
+                                <TextBlock find:SearchHighlight.Text="{Binding Name}"
+                                           find:SearchHighlight.Suffix=": "
+                                           find:SearchHighlight.Term="{Binding $parent[json:JsonView].((json:JsonViewModel)DataContext).HighlightTerm}"
                                            IsVisible="{Binding Name, Converter={x:Static json:IsNotNullConverter.Instance}}"
                                            Foreground="{DynamicResource AppAccentBrush}"
                                            VerticalAlignment="Center"
                                            FontFamily="{DynamicResource AppContentFontFamily}" />
-                                <TextBlock search:SearchHighlight.Text="{Binding Value}"
-                                           search:SearchHighlight.Term="{Binding $parent[json:JsonView].((json:JsonViewModel)DataContext).HighlightTerm}"
+                                <TextBlock find:SearchHighlight.Text="{Binding Value}"
+                                           find:SearchHighlight.Term="{Binding $parent[json:JsonView].((json:JsonViewModel)DataContext).HighlightTerm}"
                                            Classes.jsonString="{Binding IsStringValue}"
                                            Classes.jsonNumber="{Binding IsNumberValue}"
                                            Classes.jsonBool="{Binding IsBooleanValue}"
@@ -280,7 +281,7 @@
                             </ItemsPanelTemplate>
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
-                            <DataTemplate x:DataType="json:JsonPathSegment">
+                            <DataTemplate x:DataType="paths:JsonPathSegment">
                                 <Button Content="{Binding Label}"
                                         Click="OnPathSegmentClick"
                                         Classes="pathlink"

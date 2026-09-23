@@ -6,13 +6,14 @@
         x:Class="Argonaut.Shell.MainWindow"
         x:DataType="shell:MainWindowViewModel"
         xmlns:shell="clr-namespace:Argonaut.Shell"
-        xmlns:search="clr-namespace:Argonaut.Features.Search"
+        xmlns:find="clr-namespace:Argonaut.Ui.Find"
         xmlns:json="clr-namespace:Argonaut.Features.Json"
+        xmlns:arrayTable="clr-namespace:Argonaut.Features.Json.ArrayTable"
         xmlns:diff="clr-namespace:Argonaut.Features.Json.Diff"
         xmlns:ndjson="clr-namespace:Argonaut.Features.NdJson"
         xmlns:csv="clr-namespace:Argonaut.Features.Csv"
         xmlns:raw="clr-namespace:Argonaut.Features.Raw"
-        xmlns:infra="clr-namespace:Argonaut.Infrastructure"
+        xmlns:progress="clr-namespace:Argonaut.Ui.Progress"
         Title="{Binding Title}"
         Background="{DynamicResource AppPanelBackgroundBrush}"
         Width="1000" Height="700">
@@ -33,8 +34,8 @@
         <DataTemplate DataType="diff:JsonDiffViewModel">
             <diff:JsonDiffView />
         </DataTemplate>
-        <DataTemplate DataType="json:JsonArrayTableViewModel">
-            <json:JsonArrayTableView />
+        <DataTemplate DataType="arrayTable:JsonArrayTableViewModel">
+            <arrayTable:JsonArrayTableView />
         </DataTemplate>
         <DataTemplate DataType="json:JsonToolbarViewModel">
             <json:JsonToolbarView />
@@ -45,8 +46,8 @@
         <DataTemplate DataType="raw:RawToolbarViewModel">
             <raw:RawToolbarView />
         </DataTemplate>
-        <DataTemplate DataType="json:JsonArrayTableToolbarViewModel">
-            <json:JsonArrayTableToolbarView />
+        <DataTemplate DataType="arrayTable:JsonArrayTableToolbarViewModel">
+            <arrayTable:JsonArrayTableToolbarView />
         </DataTemplate>
         <DataTemplate DataType="shell:IncompatibleViewModel">
             <shell:IncompatibleView />
@@ -73,7 +74,7 @@
                  button off the right edge - losing the escape hatch first, which is backwards.
                  Constrained here instead, the toolbar wraps internally and close stays put. -->
             <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto">
-                <search:FindBar Grid.Column="0"
+                <find:FindBar Grid.Column="0"
                                 x:Name="FindBarControl"
                                 IsVisible="{Binding IsFindAvailable}"
                                 VerticalAlignment="Center" />
@@ -237,7 +238,7 @@
             </Border.Styles>
             <ItemsControl ItemsSource="{Binding Progress.Shown}">
                 <ItemsControl.ItemTemplate>
-                    <DataTemplate x:DataType="infra:ProgressEntry">
+                    <DataTemplate x:DataType="progress:ProgressEntry">
                         <Grid ColumnDefinitions="*,Auto,Auto" RowDefinitions="Auto,Auto" Margin="0,4">
                             <TextBlock Grid.Row="0" Grid.Column="0"
                                        Text="{Binding Title}"

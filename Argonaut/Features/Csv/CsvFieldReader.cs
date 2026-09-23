@@ -1,7 +1,9 @@
 using System;
 using System.Text;
-using Argonaut.Features.NdJson;
-using Argonaut.Infrastructure;
+using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Detection;
+using Argonaut.Engine.Indexing.Lines;
+using Argonaut.Engine.Text;
 
 namespace Argonaut.Features.Csv;
 
@@ -35,7 +37,7 @@ public static class CsvFieldReader
     /// </param>
     public static CsvFieldSpan[] SplitToSpans(IByteSource file, FileLineSpan lineSpan, byte delimiter, int maxFields = int.MaxValue)
     {
-        var trimmed = NdJsonLineReader.TrimTrailingNewline(file, lineSpan);
+        var trimmed = LineReader.TrimTrailingNewline(file, lineSpan);
         if (trimmed.Length == 0)
             return [new CsvFieldSpan(trimmed.Offset, 0)];
 
@@ -82,7 +84,7 @@ public static class CsvFieldReader
 
     /// <summary>
     /// Splits and decodes a row to strings, on demand - only ever called for a row the UI is
-    /// about to display, mirroring <see cref="NdJsonLineReader.ReadLine"/>'s decode-on-realize
+    /// about to display, mirroring <see cref="LineReader.ReadLine"/>'s decode-on-realize
     /// model. A field wrapped in a matching pair of '"' has the quotes stripped and any doubled
     /// '""' unescaped to a literal '"'.
     /// </summary>

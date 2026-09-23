@@ -3,6 +3,7 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:raw="clr-namespace:Argonaut.Features.Raw"
+             xmlns:editing="clr-namespace:Argonaut.Features.Raw.Editing"
              x:Class="Argonaut.Features.Raw.RawView"
              x:DataType="raw:RawViewModel">
     <Border BorderBrush="{DynamicResource AppBorderBrush}"
@@ -33,7 +34,7 @@
 
             <!-- Where the edits are, on the scrollbar's scale: the inspector's piece-table bar
                  turned on its side. Shown only once there is an editor. -->
-            <raw:RawEditOverview x:Name="EditOverview"
+            <editing:RawEditOverview x:Name="EditOverview"
                                  Grid.Row="0"
                                  Grid.Column="1"
                                  Width="8"

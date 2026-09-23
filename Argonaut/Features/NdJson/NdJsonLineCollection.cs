@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Specialized;
 using Avalonia.Threading;
-using Argonaut.Infrastructure;
+using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Indexing.Lines;
+using Argonaut.Ui.Documents;
 
 namespace Argonaut.Features.NdJson;
 
@@ -68,7 +70,7 @@ public sealed class NdJsonLineCollection : VirtualizingItemsSourceBase
             return new NdJsonVisibleLine(i + 1, string.Empty);
 
         var lineSpan = index.GetLineSpan(i);
-        var line = new NdJsonVisibleLine(i + 1, NdJsonLineReader.ReadDisplayLine(bytes, lineSpan));
+        var line = new NdJsonVisibleLine(i + 1, LineReader.ReadDisplayLine(bytes, lineSpan));
 
         var newNode = new LinkedListNode<(int, NdJsonVisibleLine)>((i, line));
         cacheOrder.AddFirst(newNode);

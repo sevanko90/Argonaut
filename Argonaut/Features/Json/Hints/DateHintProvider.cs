@@ -1,5 +1,5 @@
 using System;
-using Argonaut.Features.Json;
+using Argonaut.Features.Json.Indexing;
 
 namespace Argonaut.Features.Json.Hints;
 

@@ -2,26 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Specialized;
 using Avalonia.Threading;
-using Argonaut.Features.NdJson;
-using Argonaut.Infrastructure;
+using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Indexing.Lines;
+using Argonaut.Ui.Documents;
+using Argonaut.Ui.TableGrid;
 
 namespace Argonaut.Features.Csv;
-
-/// <summary>One displayed data row: 1-based row number plus its cells' text. Carries no
-/// geometry - the grid owns column widths, so a realized row never goes stale when one is
-/// resized or the content font changes.</summary>
-public sealed class CsvVisibleRow
-{
-    public CsvVisibleRow(int rowNumber, IReadOnlyList<CsvCell> cells)
-    {
-        RowNumber = rowNumber;
-        Cells = cells;
-    }
-
-    public int RowNumber { get; }
-
-    public IReadOnlyList<CsvCell> Cells { get; }
-}
 
 // Adapted from Argonaut.Features.NdJson.NdJsonLineCollection: same
 // VirtualizingItemsSourceBase (read-only IList + INotifyCollectionChanged + empty-once-disposed)
@@ -37,8 +23,8 @@ public sealed class CsvRowCollection : VirtualizingItemsSourceBase, IColumnFitSo
     private readonly FileOffsetIndex index;
     private readonly IByteSource bytes;
     private readonly byte delimiter;
-    private readonly Dictionary<int, LinkedListNode<(int Index, CsvVisibleRow Row)>> cache = new();
-    private readonly LinkedList<(int Index, CsvVisibleRow Row)> cacheOrder = new();
+    private readonly Dictionary<int, LinkedListNode<(int Index, TableRow Row)>> cache = new();
+    private readonly LinkedList<(int Index, TableRow Row)> cacheOrder = new();
 
     private int dataStartIndex;
     private DispatcherTimer? growthTimer;
@@ -60,7 +46,7 @@ public sealed class CsvRowCollection : VirtualizingItemsSourceBase, IColumnFitSo
 
     protected override object GetItem(int index) => GetRow(index);
 
-    private CsvVisibleRow GetRow(int i)
+    private TableRow GetRow(int i)
     {
         if (cache.TryGetValue(i, out var node))
         {
@@ -71,17 +57,17 @@ public sealed class CsvRowCollection : VirtualizingItemsSourceBase, IColumnFitSo
 
         int count = Count;
         if (i < 0 || i >= count)
-            return new CsvVisibleRow(i + 1, Array.Empty<CsvCell>());
+            return new TableRow(i + 1, Array.Empty<TableCell>());
 
         var lineSpan = index.GetLineSpan(i + dataStartIndex);
         var fields = CsvFieldReader.ReadFields(bytes, lineSpan, delimiter);
-        var cells = new CsvCell[fields.Length];
+        var cells = new TableCell[fields.Length];
         for (int c = 0; c < fields.Length; c++)
-            cells[c] = new CsvCell(fields[c]);
+            cells[c] = new TableCell(fields[c]);
 
-        var row = new CsvVisibleRow(i + 1, cells);
+        var row = new TableRow(i + 1, cells);
 
-        var newNode = new LinkedListNode<(int, CsvVisibleRow)>((i, row));
+        var newNode = new LinkedListNode<(int, TableRow)>((i, row));
         cacheOrder.AddFirst(newNode);
         cache[i] = newNode;
 

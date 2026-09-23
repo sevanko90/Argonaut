@@ -222,6 +222,17 @@ purpose because it needs its own rework rather than a move.
   the theme, font, recent files and auto-update). Open questions: one file or one per section;
   reading the existing per-file JSON on first run so nobody loses their settings; and where the
   schemas folder path goes, since it is a location rather than a setting.
+- **Store distribution is a reason to do it first.** The Mac App Store sandbox (see
+  [store-distribution-comparison.md](store-distribution-comparison.md) and Distribution below)
+  changes what a persisted setting can be. A stored path gives no access on relaunch, so recent
+  files and the remembered schema binding need security-scoped bookmarks saved with them and
+  resolved when read. Application data also moves into the app's container, which changes where
+  the files live and makes the schemas folder something users cannot browse to. Behind an
+  interface these become a different implementation for the sandboxed build, like saving is
+  behind `IFileReplacer`. With today's statics they would be conditionals scattered across seven
+  classes and their callers. So the interface should carry what a sandboxed store needs rather
+  than bare strings: an entry that remembers a file should hold "a way back to this file", not
+  just a path.
 
 ## Memory and performance
 
@@ -270,4 +281,5 @@ Detail: [store-distribution-comparison.md](store-distribution-comparison.md).
 - **Mac App Store.** Expensive, and mostly for sandbox reasons rather than packaging:
   security-scoped bookmarks for recent files and remembered schemas, the schema sidecar and
   schema folder reworked, and a sandboxed save implementation behind `IFileReplacer`. Only
-  worth it with a concrete reason to be in that store.
+  worth it with a concrete reason to be in that store. The settings service (see Settings) is
+  where the bookmark half of this would live.

@@ -68,7 +68,7 @@ for this codebase:
   and-drop (`MainWindow.OnDrop`, [Argonaut/Shell/MainWindow.axaml.cs](../Argonaut/Shell/MainWindow.axaml.cs)) —
   both are sandbox-exempt (the OS grants temporary read access for files chosen
   through its own picker/drop APIs), so **first open of a file needs no code change.**
-- **Recent files do need a code change.** [RecentFileHistory.cs](../Argonaut/Infrastructure/RecentFileHistory.cs)
+- **Recent files do need a code change.** [RecentFileHistory.cs](../Argonaut/Engine/Settings/RecentFileHistory.cs)
   persists plain path strings. Under App Sandbox, a stored path with no accompanying
   grant gives no access on relaunch — reopening a recent file would silently fail.
   This needs security-scoped bookmarks (`NSURL` bookmark data, `startAccessingSecurityScopedResource`)

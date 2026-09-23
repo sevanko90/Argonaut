@@ -2,6 +2,7 @@ using System.Text;
 using Argonaut.Engine.Search;
 using Argonaut.Infrastructure;
 using Argonaut.Shell;
+using Argonaut.Ui.Documents;
 using Argonaut.Ui.Find;
 
 namespace Argonaut.Tests;

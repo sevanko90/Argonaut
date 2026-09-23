@@ -1,8 +1,9 @@
 using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Infrastructure;
+using Argonaut.Ui.Documents.Navigation;
 
-namespace Argonaut.Shell;
+namespace Argonaut.Ui.Documents;
 
 /// <summary>What a save came to.</summary>
 public enum DocumentSaveOutcome

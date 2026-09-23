@@ -4,7 +4,7 @@ using System.Threading.Tasks;
 using Argonaut.Infrastructure;
 using Argonaut.Ui.Find;
 
-namespace Argonaut.Shell;
+namespace Argonaut.Ui.Documents;
 
 /// <summary>
 /// The shell's contract for one open document (JSON, NDJSON, CSV/TSV). Each document view

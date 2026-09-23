@@ -9,6 +9,8 @@ using System.Threading.Tasks;
 using Argonaut.Features.Json;
 using Argonaut.Features.Json.Diff;
 using Argonaut.Infrastructure;
+using Argonaut.Ui.Documents;
+using Argonaut.Ui.Documents.Navigation;
 using Argonaut.Ui.Find;
 using Avalonia.Threading;
 

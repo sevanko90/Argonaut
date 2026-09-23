@@ -1,6 +1,6 @@
 using System;
 using System.Threading.Tasks;
-using Argonaut.Shell;
+using Argonaut.Ui.Documents;
 using Argonaut.Ui.Find;
 
 namespace Argonaut.Infrastructure;

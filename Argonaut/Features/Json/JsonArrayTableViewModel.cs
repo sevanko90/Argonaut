@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
 using Argonaut.Infrastructure;
-using Argonaut.Shell;
+using Argonaut.Ui.Documents;
 using Argonaut.Ui.Find;
 using Argonaut.Ui.TableGrid;
 using Avalonia.Threading;
@@ -13,7 +13,7 @@ namespace Argonaut.Features.Json;
 /// <summary>
 /// One JSON array rendered as a CSV-style grid. A real <see cref="IDocumentViewModel"/>, entered
 /// explicitly from the JSON tree and published directly by the shell (never via
-/// <see cref="DocumentViewCatalog"/>) - exactly as a diff is, and for the same reason: it claims
+/// <c>DocumentViewCatalog</c>) - exactly as a diff is, and for the same reason: it claims
 /// no <see cref="FileTypeDetector.FileKind"/>, so the view switcher offers no selection for it
 /// and picking any view there re-indexes the origin file through the normal switch path.
 ///

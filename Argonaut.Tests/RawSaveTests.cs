@@ -1,7 +1,7 @@
 using System.Text;
 using Argonaut.Features.Raw;
 using Argonaut.Infrastructure;
-using Argonaut.Shell;
+using Argonaut.Ui.Documents;
 
 namespace Argonaut.Tests;
 

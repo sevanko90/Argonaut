@@ -1,6 +1,6 @@
 using System.Threading.Tasks;
 
-namespace Argonaut.Shell;
+namespace Argonaut.Ui.Documents.Navigation;
 
 /// <summary>
 /// A document that can reveal a JSONPath: implemented by <see cref="Argonaut.Features.Json.JsonViewModel"/>

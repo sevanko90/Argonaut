@@ -14,7 +14,7 @@ public sealed record JsonArrayColumnModeOption(string DisplayName, JsonArrayColu
 
 /// <summary>
 /// The array-table document's header toolbar, reached through the existing
-/// <see cref="Argonaut.Shell.IDocumentViewModel.Toolbar"/> seam: where this table came from, the
+/// <see cref="Argonaut.Ui.Documents.IDocumentViewModel.Toolbar"/> seam: where this table came from, the
 /// column-mode picker, and the way back to the JSON tree.
 ///
 /// <b>The picker only exists for an array of scalars.</b> An array of objects already has its

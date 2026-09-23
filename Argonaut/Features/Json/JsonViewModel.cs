@@ -8,7 +8,8 @@ using Argonaut.Engine.Search;
 using Argonaut.Features.Json.Hints;
 using Argonaut.Features.Json.Schema;
 using Argonaut.Infrastructure;
-using Argonaut.Shell;
+using Argonaut.Ui.Documents;
+using Argonaut.Ui.Documents.Navigation;
 using Argonaut.Ui.Find;
 
 namespace Argonaut.Features.Json;

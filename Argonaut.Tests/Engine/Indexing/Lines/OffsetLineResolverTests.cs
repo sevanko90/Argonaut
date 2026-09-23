@@ -1,16 +1,15 @@
 using System.Text;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Indexing.Lines;
-using Argonaut.Features.NdJson;
 
-namespace Argonaut.Tests.Features.NdJson;
+namespace Argonaut.Tests.Engine.Indexing.Lines;
 
 /// <summary>
 /// Verifies byte-offset → line resolution: line starts, mid-line, the newline byte itself
 /// (which belongs to its line's span), the final line without a trailing newline, and the
 /// coverage wait against a still-running indexer.
 /// </summary>
-public class NdJsonOffsetLineResolverTests
+public class OffsetLineResolverTests
 {
     private static void WithIndex(string content, Action<FileOffsetIndex> assert)
     {
@@ -35,11 +34,11 @@ public class NdJsonOffsetLineResolverTests
         // Offsets: line0 = [0,6) incl. '\n', line1 = [6,12), line2 = [12,17) no newline.
         WithIndex("line1\nline2\nlast3", index =>
         {
-            Assert.Equal(0, NdJsonOffsetLineResolver.ResolveLineForOffset(index, 0));
-            Assert.Equal(0, NdJsonOffsetLineResolver.ResolveLineForOffset(index, 3));
-            Assert.Equal(0, NdJsonOffsetLineResolver.ResolveLineForOffset(index, 5)); // the '\n'
-            Assert.Equal(1, NdJsonOffsetLineResolver.ResolveLineForOffset(index, 6));
-            Assert.Equal(2, NdJsonOffsetLineResolver.ResolveLineForOffset(index, 16)); // final, newline-less line
+            Assert.Equal(0, OffsetLineResolver.ResolveLineForOffset(index, 0));
+            Assert.Equal(0, OffsetLineResolver.ResolveLineForOffset(index, 3));
+            Assert.Equal(0, OffsetLineResolver.ResolveLineForOffset(index, 5)); // the '\n'
+            Assert.Equal(1, OffsetLineResolver.ResolveLineForOffset(index, 6));
+            Assert.Equal(2, OffsetLineResolver.ResolveLineForOffset(index, 16)); // final, newline-less line
         });
     }
 
@@ -48,7 +47,7 @@ public class NdJsonOffsetLineResolverTests
     {
         WithIndex("line1\n", index =>
         {
-            Assert.Null(NdJsonOffsetLineResolver.ResolveLineForOffset(index, 100));
+            Assert.Null(OffsetLineResolver.ResolveLineForOffset(index, 100));
         });
     }
 
@@ -57,7 +56,7 @@ public class NdJsonOffsetLineResolverTests
     {
         WithIndex(string.Empty, index =>
         {
-            Assert.Null(NdJsonOffsetLineResolver.ResolveLineForOffset(index, 0));
+            Assert.Null(OffsetLineResolver.ResolveLineForOffset(index, 0));
         });
     }
 
@@ -78,7 +77,7 @@ public class NdJsonOffsetLineResolverTests
             var index = FileOffsetIndex.StartIndexing(mmap);
             long offset = content.IndexOf("final", StringComparison.Ordinal);
 
-            int? line = await NdJsonOffsetLineResolver.ResolveWhenCoveredAsync(index, offset, CancellationToken.None);
+            int? line = await OffsetLineResolver.ResolveWhenCoveredAsync(index, offset, CancellationToken.None);
 
             Assert.Equal(200_000, line);
             await index.IndexingTask;

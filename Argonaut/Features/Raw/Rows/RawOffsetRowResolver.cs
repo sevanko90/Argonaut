@@ -7,7 +7,7 @@ namespace Argonaut.Features.Raw.Rows;
 /// Maps an absolute byte offset in the file (e.g. a search hit) to the display row that
 /// contains it. The lookup itself lives in <see cref="RawSegmentIndex.RowForOffset"/> (binary
 /// search over the sparse anchors, then one bucket walk); this adds the wait-for-coverage
-/// loop against a still-running indexer, mirroring NdJsonOffsetLineResolver's shape.
+/// loop against a still-running indexer, mirroring OffsetLineResolver's shape.
 /// </summary>
 public static class RawOffsetRowResolver
 {

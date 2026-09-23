@@ -1,7 +1,7 @@
 using System.Threading;
 using System.Threading.Tasks;
+using Argonaut.Engine.Indexing.Lines;
 using Argonaut.Engine.Search;
-using Argonaut.Features.NdJson;
 using Argonaut.Ui.Find;
 
 namespace Argonaut.Features.Csv;
@@ -9,7 +9,7 @@ namespace Argonaut.Features.Csv;
 /// <summary>
 /// Single-stage reveal strategy for the CSV/TSV grid (no nested per-row view model to wait on,
 /// unlike NdJsonSearchNavigator's two-stage reveal): resolve the match's byte offset to an
-/// absolute file line via NdJsonOffsetLineResolver - reused as-is rather than cloned, since CSV
+/// absolute file line via OffsetLineResolver - reused as-is rather than cloned, since CSV
 /// rows and NDJSON lines are both backed by the identical FileOffsetIndex/FileLineSpan type and
 /// there's nothing NDJSON-specific in that resolver - then re-split that row to find which
 /// column the offset falls in, and hand both indices to the view model for the view to
@@ -33,7 +33,7 @@ public sealed class CsvSearchNavigator : ISearchNavigator
 
     public async Task RevealAsync(SearchMatch match, CancellationToken ct)
     {
-        var line = await NdJsonOffsetLineResolver.ResolveWhenCoveredAsync(viewModel.Index!, match.Offset, ct);
+        var line = await OffsetLineResolver.ResolveWhenCoveredAsync(viewModel.Index!, match.Offset, ct);
         ct.ThrowIfCancellationRequested();
         if (line is not int lineIndex)
             return;

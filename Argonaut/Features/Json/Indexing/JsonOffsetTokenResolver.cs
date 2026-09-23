@@ -10,7 +10,7 @@ namespace Argonaut.Features.Json.Indexing;
 /// order by the streaming indexer, so a binary search over token offsets is valid even while
 /// indexing is still running (against a snapshot of TokenCount).
 ///
-/// Deliberately a structural twin of NdJsonOffsetLineResolver, not a shared generic: the
+/// Deliberately a structural twin of OffsetLineResolver, not a shared generic: the
 /// binary search is a hot path and the indirection a generic abstraction would add costs
 /// more than the duplicated lines save.
 /// </summary>

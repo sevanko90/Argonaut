@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Threading;
 using System.Threading.Tasks;
+using Argonaut.Engine.Indexing.Lines;
 using Argonaut.Engine.Search;
 using Argonaut.Features.Json.Indexing;
 using Argonaut.Ui.Find;
@@ -34,7 +35,7 @@ public sealed class NdJsonSearchNavigator : ISearchNavigator
 
     public async Task RevealAsync(SearchMatch match, CancellationToken ct)
     {
-        var line = await NdJsonOffsetLineResolver.ResolveWhenCoveredAsync(viewModel.Index!, match.Offset, ct);
+        var line = await OffsetLineResolver.ResolveWhenCoveredAsync(viewModel.Index!, match.Offset, ct);
         ct.ThrowIfCancellationRequested();
         if (line is not int lineIndex)
             return;

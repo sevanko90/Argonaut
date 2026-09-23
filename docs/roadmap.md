@@ -195,6 +195,34 @@ same origin rather than re-materialising it.
   degrades to a failed search rather than a crash. `FileOptions.DeleteOnClose` on the spill would
   remove even that.
 
+## Settings
+
+No plan document yet. Flagged during the 2026-09 project restructure, and left out of it on
+purpose because it needs its own rework rather than a move.
+
+- **A settings service behind an interface.** Today each preference is a static class that owns
+  a file name, a private record and its own `Load`/`Save`, and writes its own JSON file through
+  the static `JsonSettingsStore`: `theme.json`, `font.json`, `expand-depth.json`,
+  `raw-wrap-width.json`, `schema-selection.json`, `recent-files.json`, `auto-update.json`. Nine
+  files across the Shell and the features call those statics directly. What that costs:
+  - **No seam.** Nothing can be substituted, so tests redirect the real disk through the static
+    `AppDataPaths.RootOverride`. That global forces the 14 test classes that touch settings into
+    one serial xUnit collection (`AppDataPaths`).
+  - **No cache or notification.** Every `Load` re-reads its file, every `Save` writes
+    synchronously on the caller's thread (usually the UI thread), and nothing tells anyone else
+    that a value changed. Each caller keeps its own copy in sync by hand.
+  - **The wrong layer.** Feature and shell preferences (`RawWrapWidthPreference`,
+    `SchemaSelectionPreference`, `ThemePreference`, ...) sit in `Engine/Settings` because the
+    storage helper does. Engine should hold only the mechanism.
+
+  Rough shape: an `ISettingsStore` in `Engine/Settings` (load once, serve from memory, write
+  behind on the background, raise a change event), an in-memory implementation for tests (which
+  removes `RootOverride` and the serial collection), and typed preference sections owned by
+  whoever uses them (Raw owns the wrap width, Json the expand depth and schema binding, the Shell
+  the theme, font, recent files and auto-update). Open questions: one file or one per section;
+  reading the existing per-file JSON on first run so nobody loses their settings; and where the
+  schemas folder path goes, since it is a location rather than a setting.
+
 ## Memory and performance
 
 Detail: [perf-review-2026-07-17.md](perf-review-2026-07-17.md).

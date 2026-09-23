@@ -346,11 +346,29 @@ public sealed class JsonDiffViewModel : IndexedDocumentViewModel
         FilePath = leftOrigin.Path ?? leftOrigin.DisplayName;
         RightFilePath = rightOrigin.Path ?? rightOrigin.DisplayName;
 
-        var session = JsonDiffSession.Start(leftOrigin, rightOrigin,
-            leftProgress: new ProgressToStatus(this, "Indexing " + leftOrigin.DisplayName),
-            rightProgress: new ProgressToStatus(this, "Indexing " + rightOrigin.DisplayName),
-            diffProgress: new ProgressToStatus(this, "Comparing"));
+        var board = ProgressBoard.Shared;
+        var leftProgress = board.Begin("Indexing " + leftOrigin.DisplayName);
+        var rightProgress = board.Begin("Indexing " + rightOrigin.DisplayName);
+        var diffProgress = board.Begin($"Comparing {leftOrigin.DisplayName} with {rightOrigin.DisplayName}");
+
+        JsonDiffSession session;
+        try
+        {
+            session = JsonDiffSession.Start(leftOrigin, rightOrigin, leftProgress, rightProgress, diffProgress);
+        }
+        catch
+        {
+            // Nothing is running, so nothing will finish these.
+            leftProgress.Finish();
+            rightProgress.Finish();
+            diffProgress.Finish();
+            throw;
+        }
+
         this.session = session;
+        leftProgress.FinishWhen(session.Left.IndexingTask);
+        rightProgress.FinishWhen(session.Right.IndexingTask);
+        diffProgress.FinishWhen(session.IndexingTask);
 
         toolbar = new JsonDiffToolbarViewModel(
             setChangesOnly: value => { if (rows is { } r) r.ChangesOnly = value; },
@@ -434,41 +452,5 @@ public sealed class JsonDiffViewModel : IndexedDocumentViewModel
             return "documents are identical";
 
         return $"{added:N0} added, {removed:N0} removed, {modified:N0} modified, {moved:N0} moved";
-    }
-
-    /// <summary>Marshals background progress reports onto the status line - same shape as
-    /// the shell's StatusProgressReporter: Post (never blocking), ~5% buckets, silent once
-    /// the view model is disposed.</summary>
-    private sealed class ProgressToStatus : IProgressReporter
-    {
-        private readonly JsonDiffViewModel owner;
-        private readonly string label;
-        private int lastBucket = -1;
-
-        public ProgressToStatus(JsonDiffViewModel owner, string label)
-        {
-            this.owner = owner;
-            this.label = label;
-        }
-
-        public void Report(string message, long? current = null, long? max = null)
-        {
-            string text = label;
-            if (current.HasValue && max.HasValue && max.Value > 0)
-            {
-                int percent = (int)Math.Min(100, current.Value * 100L / max.Value);
-                int bucket = percent / 5;
-                if (bucket == lastBucket)
-                    return;
-                lastBucket = bucket;
-                text += $"… ({percent}%)";
-            }
-
-            ProgressPost.ToUiThread(() =>
-            {
-                if (!owner.IsDisposed)
-                    owner.StatusText = text;
-            });
-        }
     }
 }

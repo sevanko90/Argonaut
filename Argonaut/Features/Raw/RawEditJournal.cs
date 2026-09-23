@@ -31,9 +31,6 @@ public sealed class RawEditJournal
     private readonly RawPieceTable document;
     private readonly List<Entry> entries = new();
 
-    /// <summary>The document as it stood before the first recorded edit.</summary>
-    private readonly object baseline;
-
     private int applied;
     private bool runOpen;
     private long runEnd;
@@ -42,7 +39,6 @@ public sealed class RawEditJournal
     {
         ArgumentNullException.ThrowIfNull(document);
         this.document = document;
-        this.baseline = document.Snapshot();
     }
 
     public bool CanUndo => this.applied > 0;
@@ -75,14 +71,17 @@ public sealed class RawEditJournal
             extent.BytesInserted <= MaxCoalescedInsert &&
             extent.Offset == this.runEnd;
 
+        object change = this.document.LastChange();
+
         if (continuesRun)
         {
-            // Widen the open step rather than adding one: its "before" state and caret stay, and
-            // its "after" state becomes the document as it now stands.
+            // Widen the open step rather than adding one. The changes are kept as a list rather
+            // than merged: undo replays them backwards, which is the same answer with none of the
+            // reasoning about whether two runs of the piece list can be combined.
             var open = this.entries[^1];
+            open.Changes.Add(change);
             this.entries[^1] = open with
             {
-                After = this.document.Snapshot(),
                 CaretAfter = caretAfter,
                 Extent = new RawEditExtent(
                     Math.Min(open.Extent.Offset, extent.Offset),
@@ -92,8 +91,7 @@ public sealed class RawEditJournal
         }
         else
         {
-            object before = this.entries.Count > 0 ? this.entries[^1].After : this.baseline;
-            this.entries.Add(new Entry(before, this.document.Snapshot(), extent, caretBefore, caretAfter));
+            this.entries.Add(new Entry(new List<object> { change }, extent, caretBefore, caretAfter));
             this.applied = this.entries.Count;
         }
 
@@ -115,7 +113,9 @@ public sealed class RawEditJournal
             return null;
 
         var entry = this.entries[this.applied - 1];
-        this.document.Restore(entry.Before);
+        for (int i = entry.Changes.Count - 1; i >= 0; i--)
+            this.document.UndoChange(entry.Changes[i]);
+
         this.applied--;
         this.runOpen = false;
 
@@ -131,12 +131,16 @@ public sealed class RawEditJournal
             return null;
 
         var entry = this.entries[this.applied];
-        this.document.Restore(entry.After);
+        foreach (object change in entry.Changes)
+            this.document.RedoChange(change);
+
         this.applied++;
         this.runOpen = false;
 
         return new RawUndoStep(entry.Extent, entry.CaretAfter);
     }
 
-    private sealed record Entry(object Before, object After, RawEditExtent Extent, long CaretBefore, long CaretAfter);
+    /// <param name="Changes">The piece-list runs this step rewrote, in the order they were made.
+    /// Undo replays them backwards, redo forwards. More than one only when typing coalesced.</param>
+    private sealed record Entry(List<object> Changes, RawEditExtent Extent, long CaretBefore, long CaretAfter);
 }

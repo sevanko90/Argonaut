@@ -201,6 +201,7 @@ this ordering.
 
 ## Related
 
-- [editing-options.md](editing-options.md) — the raw view's row model, caret and byte-offset
-  guarantees that §1 preserves and §2 explains cannot survive rendering.
+- `RawSegmentIndex`, `RawTextSurface` and the cap-anchored row rule in CLAUDE.md — the raw view's
+  row model, caret and byte-offset guarantees that §1 preserves and §2 explains cannot survive
+  rendering.
 - [roadmap.md](roadmap.md) — where this sits against everything else deferred.

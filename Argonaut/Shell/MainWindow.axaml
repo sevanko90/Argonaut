@@ -12,6 +12,7 @@
         xmlns:ndjson="clr-namespace:Argonaut.Features.NdJson"
         xmlns:csv="clr-namespace:Argonaut.Features.Csv"
         xmlns:raw="clr-namespace:Argonaut.Features.Raw"
+        xmlns:infra="clr-namespace:Argonaut.Infrastructure"
         Title="{Binding Title}"
         Background="{DynamicResource AppPanelBackgroundBrush}"
         Width="1000" Height="700">
@@ -71,7 +72,7 @@
                  children, so it used to squeeze the star spacer to zero and push the close
                  button off the right edge - losing the escape hatch first, which is backwards.
                  Constrained here instead, the toolbar wraps internally and close stays put. -->
-            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto">
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto">
                 <search:FindBar Grid.Column="0"
                                 x:Name="FindBarControl"
                                 IsVisible="{Binding IsFindAvailable}"
@@ -85,7 +86,52 @@
                         Width="1"
                         Margin="12,2,12,2"
                         Background="{DynamicResource AppBorderBrush}" />
-                <Button Grid.Column="3"
+                <!-- A split button made of two, rather than Avalonia's SplitButton: that control
+                     disables its dropdown along with its primary half, and here the halves must
+                     differ - Save needs unsaved changes, Save As only a document ready to write. -->
+                <StackPanel Grid.Column="3"
+                            x:Name="SaveButtons"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center"
+                            IsVisible="{Binding IsSaveAvailable}"
+                            Margin="0,0,8,0">
+                    <Button x:Name="SaveFileButton"
+                            IsEnabled="{Binding CanSave}"
+                            Click="OnSaveFile"
+                            MinHeight="32"
+                            CornerRadius="6,0,0,6"
+                            FontSize="12"
+                            Padding="10,5"
+                            ToolTip.Tip="Save changes (Ctrl+S / Cmd+S)">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Viewbox Width="14" Height="14">
+                                <!-- Material "save" -->
+                                <Path Fill="{DynamicResource AppMutedTextBrush}"
+                                      Data="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z" />
+                            </Viewbox>
+                            <TextBlock Text="Save" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="SaveOptionsButton"
+                            IsEnabled="{Binding CanSaveAs}"
+                            MinHeight="32"
+                            CornerRadius="0,6,6,0"
+                            BorderThickness="0,1,1,1"
+                            Padding="6,5"
+                            ToolTip.Tip="More ways to save">
+                        <Viewbox Width="10" Height="10">
+                            <!-- Material "expand_more" -->
+                            <Path Fill="{DynamicResource AppMutedTextBrush}"
+                                  Data="M16.59 8.59L12 13.17 7.41 8.59 6 10l6 6 6-6z" />
+                        </Viewbox>
+                        <Button.Flyout>
+                            <MenuFlyout Placement="BottomEdgeAlignedRight">
+                                <MenuItem Header="Save As…" Click="OnSaveFileAs" />
+                            </MenuFlyout>
+                        </Button.Flyout>
+                    </Button>
+                </StackPanel>
+                <Button Grid.Column="4"
                         x:Name="CompareFileButton"
                         VerticalAlignment="Center"
                         IsVisible="{Binding CanCompare}"
@@ -105,7 +151,7 @@
                         <TextBlock Text="Compare" VerticalAlignment="Center" />
                     </StackPanel>
                 </Button>
-                <Button Grid.Column="4"
+                <Button Grid.Column="5"
                         x:Name="CloseFileButton"
                         VerticalAlignment="Center"
                         Click="OnCloseFile"
@@ -158,6 +204,70 @@
         <shell:EmptyStateView Grid.Row="1"
                               x:Name="EmptyState"
                               IsVisible="{Binding !IsFileOpen}" />
+
+        <!-- Work in progress: shown only for operations that outlast ProgressBoard.ShowAfter, kept
+             for at least ShowAtLeast, and faded rather than snapped away - so the everyday
+             instant operations never flash it. The fade length matches ProgressBoard.FadeOut. -->
+        <Border Grid.Row="1"
+                x:Name="ProgressCard"
+                Classes="progressCard"
+                Classes.shown="{Binding Progress.IsVisible}"
+                IsHitTestVisible="{Binding Progress.IsVisible}"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Bottom"
+                Width="340"
+                Margin="0,0,16,16"
+                Padding="12,8"
+                CornerRadius="6"
+                BorderThickness="1"
+                BorderBrush="{DynamicResource AppBorderBrush}"
+                Background="{DynamicResource AppPanelBackgroundBrush}">
+            <Border.Styles>
+                <Style Selector="Border.progressCard">
+                    <Setter Property="Opacity" Value="0" />
+                    <Setter Property="Transitions">
+                        <Transitions>
+                            <DoubleTransition Property="Opacity" Duration="0:0:0.2" />
+                        </Transitions>
+                    </Setter>
+                </Style>
+                <Style Selector="Border.progressCard.shown">
+                    <Setter Property="Opacity" Value="1" />
+                </Style>
+            </Border.Styles>
+            <ItemsControl ItemsSource="{Binding Progress.Shown}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="infra:ProgressEntry">
+                        <Grid ColumnDefinitions="*,Auto,Auto" RowDefinitions="Auto,Auto" Margin="0,4">
+                            <TextBlock Grid.Row="0" Grid.Column="0"
+                                       Text="{Binding Title}"
+                                       FontSize="12"
+                                       TextTrimming="CharacterEllipsis" />
+                            <TextBlock Grid.Row="0" Grid.Column="1"
+                                       Text="{Binding Percent, StringFormat={}{0}%}"
+                                       IsVisible="{Binding !IsIndeterminate}"
+                                       FontSize="12"
+                                       Margin="8,0,0,0"
+                                       Foreground="{DynamicResource AppMutedTextBrush}" />
+                            <Button Grid.Row="0" Grid.RowSpan="2" Grid.Column="2"
+                                    Content="Stop"
+                                    IsVisible="{Binding CanStop}"
+                                    Click="OnStopProgress"
+                                    FontSize="11"
+                                    Padding="8,2"
+                                    Margin="8,0,0,0"
+                                    VerticalAlignment="Center" />
+                            <ProgressBar Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
+                                         Value="{Binding Percent, FallbackValue=0}"
+                                         IsIndeterminate="{Binding IsIndeterminate}"
+                                         Minimum="0" Maximum="100"
+                                         MinHeight="4" Height="4"
+                                         Margin="0,6,0,0" />
+                        </Grid>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </Border>
 
         <Border Grid.Row="1"
                 x:Name="ToastBorder"

@@ -18,10 +18,7 @@ namespace Argonaut.Infrastructure;
 /// Deliberately NOT volatile/interlocked, despite those cross-thread reads (and note C# cannot
 /// mark a <c>long</c> volatile at all - it would have to be <c>Volatile.Read</c>). Every
 /// off-thread read is a fast-path early-out that a UI-thread check then repeats before anything
-/// is acted on: <see cref="Argonaut.Shell.MainWindowViewModel"/>'s StatusProgressReporter.Report
-/// runs on the scan thread and tests the ticket only to skip formatting a status line, then
-/// tests it again inside its <c>Dispatcher.Post</c> before writing one. A stale read there costs
-/// one discarded string, never a wrong write. A reader who needs the check to be authoritative
+/// is acted on, so a stale read costs one discarded piece of work, never a wrong write. A reader who needs the check to be authoritative
 /// must make it from the UI thread - which is where every consumer already makes it.
 /// </summary>
 public sealed class RequestTicket

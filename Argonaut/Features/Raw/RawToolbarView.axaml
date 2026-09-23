@@ -10,8 +10,17 @@
         <Border Width="1"
                 Margin="0,2,12,2"
                 Background="{DynamicResource AppBorderBrush}" />
+        <ToggleButton x:Name="EditToggle"
+                      IsChecked="{Binding IsEditing, Mode=TwoWay}"
+                      IsEnabled="{Binding CanEdit}"
+                      Content="Edit"
+                      FontSize="12"
+                      Margin="0,0,8,0"
+                      VerticalAlignment="Center"
+                      ToolTip.Tip="Type to change the document. Changes are held in memory until you save (Ctrl+S or Cmd+S)." />
         <ComboBox x:Name="WrapWidthCombo"
                   SelectedIndex="{Binding WrapWidthIndex, Mode=TwoWay}"
+                  IsEnabled="{Binding CanChangeWrapWidth}"
                   FontSize="12"
                   MinWidth="130"
                   VerticalAlignment="Center"

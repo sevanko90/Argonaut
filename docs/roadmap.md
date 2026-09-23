@@ -8,66 +8,48 @@ Nothing here is scheduled. Items are grouped by area, and roughly ordered by val
 
 ## Editing
 
-Options weighed, and the sequencing, are in [editing-options.md](editing-options.md). The decision
-recorded there is to build the byte layer once in the raw view rather than starting in the JSON
-tree, because the raw index is a pure function of the bytes and can be re-derived where the JSON
-index cannot. Step 1 is built and step 2 is part-built: the raw view now has a caret, a selection
-and copy-out. Nothing is editable yet - typing is the next piece of work.
+The raw view has an edit mode: a toolbar toggle, enabled once the row scan finishes, behind which
+`RawEditController` edits a `RawPieceTable` over (original mapping, append-only scratch). Memory
+grows with edits, not file size, and nothing is written to disk until a save. It is in the raw view
+rather than the JSON tree because the raw row index is a pure function of the bytes and can be
+re-derived where the JSON index cannot. Built:
 
-- ~~**Piece table over (original mapping, append-only scratch).**~~ **Built** (`Features/Raw/`:
-  `RawPieceTable`, `RawEditedRowIndex`, `RawRowDecoder`, `RawCaretStops`, `RawEditJournal`,
-  `RawTextExtractor`, over the `IByteSource` seam). Raw reads are in piece-space; the row index
-  re-derives only the span an edit disturbed and reports `NeedsRebuild` when that span grows past
-  its threshold. No UI change — verified headlessly against a from-scratch index of the edited
-  bytes. Measured: ~1.6-12.5ns per offset resolution (1 to 1024 pieces, no allocation), ~10us per
-  keystroke including re-derivation.
-- **Editing UI in the raw view.** *Part-built.* `RawTextSurface` replaced the `ListBox`: it draws
-  every visible row itself, implements `ILogicalScrollable`, and holds the caret
-  (`RawCaretController`, `RawCaret`), selection across rows, and copy. Still to do: **typing and
-  deletion** wired to the piece table, edit mode gated on `RawSegmentIndex.AllItemsPublished`, undo/redo
-  wired to `RawEditJournal` (built, unused), paste, and making `MainWindow`'s tunnelling Escape
-  handler mode-aware. IME/dead-key composition is deferred past v1 — `Avalonia.Headless` posts
-  finished text rather than composition events, so it cannot be tested here.
+- Caret, selection across rows, keyboard navigation and copy, drawn by `RawTextSurface`.
+- Typing, Enter, backspace/forward delete by character (`RawCaretStops`), paste, and undo/redo
+  through `RawEditJournal`; consecutive typing coalesces into one piece.
+- Constant-cost edits anywhere, including inside a 100MB+ unbroken line: forced row breaks are
+  cap-anchored (see CLAUDE.md), so `RawEditedRowIndex` holds one 12-byte record per edited line.
+  ~520ns a keystroke.
+- Caret readout gutter: named character under the caret (`UnicodeNames`), byte offset,
+  line/column and selection size, with "Edited — not saved" while dirty.
+- Edit overview strip beside the scrollbar (`RawEditOverview`), click to jump to an edit.
+- Debug-only internals inspector, Cmd/Ctrl+Shift+D (`Diagnostics/RawEditInspectorWindow`).
+- Save (Cmd/Ctrl+S) and Save As (Cmd/Ctrl+Shift+S), on a toolbar split button: a background streaming copy
+  into a stage beside the file, then unmap, atomic swap (`SiblingFileReplacer`) and a fresh
+  re-index with the caret put back. A failed swap leaves the file untouched and the edits open.
+  Save / Don't Save / Cancel is asked before closing, opening, pasting, switching view, quitting
+  or restarting for an update would drop unsaved edits.
 
-  The prediction that the caret would be the larger half held. Five defects came out of running
-  it on a real 4GB file rather than out of the test suite, and each is worth remembering because
-  the tests could not have found them:
-  - The surface never took keyboard focus. Every input test called `Focus()` in its own setup, so
-    all of them passed against an app where none of the keyboard worked.
-  - A cached scroll extent went stale between the row count growing and anything refreshing it,
-    so a reveal clamped ~1.6M rows short on a 4GB file. Extents are computed live now.
-  - Placing the caret before revealing let the caret's own minimal scroll park the row on the
-    bottom edge, after which the centred reveal found it "already visible". Two correct behaviours
-    cancelling out; ordering is load-bearing and now tested end to end.
-  - The caret was drawn over the full row height rather than the text's, so it overhung the glyphs.
-  - Find highlighting could not span a soft wrap (pre-existing, inherited from the attached-property
-    version it replaced).
-- ~~**Caret position readout.**~~ **Built** as a status gutter along the bottom of the raw view
-  (`RawCaretReadout`, `RawView.axaml`): the character under the caret named in full on the left
-  (`UnicodeNames`, a generated Unicode Character Database table), and byte offset, line/column and
-  selection size on the right. It went in the view rather than the app's status bar, which is tight
-  and has no per-view injectable region.
+Queued:
 
-  Deliberately **not** included: a character offset into the file. It cannot be answered without
-  decoding from byte 0, and the row scan finds breaks with a vectorized newline search that never
-  decodes — so the number would cost either a full decode per caret move or a permanently slower
-  index. The column and the selection's character count are capped for the same reason
-  (`ColumnScanBytes` 1MB, `SelectionScanBytes`) and report "—" past it; the line number is not
-  capped, since `IRawRowIndex.LineContaining` gets it from the anchor walk the index already does.
-- **Unicode descriptors elsewhere.** The name lookup is not raw-specific; the JSON views could
-  identify a character under the cursor the same way.
-- **Save as a streaming rewrite.** Staged temp file, atomic swap, background re-index. The copy is
-  one sequential pass and not where the difficulty lives; the swap is platform code behind
-  `IFileReplacer`, because the Mac App Store sandbox forbids a temp file beside the original and
-  Windows forbids replacing a file that is still mapped. Design in
-  [editing-options.md](editing-options.md) §4.
-- **Scalar edits in the JSON tree.** An offset-keyed replacement overlay served at
-  the `IByteSource` seam, with no index change, is a small self-contained feature on its own. Decide
-  it *after* the raw editor ships, not before.
-- **Structural editing in the JSON tree** (delete, insert, paste) — tombstones and fragment
-  indices merged into the row walk. The expensive class. Explicitly not committed to.
-- **Search while a document is dirty.** The chosen answer is that search reflects the last save
-  and the document says so; a merge-iterator over piece-space is a project of its own.
+- **A macOS `IFileReplacer` over `NSFileManager`.** Needed for a Mac App Store build, and would
+  keep Finder tags and ACLs that today's `rename` loses. Plan: [save-plan.md](save-plan.md).
+- **IME and dead-key composition.** Deferred past v1; `Avalonia.Headless` posts finished text
+  rather than composition events, so it cannot be tested here.
+- **In-memory rebuild when `NeedsRebuild` fires.** Past 524,288 line records (~half a million
+  separate places edited) edits in new places are refused with a toast. A save clears this more
+  cheaply, so a rebuild over the piece table is only worth building if that ever proves not enough.
+- **Re-wrap while edited, and search over edited bytes.** Both are off while a piece table exists;
+  search reads the file and so lands near rather than on a match past the first edit. Saving brings
+  both back; a merge-iterator over piece-space would be a project of its own.
+- **Unicode descriptors elsewhere.** The JSON views could name the character under the cursor the
+  same way.
+- **An internals inspector for the JSON indexes**, if the raw one earns its keep.
+- **Scalar edits in the JSON tree.** An offset-keyed replacement overlay served at the
+  `IByteSource` seam, with no index change. Now that save exists, this is the next decision.
+- **Structural editing in the JSON tree** (delete, insert, paste): tombstones and fragment indices
+  merged into the row walk. The expensive class; explicitly not committed to. Saving from raw and
+  re-indexing may make it unnecessary.
 
 ## JSON diff
 
@@ -90,8 +72,8 @@ and [json-array-nesting-options.md](json-array-nesting-options.md).
 - **Export a subtree to file.** Carried over from an earlier feature list, and the reason the
   table has no "export this back out" action: the useful version of it is a document-level feature
   (export any container from the tree, not just a table), so it wants sizing on its own rather
-  than as a table button. Shares the streaming-write path with
-  [editing-options.md](editing-options.md) §4.
+  than as a table button. The write path exists: `ByteSourceReading.WriteTo` into an
+  `IFileReplacer` stage, as save uses it.
 - **Editing cells.**
 - **Sorting and filtering the table.**
 - **Searching within the table.** `CreateSearchNavigator` is where this would land.
@@ -128,6 +110,22 @@ and virtualization-by-arithmetic are exactly what rendering gives up.
 - **Windowed rendering of large markdown.** Explicitly not committed to. Link reference definitions
   and footnotes are document-global, so rendering the visible window still needs a whole-file
   pre-pass - two indexes, not one - and giant markdown is not the common artefact giant JSON is.
+
+## XML
+
+Not designed yet; this is the starting idea.
+
+- **XML detection.** In `FileTypeDetector`: the document starts with `<?xml`, or its first
+  characters form a tag (`<name ...>`). Skip a BOM and leading whitespace first. A bare tag is
+  also what HTML starts with, so that case may want a second signal before it wins.
+- **A collapsible XML tree view.** Like the JSON tree, with elements as the collapsible nodes in
+  place of `{}`/`[]`, virtualized the same way.
+- **An XML structure index.** Built on the background like `JsonStructureIndex`: per node its
+  kind, depth, byte offsets, end index for skipping subtrees, and attributes. Needs a span-based
+  scanner over `IByteSource` in the `Utf8JsonReader` mould rather than `XmlReader`, which
+  allocates a string for every name and value. Decide how comments, CDATA, processing
+  instructions and mixed text content show up as rows.
+- **Syntax colouring.** Separate colours for element names, attribute names and attribute values.
 
 ## Input sources
 
@@ -188,9 +186,9 @@ same origin rather than re-materialising it.
 - **Path-keyed features already degrade.** The three that exist - recent files, the
   `<file>.schema.json` sidecar and the remembered schema binding - consult `IByteOrigin.Path` and
   skip when it is null; `JsonSchemaCatalog.GatherForDocument` takes a null path and offers the
-  user folder's schemas with no sidecar and nothing preselected. There is no save, reload or
-  "open containing folder" in the app yet, so there is no enabled state to drive; whenever one of
-  those arrives it reads `Path` and disables itself when there is none.
+  user folder's schemas with no sidecar and nothing preselected. Save follows the same rule the
+  other way: with no `Path` it becomes Save As. There is no reload or "open containing folder" yet;
+  whenever one arrives it reads `Path` and disables itself when there is none.
 - **One accepted edge case.** Disposing a temp-file-backed origin while a search is still scanning
   it deletes the file under that scan. `SearchSession.Scan` already catches every exception into
   `OpenFailure` ("an unreadable/vanished target is an outcome rather than a fault"), so it
@@ -219,6 +217,11 @@ proposed when only tests read it; `JsonPathBuilder`, `JsonPathResolver`, `JsonAr
 4 bytes per token are earning their keep.
 
 ## UI
+
+- **Skip the progress bar for work about to finish.** `ProgressBoard` shows anything still
+  running after 450ms. It could also project the time left from the progress reported so far and
+  stay hidden when that is under ~300ms - the slow-start, fast-finish case the delay alone still
+  shows. Worth adding only if a pointless bar is seen in practice.
 
 - **Toolbar UX pass.** Behaviour and layout, on its own branch rather than folded into a feature
   branch. Distinct from the toolbar *styling* that was tried and rejected: borderless tinted pill

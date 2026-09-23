@@ -160,54 +160,91 @@ public class RawPieceTableTests
     }
 
     [Fact]
-    public void RepointOriginal_KeepsEditsReadableOverEquivalentBytes()
+    public void UndoingAChange_PutsTheRunBackAsItWas()
     {
         var table = TableOver("hello world");
-        table.Insert(5, Bytes(" big"));
-        Assert.Equal(Bytes("hello big world"), ReadAll(table));
-
-        // What a save does when the rename fails: the mapping is gone, so re-open and carry on.
-        table.RepointOriginal(new MemoryByteSource(Bytes("hello world")));
-
-        Assert.Equal(Bytes("hello big world"), ReadAll(table));
-    }
-
-    [Fact]
-    public void RepointOriginal_RejectsADifferentLength()
-    {
-        var table = TableOver("hello world");
-
-        Assert.Throws<ArgumentException>(() => table.RepointOriginal(new MemoryByteSource(Bytes("shorter"))));
-    }
-
-    [Fact]
-    public void SnapshotAndRestore_RoundTripsAnEdit()
-    {
-        var table = TableOver("hello world");
-        var before = table.Snapshot();
 
         table.Insert(5, Bytes(" big"));
+        var change = table.LastChange();
         Assert.Equal(Bytes("hello big world"), ReadAll(table));
 
-        table.Restore(before);
+        table.UndoChange(change);
 
         Assert.Equal(Bytes("hello world"), ReadAll(table));
         Assert.Equal(11, table.AvailableLength);
     }
 
     [Fact]
-    public void SnapshotAndRestore_ReplaysForwardAgainForRedo()
+    public void RedoingAChange_ReplaysItForwardAgain()
     {
         var table = TableOver("hello world");
-        var before = table.Snapshot();
         table.Insert(5, Bytes(" big"));
-        var after = table.Snapshot();
+        var change = table.LastChange();
 
-        table.Restore(before);
-        table.Restore(after);
+        table.UndoChange(change);
+        table.RedoChange(change);
 
         // Scratch is append-only, so the redone edit's bytes are still there to point at.
         Assert.Equal(Bytes("hello big world"), ReadAll(table));
+    }
+
+    [Fact]
+    public void AReplacement_IsOneChangeRatherThanADeleteAndAnInsert()
+    {
+        // Replace is a delete followed by an insert internally, and both act at the same offset
+        // and so on the same run of the piece list. Recording the pair as one change is what
+        // makes a replacement one action to undo rather than two.
+        var table = TableOver("hello world");
+
+        table.Replace(6, 5, Bytes("there"));
+        Assert.Equal(Bytes("hello there"), ReadAll(table));
+
+        table.UndoChange(table.LastChange());
+
+        Assert.Equal(Bytes("hello world"), ReadAll(table));
+        Assert.Equal(11, table.AvailableLength);
+    }
+
+    [Fact]
+    public void UndoingAScriptOfChanges_WalksTheDocumentAllTheWayBack()
+    {
+        // Each change is a run of the piece list rather than a copy of all of it, so replaying
+        // them backwards has to land exactly where the document started - including the pieces
+        // the edits split, which no single change describes on its own.
+        var table = TableOver("the quick brown fox jumps over the lazy dog");
+        var rng = new Random(4242);
+        var changes = new List<object>();
+
+        for (int step = 0; step < 60; step++)
+        {
+            long length = table.AvailableLength;
+            int offset = rng.Next((int)length);
+            switch (rng.Next(3))
+            {
+                case 0:
+                    table.Insert(offset, Bytes(new string((char)('a' + rng.Next(26)), rng.Next(1, 6))));
+                    break;
+                case 1:
+                    table.Delete(offset, rng.Next(1, Math.Min(7, (int)length - offset + 1)));
+                    break;
+                default:
+                    table.Replace(offset, rng.Next(0, Math.Min(5, (int)length - offset + 1)), Bytes("XY"));
+                    break;
+            }
+
+            changes.Add(table.LastChange());
+        }
+
+        for (int i = changes.Count - 1; i >= 0; i--)
+            table.UndoChange(changes[i]);
+
+        Assert.Equal(Bytes("the quick brown fox jumps over the lazy dog"), ReadAll(table));
+
+        foreach (object change in changes)
+            table.RedoChange(change);
+
+        Assert.Equal(60, changes.Count);
+        Assert.True(table.AvailableLength > 0);
     }
 
     /// <summary>
@@ -275,5 +312,68 @@ public class RawPieceTableTests
             Assert.False(span.IsEmpty, $"offset {offset} resolved to nothing");
             Assert.Equal(whole[offset], span[0]);
         }
+    }
+
+    // ---- edited ranges --------------------------------------------------------------------
+
+    private static List<(long Start, long End)> EditedRanges(RawPieceTable table)
+    {
+        var ranges = new List<(long, long)>();
+        foreach (var range in table.EnumerateEditedRanges())
+            ranges.Add(range);
+
+        return ranges;
+    }
+
+    [Fact]
+    public void EditedRanges_UneditedTableHasNone()
+        => Assert.Empty(EditedRanges(TableOver("hello world")));
+
+    [Fact]
+    public void EditedRanges_AnInsertIsItsRange()
+    {
+        var table = TableOver("hello world");
+        table.Insert(5, Bytes(", big"));
+
+        Assert.Equal([(5L, 10L)], EditedRanges(table));
+    }
+
+    [Theory]
+    [InlineData(0, 3, 0)]   // from the start: the seam is at 0
+    [InlineData(4, 3, 4)]   // from the middle
+    [InlineData(8, 3, 8)]   // to the end: no piece follows it, so the seam is the document's end
+    public void EditedRanges_ADeleteIsAnEmptyRangeAtItsSeam(int offset, int length, long seam)
+    {
+        var table = TableOver("hello world");
+        table.Delete(offset, length);
+
+        Assert.Equal([(seam, seam)], EditedRanges(table));
+    }
+
+    [Fact]
+    public void EditedRanges_AreInDocumentOrder()
+    {
+        var table = TableOver("0123456789abcdef");
+        table.Insert(12, Bytes("X"));
+        table.Delete(2, 2);
+        table.Replace(6, 1, Bytes("YY"));
+
+        var ranges = EditedRanges(table);
+        Assert.Contains((2L, 2L), ranges);
+        Assert.Contains((6L, 8L), ranges);
+        Assert.Contains((11L, 12L), ranges);
+        Assert.Equal(ranges.OrderBy(r => r.Start).ToList(), ranges);
+    }
+
+    [Fact]
+    public void EditedRanges_UndoingAnInsertByDeletingItLeavesNone()
+    {
+        // Two original pieces that meet again are not a deletion, even though the table no longer
+        // reports itself unedited.
+        var table = TableOver("hello world");
+        table.Insert(5, Bytes("XYZ"));
+        table.Delete(5, 3);
+
+        Assert.Empty(EditedRanges(table));
     }
 }

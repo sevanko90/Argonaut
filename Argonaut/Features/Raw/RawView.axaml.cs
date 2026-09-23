@@ -10,8 +10,8 @@ namespace Argonaut.Features.Raw;
 
 /// <summary>
 /// Host for <see cref="RawTextSurface"/>. Everything about how a row looks lives in the surface;
-/// what remains here is the chrome around it - the pan scrollbar, the reveal a search hit needs,
-/// and the scroll reset a wrap-width change needs.
+/// what remains here is the chrome around it - the pan scrollbar, the edit overview strip, the
+/// reveal a search hit needs, and the scroll reset a wrap-width change needs.
 /// </summary>
 public partial class RawView : UserControl
 {
@@ -30,6 +30,7 @@ public partial class RawView : UserControl
         Surface.PanRequested += OnPanRequested;
         Surface.WidestRowWidthChanged += OnWidestRowWidthChanged;
         PanScrollBar.ValueChanged += OnPanValueChanged;
+        EditOverview.EditChosen += OnEditChosen;
         fontResourceSubscription = this.GetResourceObservable("AppContentFontFamily")
             .Subscribe(new AnonymousObserver<object?>(OnContentFontChanged));
     }
@@ -64,6 +65,7 @@ public partial class RawView : UserControl
         }
 
         UpdatePanRange();
+        UpdateEditOverview();
     }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -74,12 +76,23 @@ public partial class RawView : UserControl
         if (e.PropertyName is null or nameof(RawViewModel.SelectedRowIndex))
             RevealSelectedRow(vm);
 
-        if (e.PropertyName is null or nameof(RawViewModel.WrapWidth))
+        // The toggle that turns editing on lives in the header toolbar, so the click that
+        // enabled it left focus there. Typing has to work without a second click into the text.
+        if ((e.PropertyName is null or nameof(RawViewModel.IsEditing)) && vm.IsEditing)
+            Surface.Focus();
+
+        if (e.PropertyName is null or nameof(RawViewModel.IsEditing))
+            UpdateEditOverview();
+        else if (e.PropertyName is nameof(RawViewModel.EditGeneration))
+            EditOverview.Refresh();
+
+        if (e.PropertyName is null or nameof(RawViewModel.WrapWidth) or nameof(RawViewModel.IndexGeneration))
         {
-            // Row geometry is about to change wholesale, so the old vertical offset means
-            // nothing against the new rows - and leaving it in place would have the surface
-            // draw a viewport far past the end of a row set that starts near-empty and then
-            // grows by millions of rows a second.
+            // Row geometry is about to change wholesale (a re-wrap, or the fresh scan a save
+            // reopens the document with), so the old vertical offset means nothing against the
+            // new rows - and leaving it in place would have the surface draw a viewport far past
+            // the end of a row set that starts near-empty and then grows by millions of rows a
+            // second. A save's reopen puts the caret back with a reveal once the scan reaches it.
             ResetScroll();
             UpdatePanRange();
         }
@@ -110,6 +123,7 @@ public partial class RawView : UserControl
         Surface.PanRequested -= OnPanRequested;
         Surface.WidestRowWidthChanged -= OnWidestRowWidthChanged;
         PanScrollBar.ValueChanged -= OnPanValueChanged;
+        EditOverview.EditChosen -= OnEditChosen;
         DataContextChanged -= OnDataContextChanged;
         fontResourceSubscription.Dispose();
 
@@ -123,6 +137,29 @@ public partial class RawView : UserControl
         // drive (e.g. window close); the shell disposes the outgoing document before the swap.
         if (DataContext is IDisposable d)
             d.Dispose();
+    }
+
+    /// <summary>
+    /// Points the edit overview at the editor, once there is one - it stays shown after edit
+    /// mode is turned off while the edits it marks are still unsaved, since that is when finding
+    /// them again matters.
+    /// </summary>
+    private void UpdateEditOverview()
+    {
+        var editor = (DataContext as RawViewModel)?.Editor;
+        EditOverview.IsVisible = editor is not null;
+        EditOverview.Show(editor?.Document, editor?.RowIndex);
+    }
+
+    /// <summary>A mark on the overview was clicked: put the caret on the edit it stands for.</summary>
+    private void OnEditChosen(object? sender, long offset)
+    {
+        if (DataContext is not RawViewModel { RowIndex: { } rows } vm)
+            return;
+
+        int row = rows.RowForOffset(offset) ?? Math.Max(rows.RowCount - 1, 0);
+        vm.RevealOffset(offset, row);
+        Surface.Focus();
     }
 
     private void OnSurfaceSizeChanged(object? sender, SizeChangedEventArgs e) => UpdatePanRange();

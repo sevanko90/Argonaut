@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Features.Json;
 using Argonaut.Features.Json.Diff;
@@ -21,7 +22,7 @@ namespace Argonaut.Shell;
 /// view model instead - see <see cref="IDocumentViewModel.Toolbar"/>.
 ///
 /// All members run on the UI thread; awaits resume there per the app's threading convention
-/// (see CLAUDE.md), so the only explicit marshalling is <see cref="StatusProgressReporter"/>,
+/// (see CLAUDE.md), so the only explicit marshalling is in <see cref="ProgressEntry.Report"/>,
 /// which is invoked from a background indexing/search thread.
 ///
 /// Document disposal follows <see cref="IDocumentViewModel"/>'s lifetime contract: this view
@@ -56,6 +57,15 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly Func<Task<byte[]?>>? readClipboardBytes;
     private readonly DocumentLoader documentLoader;
     private readonly FindController findController;
+    private readonly Func<IByteOrigin, Task<string?>>? pickSaveDestination;
+    private readonly Func<string, Task<UnsavedChangesChoice>>? askAboutUnsavedChanges;
+    private readonly Func<string, Task>? reportFailure;
+    private readonly IFileReplacer fileReplacer;
+
+    // True from the moment a save starts until it has finished, failed or been abandoned. Every
+    // path that would change the document on screen, or read its file, waits it out: the save
+    // is about to unmap that file and swap it.
+    private bool isSaving;
 
     private IDocumentViewModel? currentDocument;
 
@@ -78,10 +88,16 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool isFindAvailable;
     private readonly RequestTicket openRequest = new();
 
-    // The reporter feeding scan progress into the status line for the current load. Held so
-    // every path that puts final text on that line can silence it first - see
-    // StatusProgressReporter.Stop. Null before the first load.
-    private StatusProgressReporter? indexProgressReporter;
+    // Where every long operation the shell starts is reported - see ProgressBoard.
+    private readonly ProgressBoard progressBoard;
+
+    // The current load on the progress board, finished by every path that replaces or abandons
+    // it so a load that was superseded never lingers in the bar. Null before the first load.
+    private ProgressEntry? loadProgress;
+
+    // The open request whose document is on screen, so stopping a load from the progress bar
+    // knows whether it is closing a published document or abandoning one still loading.
+    private long publishedRequest = -1;
 
     /// <summary>Raised when the find bar's status text should change (null clears it).</summary>
     public event Action<string?>? FindStatusChanged;
@@ -97,22 +113,49 @@ public sealed class MainWindowViewModel : ObservableObject
     /// Overrides how documents are built (defaults to the real memory-mapped view models);
     /// tests inject fakes to exercise the lifecycle without real files or indexing.
     /// </param>
+    /// <param name="pickSaveDestination">
+    /// Asks where to save the given document, resolving to a path or null when the user cancels.
+    /// Without one there is no Save As, and a document with no path cannot be saved.
+    /// </param>
+    /// <param name="askAboutUnsavedChanges">
+    /// Asks Save / Don't Save / Cancel before something would drop unsaved edits. Without one,
+    /// edits are dropped without asking - which is only ever right in a test.
+    /// </param>
+    /// <param name="reportFailure">Shows a message the user has to acknowledge. Falls back to a
+    /// toast.</param>
+    /// <param name="fileReplacer">How a save swaps its content in; <see cref="SiblingFileReplacer"/>
+    /// unless a test substitutes one.</param>
+    /// <param name="progressBoard">Where long operations are reported;
+    /// <see cref="ProgressBoard.Shared"/> unless a test substitutes one.</param>
     public MainWindowViewModel(Func<string, Task<bool>> confirmReplace,
-        Func<Task<byte[]?>>? readClipboardBytes = null, DocumentLoader? documentLoader = null)
+        Func<Task<byte[]?>>? readClipboardBytes = null, DocumentLoader? documentLoader = null,
+        Func<IByteOrigin, Task<string?>>? pickSaveDestination = null,
+        Func<string, Task<UnsavedChangesChoice>>? askAboutUnsavedChanges = null,
+        Func<string, Task>? reportFailure = null,
+        IFileReplacer? fileReplacer = null,
+        ProgressBoard? progressBoard = null)
     {
         this.confirmReplace = confirmReplace;
         this.readClipboardBytes = readClipboardBytes;
         this.documentLoader = documentLoader ?? DocumentViewCatalog.LoadAsync;
+        this.pickSaveDestination = pickSaveDestination;
+        this.askAboutUnsavedChanges = askAboutUnsavedChanges;
+        this.reportFailure = reportFailure;
+        this.fileReplacer = fileReplacer ?? SiblingFileReplacer.ForCurrentPlatform();
+        this.progressBoard = progressBoard ?? ProgressBoard.Shared;
 
         themeMode = ThemePreference.Load();
         contentFontMode = ContentFontPreference.Load();
 
         findController = new FindController(
             status => FindStatusChanged?.Invoke(status),
-            () => currentFilePath is null ? null : new StatusProgressReporter(this, currentFilePath, openRequest.Current));
+            () => currentFilePath is null ? null : this.progressBoard.Begin($"Searching {FileName}", StopFind));
 
         ReloadRecentFiles();
     }
+
+    /// <summary>What the progress bar shows.</summary>
+    public ProgressBoard Progress => this.progressBoard;
 
     public IDocumentViewModel? CurrentDocument
     {
@@ -167,7 +210,16 @@ public sealed class MainWindowViewModel : ObservableObject
                 return;
 
             if (value is not null && currentFilePath is not null && value.Kind != currentKind)
-                _ = SwitchViewAsync(value.Kind);
+            {
+                // The switch may ask about unsaved changes first, and a dialog opening inside the
+                // switcher's own selection commit is the re-entrancy CLAUDE.md warns about; the
+                // switch also puts the selection back if the user cancels.
+                var kind = value.Kind;
+                if (HasUnsavedChanges || isSaving)
+                    UiDeferral.AfterCurrentInput(() => _ = SwitchViewAsync(kind));
+                else
+                    _ = SwitchViewAsync(kind);
+            }
         }
     }
 
@@ -273,7 +325,7 @@ public sealed class MainWindowViewModel : ObservableObject
         // The outgoing load's reporter must go quiet first either way.
         DetachFind();
         FindBarResetRequested?.Invoke();
-        indexProgressReporter?.Stop();
+        loadProgress?.Finish();
         StatusText = $"Comparing {leftPath} with {rightPath}…";
 
         var document = new JsonDiffViewModel();
@@ -326,7 +378,7 @@ public sealed class MainWindowViewModel : ObservableObject
         // for why this is not what makes the swap safe.
         DetachFind();
         FindBarResetRequested?.Invoke();
-        indexProgressReporter?.Stop();
+        loadProgress?.Finish();
         string sourceName = request.Origin.Path ?? request.Origin.DisplayName;
         StatusText = $"Opening {request.ArrayPath} as a table…";
 
@@ -503,7 +555,17 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
-        if (currentFilePath is not null && !string.Equals(currentFilePath, normalizedPath, StringComparison.OrdinalIgnoreCase))
+        if (RefusedWhileSaving())
+            return;
+
+        if (HasUnsavedChanges)
+        {
+            // Asked instead of the replace confirmation, not as well as it: this question already
+            // says the document is going, and offers the one thing worth doing about it.
+            if (!await ResolveUnsavedChangesAsync($"opening \"{Path.GetFileName(normalizedPath)}\""))
+                return;
+        }
+        else if (currentFilePath is not null && !string.Equals(currentFilePath, normalizedPath, StringComparison.OrdinalIgnoreCase))
         {
             var confirmed = await confirmReplace(
                 $"Replace the currently loaded file with \"{Path.GetFileName(normalizedPath)}\"?");
@@ -558,7 +620,15 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
-        if (IsFileOpen)
+        if (RefusedWhileSaving())
+            return;
+
+        if (HasUnsavedChanges)
+        {
+            if (!await ResolveUnsavedChangesAsync("opening the clipboard contents"))
+                return;
+        }
+        else if (IsFileOpen)
         {
             var confirmed = await confirmReplace("Replace the currently loaded file with the clipboard contents?");
             if (!confirmed)
@@ -602,7 +672,7 @@ public sealed class MainWindowViewModel : ObservableObject
         // swap releases it.
         DetachFind();
         FindBarResetRequested?.Invoke();
-        StatusText = $"Indexing {name}… 0%";
+        StatusText = $"Indexing {name}…";
 
         await LoadAndPublishAsync(fileType, origin, requestId, addToRecents);
     }
@@ -618,6 +688,18 @@ public sealed class MainWindowViewModel : ObservableObject
         if (this.ownedOrigins.Count == 0 || kind == currentKind)
             return;
 
+        if (RefusedWhileSaving() || !await ResolveUnsavedChangesAsync($"switching to the {DisplayNameFor(kind)} view"))
+        {
+            // Put the switcher back on the view that is still showing.
+            SelectedView = DocumentViewCatalog.Options.FirstOrDefault(o => o.Kind == currentKind);
+            return;
+        }
+
+        // A save the user just chose may have reopened the document; the view switch goes on
+        // over whatever input is current now.
+        if (this.ownedOrigins.Count == 0 || kind == currentKind)
+            return;
+
         // Deliberately the origin already open, not a new one: re-indexing the same input as a
         // different kind must not re-materialise it.
         var origin = this.ownedOrigins[0];
@@ -628,7 +710,7 @@ public sealed class MainWindowViewModel : ObservableObject
         // document's own mapping scope is what actually stops a live search before the swap.
         DetachFind();
         FindBarResetRequested?.Invoke();
-        StatusText = $"Indexing {path}… 0%";
+        StatusText = $"Indexing {path}…";
 
         await LoadAndPublishAsync(kind, origin, requestId, addToRecents: false);
     }
@@ -667,19 +749,19 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
-        // Silence the outgoing load's reporter before starting a new one, so a scan being torn
-        // down can't write over the incoming file's progress.
-        indexProgressReporter?.Stop();
-        var reporter = new StatusProgressReporter(this, path, requestId);
-        indexProgressReporter = reporter;
+        // The outgoing load is over as far as the bar is concerned, whatever its scan is doing.
+        loadProgress?.Finish();
+        var progress = this.progressBoard.Begin($"Indexing {origin.DisplayName}", () => StopLoad(requestId));
+        loadProgress = progress;
 
         IDocumentViewModel document;
         try
         {
-            document = await documentLoader(kind, origin, reporter);
+            document = await documentLoader(kind, origin, progress);
         }
         catch (Exception ex)
         {
+            progress.Finish();
             OpenDebugLog.Write($"LoadAndPublish: load threw: {ex}");
             if (openRequest.IsCurrent(requestId))
                 StatusText = $"{path} — failed to open";
@@ -690,44 +772,45 @@ public sealed class MainWindowViewModel : ObservableObject
         // was never published, so nobody else will dispose it) and leave the newer one in place.
         if (!openRequest.IsCurrent(requestId))
         {
+            progress.Finish();
             document.Dispose();
             return;
         }
 
         if (document.IndexFailure is { ItemsIndexed: 0 } failure)
         {
+            progress.Finish();
             document.Dispose();
             ShowIncompatible(origin, kind, attemptedViewName, failure);
             return;
         }
 
         PublishDocument(document, path, kind, addToRecents, origins: new[] { origin });
-        _ = StopProgressWhenIndexedAsync(document, reporter);
+        publishedRequest = requestId;
+
+        // Finished when indexing stops for any reason - completed, failed, or the document closed.
+        progress.FinishWhen(document.IndexingTask);
     }
 
     /// <summary>
-    /// Hands the status line back to <paramref name="document"/> once its indexing stops, so the
-    /// document's final total is the last thing written (see <see cref="StatusProgressReporter.Stop"/>).
-    ///
-    /// Ordering matters and is load-bearing: the document registered its own continuation on this
-    /// same task during load, before this one, so its final <see cref="IDocumentViewModel.StatusText"/>
-    /// is written - and mirrored here by <see cref="OnDocumentPropertyChanged"/> - before the
-    /// reporter goes quiet. Fire-and-forget from the UI thread; the await resumes there per the
-    /// app's threading convention.
+    /// The progress bar's Stop for a load. A document that is still indexing has nothing worth
+    /// keeping - a partial index presents itself as the whole file - so stopping closes it; one not
+    /// yet on screen is abandoned, leaving whatever was open before. There is nothing unsaved to
+    /// lose either way: editing waits for indexing to finish.
     /// </summary>
-    private static async Task StopProgressWhenIndexedAsync(IDocumentViewModel document, StatusProgressReporter reporter)
+    private void StopLoad(long requestId)
     {
-        try
+        if (!openRequest.IsCurrent(requestId))
+            return;
+
+        if (publishedRequest == requestId)
         {
-            await document.IndexingTask;
-        }
-        catch
-        {
-            // A failed or cancelled scan is the document's to report (IndexFailure/StatusText);
-            // either way progress has stopped being meaningful, so the reporter still goes quiet.
+            CloseCurrentDocument();
+            return;
         }
 
-        reporter.Stop();
+        openRequest.Begin();
+        StatusText = currentDocument?.StatusText ?? "No file loaded";
     }
 
     private static string DisplayNameFor(FileTypeDetector.FileKind kind) =>
@@ -742,8 +825,8 @@ public sealed class MainWindowViewModel : ObservableObject
     /// </summary>
     private void ShowIncompatible(IByteOrigin origin, FileTypeDetector.FileKind kind, string attemptedViewName, IndexFailure failure)
     {
-        // The placeholder's text is final - no scan is still running that could add to it.
-        indexProgressReporter?.Stop();
+        // Nothing is indexing behind the placeholder.
+        loadProgress?.Finish();
 
         string path = origin.Path ?? origin.DisplayName;
         var incompatible = new IncompatibleViewModel(origin, path, attemptedViewName, failure,
@@ -856,6 +939,7 @@ public sealed class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(FilePath));
         OnPropertyChanged(nameof(CanCompare));
         NotifyFailurePropertiesChanged();
+        NotifySavePropertiesChanged();
     }
 
     private void NotifyFailurePropertiesChanged()
@@ -879,6 +963,9 @@ public sealed class MainWindowViewModel : ObservableObject
         if (e.PropertyName is null or nameof(IDocumentViewModel.StatusText))
             StatusText = currentDocument!.StatusText;
 
+        if (e.PropertyName is null or nameof(ISaveableDocument.HasUnsavedChanges) or nameof(ISaveableDocument.CanSave))
+            NotifySavePropertiesChanged();
+
         if (e.PropertyName is (null or nameof(IDocumentViewModel.IndexFailure)) && currentDocument!.IndexFailure is { } failure)
         {
             if (failure.ItemsIndexed == 0)
@@ -890,8 +977,18 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public async Task CloseFileAsync()
     {
+        if (RefusedWhileSaving() || !await ResolveUnsavedChangesAsync("closing it"))
+            return;
+
+        CloseCurrentDocument();
+    }
+
+    /// <summary>Closes the document with no questions asked - the tail of
+    /// <see cref="CloseFileAsync"/>, and what a save that lost its document falls back to.</summary>
+    private void CloseCurrentDocument()
+    {
         openRequest.Begin();
-        indexProgressReporter?.Stop();
+        loadProgress?.Finish();
 
         // UI hygiene and defence in depth (see the remark in OpenDiffAsync) - the outgoing
         // document's own mapping scope is what actually stops a live search before the swap,
@@ -904,83 +1001,225 @@ public sealed class MainWindowViewModel : ObservableObject
         ReloadRecentFiles();
     }
 
+    // ── Save ────────────────────────────────────────────────────────────────────────────
+    //
+    // The document owns the save itself (ISaveableDocument); the shell owns what surrounds it -
+    // where it goes, stopping search before the file is swapped, adopting a new origin after a
+    // Save As, and asking before anything would drop unsaved edits. See docs/save-plan.md.
+
+    /// <summary>True when the current document is one that can be saved at all; drives whether the
+    /// toolbar shows a Save button.</summary>
+    public bool IsSaveAvailable => currentDocument is ISaveableDocument;
+
+    /// <summary>True while a save is running. See <see cref="isSaving"/>.</summary>
+    public bool IsSaving => isSaving;
+
+    /// <summary>True when the current document reads differently from its file.</summary>
+    public bool HasUnsavedChanges => currentDocument is ISaveableDocument { HasUnsavedChanges: true };
+
+    /// <summary>Whether Save does anything now: there are changes, the document is ready to write
+    /// them, and no save is already running.</summary>
+    public bool CanSave => !isSaving && currentDocument is ISaveableDocument { CanSave: true, HasUnsavedChanges: true };
+
+    /// <summary>Whether Save As can start: as <see cref="CanSave"/> but without needing changes -
+    /// writing an unedited document to a new file is a copy, and a reasonable thing to want.</summary>
+    public bool CanSaveAs => !isSaving && currentDocument is ISaveableDocument { CanSave: true };
+
+    /// <summary>
+    /// Saves the current document over its file, or asks where to put it when it has none (a
+    /// paste). True when the document was saved, or had nothing to save; false when the user
+    /// cancelled or the save failed - which is what lets an unsaved-changes prompt know whether it
+    /// may go on.
+    /// </summary>
+    public Task<bool> SaveAsync() => SaveCoreAsync(chooseDestination: false);
+
+    /// <summary>Saves the current document to a file the user picks, which it then reads from.</summary>
+    public Task<bool> SaveAsAsync() => SaveCoreAsync(chooseDestination: true);
+
+    private async Task<bool> SaveCoreAsync(bool chooseDestination)
+    {
+        if (isSaving || currentDocument is not ISaveableDocument saveable || this.ownedOrigins.Count == 0)
+            return false;
+
+        if (!saveable.CanSave)
+        {
+            ToastService.Show("The document can be saved once it has finished loading.");
+            return false;
+        }
+
+        var current = this.ownedOrigins[0];
+        IByteOrigin destination;
+        if (!chooseDestination && current.Path is not null)
+        {
+            if (!saveable.HasUnsavedChanges)
+                return true;
+
+            destination = current;
+        }
+        else
+        {
+            if (this.pickSaveDestination is null)
+                return false;
+
+            string? picked = await this.pickSaveDestination(current);
+            if (picked is null || !ReferenceEquals(currentDocument, saveable))
+                return false;
+
+            // Saving as the file already open is an ordinary save; the origin is kept, not
+            // replaced by a second one naming the same file.
+            string full = Path.GetFullPath(picked);
+            destination = current.Path is { } open && PathsEqual(open, full) ? current : new FileByteOrigin(full);
+        }
+
+        return await RunSaveAsync(saveable, current, destination);
+    }
+
+    private async Task<bool> RunSaveAsync(ISaveableDocument saveable, IByteOrigin current, IByteOrigin destination)
+    {
+        isSaving = true;
+        NotifySavePropertiesChanged();
+
+        DocumentSaveResult result;
+        try
+        {
+            // The swap needs every mapping of the file gone, and a search holds its own chunk
+            // mappings that it would otherwise let go of only when it next looks up.
+            await findController.StopSearchAndWaitAsync();
+
+            string name = destination.Path is { } path ? Path.GetFileName(path) : destination.DisplayName;
+            using var stopping = new CancellationTokenSource();
+            var progress = this.progressBoard.Begin($"Saving {name}", stopping.Cancel);
+            StatusText = $"Saving {name}…";
+            try
+            {
+                result = await saveable.SaveAsync(destination, this.fileReplacer, progress, stopping.Token);
+            }
+            finally
+            {
+                progress.Finish();
+            }
+        }
+        finally
+        {
+            isSaving = false;
+            NotifySavePropertiesChanged();
+        }
+
+        // Whatever happened, the document's own line is the true one again - including when a
+        // failed save put back text identical to what it had, which raises no change to mirror.
+        if (currentDocument is not null)
+            StatusText = currentDocument.StatusText;
+
+        switch (result.Outcome)
+        {
+            case DocumentSaveOutcome.Saved:
+                if (!ReferenceEquals(destination, current))
+                    AdoptSavedAs(destination);
+
+                if (destination.Path is { } savedPath)
+                {
+                    RecentFileHistory.Add(savedPath);
+                    ReloadRecentFiles();
+                }
+
+                ToastService.Show($"Saved {FileName}");
+                return true;
+
+            case DocumentSaveOutcome.Stopped:
+                // Asked for, so said quietly rather than as a failure to acknowledge.
+                if (!ReferenceEquals(destination, current))
+                    destination.Dispose();
+
+                ToastService.Show(result.Message!);
+                return false;
+
+            case DocumentSaveOutcome.NotSavedAndDocumentLost:
+                CloseCurrentDocument();
+                await ReportFailureAsync(result.Message!);
+                return false;
+
+            default:
+                if (!ReferenceEquals(destination, current))
+                    destination.Dispose();
+
+                await ReportFailureAsync(result.Message!);
+                return false;
+        }
+    }
+
+    /// <summary>After a Save As the document reads from a different input, so the shell takes
+    /// ownership of it and releases the one it replaced (a paste's array, for instance).</summary>
+    private void AdoptSavedAs(IByteOrigin destination)
+    {
+        AdoptOrigins(destination);
+
+        currentFilePath = destination.Path ?? destination.DisplayName;
+        FileName = Path.GetFileName(currentFilePath);
+        Title = currentDocument?.WindowTitle ?? $"{DefaultTitle} — {FileName}";
+        OnPropertyChanged(nameof(FilePath));
+    }
+
+    /// <summary>
+    /// Asks what to do about unsaved changes before <paramref name="beforeWhat"/> ("closing it",
+    /// "opening x.json"), and saves if asked to. True when it is fine to go on: there was nothing
+    /// unsaved, the user chose not to keep it, or the save succeeded.
+    /// </summary>
+    public async Task<bool> ResolveUnsavedChangesAsync(string beforeWhat)
+    {
+        if (isSaving)
+            return false;
+
+        if (!HasUnsavedChanges || this.askAboutUnsavedChanges is null)
+            return true;
+
+        var choice = await this.askAboutUnsavedChanges($"Save your changes to \"{FileName}\" before {beforeWhat}?");
+        return choice switch
+        {
+            UnsavedChangesChoice.Discard => true,
+            UnsavedChangesChoice.Save => await SaveAsync(),
+            _ => false,
+        };
+    }
+
+    /// <summary>True, with a toast saying why, while a save is running.</summary>
+    private bool RefusedWhileSaving()
+    {
+        if (!isSaving)
+            return false;
+
+        ToastService.Show("Wait for the save to finish.");
+        return true;
+    }
+
+    private Task ReportFailureAsync(string message)
+    {
+        if (this.reportFailure is { } report)
+            return report(message);
+
+        ToastService.Show(message);
+        return Task.CompletedTask;
+    }
+
+    private void NotifySavePropertiesChanged()
+    {
+        OnPropertyChanged(nameof(IsSaving));
+        OnPropertyChanged(nameof(IsSaveAvailable));
+        OnPropertyChanged(nameof(HasUnsavedChanges));
+        OnPropertyChanged(nameof(CanSave));
+        OnPropertyChanged(nameof(CanSaveAs));
+    }
+
+    /// <summary>Whether two full paths name the same file, by the platform's usual case rule -
+    /// Windows and macOS file systems are case-insensitive by default, Linux's are not.</summary>
+    private static bool PathsEqual(string first, string second) =>
+        string.Equals(first, second, OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase);
+
     // ── Find ────────────────────────────────────────────────────────────────────────────
 
-    public Task FindAsync(string term, int direction) => findController.FindAsync(term, direction);
+    public Task FindAsync(string term, int direction) =>
+        isSaving ? Task.CompletedTask : findController.FindAsync(term, direction);
 
     public void StopFind() => findController.StopSearch();
 
     private void DetachFind() => findController.Detach();
-
-    /// <summary>
-    /// Writes indexing/search scan progress into <see cref="StatusText"/>. Report is called
-    /// from a background scan thread, so it marshals with Dispatcher.UIThread.Post (never a
-    /// blocking InvokeAsync) per the app's threading convention. A monotonic request id drops
-    /// updates from a superseded open.
-    ///
-    /// Progress is the shell's only claim on the status line, and it is a temporary one: while
-    /// a scan runs, the document's own text is a stale partial count ("250 rows indexed so
-    /// far"), so live progress is the more useful thing to show. Once the scan stops, the
-    /// document's text becomes the real total and the shell must get out of the way - see
-    /// <see cref="Stop"/>.
-    /// </summary>
-    private sealed class StatusProgressReporter : IProgressReporter
-    {
-        private const int BucketSize = 5;
-
-        private readonly MainWindowViewModel owner;
-        private readonly string path;
-        private readonly long requestId;
-        private int lastBucket = -1;
-
-        // Set on the UI thread once indexing stops; read on the UI thread inside the posted
-        // update. Volatile because Report itself runs on the scan thread.
-        private volatile bool stopped;
-
-        public StatusProgressReporter(MainWindowViewModel owner, string path, long requestId)
-        {
-            this.owner = owner;
-            this.path = path;
-            this.requestId = requestId;
-        }
-
-        /// <summary>
-        /// Permanently stops this reporter writing to the status line. Called on the UI thread
-        /// when the document's indexing task completes, which is what keeps the final "N tokens"
-        /// from being overwritten by a trailing "Indexing… (100%)": the last progress reports are
-        /// posted from the scan thread just before the scan completes, so they can still be
-        /// sitting in the dispatcher queue at that point. Re-checking the flag inside the posted
-        /// action (rather than only before posting) is what drops those already-queued updates -
-        /// both sides of that check run on the UI thread, so there is no race left.
-        /// </summary>
-        public void Stop() => stopped = true;
-
-        public void Report(string message, long? current = null, long? max = null)
-        {
-            if (stopped || !owner.openRequest.IsCurrent(requestId))
-                return;
-
-            string text = $"{message} {path}…";
-
-            if (current.HasValue && max.HasValue && max.Value > 0)
-            {
-                int percent = (int)Math.Min(100, (current.Value * 100L) / max.Value);
-
-                // Only act once per 5% step - a raw byte-offset stream would otherwise post
-                // to the UI thread far more often than the status text can usefully change.
-                int bucket = percent / BucketSize;
-                if (bucket == lastBucket)
-                    return;
-
-                lastBucket = bucket;
-                text += $" ({percent}%)";
-            }
-
-            ProgressPost.ToUiThread(() =>
-            {
-                if (!stopped && owner.openRequest.IsCurrent(requestId))
-                    owner.StatusText = text;
-            });
-        }
-    }
 }

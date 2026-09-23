@@ -43,15 +43,28 @@ public partial class MainWindow : Window
 
         viewModel = new MainWindowViewModel(
             message => ConfirmDialog.Show(this, message),
-            readClipboardBytes: ReadClipboardBytesAsync);
+            readClipboardBytes: ReadClipboardBytesAsync,
+            pickSaveDestination: PickSaveDestinationAsync,
+            askAboutUnsavedChanges: message => UnsavedChangesDialog.Show(this, message),
+            reportFailure: message => ConfirmDialog.Inform(this, message));
         DataContext = viewModel;
         viewModel.PropertyChanged += OnViewModelPropertyChanged;
         viewModel.FindStatusChanged += status => FindBarControl.SetStatus(status);
         viewModel.FindBarResetRequested += () => FindBarControl.Reset();
 
         ToastService.Requested += ShowToast;
+        viewModel.Progress.WorkStarted += (_, _) => StartProgressTicks();
         RawJumpService.Requested += offset => _ = viewModel.JumpToRawOffsetAsync(offset);
         ArrayTableService.Requested += request => _ = viewModel.OpenArrayTableAsync(request);
+
+        // The platform's own modifier, so the menu shows the shortcut the key handler honours.
+        // Reached through the button rather than by name: a control named inside a flyout is not
+        // reliably in the window's name scope, and would be null here.
+        if (SaveOptionsButton.Flyout is MenuFlyout { Items: [MenuItem saveAs, ..] })
+        {
+            saveAs.InputGesture = new KeyGesture(Key.S,
+                (OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control) | KeyModifiers.Shift);
+        }
 
         EmptyState.ChooseFileRequested += async (_, _) => await BrowseForFile();
         EmptyState.PasteRequested += async (_, _) => await viewModel.PasteAsync();
@@ -147,6 +160,11 @@ public partial class MainWindow : Window
 
         if (e.PropertyName is null or nameof(MainWindowViewModel.RecentFiles))
             EmptyState.SetRecentFiles(viewModel.RecentFiles);
+
+#if DEBUG
+        if (e.PropertyName is null or nameof(MainWindowViewModel.CurrentDocument))
+            DetachInternalsInspector();
+#endif
     }
 
     /// <param name="second">A second command-line path (e.g. `argonaut a.json b.json`), or
@@ -174,6 +192,17 @@ public partial class MainWindow : Window
     {
         bool cmdOrCtrl = (e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Meta)) != 0;
 
+        if (e.Key == Key.S && cmdOrCtrl)
+        {
+            if (viewModel.IsSaveAvailable)
+            {
+                _ = (e.KeyModifiers & KeyModifiers.Shift) != 0 ? viewModel.SaveAsAsync() : viewModel.SaveAsync();
+                e.Handled = true;
+            }
+
+            return;
+        }
+
         if (e.Key == Key.F && cmdOrCtrl)
         {
             if (viewModel.IsFileOpen)
@@ -196,8 +225,30 @@ public partial class MainWindow : Window
             return;
         }
 
+#if DEBUG
+        // Development only - the whole Diagnostics folder is excluded from the build outside
+        // Debug (see Argonaut.csproj), so this shortcut cannot exist in a shipped binary.
+        if (e.Key == Key.D && cmdOrCtrl && (e.KeyModifiers & KeyModifiers.Shift) != 0)
+        {
+            ShowInternalsInspector();
+            e.Handled = true;
+            return;
+        }
+#endif
+
         if (e.Key == Key.Escape && viewModel.IsFileOpen)
         {
+            // Escape is the way out of the raw editor's edit mode, and this handler tunnels -
+            // it sees the key before the surface does. Dismissing the find bar also pulls focus
+            // back to the content area, so handling it here while the user is typing would end
+            // the edit session's focus as well as its mode.
+            if (viewModel.CurrentDocument is Features.Raw.RawViewModel { IsEditing: true } editing)
+            {
+                editing.SetEditing(false);
+                e.Handled = true;
+                return;
+            }
+
             CloseFindBar();
             e.Handled = true;
             return;
@@ -209,6 +260,38 @@ public partial class MainWindow : Window
             e.Handled = true;
         }
     }
+
+#if DEBUG
+    private Diagnostics.RawEditInspectorWindow? internalsInspector;
+
+    /// <summary>
+    /// Opens the raw editor's internals inspector, or brings the open one forward. Re-opened
+    /// rather than re-targeted when the document has changed: a snapshot copies what it shows,
+    /// so the old window is still readable, but it belongs to a document that is gone.
+    /// </summary>
+    private void ShowInternalsInspector()
+    {
+        if (viewModel.CurrentDocument is not Features.Raw.RawViewModel raw)
+        {
+            ToastService.Show("Internals inspector: open a file in the raw viewer first.");
+            return;
+        }
+
+        if (internalsInspector is { } open && open.IsVisible)
+        {
+            open.Activate();
+            return;
+        }
+
+        internalsInspector = new Diagnostics.RawEditInspectorWindow(raw);
+        internalsInspector.Closed += (_, _) => internalsInspector = null;
+        internalsInspector.Show(this);
+    }
+
+    /// <summary>The inspector follows one document; when that document goes, it stops following
+    /// rather than reading a view model that is being torn down.</summary>
+    private void DetachInternalsInspector() => internalsInspector?.Detach();
+#endif
 
     private void CloseFindBar()
     {
@@ -270,6 +353,74 @@ public partial class MainWindow : Window
     private async void OnCloseFile(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         await viewModel.CloseFileAsync();
+    }
+
+    private async void OnSaveFile(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        await viewModel.SaveAsync();
+    }
+
+    private async void OnSaveFileAs(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        await viewModel.SaveAsAsync();
+    }
+
+    /// <summary>
+    /// Asks where to save <paramref name="current"/>, starting beside its file and under its name
+    /// when it has one. The picker asks about overwriting an existing file itself.
+    /// </summary>
+    private async Task<string?> PickSaveDestinationAsync(IByteOrigin current)
+    {
+        var options = new FilePickerSaveOptions
+        {
+            Title = "Save as",
+            SuggestedFileName = current.Path is { } path ? System.IO.Path.GetFileName(path) : $"{current.DisplayName}.txt",
+            ShowOverwritePrompt = true,
+        };
+
+        if (current.Path is { } file && System.IO.Path.GetDirectoryName(file) is { } folder)
+            options.SuggestedStartLocation = await StorageProvider.TryGetFolderFromPathAsync(folder);
+
+        var picked = await StorageProvider.SaveFilePickerAsync(options);
+        return picked?.TryGetLocalPath();
+    }
+
+    // Set once the user has dealt with unsaved changes, so the Close that follows goes through.
+    private bool closeAgreed;
+
+    /// <summary>
+    /// Closing the window would drop unsaved edits, so it is held while the user is asked -
+    /// Avalonia's close cannot wait on a dialog, so this cancels it and closes again once the
+    /// answer allows. A save still running holds the close outright: it is part way through
+    /// swapping the user's file.
+    /// </summary>
+    protected override void OnClosing(WindowClosingEventArgs e)
+    {
+        base.OnClosing(e);
+        if (e.Cancel || this.closeAgreed)
+            return;
+
+        if (viewModel.IsSaving)
+        {
+            e.Cancel = true;
+            ToastService.Show("Wait for the save to finish.");
+            return;
+        }
+
+        if (!viewModel.HasUnsavedChanges)
+            return;
+
+        e.Cancel = true;
+        _ = CloseAfterResolvingUnsavedChangesAsync();
+    }
+
+    private async Task CloseAfterResolvingUnsavedChangesAsync()
+    {
+        if (!await viewModel.ResolveUnsavedChangesAsync("quitting"))
+            return;
+
+        this.closeAgreed = true;
+        Close();
     }
 
     private async void OnShowAbout(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
@@ -358,7 +509,7 @@ public partial class MainWindow : Window
 
         bool restart = await ConfirmDialog.Show(
             this, $"Update downloaded (v{version}). Restart Argonaut now to apply it?", "Restart");
-        if (restart)
+        if (restart && await viewModel.ResolveUnsavedChangesAsync("restarting"))
             updateService.ApplyUpdatesAndRestart(info);
     }
 
@@ -422,6 +573,32 @@ public partial class MainWindow : Window
             return;
 
         await viewModel.OpenPathAsync(path);
+    }
+
+    private DispatcherTimer? progressTimer;
+
+    /// <summary>
+    /// Drives the progress board's show/hide rules while it has anything to decide - pending,
+    /// shown or fading - and stops once it has not, so an idle app runs no timer.
+    /// </summary>
+    private void StartProgressTicks()
+    {
+        progressTimer ??= new DispatcherTimer(TimeSpan.FromMilliseconds(100), DispatcherPriority.Background, OnProgressTick);
+        progressTimer.Start();
+    }
+
+    private void OnProgressTick(object? sender, EventArgs e)
+    {
+        var board = viewModel.Progress;
+        board.Tick();
+        if (!board.HasWork)
+            progressTimer!.Stop();
+    }
+
+    private void OnStopProgress(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if ((sender as Control)?.DataContext is ProgressEntry entry)
+            entry.RequestStop();
     }
 
     private void ShowToast(string message)

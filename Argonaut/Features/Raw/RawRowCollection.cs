@@ -56,7 +56,12 @@ public sealed class RawRowCollection : VirtualizingItemsSourceBase
     private const int CacheCapacity = 200;
     private static readonly TimeSpan GrowthPollInterval = TimeSpan.FromMilliseconds(120);
 
-    private readonly RawSegmentIndex index;
+    private readonly IRawRowIndex index;
+
+    /// <summary>The same object as <see cref="index"/> when it is a running scan, and null when
+    /// it is the edited-document index - which is what the growth monitor keys off.</summary>
+    private readonly RawSegmentIndex? scan;
+
     private readonly IByteSource bytes;
     private readonly Dictionary<int, LinkedListNode<(int Index, RawVisibleRow Row)>> cache = new();
     private readonly LinkedList<(int Index, RawVisibleRow Row)> cacheOrder = new();
@@ -71,14 +76,43 @@ public sealed class RawRowCollection : VirtualizingItemsSourceBase
     /// </summary>
     internal int MaterializedRowCount;
 
-    public RawRowCollection(RawSegmentIndex index, IByteSource bytes)
+    /// <summary>
+    /// Rows over <paramref name="index"/>, read from <paramref name="bytes"/>.
+    ///
+    /// The growth monitor starts only for a scan that is still running. That is a type test
+    /// rather than a member on <see cref="IRawRowIndex"/> on purpose: growth belongs to a
+    /// background scan of a file, and the other implementation
+    /// (<see cref="RawEditedRowIndex"/>) exists only once a scan has finished - its row count
+    /// changes by user edits, which the owner announces (see
+    /// <see cref="Invalidate"/>) rather than something a timer could discover.
+    /// </summary>
+    public RawRowCollection(IRawRowIndex index, IByteSource bytes)
     {
         this.index = index;
         this.bytes = bytes;
         notifiedCount = index.RowCount;
 
-        if (!index.AllItemsPublished)
+        this.scan = index as RawSegmentIndex;
+
+        if (this.scan is { AllItemsPublished: false })
             StartGrowthMonitor();
+    }
+
+    /// <summary>
+    /// Drops every cached row and tells the view the whole list changed - what an edit needs,
+    /// since an edit can change a row's text, how many rows there are, and where every later row
+    /// starts, all at once. The cache holds at most <see cref="CacheCapacity"/> rows, so this is
+    /// cheap enough to do per keystroke.
+    /// </summary>
+    public void Invalidate()
+    {
+        if (IsDisposed)
+            return;
+
+        cache.Clear();
+        cacheOrder.Clear();
+        notifiedCount = index.RowCount;
+        RaiseCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
     }
 
     protected override int GetCount() => index.RowCount;
@@ -131,7 +165,7 @@ public sealed class RawRowCollection : VirtualizingItemsSourceBase
     private void OnGrowthTick(object? sender, EventArgs e)
     {
         int current = index.RowCount;
-        bool complete = index.AllItemsPublished;
+        bool complete = scan is null || scan.AllItemsPublished;
 
         if (current > notifiedCount)
         {

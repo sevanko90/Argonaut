@@ -1,7 +1,8 @@
+
 namespace Argonaut.Engine.Search;
 
 /// <summary>
-/// A growing, randomly-addressable run of matches - what <see cref="FindCursor"/> folds from.
+/// A growing, randomly-addressable run of matches - what <c>FindCursor</c> folds from.
 /// Implemented by <see cref="SearchSession"/>; exists so the cursor can be driven from a
 /// plain list in tests, with no file and no background scan.
 ///

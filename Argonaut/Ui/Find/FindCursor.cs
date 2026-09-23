@@ -1,8 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Threading;
+using Argonaut.Engine.Search;
 
-namespace Argonaut.Engine.Search;
+namespace Argonaut.Ui.Find;
 
 /// <summary>One place find will stop: a match, plus where it sorts in the merged order.</summary>
 public readonly record struct FindStop(int Source, int MatchIndex, long Key);

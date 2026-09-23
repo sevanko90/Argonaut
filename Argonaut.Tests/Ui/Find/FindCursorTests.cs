@@ -1,6 +1,7 @@
 using Argonaut.Engine.Search;
+using Argonaut.Ui.Find;
 
-namespace Argonaut.Tests.Engine.Search;
+namespace Argonaut.Tests.Ui.Find;
 
 /// <summary>
 /// The stop-list mechanism on its own: no files, no mappings, no scans, no dispatcher. Matches

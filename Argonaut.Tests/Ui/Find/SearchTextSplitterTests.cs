@@ -1,6 +1,6 @@
-using Argonaut.Engine.Search;
+using Argonaut.Ui.Find;
 
-namespace Argonaut.Tests.Engine.Search;
+namespace Argonaut.Tests.Ui.Find;
 
 /// <summary>
 /// Verifies the display-side splitter behind row highlighting: the null fast path (no term

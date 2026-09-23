@@ -2,9 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Argonaut.Engine.Bytes;
-using Argonaut.Features.Raw.Editing;
+using Argonaut.Features.Raw.Rows;
 
-namespace Argonaut.Features.Raw.Rows;
+namespace Argonaut.Features.Raw.Editing;
 
 /// <summary>
 /// The row index of an edited document, layered over the (frozen, complete) index of the

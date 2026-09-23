@@ -2,7 +2,6 @@ using System.Text;
 using Argonaut.Engine.Bytes;
 using Argonaut.Features.Raw.Editing;
 using Argonaut.Features.Raw.Rows;
-using Argonaut.Tests.Features.Raw.Rows;
 using Argonaut.Tests.Support;
 
 namespace Argonaut.Tests.Features.Raw.Editing;

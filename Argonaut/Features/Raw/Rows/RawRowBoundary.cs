@@ -6,7 +6,7 @@ namespace Argonaut.Features.Raw.Rows;
 /// <summary>
 /// Where one display row ends. One implementation, because every caller must agree to the byte:
 /// the background scan, the on-demand rescan that re-derives rows between anchors, and the line
-/// geometry <see cref="RawEditedRowIndex"/> computes rows from (<see cref="RawLineRows"/>). A
+/// geometry <see cref="Editing.RawEditedRowIndex"/> computes rows from (<see cref="RawLineRows"/>). A
 /// second implementation of these rules that drifted by one byte would put the caret on a
 /// different row than the one being drawn.
 ///

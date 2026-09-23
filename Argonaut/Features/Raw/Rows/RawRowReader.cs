@@ -2,7 +2,6 @@ using System;
 using System.Buffers;
 using System.Text;
 using Argonaut.Engine.Bytes;
-using Argonaut.Features.Raw.Editing;
 
 namespace Argonaut.Features.Raw.Rows;
 
@@ -140,7 +139,7 @@ public static class RawRowReader
 
     /// <summary>
     /// True for the glyphs <see cref="SubstituteControl"/> produces. Shared with
-    /// <see cref="RawWordStops"/>, which selects each of them alone: a substitution stands for a
+    /// <see cref="Editing.RawWordStops"/>, which selects each of them alone: a substitution stands for a
     /// byte the file does not otherwise show, and selecting exactly one is what makes it a single
     /// thing to delete.
     ///

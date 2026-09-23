@@ -174,7 +174,7 @@ public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IBackgro
 
     /// <summary>
     /// Where the line holding <paramref name="offset"/> begins: its start offset, its first row
-    /// and its number. What <see cref="RawEditedRowIndex"/> needs to open a run of whole lines
+    /// and its number. What <see cref="Editing.RawEditedRowIndex"/> needs to open a run of whole lines
     /// around an edit without walking the line.
     ///
     /// One bucket walk when the line begins inside the bucket holding the offset - every line

@@ -4,7 +4,7 @@ using Argonaut.Engine.Bytes;
 using Argonaut.Features.Raw.Editing;
 using Argonaut.Features.Raw.Rows;
 
-namespace Argonaut.Tests.Features.Raw.Rows;
+namespace Argonaut.Tests.Features.Raw.Editing;
 
 /// <summary>
 /// The oracle here is the strongest one available: indexing the edited bytes from scratch. If

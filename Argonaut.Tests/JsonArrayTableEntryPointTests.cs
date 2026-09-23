@@ -1,5 +1,6 @@
 using System.Text;
 using Argonaut.Features.Json;
+using Argonaut.Features.Json.ArrayTable;
 using Argonaut.Ui.Documents.Navigation;
 
 namespace Argonaut.Tests;

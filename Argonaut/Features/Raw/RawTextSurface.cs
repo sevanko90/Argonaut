@@ -14,6 +14,8 @@ using System.Threading.Tasks;
 using Avalonia.Interactivity;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Search;
+using Argonaut.Features.Raw.Editing;
+using Argonaut.Features.Raw.Rows;
 using Argonaut.Ui.Notifications;
 using Argonaut.Ui.ViewModels;
 

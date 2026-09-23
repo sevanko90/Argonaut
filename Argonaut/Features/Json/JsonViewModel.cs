@@ -11,6 +11,8 @@ using Argonaut.Engine.Progress;
 using Argonaut.Engine.Search;
 using Argonaut.Engine.Settings;
 using Argonaut.Features.Json.Hints;
+using Argonaut.Features.Json.Indexing;
+using Argonaut.Features.Json.Paths;
 using Argonaut.Features.Json.Schema;
 using Argonaut.Ui.Documents;
 using Argonaut.Ui.Documents.Navigation;

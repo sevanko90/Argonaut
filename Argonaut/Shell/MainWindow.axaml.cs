@@ -11,6 +11,7 @@ using Avalonia.Styling;
 using Avalonia.Threading;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Settings;
+using Argonaut.Shell.Dialogs;
 using Argonaut.Shell.Updates;
 using Argonaut.Ui.Documents.Navigation;
 using Argonaut.Ui.Notifications;

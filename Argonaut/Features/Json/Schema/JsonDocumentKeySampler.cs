@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Argonaut.Engine.Bytes;
+using Argonaut.Features.Json.Indexing;
 
 namespace Argonaut.Features.Json.Schema;
 

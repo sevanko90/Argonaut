@@ -1,7 +1,8 @@
 using System.Collections.Generic;
 using System.Text;
 using Argonaut.Engine.Bytes;
-using Argonaut.Features.Raw;
+using Argonaut.Features.Raw.Editing;
+using Argonaut.Features.Raw.Rows;
 
 namespace Argonaut.Tests;
 

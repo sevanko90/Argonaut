@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Indexing;
 using Argonaut.Engine.Progress;
+using Argonaut.Features.Raw.Rows;
 
 namespace Argonaut.Features.Raw;
 

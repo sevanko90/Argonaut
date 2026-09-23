@@ -4,6 +4,7 @@ using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Collections;
 using Argonaut.Engine.Text;
 using Argonaut.Features.Json.Hints;
+using Argonaut.Features.Json.Indexing;
 using Argonaut.Features.Json.Schema;
 
 namespace Argonaut.Features.Json;

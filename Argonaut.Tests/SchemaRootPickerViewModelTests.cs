@@ -1,6 +1,5 @@
 using System.Text;
 using Argonaut.Engine.Settings;
-using Argonaut.Features.Json;
 using Argonaut.Features.Json.Schema;
 using Argonaut.Ui.ViewModels;
 

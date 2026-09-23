@@ -2,6 +2,7 @@ using System.Collections;
 using System.Text;
 using Argonaut.Features.Csv;
 using Argonaut.Features.Json;
+using Argonaut.Features.Json.ArrayTable;
 using Argonaut.Features.NdJson;
 using Argonaut.Features.Raw;
 

@@ -4,6 +4,8 @@ using System.ComponentModel;
 using System.Linq;
 using System.Threading.Tasks;
 using Argonaut.Features.Json.Hints;
+using Argonaut.Features.Json.Indexing;
+using Argonaut.Features.Json.Paths;
 using Argonaut.Features.Json.Schema;
 using Argonaut.Ui.Documents.Navigation;
 using Argonaut.Ui.Notifications;

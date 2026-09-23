@@ -1,6 +1,8 @@
 using System.Text;
 using Argonaut.Engine.Settings;
 using Argonaut.Features.Raw;
+using Argonaut.Features.Raw.Editing;
+using Argonaut.Features.Raw.Rows;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless;

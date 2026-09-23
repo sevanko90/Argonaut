@@ -1,5 +1,5 @@
 using System.Collections;
-using Argonaut.Features.Raw;
+using Argonaut.Features.Raw.Rows;
 
 namespace Argonaut.Tests;
 

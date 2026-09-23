@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Threading.Tasks;
 using Argonaut.Engine.Collections;
+using Argonaut.Features.Json.Indexing;
+using Argonaut.Features.Json.Paths;
 using Argonaut.Ui.Documents;
 
 namespace Argonaut.Features.Json.Diff;

@@ -1,7 +1,7 @@
 using System.Text;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Progress;
-using Argonaut.Features.Raw;
+using Argonaut.Features.Raw.Editing;
 
 namespace Argonaut.Tests;
 

@@ -1,4 +1,5 @@
 using Argonaut.Engine.Bytes;
+using Argonaut.Features.Json.Indexing;
 
 namespace Argonaut.Features.Json.Hints;
 

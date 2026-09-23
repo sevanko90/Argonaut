@@ -9,6 +9,7 @@ using Avalonia.Layout;
 using Avalonia.Markup.Xaml.MarkupExtensions;
 using Avalonia.Media;
 using Argonaut.Features.Raw;
+using Argonaut.Features.Raw.Editing;
 
 namespace Argonaut.Diagnostics;
 

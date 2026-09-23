@@ -1,5 +1,5 @@
 using System.Text.Json;
-using Argonaut.Features.Json;
+using Argonaut.Features.Json.ArrayTable;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless;

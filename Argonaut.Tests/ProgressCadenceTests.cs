@@ -3,8 +3,8 @@ using System.Text;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Indexing.Lines;
 using Argonaut.Engine.Progress;
-using Argonaut.Features.Json;
-using Argonaut.Features.Raw;
+using Argonaut.Features.Json.Indexing;
+using Argonaut.Features.Raw.Rows;
 
 namespace Argonaut.Tests;
 

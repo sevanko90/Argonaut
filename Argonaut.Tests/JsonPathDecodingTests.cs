@@ -1,7 +1,8 @@
 using System.Text;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Indexing;
-using Argonaut.Features.Json;
+using Argonaut.Features.Json.Indexing;
+using Argonaut.Features.Json.Paths;
 
 namespace Argonaut.Tests;
 

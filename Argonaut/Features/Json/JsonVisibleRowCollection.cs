@@ -7,6 +7,7 @@ using Avalonia.Threading;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Collections;
 using Argonaut.Features.Json.Hints;
+using Argonaut.Features.Json.Indexing;
 using Argonaut.Features.Json.Schema;
 using Argonaut.Ui.Documents;
 

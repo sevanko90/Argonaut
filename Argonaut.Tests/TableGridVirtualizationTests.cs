@@ -1,6 +1,6 @@
 using System.Collections;
 using System.Collections.Specialized;
-using Argonaut.Features.Json;
+using Argonaut.Features.Json.ArrayTable;
 using Argonaut.Ui.TableGrid;
 using Avalonia;
 using Avalonia.Controls;

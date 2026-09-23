@@ -1,7 +1,7 @@
 using System.Text;
 using Argonaut.Engine.Bytes;
-using Argonaut.Features.Json;
 using Argonaut.Features.Json.Diff;
+using Argonaut.Features.Json.Indexing;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Jobs;
 

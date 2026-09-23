@@ -1,6 +1,7 @@
 using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Engine.Search;
+using Argonaut.Features.Raw.Rows;
 using Argonaut.Ui.Find;
 
 namespace Argonaut.Features.Raw;

@@ -4,6 +4,7 @@ using Argonaut.Engine.Progress;
 using Argonaut.Engine.Search;
 using Argonaut.Features.Csv;
 using Argonaut.Features.Json;
+using Argonaut.Features.Json.ArrayTable;
 using Argonaut.Features.Json.Diff;
 using Argonaut.Features.NdJson;
 using Argonaut.Features.Raw;

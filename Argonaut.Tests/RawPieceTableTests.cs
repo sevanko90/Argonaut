@@ -1,5 +1,5 @@
 using Argonaut.Engine.Bytes;
-using Argonaut.Features.Raw;
+using Argonaut.Features.Raw.Editing;
 
 namespace Argonaut.Tests;
 

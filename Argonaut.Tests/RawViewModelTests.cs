@@ -3,6 +3,7 @@ using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Search;
 using Argonaut.Engine.Settings;
 using Argonaut.Features.Raw;
+using Argonaut.Features.Raw.Rows;
 
 namespace Argonaut.Tests;
 

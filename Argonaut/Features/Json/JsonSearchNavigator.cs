@@ -1,6 +1,7 @@
 using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Engine.Search;
+using Argonaut.Features.Json.Indexing;
 using Argonaut.Ui.Find;
 
 namespace Argonaut.Features.Json;

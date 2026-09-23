@@ -1,6 +1,6 @@
 using System.Text;
 using Argonaut.Engine.Bytes;
-using Argonaut.Features.Raw;
+using Argonaut.Features.Raw.Editing;
 using BenchmarkDotNet.Attributes;
 
 namespace Argonaut.Tests;

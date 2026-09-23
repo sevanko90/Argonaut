@@ -7,6 +7,7 @@ using Argonaut.Engine.Saving;
 using Argonaut.Engine.Search;
 using Argonaut.Engine.Settings;
 using Argonaut.Shell;
+using Argonaut.Shell.Dialogs;
 using Argonaut.Ui.Documents;
 using Argonaut.Ui.Find;
 using Argonaut.Ui.Progress;

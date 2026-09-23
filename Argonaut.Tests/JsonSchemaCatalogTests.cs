@@ -1,5 +1,5 @@
 using Argonaut.Engine.Settings;
-using Argonaut.Features.Json;
+using Argonaut.Features.Json.Indexing;
 using Argonaut.Features.Json.Schema;
 
 namespace Argonaut.Tests;

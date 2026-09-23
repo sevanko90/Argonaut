@@ -4,7 +4,7 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:json="clr-namespace:Argonaut.Features.NdJson"
              xmlns:jsonview="clr-namespace:Argonaut.Features.Json"
-             xmlns:search="clr-namespace:Argonaut.Ui.Find"
+             xmlns:find="clr-namespace:Argonaut.Ui.Find"
              x:Class="Argonaut.Features.NdJson.NdJsonView"
              x:DataType="json:NdJsonViewModel">
     <Border BorderBrush="{DynamicResource AppBorderBrush}"
@@ -35,8 +35,8 @@
                                        Foreground="{DynamicResource AppMutedTextBrush}"
                                        FontFamily="{DynamicResource AppContentFontFamily}" />
                             <TextBlock Grid.Column="1"
-                                       search:SearchHighlight.Text="{Binding Text}"
-                                       search:SearchHighlight.Term="{Binding $parent[json:NdJsonView].((json:NdJsonViewModel)DataContext).HighlightTerm}"
+                                       find:SearchHighlight.Text="{Binding Text}"
+                                       find:SearchHighlight.Term="{Binding $parent[json:NdJsonView].((json:NdJsonViewModel)DataContext).HighlightTerm}"
                                        TextWrapping="NoWrap"
                                        FontFamily="{DynamicResource AppContentFontFamily}" />
                         </Grid>

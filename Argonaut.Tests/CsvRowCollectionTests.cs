@@ -2,6 +2,7 @@ using System.Text;
 using Argonaut.Engine.Indexing.Lines;
 using Argonaut.Features.Csv;
 using Argonaut.Infrastructure;
+using Argonaut.Ui.TableGrid;
 
 namespace Argonaut.Tests;
 
@@ -47,7 +48,7 @@ public class CsvRowCollectionTests
     {
         WithRows(Content, dataStartIndex: 1, rows =>
         {
-            var row = (CsvVisibleRow)rows[0]!;
+            var row = (TableRow)rows[0]!;
             Assert.Equal(1, row.RowNumber);
             Assert.Equal("1", row.Cells[0].Text);
             Assert.Equal("alpha", row.Cells[1].Text);
@@ -59,7 +60,7 @@ public class CsvRowCollectionTests
     {
         WithRows(Content, dataStartIndex: 0, rows =>
         {
-            var row = (CsvVisibleRow)rows[0]!;
+            var row = (TableRow)rows[0]!;
             Assert.Equal("id", row.Cells[0].Text);
             Assert.Equal("name", row.Cells[1].Text);
         });
@@ -70,7 +71,7 @@ public class CsvRowCollectionTests
     {
         WithRows(Content, dataStartIndex: 1, rows =>
         {
-            var row = (CsvVisibleRow)rows[10]!;
+            var row = (TableRow)rows[10]!;
             Assert.Empty(row.Cells);
         });
     }
@@ -83,7 +84,7 @@ public class CsvRowCollectionTests
             rows.SetDataStartIndex(0);
 
             Assert.Equal(4, rows.Count);
-            var row = (CsvVisibleRow)rows[0]!;
+            var row = (TableRow)rows[0]!;
             Assert.Equal("id", row.Cells[0].Text);
         });
     }

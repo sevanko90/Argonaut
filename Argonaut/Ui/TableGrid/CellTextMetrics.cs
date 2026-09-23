@@ -3,14 +3,15 @@ using System.Globalization;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
+using Argonaut.Infrastructure;
 
-namespace Argonaut.Infrastructure;
+namespace Argonaut.Ui.TableGrid;
 
 /// <summary>
 /// How many pixels a grid cell needs for a given number of characters - both terms measured
 /// rather than guessed.
 ///
-/// The grid widths a column from a character count (see <c>CsvStructure</c>): counting is cheap
+/// The grid widths a column from a character count (see <c>TableStructure</c>): counting is cheap
 /// on a multi-gigabyte file where laying out every value's text is not. Turning that count into
 /// pixels needs two numbers, and hard-coding either has now caused the same bug twice - values
 /// trimmed to "66317..." in a column that was supposed to fit "6631700":

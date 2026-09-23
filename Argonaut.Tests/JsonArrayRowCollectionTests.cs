@@ -1,6 +1,6 @@
 using System.Text;
-using Argonaut.Features.Csv;
 using Argonaut.Features.Json;
+using Argonaut.Ui.TableGrid;
 
 namespace Argonaut.Tests;
 
@@ -13,7 +13,7 @@ namespace Argonaut.Tests;
 /// </summary>
 public class JsonArrayRowCollectionTests
 {
-    private static async Task WithRows(string json, CsvStructure structure, JsonArrayColumnMode mode,
+    private static async Task WithRows(string json, TableStructure structure, JsonArrayColumnMode mode,
         Action<JsonArrayRowCollection> assert)
     {
         string path = Path.GetTempFileName();
@@ -33,19 +33,19 @@ public class JsonArrayRowCollectionTests
         }
     }
 
-    private static CsvStructure Columns(params string[] names)
-        => CsvStructure.FromMaxChars(names, names.Select(n => n.Length).ToArray());
+    private static TableStructure Columns(params string[] names)
+        => TableStructure.FromMaxChars(names, names.Select(n => n.Length).ToArray());
 
     /// <summary>The flat routes discovery would have produced for these columns - one direct
     /// property step each - and none at all for a reshape, whose cells are whole elements.</summary>
-    private static ExpandedRoutes RoutesFor(CsvStructure structure, JsonArrayColumnMode mode)
+    private static ExpandedRoutes RoutesFor(TableStructure structure, JsonArrayColumnMode mode)
         => mode == JsonArrayColumnMode.ByProperty
             ? ExpandedRoutes.ForProperties(structure.Columns.Select(c => c.Name).ToArray())
             : ExpandedRoutes.None;
 
     /// <summary>The same harness with routes chosen by the caller - what a header expansion
     /// will hand the collection once slice 2 can build one.</summary>
-    private static async Task WithRoutedRows(string json, CsvStructure structure, ExpandedRoutes routes,
+    private static async Task WithRoutedRows(string json, TableStructure structure, ExpandedRoutes routes,
         Action<JsonArrayRowCollection> assert)
     {
         string path = Path.GetTempFileName();
@@ -66,7 +66,7 @@ public class JsonArrayRowCollectionTests
     }
 
     private static string[] TextOf(JsonArrayRowCollection rows, int i)
-        => ((CsvVisibleRow)rows[i]!).Cells.Select(c => c.Text).ToArray();
+        => ((TableRow)rows[i]!).Cells.Select(c => c.Text).ToArray();
 
     [Fact]
     public Task ByProperty_OneRowPerElementWithCellsInColumnOrder()
@@ -215,7 +215,7 @@ public class JsonArrayRowCollectionTests
     public Task OutOfRangeIndex_ReturnsAnEmptyRowInsteadOfThrowing()
         => WithRows("[1,2]", Columns("value"), JsonArrayColumnMode.ByProperty, rows =>
         {
-            Assert.Empty(((CsvVisibleRow)rows[10]!).Cells);
+            Assert.Empty(((TableRow)rows[10]!).Cells);
         });
 
     [Fact]
@@ -233,8 +233,8 @@ public class JsonArrayRowCollectionTests
     public Task RowNumbersAreOneBased()
         => WithRows("[1,2,3]", Columns("value"), JsonArrayColumnMode.ByProperty, rows =>
         {
-            Assert.Equal(1, ((CsvVisibleRow)rows[0]!).RowNumber);
-            Assert.Equal(3, ((CsvVisibleRow)rows[2]!).RowNumber);
+            Assert.Equal(1, ((TableRow)rows[0]!).RowNumber);
+            Assert.Equal(3, ((TableRow)rows[2]!).RowNumber);
         });
 
     [Fact]

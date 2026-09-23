@@ -1,8 +1,7 @@
 using System.Collections;
 using System.Collections.Specialized;
-using Argonaut.Features.Csv;
 using Argonaut.Features.Json;
-using Argonaut.Infrastructure;
+using Argonaut.Ui.TableGrid;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
@@ -62,10 +61,10 @@ public sealed class TableGridVirtualizationTests
             get
             {
                 IndexerHits++;
-                var cells = new CsvCell[this.columnCount];
+                var cells = new TableCell[this.columnCount];
                 for (int c = 0; c < cells.Length; c++)
-                    cells[c] = new CsvCell(TextAt(index, c));
-                return new CsvVisibleRow(index + 1, cells);
+                    cells[c] = new TableCell(TextAt(index, c));
+                return new TableRow(index + 1, cells);
             }
             set => throw new NotSupportedException();
         }
@@ -123,7 +122,7 @@ public sealed class TableGridVirtualizationTests
 
     /// <summary>A structure of <paramref name="columnCount"/> evenly-widthed columns: these
     /// tests care about names and count, and set the widths they check by dragging.</summary>
-    private static CsvStructure StructureOf(int columnCount)
+    private static TableStructure StructureOf(int columnCount)
     {
         var names = new string[columnCount];
         var chars = new int[columnCount];
@@ -133,10 +132,10 @@ public sealed class TableGridVirtualizationTests
             chars[c] = 20;
         }
 
-        return CsvStructure.FromMaxChars(names, chars);
+        return TableStructure.FromMaxChars(names, chars);
     }
 
-    private static (TableView Table, TableGridColumns Columns) BuildTable(CountingRows rows, CsvStructure structure)
+    private static (TableView Table, TableGridColumns Columns) BuildTable(CountingRows rows, TableStructure structure)
     {
         var table = new TableView { ItemsSource = rows, SelectionMode = SelectionMode.Single, CanUserResizeColumns = true };
         var columns = new TableGridColumns(table);
@@ -270,7 +269,7 @@ public sealed class TableGridVirtualizationTests
         {
             object? originalFontSize = Application.Current!.Resources["AppContentFontSize"];
             var rows = new CountingRows(100, 97);
-            var structure = CsvStructure.FromMaxChars(Enumerable.Range(0, 97).Select(c => $"c{c}").ToArray(),
+            var structure = TableStructure.FromMaxChars(Enumerable.Range(0, 97).Select(c => $"c{c}").ToArray(),
                 Enumerable.Range(0, 97).Select(c => 7 + c % 17).ToArray());
             var (table, columns) = BuildTable(rows, structure);
             table.UseLayoutRounding = roundWidths;
@@ -342,7 +341,7 @@ public sealed class TableGridVirtualizationTests
                 int fitChars = Math.Max(middleColumn.Header!.ToString()!.Length, rows.LongestRealizedText(logicalIndex));
                 await DoubleClickResizerAsync(window, middleColumn);
                 middleColumn = table.Columns.Single(c => columns.LogicalColumnIndex(c) == logicalIndex);
-                Assert.Equal(CsvStructure.WidthForChars(fitChars), middleColumn.Width.Value, 1);
+                Assert.Equal(TableStructure.WidthForChars(fitChars), middleColumn.Width.Value, 1);
 
                 var spacer = table.Columns[0];
                 Assert.Equal(-1, columns.LogicalColumnIndex(spacer));
@@ -407,7 +406,7 @@ public sealed class TableGridVirtualizationTests
                 Assert.InRange(afterBind, 1, 500);
                 Assert.InRange(window.GetVisualDescendants().OfType<TableViewRow>().Count(), 1, 200);
 
-                // The index-path cell bindings must actually resolve against CsvVisibleRow.
+                // The index-path cell bindings must actually resolve against TableRow.
                 var texts = window.GetVisualDescendants().OfType<TextBlock>().Select(t => t.Text).ToList();
                 Assert.Contains("r0c1", texts);
                 Assert.Contains("Column 1", texts);
@@ -494,18 +493,18 @@ public sealed class TableGridVirtualizationTests
                 var column = table.Columns[0];
                 await DragResizerAsync(window, column, -60);
                 double narrowed = column.ActualWidth;
-                Assert.True(narrowed < CsvStructure.WidthForChars(40),
-                    $"the column must start too narrow for its content: narrowed={narrowed} fit={CsvStructure.WidthForChars(40)} " +
+                Assert.True(narrowed < TableStructure.WidthForChars(40),
+                    $"the column must start too narrow for its content: narrowed={narrowed} fit={TableStructure.WidthForChars(40)} " +
                     $"advance={CellTextMetrics.Current.CharAdvance} inset={CellTextMetrics.Current.CellInset}");
 
                 await DoubleClickResizerAsync(window, column);
-                Assert.Equal(CsvStructure.WidthForChars(40), column.ActualWidth, 1);
+                Assert.Equal(TableStructure.WidthForChars(40), column.ActualWidth, 1);
                 Assert.Equal(column.ActualWidth, FirstCellWidth(window), 1);
 
                 // A column whose content is shorter than its header fits the header instead.
                 var third = table.Columns[2];
                 await DoubleClickResizerAsync(window, third);
-                Assert.Equal(CsvStructure.WidthForChars("Column 3".Length), third.ActualWidth, 1);
+                Assert.Equal(TableStructure.WidthForChars("Column 3".Length), third.ActualWidth, 1);
                 return true;
             }
             finally
@@ -544,7 +543,7 @@ public sealed class TableGridVirtualizationTests
                 double widened = column.Width.Value;
                 await DoubleClickResizerAsync(window, column);
 
-                double expected = CsvStructure.WidthForChars(Math.Max(displayName.Length, rows.FirstColumnLength));
+                double expected = TableStructure.WidthForChars(Math.Max(displayName.Length, rows.FirstColumnLength));
                 Assert.Equal(expected, column.Width.Value, 1);
                 Assert.True(column.Width.Value < widened);
                 Assert.Equal(0, rows.ItemsEnumerated);
@@ -660,7 +659,7 @@ public sealed class TableGridVirtualizationTests
 
                 // And the columns account for it: a column seeded for N characters gives those
                 // characters the whole width the metrics measured for them.
-                Assert.Equal(CsvStructure.WidthForChars(20), table.Columns[0].ActualWidth, 1);
+                Assert.Equal(TableStructure.WidthForChars(20), table.Columns[0].ActualWidth, 1);
                 return true;
             }
             finally
@@ -806,7 +805,7 @@ public sealed class TableGridVirtualizationTests
                 window.UpdateLayout();
 
                 Assert.Equal(4, table.Columns.Count);
-                Assert.Equal(CsvStructure.WidthForChars(20), table.Columns[0].Width.Value, 1);
+                Assert.Equal(TableStructure.WidthForChars(20), table.Columns[0].Width.Value, 1);
                 return true;
             }
             finally

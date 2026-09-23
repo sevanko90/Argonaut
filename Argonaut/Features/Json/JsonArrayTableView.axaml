@@ -17,7 +17,7 @@
          resizer that were all hand-built here.
 
          Columns are absent from this markup on purpose: their count and names are data, so
-         TableGridColumns builds them in code-behind from the view model's CsvStructure and
+         TableGridColumns builds them in code-behind from the view model's TableStructure and
          rebuilds them whenever a re-shape replaces it.
 
          The find highlight is absent here on purpose - the table returns no search navigator in

@@ -18,10 +18,10 @@ using Avalonia.Media;
 using Avalonia.Reactive;
 using Avalonia.VisualTree;
 
-namespace Argonaut.Features.Csv;
+namespace Argonaut.Ui.TableGrid;
 
 /// <summary>
-/// Projects a <see cref="CsvStructure"/> onto a <see cref="TableView"/>'s columns - shared by
+/// Projects a <see cref="TableStructure"/> onto a <see cref="TableView"/>'s columns - shared by
 /// both grids, the CSV viewer and the JSON array table. Only columns near the horizontal
 /// viewport get cells; logical columns keep their headers and user widths off-screen. Also
 /// supports fitting a column to its content and remeasuring widths when the font changes.
@@ -29,7 +29,7 @@ namespace Argonaut.Features.Csv;
 /// Columns are built here rather than declared in XAML because their number and names are data:
 /// a CSV header line, a JSON array's shared property names, or "Column 1..N" placeholders, all
 /// re-discovered whenever the grid is re-shaped. A shared cell template reads the source index
-/// of its recyclable column slot into <see cref="CsvVisibleRow"/>; the lazy row collection is
+/// of its recyclable column slot into <see cref="TableRow"/>; the lazy row collection is
 /// unchanged by horizontal virtualization.
 ///
 /// Drag widths are deliberately un-policed - no floor, no ceiling. A clamp can only be applied
@@ -56,7 +56,7 @@ public sealed partial class TableGridColumns : IDisposable
     private Border? mark;
     private TableViewCell? markedCell;
     private bool hoverMarkTracked;
-    private CsvStructure? seeded;
+    private TableStructure? seeded;
     private IReadOnlyList<object>? seededHeaders;
 
     public TableGridColumns(TableView table)
@@ -103,7 +103,7 @@ public sealed partial class TableGridColumns : IDisposable
     /// hint under the value in their tooltip. Null - a grid whose cells only select - renders
     /// exactly the plain trimmed text with the untrimmed tooltip it always did.
     /// </summary>
-    public void Rebuild(CsvStructure structure, IColumnFitSource? fitSource = null, BindingBase? highlightTerm = null,
+    public void Rebuild(TableStructure structure, IColumnFitSource? fitSource = null, BindingBase? highlightTerm = null,
         IReadOnlyList<object>? headers = null, IDataTemplate? headerTemplate = null, string? clickHint = null)
     {
         this.fitSource = fitSource;
@@ -212,7 +212,7 @@ public sealed partial class TableGridColumns : IDisposable
         this.seededHeaders = null;
     }
 
-    private static bool SameShape(CsvStructure previous, CsvStructure next)
+    private static bool SameShape(TableStructure previous, TableStructure next)
     {
         if (previous.ColumnCount != next.ColumnCount)
             return false;
@@ -243,14 +243,14 @@ public sealed partial class TableGridColumns : IDisposable
     /// adorner layer (see <see cref="HoverMarkAdorner"/>), so nothing per-cell pays for it.
     /// </summary>
     private static IDataTemplate CellTemplate(BindingBase? highlightTerm, string? clickHint)
-        => new FuncDataTemplate<CsvVisibleRow>((_, _) =>
+        => new FuncDataTemplate<TableRow>((_, _) =>
         {
             var text = CellTextBlock();
             var cellText = new MultiBinding
             {
                 Bindings =
                 {
-                    new Binding(nameof(CsvVisibleRow.Cells)),
+                    new Binding(nameof(TableRow.Cells)),
                     new Binding("Column.SourceIndex")
                     {
                         RelativeSource = new RelativeSource(RelativeSourceMode.FindAncestor)
@@ -288,7 +288,7 @@ public sealed partial class TableGridColumns : IDisposable
         public static readonly SourceCellText Instance = new();
 
         public object? Convert(IList<object?> inputs, Type targetType, object? parameter, CultureInfo culture)
-            => inputs.Count == 2 && inputs[0] is IReadOnlyList<CsvCell> cells && inputs[1] is int index
+            => inputs.Count == 2 && inputs[0] is IReadOnlyList<TableCell> cells && inputs[1] is int index
                 && index >= 0 && index < cells.Count ? cells[index].Text : null;
     }
 
@@ -477,7 +477,7 @@ public sealed partial class TableGridColumns : IDisposable
         // Deferred for the reason UiDeferral exists: writing Width from inside the pointer event
         // the resizer is still handling re-enters TableView's measure mid-gesture, and that path
         // throws "Cannot call Measure using a size with NaN values" out of the layout pass.
-        UiDeferral.AfterCurrentInput(() => column.Width = new GridLength(CsvStructure.WidthForChars(chars)));
+        UiDeferral.AfterCurrentInput(() => column.Width = new GridLength(TableStructure.WidthForChars(chars)));
     }
 
     /// <summary>The column whose resizer <paramref name="source"/> sits in, or null if the press

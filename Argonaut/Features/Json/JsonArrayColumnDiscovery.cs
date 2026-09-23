@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
-using Argonaut.Features.Csv;
 using Argonaut.Infrastructure;
+using Argonaut.Ui.TableGrid;
 
 namespace Argonaut.Features.Json;
 
@@ -23,7 +23,7 @@ public sealed record JsonArrayColumnHeader(IReadOnlyList<JsonArrayColumnHeaderSe
 /// <param name="Truncated">The column cap stopped this discovery short, so some columns the data
 /// has are not drawn - the only outcome here that is worth telling the user about.</param>
 public sealed record DiscoveredColumns(
-    CsvStructure Structure,
+    TableStructure Structure,
     ExpandedRoutes Routes,
     IReadOnlyList<ColumnNesting> Nesting,
     IReadOnlyList<JsonArrayColumnHeader> Headers,
@@ -401,8 +401,8 @@ public static class JsonArrayColumnDiscovery
                 SawObject: true, this.truncated);
         }
 
-        private CsvStructure Structure()
-            => CsvStructure.FromMaxChars(this.displays,
+        private TableStructure Structure()
+            => TableStructure.FromMaxChars(this.displays,
                 System.Runtime.InteropServices.CollectionsMarshal.AsSpan(this.maxChars));
 
         /// <summary>

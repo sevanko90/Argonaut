@@ -1,6 +1,6 @@
 using System.Collections;
 using System.Collections.Specialized;
-using Argonaut.Features.Csv;
+using Argonaut.Ui.TableGrid;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
@@ -49,10 +49,10 @@ public sealed class TableGridHoverMarkTests
         {
             get
             {
-                var cells = new CsvCell[this.columnCount];
+                var cells = new TableCell[this.columnCount];
                 for (int c = 0; c < cells.Length; c++)
-                    cells[c] = new CsvCell($"r{index}c{c}");
-                return new CsvVisibleRow(index + 1, cells);
+                    cells[c] = new TableCell($"r{index}c{c}");
+                return new TableRow(index + 1, cells);
             }
             set => throw new NotSupportedException();
         }
@@ -77,7 +77,7 @@ public sealed class TableGridHoverMarkTests
         }
     }
 
-    private static CsvStructure StructureOf(int columnCount)
+    private static TableStructure StructureOf(int columnCount)
     {
         var names = new string[columnCount];
         var chars = new int[columnCount];
@@ -87,7 +87,7 @@ public sealed class TableGridHoverMarkTests
             chars[c] = 20;
         }
 
-        return CsvStructure.FromMaxChars(names, chars);
+        return TableStructure.FromMaxChars(names, chars);
     }
 
     /// <summary>Runs <paramref name="body"/> on the headless UI thread and lets its exceptions -

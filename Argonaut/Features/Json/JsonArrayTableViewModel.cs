@@ -2,10 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
-using Argonaut.Features.Csv;
 using Argonaut.Features.Search;
 using Argonaut.Infrastructure;
 using Argonaut.Shell;
+using Argonaut.Ui.TableGrid;
 using Avalonia.Threading;
 
 namespace Argonaut.Features.Json;
@@ -40,7 +40,7 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
     private JsonRowFactory? cellText;
     private JsonArrayRowCollection? rows;
     private JsonArrayTableToolbarViewModel? toolbar;
-    private CsvStructure? structure;
+    private TableStructure? structure;
     private ExpandedRoutes routes = ExpandedRoutes.None;
     private IReadOnlyList<ColumnNesting> nesting = [];
     private IReadOnlyList<JsonArrayColumnHeader> headers = [];
@@ -59,7 +59,7 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
 
     public JsonArrayRowCollection Rows => this.rows ?? throw new InvalidOperationException("LoadAsync must complete before Rows is accessed.");
 
-    public CsvStructure Structure => this.structure ?? throw new InvalidOperationException("LoadAsync must complete before Structure is accessed.");
+    public TableStructure Structure => this.structure ?? throw new InvalidOperationException("LoadAsync must complete before Structure is accessed.");
 
     /// <summary>Columns discovered so far - 0 until <see cref="LoadAsync"/> has published a
     /// <see cref="Structure"/>, which is what the view waits for before building columns.</summary>
@@ -296,7 +296,7 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
     }
 
     /// <summary>
-    /// Re-shapes the grid for a new picker selection. Builds a new <see cref="CsvStructure"/> and
+    /// Re-shapes the grid for a new picker selection. Builds a new <see cref="TableStructure"/> and
     /// hands it to the row collection; the array itself is never re-walked, because element
     /// addressing is independent of how the columns are drawn.
     /// </summary>
@@ -376,7 +376,7 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
 
     /// <summary>Headers for columns that are not routes into an element - the reshape modes'
     /// generic labels, which nothing can be expanded from.</summary>
-    private static IReadOnlyList<JsonArrayColumnHeader> PlainHeaders(CsvStructure structure)
+    private static IReadOnlyList<JsonArrayColumnHeader> PlainHeaders(TableStructure structure)
     {
         var plain = new JsonArrayColumnHeader[structure.ColumnCount];
         for (int c = 0; c < plain.Length; c++)
@@ -397,7 +397,7 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
     /// element - the brace - and lands on the minimum width, which is the honest result for
     /// cells that show a container summary.)
     /// </summary>
-    private CsvStructure BuildReshapeStructure(JsonArrayTableSession current, int columns)
+    private TableStructure BuildReshapeStructure(JsonArrayTableSession current, int columns)
     {
         var index = current.Inner.Index;
         int sample = Math.Min(current.Elements.ElementCount, InitialElementTarget);
@@ -417,7 +417,7 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
             maxChars[column] = Math.Max(maxChars[column], RenderedLength(token, index.GetToken(token)));
         }
 
-        return CsvStructure.FromMaxChars(names, maxChars);
+        return TableStructure.FromMaxChars(names, maxChars);
     }
 
     /// <summary>

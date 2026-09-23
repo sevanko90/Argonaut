@@ -1,7 +1,7 @@
 using System;
 using System.ComponentModel;
-using Argonaut.Features.Csv;
 using Argonaut.Infrastructure;
+using Argonaut.Ui.TableGrid;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
@@ -133,7 +133,7 @@ public partial class JsonArrayTableView : UserControl
     }
 
     /// <summary>
-    /// The view model publishes a whole new <see cref="CsvStructure"/> on load and on every
+    /// The view model publishes a whole new <see cref="TableStructure"/> on load and on every
     /// re-shape, so the columns are rebuilt from it rather than patched - the same "a new
     /// structure replaces the old one" contract the row collection follows.
     /// </summary>

@@ -5,6 +5,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Data;
 using Avalonia.VisualTree;
+using Argonaut.Ui.TableGrid;
 
 namespace Argonaut.Features.Csv;
 

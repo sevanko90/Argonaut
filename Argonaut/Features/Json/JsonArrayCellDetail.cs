@@ -10,7 +10,7 @@ namespace Argonaut.Features.Json;
 /// CELL rather than a row: a row's tree beside the grid would just be the JSON view with the
 /// element collapsed, which is where the reader came from.
 ///
-///   * a long scalar - the grid caps a column at <see cref="Csv.CsvStructure"/>'s discovered
+///   * a long scalar - the grid caps a column at <see cref="Argonaut.Ui.TableGrid.TableStructure"/>'s discovered
 ///     width and a cell's text at <see cref="JsonRowFactory.MaxDisplayTextLength"/>, so a long
 ///     string is only ever readable here;
 ///   * a container - rendered by the ordinary tree machinery

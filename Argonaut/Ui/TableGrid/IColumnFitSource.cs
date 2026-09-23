@@ -1,4 +1,4 @@
-namespace Argonaut.Features.Csv;
+namespace Argonaut.Ui.TableGrid;
 
 /// <summary>
 /// A grid body that can say how wide a column's content actually is - answered from the rows it

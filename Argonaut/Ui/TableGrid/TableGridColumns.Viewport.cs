@@ -10,7 +10,7 @@ using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Styling;
 
-namespace Argonaut.Features.Csv;
+namespace Argonaut.Ui.TableGrid;
 
 public sealed partial class TableGridColumns
 {

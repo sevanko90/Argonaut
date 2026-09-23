@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Specialized;
-using Argonaut.Features.Csv;
 using Argonaut.Infrastructure;
+using Argonaut.Ui.TableGrid;
 
 namespace Argonaut.Features.Json;
 
@@ -25,7 +25,7 @@ public enum JsonArrayColumnMode
 }
 
 /// <summary>
-/// The table's ItemsSource: <see cref="CsvVisibleRow"/>s produced on demand from a JSON array,
+/// The table's ItemsSource: <see cref="TableRow"/>s produced on demand from a JSON array,
 /// so the CSV grid's presentation layer renders them unchanged.
 ///
 /// It keeps no walk state of its own. <see cref="VirtualizingItemsSourceBase.Count"/> derives from
@@ -37,7 +37,7 @@ public enum JsonArrayColumnMode
 /// Reshape is therefore a pure re-chunking of the same per-element decode, not a second
 /// value-reading path.
 ///
-/// It invents no columns: <see cref="CsvStructure"/> and the <see cref="ExpandedRoutes"/> that
+/// It invents no columns: <see cref="TableStructure"/> and the <see cref="ExpandedRoutes"/> that
 /// say where each of them lives inside an element both arrive finished, from whoever discovered
 /// the property names or chose the reshape width.
 /// </summary>
@@ -53,9 +53,9 @@ public sealed class JsonArrayRowCollection : VirtualizingItemsSourceBase, IColum
     private readonly JsonStructureIndex index;
     private readonly IByteSource bytes;
     private readonly JsonRowFactory rowFactory;
-    private readonly LruCache<int, CsvVisibleRow> cache = new(CacheCapacity);
+    private readonly LruCache<int, TableRow> cache = new(CacheCapacity);
 
-    private CsvStructure structure;
+    private TableStructure structure;
     private JsonArrayColumnMode mode;
 
     // Where each column's value sits inside an element. Property names are matched RAW (escapes
@@ -68,7 +68,7 @@ public sealed class JsonArrayRowCollection : VirtualizingItemsSourceBase, IColum
     private int notifiedCount;
 
     public JsonArrayRowCollection(JsonArrayElementIndex elements, JsonStructureIndex index, IByteSource bytes,
-        CsvStructure structure, ExpandedRoutes routes, JsonArrayColumnMode mode)
+        TableStructure structure, ExpandedRoutes routes, JsonArrayColumnMode mode)
     {
         this.elements = elements;
         this.index = index;
@@ -112,7 +112,7 @@ public sealed class JsonArrayRowCollection : VirtualizingItemsSourceBase, IColum
     /// re-realizes what is visible. This never re-walks the array: element addressing is
     /// independent of how the columns are drawn.
     /// </summary>
-    public void SetShape(CsvStructure newStructure, ExpandedRoutes newRoutes, JsonArrayColumnMode newMode)
+    public void SetShape(TableStructure newStructure, ExpandedRoutes newRoutes, JsonArrayColumnMode newMode)
     {
         if (ReferenceEquals(structure, newStructure) && ReferenceEquals(routes, newRoutes) && mode == newMode)
             return;
@@ -146,16 +146,16 @@ public sealed class JsonArrayRowCollection : VirtualizingItemsSourceBase, IColum
         return longest;
     }
 
-    private CsvVisibleRow GetRow(int i)
+    private TableRow GetRow(int i)
     {
         if (cache.TryGetValue(i, out var cached))
             return cached;
 
         int count = Count;
         if (i < 0 || i >= count)
-            return new CsvVisibleRow(i + 1, []);
+            return new TableRow(i + 1, []);
 
-        var row = new CsvVisibleRow(i + 1, mode == JsonArrayColumnMode.ByProperty ? ByPropertyCells(i) : ReshapeCells(i));
+        var row = new TableRow(i + 1, mode == JsonArrayColumnMode.ByProperty ? ByPropertyCells(i) : ReshapeCells(i));
         cache.Set(i, row);
         return row;
     }
@@ -222,17 +222,17 @@ public sealed class JsonArrayRowCollection : VirtualizingItemsSourceBase, IColum
         return -1;
     }
 
-    private CsvCell[] ByPropertyCells(int rowIndex)
+    private TableCell[] ByPropertyCells(int rowIndex)
     {
         int token = elements.TokenForElement(rowIndex);
         var element = index.GetToken(token);
 
         if (element.Kind != JsonTokenKind.StartObject)
-            return [new CsvCell(TextFor(token, element))];
+            return [new TableCell(TextFor(token, element))];
 
-        var cells = new CsvCell[structure.ColumnCount];
+        var cells = new TableCell[structure.ColumnCount];
         for (int c = 0; c < cells.Length; c++)
-            cells[c] = new CsvCell(string.Empty);
+            cells[c] = new TableCell(string.Empty);
 
         FillFrom(cells, routes, token, element);
         return cells;
@@ -249,7 +249,7 @@ public sealed class JsonArrayRowCollection : VirtualizingItemsSourceBase, IColum
     /// Safe to read EndIndex here without a wait: every element the element index published has
     /// closed, so its whole subtree has too.
     /// </summary>
-    private void FillFrom(CsvCell[] cells, ExpandedRoutes level, int containerToken, JsonTokenInfo container)
+    private void FillFrom(TableCell[] cells, ExpandedRoutes level, int containerToken, JsonTokenInfo container)
     {
         int ordinal = 0;
         for (int child = containerToken + 1; child < container.EndIndex; ordinal++)
@@ -264,7 +264,7 @@ public sealed class JsonArrayRowCollection : VirtualizingItemsSourceBase, IColum
             if (matched)
             {
                 if (column >= 0 && column < cells.Length)
-                    cells[column] = new CsvCell(TextFor(child, info));
+                    cells[column] = new TableCell(TextFor(child, info));
 
                 if (inner is not null && isContainer)
                     FillFrom(cells, inner, child, info);
@@ -279,7 +279,7 @@ public sealed class JsonArrayRowCollection : VirtualizingItemsSourceBase, IColum
     /// itself. A partial last row simply yields fewer cells than the header has columns; each
     /// cell carries its own width, so nothing misaligns and no padding is needed.
     /// </summary>
-    private CsvCell[] ReshapeCells(int rowIndex)
+    private TableCell[] ReshapeCells(int rowIndex)
     {
         int columns = Math.Max(1, structure.ColumnCount);
         int first = rowIndex * columns;
@@ -287,11 +287,11 @@ public sealed class JsonArrayRowCollection : VirtualizingItemsSourceBase, IColum
         if (available <= 0)
             return [];
 
-        var cells = new CsvCell[available];
+        var cells = new TableCell[available];
         for (int c = 0; c < available; c++)
         {
             int token = elements.TokenForElement(first + c);
-            cells[c] = new CsvCell(TextFor(token, index.GetToken(token)));
+            cells[c] = new TableCell(TextFor(token, index.GetToken(token)));
         }
 
         return cells;

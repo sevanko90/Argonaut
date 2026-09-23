@@ -1,13 +1,12 @@
 using System;
 using System.Collections.Generic;
-using Argonaut.Infrastructure;
 
-namespace Argonaut.Features.Csv;
+namespace Argonaut.Ui.TableGrid;
 
 /// <summary>A cell's display text. Width is the column's business, not the cell's - the grid
 /// sizes columns, so a realized row carries no geometry and never goes stale when one is
 /// resized or the content font changes.</summary>
-public readonly record struct CsvCell(string Text);
+public readonly record struct TableCell(string Text);
 
 /// <summary>
 /// One column: its display name and the character count its width is derived from. Pixels are
@@ -15,7 +14,7 @@ public readonly record struct CsvCell(string Text);
 /// so the answer follows the font the app is actually rendering with (the status bar can swap
 /// the content font at runtime) rather than the one that was current at discovery.
 /// </summary>
-public readonly record struct CsvColumn(string Name, int MaxChars)
+public readonly record struct TableColumn(string Name, int MaxChars)
 {
     public double Width => CellTextMetrics.Current.WidthForChars(MaxChars);
 }
@@ -44,7 +43,7 @@ public readonly record struct CsvColumn(string Name, int MaxChars)
 /// shape change rather than per row, and an immutable class avoids the defensive-copy traps a
 /// struct with array fields invites.
 /// </summary>
-public sealed class CsvStructure
+public sealed class TableStructure
 {
     /// <summary>Narrowest a discovered column opens, in characters - enough that a column of
     /// short values still reads as a column. A width the user chose - by dragging, or by
@@ -56,11 +55,11 @@ public sealed class CsvStructure
     /// long enough that the tooltip, not the column, is how it gets read.</summary>
     private const int MaxDiscoveredChars = 40;
 
-    private readonly CsvColumn[] columns;
+    private readonly TableColumn[] columns;
 
-    private CsvStructure(CsvColumn[] columns) => this.columns = columns;
+    private TableStructure(TableColumn[] columns) => this.columns = columns;
 
-    public IReadOnlyList<CsvColumn> Columns => this.columns;
+    public IReadOnlyList<TableColumn> Columns => this.columns;
 
     public int ColumnCount => this.columns.Length;
 
@@ -98,17 +97,17 @@ public sealed class CsvStructure
     /// over-counting measure (UTF-8 bytes rather than characters, a CSV field's length including
     /// its quotes) is harmless here.
     /// </summary>
-    public static CsvStructure FromMaxChars(IReadOnlyList<string> names, ReadOnlySpan<int> maxChars)
+    public static TableStructure FromMaxChars(IReadOnlyList<string> names, ReadOnlySpan<int> maxChars)
     {
-        var columns = new CsvColumn[names.Count];
+        var columns = new TableColumn[names.Count];
 
         for (int c = 0; c < columns.Length; c++)
         {
             int chars = c < maxChars.Length ? maxChars[c] : names[c].Length;
-            columns[c] = new CsvColumn(names[c], Math.Clamp(chars, MinColumnChars, MaxDiscoveredChars));
+            columns[c] = new TableColumn(names[c], Math.Clamp(chars, MinColumnChars, MaxDiscoveredChars));
         }
 
-        return new CsvStructure(columns);
+        return new TableStructure(columns);
     }
 
     /// <summary>
@@ -117,16 +116,16 @@ public sealed class CsvStructure
     /// were measured from the data, and relabelling a column does not change what is in it.
     /// Cheap enough to call per toggle (one array of each per column, no file read).
     /// </summary>
-    public CsvStructure WithNames(IReadOnlyList<string> names)
+    public TableStructure WithNames(IReadOnlyList<string> names)
     {
-        var renamed = new CsvColumn[this.columns.Length];
+        var renamed = new TableColumn[this.columns.Length];
 
         for (int c = 0; c < renamed.Length; c++)
         {
             string name = c < names.Count ? names[c] : string.Empty;
-            renamed[c] = new CsvColumn(name, this.columns[c].MaxChars);
+            renamed[c] = new TableColumn(name, this.columns[c].MaxChars);
         }
 
-        return new CsvStructure(renamed);
+        return new TableStructure(renamed);
     }
 }

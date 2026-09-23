@@ -1,7 +1,7 @@
 using System.Text;
-using Argonaut.Features.Csv;
 using Argonaut.Features.Json;
 using Argonaut.Infrastructure;
+using Argonaut.Ui.TableGrid;
 
 namespace Argonaut.Tests;
 
@@ -72,7 +72,7 @@ public class JsonArrayTableViewModelTests
             double idWidth = document.Structure.Columns[0].Width;
             double descriptionWidth = document.Structure.Columns[1].Width;
 
-            Assert.Equal(CsvStructure.MinColumnWidth, idWidth); // "id" (2) and the value (1) both clamp to the minimum
+            Assert.Equal(TableStructure.MinColumnWidth, idWidth); // "id" (2) and the value (1) both clamp to the minimum
             Assert.True(descriptionWidth > idWidth);
             return Task.CompletedTask;
         });
@@ -86,8 +86,8 @@ public class JsonArrayTableViewModelTests
             // trimmed to "{ 2 me...". The width must fit the summary text instead.
             double width = document.Structure.Columns[0].Width;
 
-            Assert.Equal(CsvStructure.WidthForChars("{ 2 members }".Length), width);
-            Assert.True(width > CsvStructure.MinColumnWidth);
+            Assert.Equal(TableStructure.WidthForChars("{ 2 members }".Length), width);
+            Assert.True(width > TableStructure.MinColumnWidth);
             return Task.CompletedTask;
         });
 
@@ -95,7 +95,7 @@ public class JsonArrayTableViewModelTests
     public Task ColumnWidthIsSeededByItsOwnHeaderSoTheLabelAlwaysFits()
         => WithDocument("""[{"a-long-column-header":1}]""", document =>
         {
-            Assert.Equal(CsvStructure.WidthForChars("a-long-column-header".Length), document.Structure.Columns[0].Width);
+            Assert.Equal(TableStructure.WidthForChars("a-long-column-header".Length), document.Structure.Columns[0].Width);
             return Task.CompletedTask;
         });
 
@@ -388,7 +388,7 @@ public class JsonArrayTableViewModelTests
         });
 
     private static string[] CellsOf(JsonArrayTableViewModel document, int row)
-        => ((CsvVisibleRow)document.Rows[row]!).Cells.Select(c => c.Text).ToArray();
+        => ((TableRow)document.Rows[row]!).Cells.Select(c => c.Text).ToArray();
 
     /// <summary>The key a header piece toggles - what a click on it hands the document.</summary>
     private static string KeyOf(JsonArrayTableViewModel document, int column)

@@ -113,6 +113,21 @@ public sealed class MainWindowViewModelTests : IDisposable
     private static MainWindowViewModel CreateViewModel(MainWindowViewModel.DocumentLoader loader, ISettingsStore? settings = null)
         => new(settings ?? SettingsStore.InMemory(), TestSchemas.Catalog(), _ => Task.FromResult(true), documentLoader: loader);
 
+    /// <summary>The shell logs through the log it is given - here, that a path that does not
+    /// exist was turned away.</summary>
+    [Fact]
+    public async Task OpenPath_MissingFile_IsLoggedToTheGivenLog()
+    {
+        var log = new RecordingDiagnosticLog();
+        var vm = new MainWindowViewModel(SettingsStore.InMemory(), TestSchemas.Catalog(), _ => Task.FromResult(true),
+            documentLoader: (_, _, _) => throw new InvalidOperationException("nothing should load"), log: log);
+        string missing = Path.Combine(tempDir, "missing.json");
+
+        await vm.OpenPathAsync(missing);
+
+        Assert.Contains(log.Lines, line => line.Contains("File.Exists false") && line.Contains(missing));
+    }
+
     [Fact]
     public async Task OpenPath_PublishesDocument_AndMirrorsStatus()
     {

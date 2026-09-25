@@ -10,6 +10,7 @@ using Avalonia.Platform.Storage;
 using Avalonia.Styling;
 using Avalonia.Threading;
 using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Logging;
 using Argonaut.Engine.Settings;
 using Argonaut.Features.Json.Schema;
 using Argonaut.Shell.Dialogs;
@@ -43,21 +44,29 @@ public partial class MainWindow : Window
     private readonly MainWindowViewModel viewModel;
     private readonly UpdateService updateService;
     private readonly ISettingsStore settings;
+    private readonly IDiagnosticLog log;
+    private readonly Action? openLogFolder;
     private readonly UpdateSettings updateSettings;
     private DispatcherTimer? toastTimer;
 
     /// <summary>For the XAML runtime loader and the designer only - settings go nowhere. The app
     /// constructs the window through the other constructor.</summary>
     public MainWindow() : this(SettingsStore.InMemory(), new JsonSchemaCatalog(
-        JsonSchemaCatalog.BundledDirectoryBesideApp, AppDataPaths.SchemasDirectory, revealDirectory: _ => { }))
+        JsonSchemaCatalog.BundledDirectoryBesideApp, AppDataPaths.SchemasDirectory, revealDirectory: _ => { }),
+        NullDiagnosticLog.Instance)
     {
     }
 
-    public MainWindow(ISettingsStore settings, JsonSchemaCatalog schemaCatalog)
+    /// <param name="openLogFolder">Shows the folder <paramref name="log"/> writes to, or null
+    /// when there is none to show - which hides the status bar's button for it.</param>
+    public MainWindow(ISettingsStore settings, JsonSchemaCatalog schemaCatalog, IDiagnosticLog log, Action? openLogFolder = null)
     {
         InitializeComponent();
 
         this.settings = settings;
+        this.log = log;
+        this.openLogFolder = openLogFolder;
+        OpenLogFolderButton.IsVisible = openLogFolder is not null;
         updateSettings = settings.Get<UpdateSettings>();
         updateService = new UpdateService(updateSettings);
         viewModel = new MainWindowViewModel(settings, schemaCatalog,
@@ -65,7 +74,8 @@ public partial class MainWindow : Window
             readClipboardBytes: ReadClipboardBytesAsync,
             pickSaveDestination: PickSaveDestinationAsync,
             askAboutUnsavedChanges: message => UnsavedChangesDialog.Show(this, message),
-            reportFailure: message => ConfirmDialog.Inform(this, message));
+            reportFailure: message => ConfirmDialog.Inform(this, message),
+            log: log);
         DataContext = viewModel;
         viewModel.PropertyChanged += OnViewModelPropertyChanged;
         viewModel.FindStatusChanged += status => FindBarControl.SetStatus(status);
@@ -191,15 +201,15 @@ public partial class MainWindow : Window
     /// how the pair decides between diff mode and opening <paramref name="first"/> alone.</param>
     public async Task OpenInitialFileAsync(string? first, string? second = null)
     {
-        OpenDebugLog.Write($"OpenInitialFileAsync: first={first}, second={second}");
+        log.Write($"OpenInitialFileAsync: first={first}, second={second}");
         try
         {
             await viewModel.OpenPathsAsync(first, second);
-            OpenDebugLog.Write($"OpenInitialFileAsync completed, currentFilePath={viewModel.FilePath ?? "<null>"}");
+            log.Write($"OpenInitialFileAsync completed, currentFilePath={viewModel.FilePath ?? "<null>"}");
         }
         catch (Exception ex)
         {
-            OpenDebugLog.Write($"OpenInitialFileAsync threw: {ex}");
+            log.Write($"OpenInitialFileAsync threw: {ex}");
         }
     }
 
@@ -548,6 +558,11 @@ public partial class MainWindow : Window
     private void OnToggleTextView(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         _ = viewModel.ToggleTextViewAsync();
+    }
+
+    private void OnOpenLogFolder(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        this.openLogFolder?.Invoke();
     }
 
     private void OnJumpToFailureLine(object? sender, Avalonia.Interactivity.RoutedEventArgs e)

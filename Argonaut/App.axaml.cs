@@ -7,6 +7,7 @@ using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform.Storage;
+using Argonaut.Engine.Logging;
 using Argonaut.Engine.Settings;
 using Argonaut.Features.Json.Schema;
 using Argonaut.Shell;
@@ -16,6 +17,9 @@ namespace Argonaut;
 public partial class App : Application
 {
     private MainWindow? mainWindow;
+
+    // Debug builds log to a file for whoever is debugging them; anything else keeps nothing.
+    private readonly IDiagnosticLog log = CreateLog();
 
     // macOS re-signals each CLI-launched path as its own IActivatableLifetime.Activated /
     // FileActivatedEventArgs on top of argv - one event per path, fired moments after this
@@ -33,8 +37,7 @@ public partial class App : Application
 
     public override void OnFrameworkInitializationCompleted()
     {
-        // TODO(temporary diagnostics): remove OpenDebugLog once "Open With" file loading is confirmed working.
-        OpenDebugLog.Write($"OnFrameworkInitializationCompleted: ApplicationLifetime={ApplicationLifetime?.GetType().Name}");
+        log.Write($"OnFrameworkInitializationCompleted: ApplicationLifetime={ApplicationLifetime?.GetType().Name}");
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
@@ -42,15 +45,17 @@ public partial class App : Application
             // handed down to what uses it.
             var settings = SettingsStore.Open(AppDataPaths.SettingsFile);
             desktop.Exit += (_, _) => settings.Save();
+            if (log is IDisposable ownedLog)
+                desktop.Exit += (_, _) => ownedLog.Dispose();
 
             var schemaCatalog = new JsonSchemaCatalog(JsonSchemaCatalog.BundledDirectoryBesideApp, AppDataPaths.SchemasDirectory,
-                revealDirectory: path => Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }));
+                revealDirectory: RevealDirectory);
 
-            var window = new MainWindow(settings, schemaCatalog);
+            var window = new MainWindow(settings, schemaCatalog, log, OpenLogFolderAction());
             mainWindow = window;
             desktop.MainWindow = window;
 
-            OpenDebugLog.Write($"desktop.Args = [{string.Join(", ", desktop.Args ?? [])}]");
+            log.Write($"desktop.Args = [{string.Join(", ", desktop.Args ?? [])}]");
 
             // Up to two positional paths: `argonaut a.json b.json` opens a diff when both are
             // JSON (see MainWindowViewModel.OpenPathsAsync); a third or later positional arg is
@@ -60,7 +65,7 @@ public partial class App : Application
             {
                 var first = positionalArgs[0];
                 var second = positionalArgs.Length > 1 ? positionalArgs[1] : null;
-                OpenDebugLog.Write($"Opening from Args: first={first}, second={second}");
+                log.Write($"Opening from Args: first={first}, second={second}");
                 foreach (var arg in positionalArgs)
                 {
                     try { startupArgPaths.Add(Path.GetFullPath(arg)); }
@@ -74,34 +79,64 @@ public partial class App : Application
         // IActivatableLifetime is NOT implemented by ClassicDesktopStyleApplicationLifetime
         // (Application.ApplicationLifetime) - it's a separate optional platform feature.
         var activatable = this.TryGetFeature<IActivatableLifetime>();
-        OpenDebugLog.Write($"TryGetFeature<IActivatableLifetime> = {activatable?.GetType().FullName ?? "<null>"}");
+        log.Write($"TryGetFeature<IActivatableLifetime> = {activatable?.GetType().FullName ?? "<null>"}");
         if (activatable is not null)
         {
             activatable.Activated += OnActivated;
-            OpenDebugLog.Write("Subscribed to IActivatableLifetime.Activated");
+            log.Write("Subscribed to IActivatableLifetime.Activated");
         }
 
         base.OnFrameworkInitializationCompleted();
     }
 
+    /// <summary>Opens <paramref name="path"/> in the platform's file manager.</summary>
+    private static void RevealDirectory(string path) =>
+        Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+
+    /// <summary>What the status bar's log-folder button does: Debug builds only, since no other
+    /// build writes a log. Creates the folder first, because the log's writer creates it in the
+    /// background and may not have got there yet.</summary>
+    private static Action? OpenLogFolderAction()
+    {
+#if DEBUG
+        return () =>
+        {
+            string folder = Path.GetDirectoryName(AppDataPaths.DebugLogFile)!;
+            Directory.CreateDirectory(folder);
+            RevealDirectory(folder);
+        };
+#else
+        return null;
+#endif
+    }
+
+    private static IDiagnosticLog CreateLog()
+    {
+#if DEBUG
+        return new FileDiagnosticLog(AppDataPaths.DebugLogFile);
+#else
+        return NullDiagnosticLog.Instance;
+#endif
+    }
+
     private void OnActivated(object? sender, ActivatedEventArgs e)
     {
-        OpenDebugLog.Write($"OnActivated: kind={e.GetType().Name}");
+        log.Write($"OnActivated: kind={e.GetType().Name}");
 
         if (mainWindow is null || e is not FileActivatedEventArgs fileArgs)
             return;
 
-        OpenDebugLog.Write($"FileActivatedEventArgs.Files.Count = {fileArgs.Files.Count}");
+        log.Write($"FileActivatedEventArgs.Files.Count = {fileArgs.Files.Count}");
 
         var path = fileArgs.Files.FirstOrDefault()?.TryGetLocalPath();
-        OpenDebugLog.Write($"Resolved local path: {path ?? "<null>"}");
+        log.Write($"Resolved local path: {path ?? "<null>"}");
 
         if (path is null)
             return;
 
         if (startupArgPaths.Remove(Path.GetFullPath(path)))
         {
-            OpenDebugLog.Write($"OnActivated: ignoring duplicate of startup arg '{path}'");
+            log.Write($"OnActivated: ignoring duplicate of startup arg '{path}'");
             return;
         }
 

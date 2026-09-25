@@ -20,5 +20,7 @@ internal static class AppDataPaths
     /// </summary>
     public static string SchemasDirectory => Path.Combine(Root, "Schemas");
 
-    public static string GetFilePath(string fileName) => Path.Combine(Root, fileName);
+    /// <summary>The diagnostic log a Debug build writes (see
+    /// <see cref="Argonaut.Engine.Logging.FileDiagnosticLog"/>).</summary>
+    public static string DebugLogFile => Path.Combine(Root, "debug.log");
 }

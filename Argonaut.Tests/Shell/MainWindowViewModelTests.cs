@@ -1,3 +1,4 @@
+using Argonaut.Tests.Support;
 using System.Threading;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Detection;
@@ -16,28 +17,20 @@ namespace Argonaut.Tests.Shell;
 /// document-disposal contract (the crash/leak the code-behind's request-id juggling used to
 /// guard by hand), status mirroring, and the close semantics. Documents are lightweight
 /// fakes injected through the view model's DocumentLoader seam, so no real memory mapping,
-/// indexing, or UI dispatcher is involved. AppDataPaths.RootOverride redirects the recent-file
-/// and preference stores to a temp dir so the developer's real settings are never touched.
+/// indexing, or UI dispatcher is involved. Settings live in an in-memory store per test.
 /// </summary>
-[Collection("AppDataPaths")]
 public sealed class MainWindowViewModelTests : IDisposable
 {
-    private readonly string settingsRoot;
     private readonly string tempDir;
 
     public MainWindowViewModelTests()
     {
-        settingsRoot = Path.Combine(Path.GetTempPath(), "ArgonautTests", Guid.NewGuid().ToString("N"));
-        AppDataPaths.RootOverride = settingsRoot;
-
         tempDir = Path.Combine(Path.GetTempPath(), "ArgonautTestFiles", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDir);
     }
 
     public void Dispose()
     {
-        AppDataPaths.RootOverride = null;
-        TryDelete(settingsRoot);
         TryDelete(tempDir);
     }
 
@@ -117,8 +110,8 @@ public sealed class MainWindowViewModelTests : IDisposable
         public void Dispose() => Disposed = true;
     }
 
-    private static MainWindowViewModel CreateViewModel(MainWindowViewModel.DocumentLoader loader)
-        => new(_ => Task.FromResult(true), documentLoader: loader);
+    private static MainWindowViewModel CreateViewModel(MainWindowViewModel.DocumentLoader loader, ISettingsStore? settings = null)
+        => new(settings ?? SettingsStore.InMemory(), TestSchemas.Catalog(), _ => Task.FromResult(true), documentLoader: loader);
 
     [Fact]
     public async Task OpenPath_PublishesDocument_AndMirrorsStatus()
@@ -322,7 +315,8 @@ public sealed class MainWindowViewModelTests : IDisposable
     [Fact]
     public void ToggleContentFont_TogglesAndPersists()
     {
-        var vm = CreateViewModel((_, _, _) => Task.FromResult<IDocumentViewModel>(new FakeDocument()));
+        var settings = SettingsStore.InMemory();
+        var vm = CreateViewModel((_, _, _) => Task.FromResult<IDocumentViewModel>(new FakeDocument()), settings);
 
         Assert.Equal(ContentFontMode.Monospace, vm.ContentFontMode);
         vm.ToggleContentFont();
@@ -331,7 +325,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         Assert.Equal(ContentFontMode.Monospace, vm.ContentFontMode);
 
         vm.ToggleContentFont();
-        var reloaded = CreateViewModel((_, _, _) => Task.FromResult<IDocumentViewModel>(new FakeDocument()));
+        var reloaded = CreateViewModel((_, _, _) => Task.FromResult<IDocumentViewModel>(new FakeDocument()), settings);
         Assert.Equal(ContentFontMode.SansSerif, reloaded.ContentFontMode);
     }
 
@@ -377,7 +371,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         string path = WriteJsonFile();
         var initial = new FakeDocument { FilePath = path };
         var switched = new FakeDocument { FilePath = path, StatusText = "switched" };
-        var vm = new MainWindowViewModel(
+        var vm = new MainWindowViewModel(SettingsStore.InMemory(), TestSchemas.Catalog(),
             _ => throw new InvalidOperationException("confirmReplace must not be called for a view switch"),
             documentLoader: (kind, _, _) => Task.FromResult<IDocumentViewModel>(kind == FileTypeDetector.FileKind.Json ? initial : switched));
 

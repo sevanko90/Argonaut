@@ -113,8 +113,20 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel
         }
     }
 
-    public NdJsonViewModel()
+    private readonly JsonViewSettings viewSettings;
+    private readonly SchemaBindings schemaBindings;
+    private readonly JsonSchemaCatalog schemaCatalog;
+
+    /// <param name="viewSettings">Where the default expand depth is remembered; also handed to
+    /// each line's nested tree.</param>
+    /// <param name="schemaBindings">Where the schema chosen for each document is remembered.</param>
+    /// <param name="schemaCatalog">The schemas a document can be bound to.</param>
+    public NdJsonViewModel(JsonViewSettings viewSettings, SchemaBindings schemaBindings, JsonSchemaCatalog schemaCatalog)
     {
+        this.viewSettings = viewSettings;
+        this.schemaBindings = schemaBindings;
+        this.schemaCatalog = schemaCatalog;
+
         HintSettings.PropertyChanged += OnMasterHintSettingsPropertyChanged;
         SchemaSettings.SchemaChanged += OnMasterSchemaChanged;
         SchemaSettings.PropertyChanged += OnMasterSchemaSettingsPropertyChanged;
@@ -125,7 +137,7 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel
         => selectedLineJsonViewModel?.SchemaSettings.SetDocument(SchemaSettings.Document);
 
     /// <summary>Persists the schema choice against the NDJSON file itself, so reopening it
-    /// restores the binding for every line. The preference store is keyed by path, so a document
+    /// restores the binding for every line. The bindings are keyed by path, so a document
     /// with no path (a paste) simply does not remember its choice - keying it by display name
     /// would let two different pastes overwrite each other's binding.</summary>
     private void OnMasterSchemaSettingsPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -134,7 +146,7 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel
             return;
 
         if (e.PropertyName is null or nameof(JsonSchemaSettings.SelectedEntry) or nameof(JsonSchemaSettings.SelectedRootName))
-            SchemaSelectionPreference.Save(documentPath, SchemaSettings.SelectedEntry?.FilePath, SchemaSettings.IsRootExplicitlyChosen ? SchemaSettings.SelectedRootName : null);
+            schemaBindings.Remember(documentPath, SchemaSettings.SelectedEntry?.FilePath, SchemaSettings.IsRootExplicitlyChosen ? SchemaSettings.SelectedRootName : null);
     }
 
     /// <summary>Lifts the open line's schema-type match scores into the shared toolbar - see the
@@ -192,13 +204,21 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel
         selectedLineJsonViewModel?.SetDefaultExpandDepth(depth);
     }
 
+    /// <summary>The toolbar's expand-depth choice: remembered for the next document, then applied
+    /// to this one.</summary>
+    private void ChooseExpandDepth(int depth)
+    {
+        viewSettings.ExpandDepth = depth;
+        SetDefaultExpandDepth(depth);
+    }
+
     public async Task LoadAsync(IByteOrigin origin, IProgressReporter? progressReporter = null)
     {
         Origin = origin;
         FilePath = origin.Path ?? origin.DisplayName;
-        DefaultExpandDepth = ExpandDepthPreference.Load();
-        toolbar = new JsonToolbarViewModel(HintSettings, SchemaSettings, DefaultExpandDepth, SetDefaultExpandDepth,
-            refreshSchemaEntries: () => RefreshSchemaEntriesAsync(origin.Path));
+        DefaultExpandDepth = viewSettings.ExpandDepth;
+        toolbar = new JsonToolbarViewModel(HintSettings, SchemaSettings, DefaultExpandDepth, ChooseExpandDepth,
+            refreshSchemaEntries: () => RefreshSchemaEntriesAsync(origin.Path), openSchemaFolder: schemaCatalog.OpenUserDirectory);
 
         // Alongside indexing, not blocking it - see JsonViewModel.ApplyInitialSchemaAsync.
         _ = ApplyInitialSchemaAsync(origin.Path);
@@ -225,7 +245,8 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel
     /// NDJSON file - see <see cref="JsonSchemaCatalog.GatherForDocument"/>.</summary>
     private async Task ApplyInitialSchemaAsync(string? documentPath)
     {
-        var (entries, preselected, rootName) = await Task.Run(() => JsonSchemaCatalog.GatherForDocument(documentPath));
+        var bindings = schemaBindings.Entries;
+        var (entries, preselected, rootName) = await Task.Run(() => schemaCatalog.GatherForDocument(documentPath, bindings));
         if (IsDisposed)
             return;
 
@@ -239,7 +260,8 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel
     /// <see cref="JsonViewModel.RefreshSchemaEntriesAsync"/>.</summary>
     private async Task RefreshSchemaEntriesAsync(string? documentPath)
     {
-        var (entries, _, _) = await Task.Run(() => JsonSchemaCatalog.GatherForDocument(documentPath));
+        var bindings = schemaBindings.Entries;
+        var (entries, _, _) = await Task.Run(() => schemaCatalog.GatherForDocument(documentPath, bindings));
         if (!IsDisposed)
             SchemaSettings.SetEntries(entries);
     }
@@ -303,7 +325,7 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel
     private async Task LoadSelectedLineJsonAsync(long requestId, FileLineSpan lineSpan)
     {
         var trimmed = LineReader.TrimTrailingNewline(this.Bytes!, lineSpan);
-        var jsonViewModel = new JsonViewModel { DefaultExpandDepth = DefaultExpandDepth };
+        var jsonViewModel = new JsonViewModel(viewSettings, schemaBindings, schemaCatalog) { DefaultExpandDepth = DefaultExpandDepth };
         try
         {
             await jsonViewModel.LoadAsync(Origin!, trimmed.Offset, trimmed.Length);

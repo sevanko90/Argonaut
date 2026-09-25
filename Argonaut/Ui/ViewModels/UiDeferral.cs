@@ -1,6 +1,5 @@
 using System;
 using Avalonia.Threading;
-using Argonaut.Engine.Settings;
 
 namespace Argonaut.Ui.ViewModels;
 
@@ -27,8 +26,7 @@ public static class UiDeferral
 {
     /// <summary>
     /// Test seam: when set, receives the work instead of the dispatcher, so a view-model test can
-    /// run dispatcher-free and still control when deferred work lands (same pattern as
-    /// <see cref="AppDataPaths.RootOverride"/>). Null in production.
+    /// run dispatcher-free and still control when deferred work lands. Null in production.
     /// </summary>
     internal static Action<Action>? PostOverride;
 

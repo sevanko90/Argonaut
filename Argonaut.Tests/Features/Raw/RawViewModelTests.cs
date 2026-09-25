@@ -1,7 +1,6 @@
 using System.Text;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Search;
-using Argonaut.Engine.Settings;
 using Argonaut.Features.Raw;
 using Argonaut.Features.Raw.Rows;
 using Argonaut.Tests.Support;
@@ -12,28 +11,20 @@ namespace Argonaut.Tests.Features.Raw;
 /// Exercises the raw document view model's load, wrap-width change, and lifetime contracts.
 /// The wrap-width change is the interesting one: it must re-index over the SAME mapping (a
 /// live search scan may hold spans over it) while swapping the rows collection instance, so
-/// the outgoing ListBox walk reads nothing. AppDataPaths.RootOverride redirects the wrap-width
-/// preference store to a temp dir so the developer's real settings are never touched.
+/// the outgoing ListBox walk reads nothing.
 /// </summary>
-[Collection("AppDataPaths")]
 public sealed class RawViewModelTests : IDisposable
 {
-    private readonly string settingsRoot;
     private readonly string tempDir;
 
     public RawViewModelTests()
     {
-        settingsRoot = Path.Combine(Path.GetTempPath(), "ArgonautTests", Guid.NewGuid().ToString("N"));
-        AppDataPaths.RootOverride = settingsRoot;
-
         tempDir = Path.Combine(Path.GetTempPath(), "ArgonautTestFiles", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDir);
     }
 
     public void Dispose()
     {
-        AppDataPaths.RootOverride = null;
-        TryDelete(settingsRoot);
         TryDelete(tempDir);
     }
 
@@ -61,13 +52,13 @@ public sealed class RawViewModelTests : IDisposable
     [Fact]
     public async Task LoadAsync_UsesTheDefaultWrapWidth_AndIndexesTheFile()
     {
-        var vm = new RawViewModel();
+        var vm = new RawViewModel(new RawViewSettings());
         try
         {
             await vm.LoadAsync(WriteNewlinelessFile());
             await vm.IndexingTask;
 
-            Assert.Equal(RawWrapWidthPreference.Default, vm.WrapWidth);
+            Assert.Equal(RawViewSettings.DefaultWrapWidth, vm.WrapWidth);
             Assert.Equal(3, vm.RowCount);
             Assert.NotNull(vm.Toolbar);
             Assert.Contains("3 rows", vm.StatusText);
@@ -81,9 +72,7 @@ public sealed class RawViewModelTests : IDisposable
     [Fact]
     public async Task LoadAsync_HonorsTheSavedWrapWidth()
     {
-        RawWrapWidthPreference.Save(80);
-
-        var vm = new RawViewModel();
+        var vm = new RawViewModel(new RawViewSettings { WrapWidth = 80 });
         try
         {
             await vm.LoadAsync(WriteNewlinelessFile());
@@ -101,7 +90,7 @@ public sealed class RawViewModelTests : IDisposable
     [Fact]
     public async Task SetWrapWidth_ReindexesOverTheSameMapping_AndSwapsTheRowsInstance()
     {
-        var vm = new RawViewModel();
+        var vm = new RawViewModel(new RawViewSettings());
         try
         {
             await vm.LoadAsync(WriteNewlinelessFile());
@@ -161,7 +150,7 @@ public sealed class RawViewModelTests : IDisposable
     [Fact]
     public async Task SetWrapWidth_DoesNotAffectARunningSearch()
     {
-        var vm = new RawViewModel();
+        var vm = new RawViewModel(new RawViewSettings());
         var matcher = new BlockingMatcher();
         try
         {
@@ -192,7 +181,7 @@ public sealed class RawViewModelTests : IDisposable
     [Fact]
     public async Task SetWrapWidth_WithTheCurrentWidth_IsANoOp()
     {
-        var vm = new RawViewModel();
+        var vm = new RawViewModel(new RawViewSettings());
         try
         {
             await vm.LoadAsync(WriteNewlinelessFile());
@@ -213,7 +202,8 @@ public sealed class RawViewModelTests : IDisposable
     [Fact]
     public async Task ToolbarComboChange_AppliesAndPersistsTheWrapWidth()
     {
-        var vm = new RawViewModel();
+        var settings = new RawViewSettings();
+        var vm = new RawViewModel(settings);
         try
         {
             await vm.LoadAsync(WriteNewlinelessFile());
@@ -225,7 +215,7 @@ public sealed class RawViewModelTests : IDisposable
 
             Assert.Equal(80, vm.WrapWidth);
             Assert.Equal(5, vm.RowCount);
-            Assert.Equal(80, RawWrapWidthPreference.Load());
+            Assert.Equal(80, settings.WrapWidth);
         }
         finally
         {
@@ -236,7 +226,7 @@ public sealed class RawViewModelTests : IDisposable
     [Fact]
     public async Task SelectRow_UpdatesSelectedRowIndex()
     {
-        var vm = new RawViewModel();
+        var vm = new RawViewModel(new RawViewSettings());
         try
         {
             await vm.LoadAsync(WriteNewlinelessFile());
@@ -255,7 +245,7 @@ public sealed class RawViewModelTests : IDisposable
     [Fact]
     public async Task JumpToByteOffsetAsync_SelectsTheRowContainingThatOffset()
     {
-        var vm = new RawViewModel();
+        var vm = new RawViewModel(new RawViewSettings());
         try
         {
             await vm.LoadAsync(WriteNewlinelessFile()); // wrap 160 by default -> rows at 0,160,320
@@ -279,7 +269,7 @@ public sealed class RawViewModelTests : IDisposable
     [Fact]
     public async Task JumpToByteOffsetAsync_PutsTheCaretOnThatOffset()
     {
-        var vm = new RawViewModel();
+        var vm = new RawViewModel(new RawViewSettings());
         try
         {
             await vm.LoadAsync(WriteNewlinelessFile());
@@ -300,7 +290,7 @@ public sealed class RawViewModelTests : IDisposable
     [Fact]
     public async Task JumpToByteOffsetAsync_AfterDispose_DoesNotThrow()
     {
-        var vm = new RawViewModel();
+        var vm = new RawViewModel(new RawViewSettings());
         await vm.LoadAsync(WriteNewlinelessFile());
         await vm.IndexingTask;
 
@@ -314,7 +304,7 @@ public sealed class RawViewModelTests : IDisposable
     [Fact]
     public async Task Dispose_IsIdempotent_AndMakesSetWrapWidthANoOp()
     {
-        var vm = new RawViewModel();
+        var vm = new RawViewModel(new RawViewSettings());
         await vm.LoadAsync(WriteNewlinelessFile());
         await vm.IndexingTask;
 
@@ -322,7 +312,7 @@ public sealed class RawViewModelTests : IDisposable
         vm.Dispose();
 
         vm.SetWrapWidth(512); // must not touch the disposed session
-        Assert.Equal(RawWrapWidthPreference.Default, vm.WrapWidth);
+        Assert.Equal(RawViewSettings.DefaultWrapWidth, vm.WrapWidth);
     }
 
     [Fact]
@@ -336,7 +326,7 @@ public sealed class RawViewModelTests : IDisposable
             content[i] = (byte)'\n';
         string path = WriteFile(content);
 
-        var vm = new RawViewModel();
+        var vm = new RawViewModel(new RawViewSettings());
         try
         {
             await vm.LoadAsync(path);
@@ -380,7 +370,7 @@ public sealed class RawViewModelTests : IDisposable
         content[202] = (byte)'b';
         content[203] = (byte)'\n';
 
-        var vm = new RawViewModel();
+        var vm = new RawViewModel(new RawViewSettings());
         try
         {
             await vm.LoadAsync(WriteFile(content));
@@ -416,7 +406,7 @@ public sealed class RawViewModelTests : IDisposable
     public async Task CaretReadout_FollowsTheCaret()
     {
         string path = WriteFile(Encoding.UTF8.GetBytes("abc\ndef\u2028ghi\n"));
-        var vm = new RawViewModel();
+        var vm = new RawViewModel(new RawViewSettings());
         try
         {
             await vm.LoadAsync(path);
@@ -446,7 +436,7 @@ public sealed class RawViewModelTests : IDisposable
     public async Task CaretReadout_ReportsSelectionInBytesAndCharacters()
     {
         string path = WriteFile(Encoding.UTF8.GetBytes("a\u65e5\u672c\u8a9eb\n"));
-        var vm = new RawViewModel();
+        var vm = new RawViewModel(new RawViewSettings());
         try
         {
             await vm.LoadAsync(path);
@@ -474,7 +464,7 @@ public sealed class RawViewModelTests : IDisposable
     [Fact]
     public async Task CaretReadout_SurvivesAWrapWidthChange()
     {
-        var vm = new RawViewModel();
+        var vm = new RawViewModel(new RawViewSettings());
         try
         {
             await vm.LoadAsync(WriteNewlinelessFile());

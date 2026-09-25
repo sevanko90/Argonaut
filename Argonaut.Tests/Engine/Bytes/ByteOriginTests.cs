@@ -102,7 +102,7 @@ public class ByteOriginTests
     public async Task JsonLoadsFromPastedBytes()
     {
         var origin = Pasted("{\"name\":\"argo\",\"items\":[1,2,3]}");
-        using var vm = new JsonViewModel();
+        using var vm = new JsonViewModel(new JsonViewSettings(), new SchemaBindings(), TestSchemas.Catalog());
 
         await vm.LoadAsync(origin);
         await vm.IndexingTask;
@@ -117,7 +117,7 @@ public class ByteOriginTests
     public async Task NdJsonLoadsFromPastedBytes_AndItsPerLineJsonViewReadsTheSameOrigin()
     {
         var origin = Pasted("{\"a\":1}\n{\"a\":2}\n{\"a\":3}\n");
-        using var vm = new NdJsonViewModel();
+        using var vm = new NdJsonViewModel(new JsonViewSettings(), new SchemaBindings(), TestSchemas.Catalog());
 
         await vm.LoadAsync(origin);
         await vm.IndexingTask;
@@ -194,7 +194,7 @@ public class ByteOriginTests
     [Fact]
     public void TheSchemaCatalogOffersUserSchemasButPreselectsNothingWithoutAPath()
     {
-        var (entries, preselected, rootName) = JsonSchemaCatalog.GatherForDocument(null);
+        var (entries, preselected, rootName) = TestSchemas.Catalog().GatherForDocument(null, []);
 
         Assert.NotNull(entries);
         Assert.Null(preselected);

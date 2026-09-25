@@ -1,5 +1,4 @@
 using System.Text;
-using Argonaut.Engine.Settings;
 using Argonaut.Features.Json.Schema;
 using Argonaut.Tests.Support;
 using Argonaut.Ui.ViewModels;
@@ -10,10 +9,9 @@ namespace Argonaut.Tests.Features.Json.Schema;
 /// Covers the schema-type picker flyout: its two-section list, the filter, and the selection
 /// rules that stop the ListBox's own churn from unbinding the user's choice.
 /// </summary>
-[Collection("AppDataPaths")]
 public sealed class SchemaRootPickerViewModelTests : IDisposable
 {
-    private readonly string settingsRoot;
+    private readonly string schemaDirectory;
 
     /// <summary>Picking a type acts a dispatcher turn later (see <see cref="UiDeferral"/>); this
     /// stands in for that turn.</summary>
@@ -21,15 +19,13 @@ public sealed class SchemaRootPickerViewModelTests : IDisposable
 
     public SchemaRootPickerViewModelTests()
     {
-        settingsRoot = Path.Combine(Path.GetTempPath(), "ArgonautTests", Guid.NewGuid().ToString("N"));
-        AppDataPaths.RootOverride = settingsRoot;
+        schemaDirectory = Path.Combine(Path.GetTempPath(), "ArgonautTests", Guid.NewGuid().ToString("N"));
     }
 
     public void Dispose()
     {
         ui.Dispose();
-        AppDataPaths.RootOverride = null;
-        try { if (Directory.Exists(settingsRoot)) Directory.Delete(settingsRoot, recursive: true); }
+        try { if (Directory.Exists(schemaDirectory)) Directory.Delete(schemaDirectory, recursive: true); }
         catch { /* best-effort test cleanup */ }
     }
 
@@ -52,9 +48,9 @@ public sealed class SchemaRootPickerViewModelTests : IDisposable
         }
         """;
 
-    private static async Task<JsonSchemaSettings> BoundAsync(string json = ApiSchema)
+    private async Task<JsonSchemaSettings> BoundAsync(string json = ApiSchema)
     {
-        string directory = JsonSchemaCatalog.EnsureUserDirectory();
+        string directory = Directory.CreateDirectory(schemaDirectory).FullName;
         string path = Path.Combine(directory, Guid.NewGuid().ToString("N") + ".json");
         File.WriteAllText(path, json);
 
@@ -356,7 +352,7 @@ public sealed class SchemaRootPickerViewModelTests : IDisposable
     [Fact]
     public async Task ArrivingScores_NeverOverrideARememberedChoice()
     {
-        string directory = JsonSchemaCatalog.EnsureUserDirectory();
+        string directory = Directory.CreateDirectory(schemaDirectory).FullName;
         string path = Path.Combine(directory, Guid.NewGuid().ToString("N") + ".json");
         File.WriteAllText(path, ApiSchema);
 
@@ -540,7 +536,7 @@ public sealed class SchemaRootPickerViewModelTests : IDisposable
         Match(settings, "reference", "passengers", "flights");
         Assert.Contains(picker.Picks, p => p.IsRecommended);
 
-        string directory = JsonSchemaCatalog.EnsureUserDirectory();
+        string directory = Directory.CreateDirectory(schemaDirectory).FullName;
         string other = Path.Combine(directory, "other.json");
         File.WriteAllText(other, """
             { "openapi": "3.0.3", "components": { "schemas": { "Other": { "properties": { "z": {} } } } } }

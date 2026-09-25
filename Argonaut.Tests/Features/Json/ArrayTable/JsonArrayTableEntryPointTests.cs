@@ -1,3 +1,4 @@
+using Argonaut.Features.Json.Schema;
 using System.Text;
 using Argonaut.Features.Json;
 using Argonaut.Features.Json.ArrayTable;
@@ -34,7 +35,7 @@ public class JsonArrayTableEntryPointTests
     private static async Task WithRequestForAsync(string json, int tokenIndex, Func<ArrayTableRequest?, Task> assert)
     {
         string path = WriteTempJson(json);
-        var vm = new JsonViewModel();
+        var vm = new JsonViewModel(new JsonViewSettings(), new SchemaBindings(), TestSchemas.Catalog());
         ArrayTableRequest? captured = null;
         void Capture(ArrayTableRequest r) => captured = r;
 
@@ -68,7 +69,7 @@ public class JsonArrayTableEntryPointTests
     private static async Task<List<JsonRow>> RowsOfAsync(string json)
     {
         string path = WriteTempJson(json);
-        var vm = new JsonViewModel();
+        var vm = new JsonViewModel(new JsonViewSettings(), new SchemaBindings(), TestSchemas.Catalog());
         try
         {
             await vm.LoadAsync(path);
@@ -169,7 +170,7 @@ public class JsonArrayTableEntryPointTests
         sb.Append(']');
 
         string path = WriteTempJson(sb.ToString());
-        var vm = new JsonViewModel();
+        var vm = new JsonViewModel(new JsonViewSettings(), new SchemaBindings(), TestSchemas.Catalog());
         ArrayTableRequest? captured = null;
         void Capture(ArrayTableRequest r) => captured = r;
 
@@ -203,7 +204,7 @@ public class JsonArrayTableEntryPointTests
         int lineOffset = json.IndexOf("{\"items\"", StringComparison.Ordinal);
         int lineLength = json.IndexOf('\n', lineOffset) - lineOffset;
 
-        var vm = new JsonViewModel();
+        var vm = new JsonViewModel(new JsonViewSettings(), new SchemaBindings(), TestSchemas.Catalog());
         ArrayTableRequest? captured = null;
         void Capture(ArrayTableRequest r) => captured = r;
 
@@ -230,7 +231,7 @@ public class JsonArrayTableEntryPointTests
     public async Task WholeFileDocument_SupportsTheTable()
     {
         string path = WriteTempJson("[1,2,3]");
-        var vm = new JsonViewModel();
+        var vm = new JsonViewModel(new JsonViewSettings(), new SchemaBindings(), TestSchemas.Catalog());
         try
         {
             await vm.LoadAsync(path);

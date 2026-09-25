@@ -197,7 +197,7 @@ them). Keep this in sync when the ownership chain changes.
   a rebuild and re-applies the widths it seeded without it. Hard-coding either term caused the same
   trimmed-text bug twice, so a cell template must not spend width the metrics do not know about — a
   horizontal margin on the cell's TextBlock trims text the column was widthed to fit.
-  `CellTextMetrics.Current` is a settable seam (like `AppDataPaths.RootOverride`) for tests with no
+  `CellTextMetrics.Current` is a settable seam for tests with no
   Avalonia platform, where the fallback is one em per character: no face exceeds its em, so the
   estimate errs wide rather than trimming. Because widths are derived rather than stored,
   `TableColumn` keeps the character count and `TableCell` carries only text — a realized row holds no

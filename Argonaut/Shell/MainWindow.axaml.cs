@@ -11,6 +11,7 @@ using Avalonia.Styling;
 using Avalonia.Threading;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Settings;
+using Argonaut.Features.Json.Schema;
 using Argonaut.Shell.Dialogs;
 using Argonaut.Shell.Updates;
 using Argonaut.Ui.Documents.Navigation;
@@ -40,14 +41,26 @@ public partial class MainWindow : Window
         "M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z";
 
     private readonly MainWindowViewModel viewModel;
-    private readonly UpdateService updateService = new();
+    private readonly UpdateService updateService;
+    private readonly ISettingsStore settings;
+    private readonly UpdateSettings updateSettings;
     private DispatcherTimer? toastTimer;
 
-    public MainWindow()
+    /// <summary>For the XAML runtime loader and the designer only - settings go nowhere. The app
+    /// constructs the window through the other constructor.</summary>
+    public MainWindow() : this(SettingsStore.InMemory(), new JsonSchemaCatalog(
+        JsonSchemaCatalog.BundledDirectoryBesideApp, AppDataPaths.SchemasDirectory, revealDirectory: _ => { }))
+    {
+    }
+
+    public MainWindow(ISettingsStore settings, JsonSchemaCatalog schemaCatalog)
     {
         InitializeComponent();
 
-        viewModel = new MainWindowViewModel(
+        this.settings = settings;
+        updateSettings = settings.Get<UpdateSettings>();
+        updateService = new UpdateService(updateSettings);
+        viewModel = new MainWindowViewModel(settings, schemaCatalog,
             message => ConfirmDialog.Show(this, message),
             readClipboardBytes: ReadClipboardBytesAsync,
             pickSaveDestination: PickSaveDestinationAsync,
@@ -431,7 +444,7 @@ public partial class MainWindow : Window
 
     private async void OnShowAbout(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        await AboutDialog.ShowAbout(this);
+        await AboutDialog.ShowAbout(this, updateSettings);
     }
 
     /// <summary>
@@ -516,6 +529,8 @@ public partial class MainWindow : Window
         bool restart = await ConfirmDialog.Show(
             this, $"Update downloaded (v{version}). Restart Argonaut now to apply it?", "Restart");
         if (restart && await viewModel.ResolveUnsavedChangesAsync("restarting"))
+            // Velopack ends the process without the app's Exit, which is where settings are saved.
+            settings.Save();
             updateService.ApplyUpdatesAndRestart(info);
     }
 

@@ -1,7 +1,6 @@
 using System.Text;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Saving;
-using Argonaut.Engine.Settings;
 using Argonaut.Features.Raw;
 using Argonaut.Tests.Support;
 using Argonaut.Ui.Documents;
@@ -13,7 +12,6 @@ namespace Argonaut.Tests.Features.Raw;
 /// sequence, and above all what happens when the commit fails - the file must be untouched and
 /// the edits still open over it, or, if the file is gone too, the staged copy must survive.
 /// </summary>
-[Collection("AppDataPaths")]
 public sealed class RawSaveTests : IDisposable
 {
     private readonly string tempDir;
@@ -22,12 +20,10 @@ public sealed class RawSaveTests : IDisposable
     {
         tempDir = Path.Combine(Path.GetTempPath(), "ArgonautTestFiles", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDir);
-        AppDataPaths.RootOverride = Path.Combine(tempDir, "settings");
     }
 
     public void Dispose()
     {
-        AppDataPaths.RootOverride = null;
         try { Directory.Delete(tempDir, recursive: true); }
         catch { /* best-effort test cleanup */ }
     }
@@ -53,7 +49,7 @@ public sealed class RawSaveTests : IDisposable
     /// typed at <paramref name="at"/>.</summary>
     private static async Task<RawViewModel> EditedAsync(IByteOrigin origin, long at, string typed)
     {
-        var vm = new RawViewModel();
+        var vm = new RawViewModel(new RawViewSettings());
         await vm.LoadAsync(origin);
         await vm.IndexingTask;
         vm.SetEditing(true);

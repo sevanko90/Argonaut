@@ -111,8 +111,19 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
         set => SetField(ref highlightTerm, value);
     }
 
-    public JsonViewModel()
+    private readonly JsonViewSettings viewSettings;
+    private readonly SchemaBindings schemaBindings;
+    private readonly JsonSchemaCatalog schemaCatalog;
+
+    /// <param name="viewSettings">Where the default expand depth is remembered.</param>
+    /// <param name="schemaBindings">Where the schema chosen for each document is remembered.</param>
+    /// <param name="schemaCatalog">The schemas a document can be bound to.</param>
+    public JsonViewModel(JsonViewSettings viewSettings, SchemaBindings schemaBindings, JsonSchemaCatalog schemaCatalog)
     {
+        this.viewSettings = viewSettings;
+        this.schemaBindings = schemaBindings;
+        this.schemaCatalog = schemaCatalog;
+
         SchemaSettings.SchemaChanged += OnSchemaChanged;
         SchemaSettings.PropertyChanged += OnSchemaSettingsPropertyChanged;
     }
@@ -171,7 +182,7 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
         // Keyed by path, so a document without one (a paste) does not remember its choice -
         // keying it by display name would let two different pastes overwrite each other.
         if (Origin?.Path is { } documentPath)
-            SchemaSelectionPreference.Save(documentPath, SchemaSettings.SelectedEntry?.FilePath, SchemaSettings.IsRootExplicitlyChosen ? SchemaSettings.SelectedRootName : null);
+            schemaBindings.Remember(documentPath, SchemaSettings.SelectedEntry?.FilePath, SchemaSettings.IsRootExplicitlyChosen ? SchemaSettings.SelectedRootName : null);
     }
 
     /// <summary>
@@ -303,14 +314,22 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
         rows?.SetDefaultExpandDepth(depth);
     }
 
+    /// <summary>The toolbar's expand-depth choice: remembered for the next document, then applied
+    /// to this one.</summary>
+    private void ChooseExpandDepth(int depth)
+    {
+        viewSettings.ExpandDepth = depth;
+        SetDefaultExpandDepth(depth);
+    }
+
     public Task LoadAsync(IByteOrigin origin, IProgressReporter? progressReporter = null)
     {
         Origin = origin;
         FilePath = origin.Path ?? origin.DisplayName;
         ScanTarget = new ScanTarget(origin);
-        DefaultExpandDepth = ExpandDepthPreference.Load();
-        toolbar = new JsonToolbarViewModel(HintSettings, SchemaSettings, DefaultExpandDepth, SetDefaultExpandDepth, NavigateToPathAsync,
-            refreshSchemaEntries: () => RefreshSchemaEntriesAsync(origin.Path));
+        DefaultExpandDepth = viewSettings.ExpandDepth;
+        toolbar = new JsonToolbarViewModel(HintSettings, SchemaSettings, DefaultExpandDepth, ChooseExpandDepth, NavigateToPathAsync,
+            refreshSchemaEntries: () => RefreshSchemaEntriesAsync(origin.Path), openSchemaFolder: schemaCatalog.OpenUserDirectory);
 
         var loadTask = LoadCore(origin.Open(), progressReporter);
 
@@ -325,12 +344,13 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
     /// <summary>
     /// Populates the schema catalog for this document and applies the initial binding, if any: a
     /// <c>&lt;file&gt;.schema.json</c> sidecar wins, otherwise the schema last bound to this path
-    /// (see <see cref="SchemaSelectionPreference"/>). Nothing here is ever an error - a missing
+    /// (see <see cref="SchemaBindings"/>). Nothing here is ever an error - a missing
     /// sidecar and an unreadable schema folder both just mean "no schema".
     /// </summary>
     private async Task ApplyInitialSchemaAsync(string? documentPath)
     {
-        var (entries, preselected, rootName) = await Task.Run(() => JsonSchemaCatalog.GatherForDocument(documentPath));
+        var bindings = schemaBindings.Entries;
+        var (entries, preselected, rootName) = await Task.Run(() => schemaCatalog.GatherForDocument(documentPath, bindings));
         if (IsDisposed)
             return;
 
@@ -345,7 +365,8 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
     /// rather than requiring a restart. See <see cref="JsonToolbarViewModel.IsSchemaFlyoutOpen"/>.</summary>
     private async Task RefreshSchemaEntriesAsync(string? documentPath)
     {
-        var (entries, _, _) = await Task.Run(() => JsonSchemaCatalog.GatherForDocument(documentPath));
+        var bindings = schemaBindings.Entries;
+        var (entries, _, _) = await Task.Run(() => schemaCatalog.GatherForDocument(documentPath, bindings));
         if (!IsDisposed)
             SchemaSettings.SetEntries(entries);
     }

@@ -1,5 +1,4 @@
 using System.Text;
-using Argonaut.Engine.Settings;
 using Argonaut.Features.Raw;
 using Argonaut.Tests.Support;
 using Avalonia;
@@ -34,7 +33,6 @@ public class HeadlessTestApp : Application
 /// merely how many. The surface deliberately decides that range during layout rather than during
 /// rendering, which is what makes it observable at all here: headless has no renderer.
 /// </summary>
-[Collection("AppDataPaths")]
 public sealed class RawViewVirtualizationTests : IDisposable
 {
     /// <summary>A 600px-tall window holds this many 22px rows, plus a partial one.</summary>
@@ -46,12 +44,10 @@ public sealed class RawViewVirtualizationTests : IDisposable
     {
         tempDir = Path.Combine(Path.GetTempPath(), "ArgonautTestFiles", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDir);
-        AppDataPaths.RootOverride = Path.Combine(tempDir, "settings");
     }
 
     public void Dispose()
     {
-        AppDataPaths.RootOverride = null;
         try { Directory.Delete(tempDir, recursive: true); }
         catch { /* best-effort test cleanup */ }
     }
@@ -84,7 +80,7 @@ public sealed class RawViewVirtualizationTests : IDisposable
         var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(RawViewVirtualizationTests).Assembly);
         return session.Dispatch(async () =>
         {
-            var vm = new RawViewModel();
+            var vm = new RawViewModel(new RawViewSettings());
             Window? window = null;
             try
             {
@@ -174,7 +170,7 @@ public sealed class RawViewVirtualizationTests : IDisposable
         var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(RawViewVirtualizationTests).Assembly);
         return session.Dispatch(async () =>
         {
-            var vm = new RawViewModel();
+            var vm = new RawViewModel(new RawViewSettings());
             Window? window = null;
             try
             {
@@ -223,7 +219,7 @@ public sealed class RawViewVirtualizationTests : IDisposable
         var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(RawViewVirtualizationTests).Assembly);
         return session.Dispatch(async () =>
         {
-            var vm = new RawViewModel();
+            var vm = new RawViewModel(new RawViewSettings());
             Window? window = null;
             try
             {
@@ -268,7 +264,7 @@ public sealed class RawViewVirtualizationTests : IDisposable
         var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(RawViewVirtualizationTests).Assembly);
         return session.Dispatch(async () =>
         {
-            var vm = new RawViewModel();
+            var vm = new RawViewModel(new RawViewSettings());
             Window? window = null;
             try
             {
@@ -319,7 +315,7 @@ public sealed class RawViewVirtualizationTests : IDisposable
         var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(RawViewVirtualizationTests).Assembly);
         return session.Dispatch(async () =>
         {
-            var vm = new RawViewModel();
+            var vm = new RawViewModel(new RawViewSettings());
             Window? window = null;
             try
             {
@@ -368,7 +364,7 @@ public sealed class RawViewVirtualizationTests : IDisposable
         var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(RawViewVirtualizationTests).Assembly);
         return session.Dispatch(async () =>
         {
-            var vm = new RawViewModel();
+            var vm = new RawViewModel(new RawViewSettings());
             Window? window = null;
             try
             {
@@ -429,7 +425,7 @@ public sealed class RawViewVirtualizationTests : IDisposable
         {
             const int VisitsPerPhase = 4_000;
 
-            var vm = new RawViewModel();
+            var vm = new RawViewModel(new RawViewSettings());
             Window? window = null;
             try
             {

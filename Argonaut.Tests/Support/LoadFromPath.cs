@@ -1,3 +1,5 @@
+using Argonaut.Tests.Support;
+using Argonaut.Engine.Settings;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Detection;
 using Argonaut.Engine.Progress;
@@ -69,5 +71,5 @@ internal static class LoadFromPath
 
     public static Task<IDocumentViewModel> LoadDocumentAsync(FileTypeDetector.FileKind kind, string path,
         IProgressReporter reporter)
-        => DocumentViewCatalog.LoadAsync(kind, Origin(path), reporter);
+        => new DocumentViewCatalog(SettingsStore.InMemory(), TestSchemas.Catalog()).LoadAsync(kind, Origin(path), reporter);
 }

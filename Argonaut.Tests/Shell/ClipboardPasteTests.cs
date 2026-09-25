@@ -1,3 +1,5 @@
+using Argonaut.Tests.Support;
+using Argonaut.Engine.Settings;
 using System.Text;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Detection;
@@ -22,7 +24,7 @@ public class ClipboardPasteTests
 
     private static MainWindowViewModel WithClipboardBytes(byte[]? bytes,
         Func<string, Task<bool>>? confirmReplace = null)
-        => new(confirmReplace ?? (_ => Task.FromResult(true)),
+        => new(SettingsStore.InMemory(), TestSchemas.Catalog(), confirmReplace ?? (_ => Task.FromResult(true)),
             readClipboardBytes: () => Task.FromResult(bytes));
 
     [Fact]
@@ -47,7 +49,7 @@ public class ClipboardPasteTests
     public async Task PastedContentIsDetectedByItsBytes(string text, FileTypeDetector.FileKind expected)
     {
         FileTypeDetector.FileKind? detected = null;
-        var vm = new MainWindowViewModel(_ => Task.FromResult(true),
+        var vm = new MainWindowViewModel(SettingsStore.InMemory(), TestSchemas.Catalog(), _ => Task.FromResult(true),
             readClipboardBytes: () => Task.FromResult<byte[]?>(Encoding.UTF8.GetBytes(text)),
             documentLoader: (kind, origin, _) =>
             {
@@ -86,7 +88,7 @@ public class ClipboardPasteTests
     [Fact]
     public async Task NoClipboardReaderMeansPasteIsUnavailableRatherThanAnError()
     {
-        var vm = new MainWindowViewModel(_ => Task.FromResult(true));
+        var vm = new MainWindowViewModel(SettingsStore.InMemory(), TestSchemas.Catalog(), _ => Task.FromResult(true));
 
         Assert.False(vm.CanPaste);
         await vm.PasteAsync();
@@ -96,7 +98,7 @@ public class ClipboardPasteTests
     [Fact]
     public async Task AClipboardThatThrowsIsReportedRatherThanPropagated()
     {
-        var vm = new MainWindowViewModel(_ => Task.FromResult(true),
+        var vm = new MainWindowViewModel(SettingsStore.InMemory(), TestSchemas.Catalog(), _ => Task.FromResult(true),
             readClipboardBytes: () => throw new InvalidOperationException("no clipboard today"));
 
         await vm.PasteAsync();
@@ -127,7 +129,7 @@ public class ClipboardPasteTests
     {
         byte[] utf8 = Encoding.UTF8.GetBytes("{\"name\":\"caf\u00e9 na\u00efve \ud83d\ude80\"}");
         IByteOrigin? captured = null;
-        var vm = new MainWindowViewModel(_ => Task.FromResult(true),
+        var vm = new MainWindowViewModel(SettingsStore.InMemory(), TestSchemas.Catalog(), _ => Task.FromResult(true),
             readClipboardBytes: () => Task.FromResult<byte[]?>(utf8),
             documentLoader: (_, origin, _) =>
             {
@@ -159,7 +161,7 @@ public class ClipboardPasteTests
         try
         {
             int asked = 0;
-            var vm = new MainWindowViewModel(
+            var vm = new MainWindowViewModel(SettingsStore.InMemory(), TestSchemas.Catalog(),
                 _ => { asked++; return Task.FromResult(false); },
                 readClipboardBytes: () => Task.FromResult<byte[]?>(Encoding.UTF8.GetBytes("{\"fromClipboard\":true}")),
                 documentLoader: (_, origin, _) => Task.FromResult<IDocumentViewModel>(new PasteDocument(origin)));

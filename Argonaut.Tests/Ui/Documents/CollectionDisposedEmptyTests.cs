@@ -1,3 +1,4 @@
+using Argonaut.Features.Json.Schema;
 using System.Collections;
 using System.Text;
 using Argonaut.Features.Csv;
@@ -39,7 +40,7 @@ public class CollectionDisposedEmptyTests
         string path = WriteTempFile(string.Join('\n', Enumerable.Range(0, 5000).Select(i => $"{{\"i\":{i}}}")));
         try
         {
-            var vm = new NdJsonViewModel();
+            var vm = new NdJsonViewModel(new JsonViewSettings(), new SchemaBindings(), TestSchemas.Catalog());
             await vm.LoadAsync(path);
             await vm.IndexingTask;
             var lines = vm.Lines;
@@ -63,7 +64,7 @@ public class CollectionDisposedEmptyTests
         string path = WriteTempFile("{\"a\":1,\"b\":[1,2,3],\"c\":{\"d\":4}}");
         try
         {
-            var vm = new JsonViewModel();
+            var vm = new JsonViewModel(new JsonViewSettings(), new SchemaBindings(), TestSchemas.Catalog());
             await vm.LoadAsync(path);
             await vm.IndexingTask;
             var rows = vm.Rows;
@@ -87,7 +88,7 @@ public class CollectionDisposedEmptyTests
         string path = WriteTempFile(string.Join('\n', Enumerable.Range(0, 5000).Select(i => $"row {i}")));
         try
         {
-            var vm = new RawViewModel();
+            var vm = new RawViewModel(new RawViewSettings());
             await vm.LoadAsync(path);
             await vm.IndexingTask;
             var rows = vm.Rows;

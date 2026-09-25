@@ -1,5 +1,4 @@
 using System.Text;
-using Argonaut.Engine.Settings;
 using Argonaut.Features.Raw;
 using Argonaut.Tests.Support;
 using Avalonia.Controls;
@@ -19,7 +18,6 @@ namespace Argonaut.Tests.Features.Raw;
 /// break exists in neither row's text and used to light up in neither - while the caret and the
 /// scroll went to it perfectly well, which is a confusing thing to watch.
 /// </summary>
-[Collection("AppDataPaths")]
 public sealed class RawHighlightTests : IDisposable
 {
     private readonly string tempDir;
@@ -28,12 +26,10 @@ public sealed class RawHighlightTests : IDisposable
     {
         tempDir = Path.Combine(Path.GetTempPath(), "ArgonautTestFiles", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDir);
-        AppDataPaths.RootOverride = Path.Combine(tempDir, "settings");
     }
 
     public void Dispose()
     {
-        AppDataPaths.RootOverride = null;
         try { Directory.Delete(tempDir, recursive: true); }
         catch { /* best-effort test cleanup */ }
     }
@@ -63,7 +59,7 @@ public sealed class RawHighlightTests : IDisposable
         var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(RawHighlightTests).Assembly);
         return session.Dispatch(async () =>
         {
-            var vm = new RawViewModel();
+            var vm = new RawViewModel(new RawViewSettings());
             Window? window = null;
             try
             {

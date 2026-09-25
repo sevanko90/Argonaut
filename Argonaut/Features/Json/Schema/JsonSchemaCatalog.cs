@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
-using Argonaut.Engine.Settings;
 
 namespace Argonaut.Features.Json.Schema;
 
@@ -12,26 +10,42 @@ public readonly record struct SchemaCatalogEntry(string DisplayName, string File
 
 /// <summary>
 /// The list of schemas a document can be bound to, merged from the schemas shipped with the app
-/// (<c>Schemas/</c> beside the executable) and the user's own
-/// (<see cref="AppDataPaths.GetSchemasDirectory"/>). A user file shadows a bundled one of the
-/// same name, so a shipped schema can be corrected locally without editing the install.
+/// and the user's own folder. A user file shadows a bundled one of the same name, so a shipped
+/// schema can be corrected locally without editing the install.
+///
+/// Both folders, and how a folder is shown to the user, are given to it by the composition root:
+/// tests point it at temp folders, and a sandboxed build can point it somewhere else entirely.
 ///
 /// Enumeration never parses a schema - only <see cref="JsonSchemaSettings.SelectAsync"/> does,
 /// on the file actually chosen - so a folder holding hundreds of schemas costs two directory
 /// listings and nothing else.
 /// </summary>
-public static class JsonSchemaCatalog
+/// <param name="bundledDirectory">Schemas shipped with the app. Read-only in practice - an
+/// install directory isn't somewhere the user can save to, which is why
+/// <see cref="JsonSchemaExample"/> copies out of here rather than pointing at it.</param>
+/// <param name="userDirectory">Where the user drops their own schemas. Not created until
+/// <see cref="EnsureUserDirectory"/> - enumeration tolerates it being absent.</param>
+/// <param name="revealDirectory">Shows a folder to the user - the OS file manager, in the app.</param>
+public sealed class JsonSchemaCatalog(string bundledDirectory, string userDirectory, Action<string> revealDirectory)
 {
-    private const string FolderName = "Schemas";
+    /// <summary>The bundled folder's name beside the executable.</summary>
+    public const string BundledFolderName = "Schemas";
 
-    public static IReadOnlyList<SchemaCatalogEntry> Enumerate()
+    /// <summary>The bundled folder as the app ships it, beside the executable.</summary>
+    public static string BundledDirectoryBesideApp => Path.Combine(AppContext.BaseDirectory, BundledFolderName);
+
+    public string BundledDirectory => bundledDirectory;
+
+    public string UserDirectory => userDirectory;
+
+    public IReadOnlyList<SchemaCatalogEntry> Enumerate()
     {
         var byName = new Dictionary<string, SchemaCatalogEntry>(StringComparer.OrdinalIgnoreCase);
 
-        AddFolder(byName, GetBundledDirectory(), isUser: false);
+        AddFolder(byName, bundledDirectory, isUser: false);
 
         // Second, so a same-named user schema overwrites (shadows) the bundled one.
-        AddFolder(byName, GetUserDirectory(), isUser: true);
+        AddFolder(byName, userDirectory, isUser: true);
 
         var entries = new List<SchemaCatalogEntry>(byName.Values);
         entries.Sort(static (a, b) => string.Compare(a.DisplayName, b.DisplayName, StringComparison.OrdinalIgnoreCase));
@@ -57,8 +71,7 @@ public static class JsonSchemaCatalog
     /// schema last bound to this path. Both a sidecar and a remembered schema outside the
     /// catalog folders are added as transient entries, so the combo can always show what's bound.
     ///
-    /// Pure filesystem work (two directory listings and a settings read) - call it off the UI
-    /// thread.
+    /// Pure filesystem work (two directory listings) - call it off the UI thread.
     /// </summary>
     /// <param name="documentPath">
     /// The document's own path, or null when it has no path on disk - a clipboard paste, or a
@@ -68,7 +81,9 @@ public static class JsonSchemaCatalog
     /// be offered. That is a real, usable result rather than an error: the user can still pick a
     /// schema by hand, it just cannot be remembered for next time.
     /// </param>
-    public static (IReadOnlyList<SchemaCatalogEntry> Entries, SchemaCatalogEntry? Preselected, string? RootName) GatherForDocument(string? documentPath)
+    /// <param name="bindings"><see cref="SchemaBindings.Entries"/>, read on the caller's thread and
+    /// passed in as a snapshot.</param>
+    public (IReadOnlyList<SchemaCatalogEntry> Entries, SchemaCatalogEntry? Preselected, string? RootName) GatherForDocument(string? documentPath, IReadOnlyList<SchemaBinding> bindings)
     {
         var entries = new List<SchemaCatalogEntry>(Enumerate());
         SchemaCatalogEntry? preselected = null;
@@ -84,7 +99,7 @@ public static class JsonSchemaCatalog
             entries.Insert(0, sidecar);
             preselected = sidecar;
         }
-        else if (SchemaSelectionPreference.Load(documentPath) is { } remembered)
+        else if (SchemaBindings.Find(bindings, documentPath) is { } remembered)
         {
             // Carried even when the schema file itself can't be found: harmless if unused, and
             // the loader drops a root name the schema no longer offers.
@@ -112,38 +127,22 @@ public static class JsonSchemaCatalog
         return (entries, preselected, rootName);
     }
 
-    /// <summary>Folder of schemas shipped with the app, beside the executable. Read-only in
-    /// practice - an install directory isn't somewhere the user can save to, which is why
-    /// <see cref="JsonSchemaExample"/> copies out of here rather than pointing at it.</summary>
-    public static string GetBundledDirectory() => Path.Combine(AppContext.BaseDirectory, FolderName);
-
-    public static string GetUserDirectory() => AppDataPaths.GetSchemasDirectory();
-
     /// <summary>Creates the user schema folder if it doesn't exist and returns its path.
     /// Returns the path either way - the caller only ever uses it to open a file manager, and a
     /// folder that couldn't be created is not worth an error dialog.</summary>
-    public static string EnsureUserDirectory()
+    public string EnsureUserDirectory()
     {
-        string path = GetUserDirectory();
         try
         {
-            Directory.CreateDirectory(path);
+            Directory.CreateDirectory(userDirectory);
         }
         catch
         {
-            // Best-effort, exactly like JsonSettingsStore.
+            // Best-effort, exactly like SettingsStore.
         }
 
-        return path;
+        return userDirectory;
     }
-
-    /// <summary>
-    /// Test seam: when set, replaces launching the OS file manager (see
-    /// <see cref="AppDataPaths.RootOverride"/> for the same pattern). Null in production - tests
-    /// set it so exercising the toolbar's "open schema folder" item doesn't pop a Finder/Explorer
-    /// window on the build machine.
-    /// </summary>
-    internal static Action<string>? OpenDirectoryOverride;
 
     /// <summary>
     /// Creates the user schema folder, seeds it with the annotated example (see
@@ -151,17 +150,14 @@ public static class JsonSchemaCatalog
     /// manager. Seeding happens here rather than in <see cref="EnsureUserDirectory"/> so it is
     /// tied to the user actually going to look at the folder.
     /// </summary>
-    public static void OpenUserDirectory()
+    public void OpenUserDirectory()
     {
         string path = EnsureUserDirectory();
-        JsonSchemaExample.TryCopyTo(path);
+        JsonSchemaExample.TryCopy(bundledDirectory, path);
 
         try
         {
-            if (OpenDirectoryOverride is { } open)
-                open(path);
-            else
-                Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+            revealDirectory(path);
         }
         catch
         {

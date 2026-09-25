@@ -1,11 +1,14 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform.Storage;
+using Argonaut.Engine.Settings;
+using Argonaut.Features.Json.Schema;
 using Argonaut.Shell;
 
 namespace Argonaut;
@@ -35,7 +38,15 @@ public partial class App : Application
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            var window = new MainWindow();
+            // The composition root: where every file location and OS action is decided, then
+            // handed down to what uses it.
+            var settings = SettingsStore.Open(AppDataPaths.SettingsFile);
+            desktop.Exit += (_, _) => settings.Save();
+
+            var schemaCatalog = new JsonSchemaCatalog(JsonSchemaCatalog.BundledDirectoryBesideApp, AppDataPaths.SchemasDirectory,
+                revealDirectory: path => Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }));
+
+            var window = new MainWindow(settings, schemaCatalog);
             mainWindow = window;
             desktop.MainWindow = window;
 

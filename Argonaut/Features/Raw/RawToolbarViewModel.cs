@@ -1,12 +1,11 @@
 using System;
-using Argonaut.Engine.Settings;
 using Argonaut.Ui.ViewModels;
 
 namespace Argonaut.Features.Raw;
 
 /// <summary>
-/// Header toolbar for the raw viewer: the wrap-width combo and the edit-mode toggle. Persists
-/// the wrap choice and applies it to the owning document via
+/// Header toolbar for the raw viewer: the wrap-width combo and the edit-mode toggle. Reports the
+/// wrap choice to the owning document, which remembers it and applies it via
 /// <see cref="RawViewModel.SetWrapWidth"/> (a re-index); the toggle goes to
 /// <see cref="RawViewModel.SetEditing"/>. Owned by the document view model that creates it and
 /// shares its lifetime.
@@ -25,9 +24,9 @@ public sealed class RawToolbarViewModel : ObservableObject
         this.applyWrapWidth = applyWrapWidth;
         this.applyEditing = applyEditing;
 
-        wrapWidthIndex = Array.IndexOf(RawWrapWidthPreference.Widths, initialWrapWidth);
+        wrapWidthIndex = Array.IndexOf(RawViewSettings.Widths, initialWrapWidth);
         if (wrapWidthIndex < 0)
-            wrapWidthIndex = Array.IndexOf(RawWrapWidthPreference.Widths, RawWrapWidthPreference.Default);
+            wrapWidthIndex = Array.IndexOf(RawViewSettings.Widths, RawViewSettings.DefaultWrapWidth);
     }
 
     /// <summary>Bound two-way to the wrap-width combo. The &lt; 0 guard absorbs the -1 a
@@ -37,12 +36,10 @@ public sealed class RawToolbarViewModel : ObservableObject
         get => wrapWidthIndex;
         set
         {
-            if (value < 0 || value >= RawWrapWidthPreference.Widths.Length || !SetField(ref wrapWidthIndex, value))
+            if (value < 0 || value >= RawViewSettings.Widths.Length || !SetField(ref wrapWidthIndex, value))
                 return;
 
-            int width = RawWrapWidthPreference.Widths[value];
-            RawWrapWidthPreference.Save(width);
-            applyWrapWidth(width);
+            applyWrapWidth(RawViewSettings.Widths[value]);
         }
     }
 

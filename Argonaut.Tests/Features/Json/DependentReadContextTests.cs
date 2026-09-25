@@ -1,3 +1,4 @@
+using Argonaut.Features.Json.Schema;
 using System.Collections.Concurrent;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Indexing;
@@ -74,7 +75,7 @@ public class DependentReadContextTests
             SynchronizationContext.SetSynchronizationContext(uiContext);
             try
             {
-                var document = new JsonViewModel();
+                var document = new JsonViewModel(new JsonViewSettings(), new SchemaBindings(), TestSchemas.Catalog());
                 var loading = document.LoadAsync(path);
                 while (!loading.IsCompleted)
                 {

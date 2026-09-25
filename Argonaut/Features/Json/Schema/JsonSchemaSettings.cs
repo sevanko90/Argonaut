@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using Argonaut.Engine.Settings;
 using Argonaut.Ui.ViewModels;
 
 namespace Argonaut.Features.Json.Schema;
@@ -10,7 +9,7 @@ namespace Argonaut.Features.Json.Schema;
 /// Per-document session state for schema hints: the schemas offered in the toolbar, which one is
 /// selected, and the parsed document behind that selection. A deliberate mirror of
 /// <see cref="Hints.DateHintSettings"/> - not persisted itself (the *choice* is, via
-/// <see cref="SchemaSelectionPreference"/>), lives and dies with the owning
+/// <see cref="SchemaBindings"/>), lives and dies with the owning
 /// JsonViewModel/NdJsonViewModel, UI-thread only.
 /// </summary>
 public sealed class JsonSchemaSettings : ObservableObject

@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Threading.Tasks;
-using Argonaut.Engine.Settings;
 using Argonaut.Features.Json.Hints;
 using Argonaut.Features.Json.Schema;
 using Argonaut.Ui.ViewModels;
@@ -37,6 +36,7 @@ public sealed class JsonToolbarViewModel : ObservableObject
     private readonly Action<int> applyExpandDepth;
     private readonly Func<string, Task>? navigateToPath;
     private readonly Func<Task>? refreshSchemaEntries;
+    private readonly Action? openSchemaFolder;
     private int dateHintSchemeIndex;
     private int timeZoneModeIndex;
     private int expandDepthIndex;
@@ -51,13 +51,14 @@ public sealed class JsonToolbarViewModel : ObservableObject
     // has since reopened to browse.
     private bool awaitingSchemaCloseDecision;
 
-    public JsonToolbarViewModel(DateHintSettings settings, JsonSchemaSettings schemaSettings, int initialExpandDepthIndex, Action<int> applyExpandDepth, Func<string, Task>? navigateToPath = null, Func<Task>? refreshSchemaEntries = null)
+    public JsonToolbarViewModel(DateHintSettings settings, JsonSchemaSettings schemaSettings, int initialExpandDepthIndex, Action<int> applyExpandDepth, Func<string, Task>? navigateToPath = null, Func<Task>? refreshSchemaEntries = null, Action? openSchemaFolder = null)
     {
         this.settings = settings;
         this.schemaSettings = schemaSettings;
         this.applyExpandDepth = applyExpandDepth;
         this.navigateToPath = navigateToPath;
         this.refreshSchemaEntries = refreshSchemaEntries;
+        this.openSchemaFolder = openSchemaFolder;
 
         dateHintSchemeIndex = (int)settings.FileDefaultScheme;
         timeZoneModeIndex = (int)settings.TimeZoneMode;
@@ -167,7 +168,7 @@ public sealed class JsonToolbarViewModel : ObservableObject
             {
                 if (openFolder)
                 {
-                    JsonSchemaCatalog.OpenUserDirectory();
+                    openSchemaFolder?.Invoke();
                     SetField(ref selectedSchemaIndex, IndexOfSelectedEntry(), nameof(SelectedSchemaIndex));
                     IsSchemaFlyoutOpen = false;
                     return;
@@ -239,8 +240,8 @@ public sealed class JsonToolbarViewModel : ObservableObject
         }
     }
 
-    /// <summary>Bound two-way to the expand-depth combo. Persists the choice and applies it
-    /// live to the owning document's tree.</summary>
+    /// <summary>Bound two-way to the expand-depth combo. Reports the choice to the owning
+    /// document, which remembers it and applies it live to its tree.</summary>
     public int ExpandDepthIndex
     {
         get => expandDepthIndex;
@@ -249,7 +250,6 @@ public sealed class JsonToolbarViewModel : ObservableObject
             if (value < 0 || !SetField(ref expandDepthIndex, value))
                 return;
 
-            ExpandDepthPreference.Save(value);
             applyExpandDepth(value);
         }
     }

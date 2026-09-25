@@ -1,3 +1,4 @@
+using Argonaut.Features.Json.Schema;
 using System.Text;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Search;
@@ -151,7 +152,7 @@ public class DocumentDisposalLifecycleTests
         string path = WriteLargeJson();
         try
         {
-            var vm = new JsonViewModel();
+            var vm = new JsonViewModel(new JsonViewSettings(), new SchemaBindings(), TestSchemas.Catalog());
             await vm.LoadAsync(path);
             Assert.False(vm.IndexingTask.IsCompleted); // sanity: indexing genuinely still running
 
@@ -170,7 +171,7 @@ public class DocumentDisposalLifecycleTests
         string path = WriteLargeJson();
         try
         {
-            var vm = new JsonViewModel();
+            var vm = new JsonViewModel(new JsonViewSettings(), new SchemaBindings(), TestSchemas.Catalog());
             await vm.LoadAsync(path);
             Assert.False(vm.IndexingTask.IsCompleted);
 
@@ -225,7 +226,7 @@ public class DocumentDisposalLifecycleTests
         string path = WriteLargeNdJson();
         try
         {
-            var vm = new NdJsonViewModel();
+            var vm = new NdJsonViewModel(new JsonViewSettings(), new SchemaBindings(), TestSchemas.Catalog());
             await vm.LoadAsync(path);
             Assert.False(vm.IndexingTask.IsCompleted);
 
@@ -244,7 +245,7 @@ public class DocumentDisposalLifecycleTests
         string path = WriteLargeNdJson();
         try
         {
-            var vm = new NdJsonViewModel();
+            var vm = new NdJsonViewModel(new JsonViewSettings(), new SchemaBindings(), TestSchemas.Catalog());
             await vm.LoadAsync(path);
             Assert.False(vm.IndexingTask.IsCompleted);
 
@@ -265,7 +266,7 @@ public class DocumentDisposalLifecycleTests
         string path = WriteLargeNdJson();
         try
         {
-            var vm = new NdJsonViewModel();
+            var vm = new NdJsonViewModel(new JsonViewSettings(), new SchemaBindings(), TestSchemas.Catalog());
             await vm.LoadAsync(path);
             vm.LoadSelectedLine(0);
             await Task.Delay(20); // let the nested JsonViewModel.LoadAsync start
@@ -284,7 +285,7 @@ public class DocumentDisposalLifecycleTests
         string path = WriteLargeRaw();
         try
         {
-            var vm = new RawViewModel();
+            var vm = new RawViewModel(new RawViewSettings());
             await vm.LoadAsync(path);
             Assert.False(vm.IndexingTask.IsCompleted);
 
@@ -303,7 +304,7 @@ public class DocumentDisposalLifecycleTests
         string path = WriteLargeRaw();
         try
         {
-            var vm = new RawViewModel();
+            var vm = new RawViewModel(new RawViewSettings());
             await vm.LoadAsync(path);
             Assert.False(vm.IndexingTask.IsCompleted);
 
@@ -324,7 +325,7 @@ public class DocumentDisposalLifecycleTests
         string path = WriteLargeRaw();
         try
         {
-            var vm = new RawViewModel();
+            var vm = new RawViewModel(new RawViewSettings());
             await vm.LoadAsync(path);
             await vm.IndexingTask;
 
@@ -440,7 +441,7 @@ public class DocumentDisposalLifecycleTests
             string path = WriteLargeJson();
             try
             {
-                var vm = new JsonViewModel();
+                var vm = new JsonViewModel(new JsonViewSettings(), new SchemaBindings(), TestSchemas.Catalog());
                 await vm.LoadAsync(path);
                 await DisposeWithTimeoutAsync(vm.Dispose);
                 vm.Dispose();
@@ -462,7 +463,7 @@ public class DocumentDisposalLifecycleTests
             string path = WriteLargeNdJson();
             try
             {
-                var vm = new NdJsonViewModel();
+                var vm = new NdJsonViewModel(new JsonViewSettings(), new SchemaBindings(), TestSchemas.Catalog());
                 await vm.LoadAsync(path);
                 await DisposeWithTimeoutAsync(vm.Dispose);
                 vm.Dispose();
@@ -473,7 +474,7 @@ public class DocumentDisposalLifecycleTests
             string path = WriteLargeRaw();
             try
             {
-                var vm = new RawViewModel();
+                var vm = new RawViewModel(new RawViewSettings());
                 await vm.LoadAsync(path);
                 await DisposeWithTimeoutAsync(vm.Dispose);
                 vm.Dispose();

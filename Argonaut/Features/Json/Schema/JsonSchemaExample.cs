@@ -33,14 +33,15 @@ internal static class JsonSchemaExample
     public const string UserCopyFileName = "geojson" + JsonSchemaCatalog.ExampleSuffix;
 
     /// <summary>
-    /// Copies the shipped schema into <paramref name="directory"/> as the example, unless it's
+    /// Copies the shipped schema from <paramref name="bundledDirectory"/> into
+    /// <paramref name="directory"/> as the example, unless it's
     /// already there - an edited copy is never clobbered. Deleting it does bring it back on the
     /// next open, which is the point: the folder should always offer a worked example to crib from.
     ///
     /// Best-effort, like everything else that touches the settings folder: an unwritable folder or
     /// an install missing the shipped file must never stop the folder from opening.
     /// </summary>
-    public static void TryCopyTo(string directory)
+    public static void TryCopy(string bundledDirectory, string directory)
     {
         try
         {
@@ -48,7 +49,7 @@ internal static class JsonSchemaExample
             if (File.Exists(destination))
                 return;
 
-            string source = Path.Combine(JsonSchemaCatalog.GetBundledDirectory(), BundledFileName);
+            string source = Path.Combine(bundledDirectory, BundledFileName);
             if (File.Exists(source))
                 File.Copy(source, destination);
         }

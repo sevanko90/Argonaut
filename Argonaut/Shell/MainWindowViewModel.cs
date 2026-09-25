@@ -12,6 +12,7 @@ using Argonaut.Engine.Indexing;
 using Argonaut.Engine.Progress;
 using Argonaut.Engine.Saving;
 using Argonaut.Engine.Settings;
+using Argonaut.Features.Json.Schema;
 using Argonaut.Features.Json.ArrayTable;
 using Argonaut.Features.Json.Diff;
 using Argonaut.Shell.Dialogs;
@@ -64,6 +65,8 @@ public sealed class MainWindowViewModel : ObservableObject
     /// </summary>
     internal const long MaxPasteBytes = 64L * 1024 * 1024;
 
+    private readonly AppearanceSettings appearance;
+    private readonly RecentFileHistory recentFileHistory;
     private readonly Func<string, Task<bool>> confirmReplace;
     private readonly Func<Task<byte[]?>>? readClipboardBytes;
     private readonly DocumentLoader documentLoader;
@@ -116,6 +119,9 @@ public sealed class MainWindowViewModel : ObservableObject
     /// <summary>Raised when the find bar should clear its term/status (file open, switch, or close).</summary>
     public event Action? FindBarResetRequested;
 
+    /// <param name="settings">The app's settings; the shell keeps its appearance and recent files
+    /// there, and hands the document views their own blocks.</param>
+    /// <param name="schemaCatalog">The schemas a JSON document can be bound to.</param>
     /// <param name="confirmReplace">
     /// Shows the "replace the loaded file?" confirmation and resolves to the user's choice.
     /// Injected so the lifecycle stays view-agnostic and unit-testable.
@@ -138,7 +144,7 @@ public sealed class MainWindowViewModel : ObservableObject
     /// unless a test substitutes one.</param>
     /// <param name="progressBoard">Where long operations are reported;
     /// <see cref="ProgressBoard.Shared"/> unless a test substitutes one.</param>
-    public MainWindowViewModel(Func<string, Task<bool>> confirmReplace,
+    public MainWindowViewModel(ISettingsStore settings, JsonSchemaCatalog schemaCatalog, Func<string, Task<bool>> confirmReplace,
         Func<Task<byte[]?>>? readClipboardBytes = null, DocumentLoader? documentLoader = null,
         Func<IByteOrigin, Task<string?>>? pickSaveDestination = null,
         Func<string, Task<UnsavedChangesChoice>>? askAboutUnsavedChanges = null,
@@ -146,17 +152,19 @@ public sealed class MainWindowViewModel : ObservableObject
         IFileReplacer? fileReplacer = null,
         ProgressBoard? progressBoard = null)
     {
+        this.appearance = settings.Get<AppearanceSettings>();
+        this.recentFileHistory = settings.Get<RecentFileHistory>();
         this.confirmReplace = confirmReplace;
         this.readClipboardBytes = readClipboardBytes;
-        this.documentLoader = documentLoader ?? DocumentViewCatalog.LoadAsync;
+        this.documentLoader = documentLoader ?? new DocumentViewCatalog(settings, schemaCatalog).LoadAsync;
         this.pickSaveDestination = pickSaveDestination;
         this.askAboutUnsavedChanges = askAboutUnsavedChanges;
         this.reportFailure = reportFailure;
         this.fileReplacer = fileReplacer ?? SiblingFileReplacer.ForCurrentPlatform();
         this.progressBoard = progressBoard ?? ProgressBoard.Shared;
 
-        themeMode = ThemePreference.Load();
-        contentFontMode = ContentFontPreference.Load();
+        themeMode = appearance.Theme;
+        contentFontMode = appearance.ContentFont;
 
         findController = new FindController(
             status => FindStatusChanged?.Invoke(status),
@@ -512,7 +520,7 @@ public sealed class MainWindowViewModel : ObservableObject
             ThemeMode.Light => ThemeMode.Dark,
             _ => ThemeMode.System
         };
-        ThemePreference.Save(ThemeMode);
+        appearance.Theme = ThemeMode;
     }
 
     public ContentFontMode ContentFontMode
@@ -528,20 +536,20 @@ public sealed class MainWindowViewModel : ObservableObject
         ContentFontMode = ContentFontMode == ContentFontMode.Monospace
             ? ContentFontMode.SansSerif
             : ContentFontMode.Monospace;
-        ContentFontPreference.Save(ContentFontMode);
+        appearance.ContentFont = ContentFontMode;
     }
 
     public void OpenRecentFile(string path) => _ = OpenPathAsync(path);
 
     public void ClearRecentFiles()
     {
-        RecentFileHistory.Clear();
+        recentFileHistory.Clear();
         ReloadRecentFiles();
     }
 
     private void ReloadRecentFiles()
     {
-        RecentFiles = RecentFileHistory.Load()
+        RecentFiles = recentFileHistory.Paths
             .Select(path => new RecentFileItem(path, Path.GetFileName(path)))
             .ToList();
     }
@@ -867,7 +875,7 @@ public sealed class MainWindowViewModel : ObservableObject
         // nothing here rather than recording a path that does not exist.
         if (addToRecents && origins.Length > 0 && origins[0].Path is { } diskPath)
         {
-            RecentFileHistory.Add(diskPath);
+            recentFileHistory.Add(diskPath);
             ReloadRecentFiles();
         }
     }
@@ -1129,7 +1137,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
                 if (destination.Path is { } savedPath)
                 {
-                    RecentFileHistory.Add(savedPath);
+                    recentFileHistory.Add(savedPath);
                     ReloadRecentFiles();
                 }
 

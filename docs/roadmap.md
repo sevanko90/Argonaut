@@ -197,42 +197,20 @@ same origin rather than re-materialising it.
 
 ## Settings
 
-No plan document yet. Flagged during the 2026-09 project restructure, and left out of it on
-purpose because it needs its own rework rather than a move.
+Settings are blocks handed out by `ISettingsStore` (`Engine/Settings`), written to one
+`settings.json` by `Save()` at exit and before an update restart. File locations
+(`AppDataPaths`) and OS actions are decided in the composition root (`App`) and handed down,
+so the schema folder reaches `JsonSchemaCatalog` as a constructor argument. Open item:
 
-- **A settings service behind an interface.** Today each preference is a static class that owns
-  a file name, a private record and its own `Load`/`Save`, and writes its own JSON file through
-  the static `JsonSettingsStore`: `theme.json`, `font.json`, `expand-depth.json`,
-  `raw-wrap-width.json`, `schema-selection.json`, `recent-files.json`, `auto-update.json`. Nine
-  files across the Shell and the features call those statics directly. What that costs:
-  - **No seam.** Nothing can be substituted, so tests redirect the real disk through the static
-    `AppDataPaths.RootOverride`. That global forces the 14 test classes that touch settings into
-    one serial xUnit collection (`AppDataPaths`).
-  - **No cache or notification.** Every `Load` re-reads its file, every `Save` writes
-    synchronously on the caller's thread (usually the UI thread), and nothing tells anyone else
-    that a value changed. Each caller keeps its own copy in sync by hand.
-  - **The wrong layer.** Feature and shell preferences (`RawWrapWidthPreference`,
-    `SchemaSelectionPreference`, `ThemePreference`, ...) sit in `Engine/Settings` because the
-    storage helper does. Engine should hold only the mechanism.
-
-  Rough shape: an `ISettingsStore` in `Engine/Settings` (load once, serve from memory, write
-  behind on the background, raise a change event), an in-memory implementation for tests (which
-  removes `RootOverride` and the serial collection), and typed preference sections owned by
-  whoever uses them (Raw owns the wrap width, Json the expand depth and schema binding, the Shell
-  the theme, font, recent files and auto-update). Open questions: one file or one per section;
-  reading the existing per-file JSON on first run so nobody loses their settings; and where the
-  schemas folder path goes, since it is a location rather than a setting.
-- **Store distribution is a reason to do it first.** The Mac App Store sandbox (see
+- **Sandboxed build.** The Mac App Store sandbox (see
   [store-distribution-comparison.md](store-distribution-comparison.md) and Distribution below)
-  changes what a persisted setting can be. A stored path gives no access on relaunch, so recent
-  files and the remembered schema binding need security-scoped bookmarks saved with them and
-  resolved when read. Application data also moves into the app's container, which changes where
-  the files live and makes the schemas folder something users cannot browse to. Behind an
-  interface these become a different implementation for the sandboxed build, like saving is
-  behind `IFileReplacer`. With today's statics they would be conditionals scattered across seven
-  classes and their callers. So the interface should carry what a sandboxed store needs rather
-  than bare strings: an entry that remembers a file should hold "a way back to this file", not
-  just a path.
+  gives a stored path no access on relaunch, so recent files and schema bindings need
+  security-scoped bookmarks saved with them and resolved when read. Those entries should hold
+  "a way back to this file" rather than a bare path. Application data also lives in the app's
+  container, which moves `settings.json` and makes the user schema folder something users
+  cannot browse to. The root builds the store and the catalog, so the sandboxed build can use
+  its own store implementation and its own catalog folders, the way saving sits behind
+  `IFileReplacer`.
 
 ## Memory and performance
 

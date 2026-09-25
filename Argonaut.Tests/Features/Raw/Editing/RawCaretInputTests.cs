@@ -1,5 +1,4 @@
 using System.Text;
-using Argonaut.Engine.Settings;
 using Argonaut.Features.Raw;
 using Argonaut.Tests.Support;
 using Avalonia;
@@ -22,7 +21,6 @@ namespace Argonaut.Tests.Features.Raw.Editing;
 /// overload and every assertion after the first await runs unobserved - the test passes whatever
 /// happens. Each test here was confirmed to go red with an inverted assertion.
 /// </summary>
-[Collection("AppDataPaths")]
 public sealed class RawCaretInputTests : IDisposable
 {
     private readonly string tempDir;
@@ -31,12 +29,10 @@ public sealed class RawCaretInputTests : IDisposable
     {
         tempDir = Path.Combine(Path.GetTempPath(), "ArgonautTestFiles", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDir);
-        AppDataPaths.RootOverride = Path.Combine(tempDir, "settings");
     }
 
     public void Dispose()
     {
-        AppDataPaths.RootOverride = null;
         try { Directory.Delete(tempDir, recursive: true); }
         catch { /* best-effort test cleanup */ }
     }
@@ -66,7 +62,7 @@ public sealed class RawCaretInputTests : IDisposable
         var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(RawCaretInputTests).Assembly);
         return session.Dispatch(async () =>
         {
-            var vm = new RawViewModel();
+            var vm = new RawViewModel(new RawViewSettings());
             Window? window = null;
             try
             {

@@ -1,31 +1,14 @@
-using Argonaut.Engine.Settings;
 using Argonaut.Features.Raw;
 
 namespace Argonaut.Tests.Features.Raw;
 
 /// <summary>
 /// Exercises the raw toolbar's wrap-width combo in isolation: index↔width mapping, the
-/// ComboBox-teardown guard, and persistence + apply-callback ordering. AppDataPaths.RootOverride
-/// redirects the preference store to a temp dir so the developer's real settings are never touched.
+/// ComboBox-teardown guard, and the apply callback. Remembering the choice is the document's job
+/// (see RawViewModelTests).
 /// </summary>
-[Collection("AppDataPaths")]
-public sealed class RawToolbarViewModelTests : IDisposable
+public sealed class RawToolbarViewModelTests
 {
-    private readonly string settingsRoot;
-
-    public RawToolbarViewModelTests()
-    {
-        settingsRoot = Path.Combine(Path.GetTempPath(), "ArgonautTests", Guid.NewGuid().ToString("N"));
-        AppDataPaths.RootOverride = settingsRoot;
-    }
-
-    public void Dispose()
-    {
-        AppDataPaths.RootOverride = null;
-        try { if (Directory.Exists(settingsRoot)) Directory.Delete(settingsRoot, recursive: true); }
-        catch { /* best-effort test cleanup */ }
-    }
-
     [Fact]
     public void Ctor_SeedsIndexFromTheInitialWidth()
     {
@@ -38,18 +21,17 @@ public sealed class RawToolbarViewModelTests : IDisposable
     public void Ctor_UnknownWidth_FallsBackToTheDefault()
     {
         var toolbar = new RawToolbarViewModel(999, _ => { }, _ => { });
-        Assert.Equal(Array.IndexOf(RawWrapWidthPreference.Widths, RawWrapWidthPreference.Default), toolbar.WrapWidthIndex);
+        Assert.Equal(Array.IndexOf(RawViewSettings.Widths, RawViewSettings.DefaultWrapWidth), toolbar.WrapWidthIndex);
     }
 
     [Fact]
-    public void WrapWidthIndex_Set_PersistsAndInvokesCallback()
+    public void WrapWidthIndex_Set_InvokesCallback()
     {
         var applied = new List<int>();
         var toolbar = new RawToolbarViewModel(160, applied.Add, _ => { });
 
         toolbar.WrapWidthIndex = 2;
 
-        Assert.Equal(512, RawWrapWidthPreference.Load());
         Assert.Equal(new[] { 512 }, applied);
 
         // Reassigning the same index is a no-op via the SetField equality guard.
@@ -64,7 +46,7 @@ public sealed class RawToolbarViewModelTests : IDisposable
         var toolbar = new RawToolbarViewModel(160, applied.Add, _ => { });
 
         toolbar.WrapWidthIndex = -1; // a ComboBox raises -1 during teardown
-        toolbar.WrapWidthIndex = RawWrapWidthPreference.Widths.Length;
+        toolbar.WrapWidthIndex = RawViewSettings.Widths.Length;
 
         Assert.Equal(1, toolbar.WrapWidthIndex);
         Assert.Empty(applied);

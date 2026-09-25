@@ -3,7 +3,6 @@ using System.Globalization;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
-using Argonaut.Engine.Settings;
 using Argonaut.Ui.ViewModels;
 
 namespace Argonaut.Ui.TableGrid;
@@ -27,8 +26,8 @@ namespace Argonaut.Ui.TableGrid;
 ///     it is learned from the first one and reported back through
 ///     <see cref="ReportCellInset"/>.
 ///
-/// <see cref="Current"/> is a settable seam, the same shape as <see cref="AppDataPaths.RootOverride"/>
-/// and <see cref="UiDeferral.PostOverride"/>: tests that run without an Avalonia platform can
+/// <see cref="Current"/> is a settable seam, the same shape as <see cref="UiDeferral.PostOverride"/>:
+/// tests that run without an Avalonia platform can
 /// state the metrics they want to assert against instead of measuring a font that isn't there.
 /// </summary>
 public sealed class CellTextMetrics

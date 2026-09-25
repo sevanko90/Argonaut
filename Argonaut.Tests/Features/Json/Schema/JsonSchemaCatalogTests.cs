@@ -1,4 +1,3 @@
-using Argonaut.Engine.Settings;
 using Argonaut.Features.Json.Indexing;
 using Argonaut.Features.Json.Schema;
 
@@ -6,31 +5,29 @@ namespace Argonaut.Tests.Features.Json.Schema;
 
 /// <summary>
 /// Covers the bundled/user schema merge, user-shadows-bundled, and the per-document gather
-/// (sidecar and remembered selection). AppDataPaths.RootOverride redirects the user schema folder
-/// and the remembered-selection file into a temp dir, so the developer's real settings and
-/// schemas are never touched.
+/// (sidecar and remembered selection). The user folder is a temp folder per test, and revealing
+/// it is recorded rather than opening a file manager.
 /// </summary>
-[Collection("AppDataPaths")]
 public sealed class JsonSchemaCatalogTests : IDisposable
 {
-    private readonly string settingsRoot;
+    private readonly string root = Path.Combine(Path.GetTempPath(), "ArgonautTests", Guid.NewGuid().ToString("N"));
+    private readonly List<string> revealed = [];
+    private readonly JsonSchemaCatalog catalog;
 
     public JsonSchemaCatalogTests()
     {
-        settingsRoot = Path.Combine(Path.GetTempPath(), "ArgonautTests", Guid.NewGuid().ToString("N"));
-        AppDataPaths.RootOverride = settingsRoot;
+        catalog = new JsonSchemaCatalog(JsonSchemaCatalog.BundledDirectoryBesideApp, Path.Combine(root, "Schemas"), revealed.Add);
     }
 
     public void Dispose()
     {
-        AppDataPaths.RootOverride = null;
-        try { if (Directory.Exists(settingsRoot)) Directory.Delete(settingsRoot, recursive: true); }
+        try { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
         catch { /* best-effort test cleanup */ }
     }
 
-    private static string WriteUserSchema(string fileName, string content = """{ "title": "T" }""")
+    private string WriteUserSchema(string fileName, string content = """{ "title": "T" }""")
     {
-        string directory = JsonSchemaCatalog.EnsureUserDirectory();
+        string directory = catalog.EnsureUserDirectory();
         string path = Path.Combine(directory, fileName);
         File.WriteAllText(path, content);
         return path;
@@ -39,7 +36,7 @@ public sealed class JsonSchemaCatalogTests : IDisposable
     [Fact]
     public void Enumerate_IncludesBundledSchemas()
     {
-        var entries = JsonSchemaCatalog.Enumerate();
+        var entries = catalog.Enumerate();
 
         var keepa = Assert.Single(entries, e => e.DisplayName == "keepa-product");
         Assert.False(keepa.IsUser);
@@ -48,7 +45,7 @@ public sealed class JsonSchemaCatalogTests : IDisposable
     [Fact]
     public void BundledKeepaSchema_ActuallyParses()
     {
-        var keepa = Assert.Single(JsonSchemaCatalog.Enumerate(), e => e.DisplayName == "keepa-product");
+        var keepa = Assert.Single(catalog.Enumerate(), e => e.DisplayName == "keepa-product");
 
         Assert.NotNull(JsonSchemaLoader.TryLoadFile(keepa.FilePath));
     }
@@ -61,7 +58,7 @@ public sealed class JsonSchemaCatalogTests : IDisposable
     [Fact]
     public void BundledKeepaSchema_LabelsOffersThroughItsRefs()
     {
-        var keepa = Assert.Single(JsonSchemaCatalog.Enumerate(), e => e.DisplayName == "keepa-product");
+        var keepa = Assert.Single(catalog.Enumerate(), e => e.DisplayName == "keepa-product");
         var schema = JsonSchemaLoader.TryLoadFile(keepa.FilePath)!;
 
         int products = schema.ResolveMember(schema.RootId, "products"u8);
@@ -91,7 +88,7 @@ public sealed class JsonSchemaCatalogTests : IDisposable
     [Fact]
     public void BundledKeepaSchema_KeepsTheCsvSlotsAfterTheRetiredRentEntry()
     {
-        var keepa = Assert.Single(JsonSchemaCatalog.Enumerate(), e => e.DisplayName == "keepa-product");
+        var keepa = Assert.Single(catalog.Enumerate(), e => e.DisplayName == "keepa-product");
         var schema = JsonSchemaLoader.TryLoadFile(keepa.FilePath)!;
 
         int product = schema.ResolveElement(schema.ResolveMember(schema.RootId, "products"u8), 0);
@@ -113,7 +110,7 @@ public sealed class JsonSchemaCatalogTests : IDisposable
     [Fact]
     public void BundledKeepaSchema_LabelsTheStatsArraysByPriceType()
     {
-        var keepa = Assert.Single(JsonSchemaCatalog.Enumerate(), e => e.DisplayName == "keepa-product");
+        var keepa = Assert.Single(catalog.Enumerate(), e => e.DisplayName == "keepa-product");
         var schema = JsonSchemaLoader.TryLoadFile(keepa.FilePath)!;
 
         int product = schema.ResolveElement(schema.ResolveMember(schema.RootId, "products"u8), 0);
@@ -136,7 +133,7 @@ public sealed class JsonSchemaCatalogTests : IDisposable
     [Fact]
     public void BundledKeepaSchema_OffersOnlyProductAndOfferAsRoots()
     {
-        var keepa = Assert.Single(JsonSchemaCatalog.Enumerate(), e => e.DisplayName == "keepa-product");
+        var keepa = Assert.Single(catalog.Enumerate(), e => e.DisplayName == "keepa-product");
         var schema = JsonSchemaLoader.TryLoadFile(keepa.FilePath)!;
 
         Assert.Equal(new[] { "offer", "product" }, schema.NamedRoots.Select(r => r.Name).ToArray());
@@ -150,7 +147,7 @@ public sealed class JsonSchemaCatalogTests : IDisposable
     [Fact]
     public void BundledKeepaSchema_DeclaresTheFullProductFieldSet()
     {
-        var keepa = Assert.Single(JsonSchemaCatalog.Enumerate(), e => e.DisplayName == "keepa-product");
+        var keepa = Assert.Single(catalog.Enumerate(), e => e.DisplayName == "keepa-product");
         var schema = JsonSchemaLoader.TryLoadFile(keepa.FilePath)!;
 
         int product = schema.ResolveElement(schema.ResolveMember(schema.RootId, "products"u8), 0);
@@ -160,18 +157,14 @@ public sealed class JsonSchemaCatalogTests : IDisposable
             Assert.True(schema.ResolveMember(product, field) >= 0, $"missing {System.Text.Encoding.UTF8.GetString(field)}");
     }
 
-    /// <summary>Drives OpenUserDirectory with the file-manager launch stubbed out.</summary>
-    private static void OpenSchemaFolder()
+    private void OpenSchemaFolder() => catalog.OpenUserDirectory();
+
+    [Fact]
+    public void OpeningTheSchemaFolder_RevealsIt()
     {
-        JsonSchemaCatalog.OpenDirectoryOverride = _ => { };
-        try
-        {
-            JsonSchemaCatalog.OpenUserDirectory();
-        }
-        finally
-        {
-            JsonSchemaCatalog.OpenDirectoryOverride = null;
-        }
+        OpenSchemaFolder();
+
+        Assert.Equal(new[] { catalog.UserDirectory }, revealed);
     }
 
     /// <summary>The example is a shipped file, not a string constant, so a rename or a dropped
@@ -179,14 +172,14 @@ public sealed class JsonSchemaCatalogTests : IDisposable
     [Fact]
     public void GeoJsonSchema_ShipsWithTheApp()
     {
-        Assert.True(File.Exists(Path.Combine(JsonSchemaCatalog.GetBundledDirectory(), JsonSchemaExample.BundledFileName)));
+        Assert.True(File.Exists(Path.Combine(catalog.BundledDirectory, JsonSchemaExample.BundledFileName)));
     }
 
     /// <summary>Unlike the copy it seeds, the bundled original is a normal, bindable schema.</summary>
     [Fact]
     public void BundledGeoJsonSchema_IsOfferedInTheDropdown()
     {
-        var geojson = Assert.Single(JsonSchemaCatalog.Enumerate(), e => e.DisplayName == "geojson");
+        var geojson = Assert.Single(catalog.Enumerate(), e => e.DisplayName == "geojson");
 
         Assert.False(geojson.IsUser);
         Assert.NotNull(JsonSchemaLoader.TryLoadFile(geojson.FilePath));
@@ -197,7 +190,7 @@ public sealed class JsonSchemaCatalogTests : IDisposable
     {
         OpenSchemaFolder();
 
-        Assert.True(File.Exists(Path.Combine(JsonSchemaCatalog.GetUserDirectory(), JsonSchemaExample.UserCopyFileName)));
+        Assert.True(File.Exists(Path.Combine(catalog.UserDirectory, JsonSchemaExample.UserCopyFileName)));
     }
 
     /// <summary>The seeded copy is the same schema as the bundled one, so the whole point of the
@@ -207,7 +200,7 @@ public sealed class JsonSchemaCatalogTests : IDisposable
     {
         OpenSchemaFolder();
 
-        var entries = JsonSchemaCatalog.Enumerate();
+        var entries = catalog.Enumerate();
 
         var geojson = Assert.Single(entries, e => e.DisplayName == "geojson");
         Assert.False(geojson.IsUser); // still the bundled one, not the user copy
@@ -221,11 +214,11 @@ public sealed class JsonSchemaCatalogTests : IDisposable
     public void RenamedExampleCopy_ShadowsTheBundledSchema()
     {
         OpenSchemaFolder();
-        string directory = JsonSchemaCatalog.GetUserDirectory();
+        string directory = catalog.UserDirectory;
         string renamed = Path.Combine(directory, JsonSchemaExample.BundledFileName);
         File.Move(Path.Combine(directory, JsonSchemaExample.UserCopyFileName), renamed);
 
-        var geojson = Assert.Single(JsonSchemaCatalog.Enumerate(), e => e.DisplayName == "geojson");
+        var geojson = Assert.Single(catalog.Enumerate(), e => e.DisplayName == "geojson");
 
         Assert.True(geojson.IsUser);
         Assert.Equal(renamed, geojson.FilePath);
@@ -235,7 +228,7 @@ public sealed class JsonSchemaCatalogTests : IDisposable
     public void OpeningTheSchemaFolder_NeverClobbersAnEditedExample()
     {
         OpenSchemaFolder();
-        string path = Path.Combine(JsonSchemaCatalog.GetUserDirectory(), JsonSchemaExample.UserCopyFileName);
+        string path = Path.Combine(catalog.UserDirectory, JsonSchemaExample.UserCopyFileName);
         File.WriteAllText(path, """{ "title": "Mine now" }""");
 
         OpenSchemaFolder();
@@ -249,7 +242,7 @@ public sealed class JsonSchemaCatalogTests : IDisposable
         OpenSchemaFolder();
         WriteUserSchema("real-one.json");
 
-        var entries = JsonSchemaCatalog.Enumerate();
+        var entries = catalog.Enumerate();
 
         Assert.Contains(entries, e => e.DisplayName == "real-one");
         Assert.DoesNotContain(entries, e => e.FilePath.EndsWith(JsonSchemaCatalog.ExampleSuffix, StringComparison.OrdinalIgnoreCase));
@@ -264,7 +257,7 @@ public sealed class JsonSchemaCatalogTests : IDisposable
     public void ShippedExample_IsAWorkingSchema()
     {
         OpenSchemaFolder();
-        string path = Path.Combine(JsonSchemaCatalog.GetUserDirectory(), JsonSchemaExample.UserCopyFileName);
+        string path = Path.Combine(catalog.UserDirectory, JsonSchemaExample.UserCopyFileName);
 
         var schema = JsonSchemaLoader.TryLoadFile(path);
         Assert.NotNull(schema);
@@ -296,7 +289,7 @@ public sealed class JsonSchemaCatalogTests : IDisposable
         WriteUserSchema("zzz-last.json");
         WriteUserSchema("aaa-first.json");
 
-        var entries = JsonSchemaCatalog.Enumerate();
+        var entries = catalog.Enumerate();
 
         Assert.True(entries[0].DisplayName == "aaa-first");
         Assert.True(entries[^1].DisplayName == "zzz-last");
@@ -308,7 +301,7 @@ public sealed class JsonSchemaCatalogTests : IDisposable
     {
         string userCopy = WriteUserSchema("keepa-product.json");
 
-        var keepa = Assert.Single(JsonSchemaCatalog.Enumerate(), e => e.DisplayName == "keepa-product");
+        var keepa = Assert.Single(catalog.Enumerate(), e => e.DisplayName == "keepa-product");
 
         Assert.True(keepa.IsUser);
         Assert.Equal(userCopy, keepa.FilePath);
@@ -317,9 +310,9 @@ public sealed class JsonSchemaCatalogTests : IDisposable
     [Fact]
     public void Enumerate_WithNoUserFolder_StillReturnsBundled()
     {
-        Assert.False(Directory.Exists(JsonSchemaCatalog.GetUserDirectory()));
+        Assert.False(Directory.Exists(catalog.UserDirectory));
 
-        Assert.NotEmpty(JsonSchemaCatalog.Enumerate());
+        Assert.NotEmpty(catalog.Enumerate());
     }
 
     [Fact]
@@ -331,7 +324,7 @@ public sealed class JsonSchemaCatalogTests : IDisposable
         {
             File.WriteAllText(sidecar, """{ "title": "Sidecar" }""");
 
-            var (entries, preselected, _) = JsonSchemaCatalog.GatherForDocument(document);
+            var (entries, preselected, _) = catalog.GatherForDocument(document, []);
 
             Assert.Equal(sidecar, preselected!.Value.FilePath);
             Assert.Contains(entries, e => e.FilePath == sidecar);
@@ -349,7 +342,7 @@ public sealed class JsonSchemaCatalogTests : IDisposable
         string document = Path.GetTempFileName();
         try
         {
-            var (_, preselected, _) = JsonSchemaCatalog.GatherForDocument(document);
+            var (_, preselected, _) = catalog.GatherForDocument(document, []);
 
             Assert.Null(preselected);
         }
@@ -363,12 +356,13 @@ public sealed class JsonSchemaCatalogTests : IDisposable
     public void GatherForDocument_RestoresRememberedCatalogEntry()
     {
         string document = Path.GetTempFileName();
+        var bindings = new SchemaBindings();
         try
         {
             string remembered = WriteUserSchema("remembered.json");
-            SchemaSelectionPreference.Save(document, remembered);
+            bindings.Remember(document, remembered);
 
-            var (_, preselected, _) = JsonSchemaCatalog.GatherForDocument(document);
+            var (_, preselected, _) = catalog.GatherForDocument(document, bindings.Entries);
 
             Assert.Equal("remembered", preselected!.Value.DisplayName);
             Assert.Equal(remembered, preselected.Value.FilePath);
@@ -383,13 +377,14 @@ public sealed class JsonSchemaCatalogTests : IDisposable
     public void GatherForDocument_RestoresRememberedSchemaOutsideTheCatalogFolders()
     {
         string document = Path.GetTempFileName();
+        var bindings = new SchemaBindings();
         string loose = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".json");
         try
         {
             File.WriteAllText(loose, """{ "title": "Loose" }""");
-            SchemaSelectionPreference.Save(document, loose);
+            bindings.Remember(document, loose);
 
-            var (entries, preselected, _) = JsonSchemaCatalog.GatherForDocument(document);
+            var (entries, preselected, _) = catalog.GatherForDocument(document, bindings.Entries);
 
             Assert.Equal(loose, preselected!.Value.FilePath);
             Assert.Contains(entries, e => e.FilePath == loose);
@@ -405,53 +400,14 @@ public sealed class JsonSchemaCatalogTests : IDisposable
     public void GatherForDocument_IgnoresRememberedSchemaThatNoLongerExists()
     {
         string document = Path.GetTempFileName();
+        var bindings = new SchemaBindings();
         try
         {
-            SchemaSelectionPreference.Save(document, Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".json"));
+            bindings.Remember(document, Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".json"));
 
-            var (_, preselected, _) = JsonSchemaCatalog.GatherForDocument(document);
+            var (_, preselected, _) = catalog.GatherForDocument(document, bindings.Entries);
 
             Assert.Null(preselected);
-        }
-        finally
-        {
-            File.Delete(document);
-        }
-    }
-
-    [Fact]
-    public void SchemaSelectionPreference_SavesLatestChoice_AndForgetsOnNull()
-    {
-        string document = Path.GetTempFileName();
-        try
-        {
-            SchemaSelectionPreference.Save(document, "/one.json");
-            Assert.Equal(("/one.json", (string?)null), SchemaSelectionPreference.Load(document));
-
-            SchemaSelectionPreference.Save(document, "/two.json");
-            Assert.Equal(("/two.json", (string?)null), SchemaSelectionPreference.Load(document));
-
-            SchemaSelectionPreference.Save(document, null);
-            Assert.Null(SchemaSelectionPreference.Load(document));
-        }
-        finally
-        {
-            File.Delete(document);
-        }
-    }
-
-    [Fact]
-    public void SchemaSelectionPreference_RoundTripsTheBoundRoot()
-    {
-        string document = Path.GetTempFileName();
-        try
-        {
-            SchemaSelectionPreference.Save(document, "/api.json", "Booking");
-            Assert.Equal(("/api.json", "Booking"), SchemaSelectionPreference.Load(document));
-
-            // Re-picking the schema's own root has to clear the remembered type, not keep it.
-            SchemaSelectionPreference.Save(document, "/api.json", null);
-            Assert.Equal(("/api.json", (string?)null), SchemaSelectionPreference.Load(document));
         }
         finally
         {
@@ -463,12 +419,13 @@ public sealed class JsonSchemaCatalogTests : IDisposable
     public void GatherForDocument_CarriesTheRememberedRoot()
     {
         string document = Path.GetTempFileName();
+        var bindings = new SchemaBindings();
         try
         {
             string remembered = WriteUserSchema("api.json");
-            SchemaSelectionPreference.Save(document, remembered, "Booking");
+            bindings.Remember(document, remembered, "Booking");
 
-            var (_, preselected, rootName) = JsonSchemaCatalog.GatherForDocument(document);
+            var (_, preselected, rootName) = catalog.GatherForDocument(document, bindings.Entries);
 
             Assert.Equal(remembered, preselected!.Value.FilePath);
             Assert.Equal("Booking", rootName);
@@ -477,26 +434,5 @@ public sealed class JsonSchemaCatalogTests : IDisposable
         {
             File.Delete(document);
         }
-    }
-
-    [Fact]
-    public void SchemaSelectionPreference_KeepsOtherDocuments()
-    {
-        SchemaSelectionPreference.Save("/docs/a.json", "/schemas/a.json");
-        SchemaSelectionPreference.Save("/docs/b.json", "/schemas/b.json");
-
-        Assert.Equal(("/schemas/a.json", (string?)null), SchemaSelectionPreference.Load("/docs/a.json"));
-        Assert.Equal(("/schemas/b.json", (string?)null), SchemaSelectionPreference.Load("/docs/b.json"));
-    }
-
-    [Fact]
-    public void SchemaSelectionPreference_CapsHistory()
-    {
-        for (int i = 0; i < 150; i++)
-            SchemaSelectionPreference.Save($"/docs/{i}.json", $"/schemas/{i}.json");
-
-        // Most-recent-first with a 100-entry cap: the newest survives, the oldest is gone.
-        Assert.Equal(("/schemas/149.json", (string?)null), SchemaSelectionPreference.Load("/docs/149.json"));
-        Assert.Null(SchemaSelectionPreference.Load("/docs/0.json"));
     }
 }

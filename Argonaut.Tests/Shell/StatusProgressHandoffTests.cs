@@ -1,3 +1,4 @@
+using Argonaut.Features.Raw;
 using System.Threading;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Detection;
@@ -26,7 +27,6 @@ namespace Argonaut.Tests.Shell;
 /// dispatcher-free) because the bug lives entirely in the ordering of posted work: a fake that
 /// never drains the queue would pass no matter what the shell did.
 /// </summary>
-[Collection("AppDataPaths")]
 public sealed class StatusProgressHandoffTests : IDisposable
 {
     private readonly string tempDir;
@@ -35,12 +35,10 @@ public sealed class StatusProgressHandoffTests : IDisposable
     {
         tempDir = Path.Combine(Path.GetTempPath(), "ArgonautTestFiles", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDir);
-        AppDataPaths.RootOverride = Path.Combine(tempDir, "settings");
     }
 
     public void Dispose()
     {
-        AppDataPaths.RootOverride = null;
         try { Directory.Delete(tempDir, recursive: true); }
         catch { /* best-effort test cleanup */ }
     }
@@ -102,7 +100,7 @@ public sealed class StatusProgressHandoffTests : IDisposable
             var document = new FakeDocument { FilePath = path, StatusText = "12,345 tokens indexed so far" };
 
             IProgressReporter? reporter = null;
-            var vm = new MainWindowViewModel(_ => Task.FromResult(true), documentLoader: (_, _, r) =>
+            var vm = new MainWindowViewModel(SettingsStore.InMemory(), TestSchemas.Catalog(), _ => Task.FromResult(true), documentLoader: (_, _, r) =>
             {
                 reporter = r;
                 return Task.FromResult<IDocumentViewModel>(document);
@@ -139,7 +137,7 @@ public sealed class StatusProgressHandoffTests : IDisposable
             var board = new ProgressBoard(TimeProvider.System);
 
             IProgressReporter? reporter = null;
-            var vm = new MainWindowViewModel(_ => Task.FromResult(true), documentLoader: (_, _, r) =>
+            var vm = new MainWindowViewModel(SettingsStore.InMemory(), TestSchemas.Catalog(), _ => Task.FromResult(true), documentLoader: (_, _, r) =>
             {
                 reporter = r;
                 return Task.FromResult<IDocumentViewModel>(document);
@@ -180,7 +178,7 @@ public sealed class StatusProgressHandoffTests : IDisposable
             File.WriteAllText(path, string.Concat(Enumerable.Repeat(line, 400_000))); // 40MB, several scan chunks
 
             var board = new ProgressBoard(TimeProvider.System);
-            var vm = new Argonaut.Features.Raw.RawViewModel(board);
+            var vm = new Argonaut.Features.Raw.RawViewModel(new RawViewSettings(), board);
             try
             {
                 await vm.LoadAsync(new FileByteOrigin(path));

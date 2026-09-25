@@ -58,13 +58,17 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
     /// or the reopen after a save. The shell reports the first load.</summary>
     private readonly ProgressBoard progressBoard;
 
+    private readonly RawViewSettings settings;
+
+    /// <param name="settings">Where the wrap width is remembered.</param>
     /// <param name="progressBoard"><see cref="ProgressBoard.Shared"/> unless a test substitutes one.</param>
-    public RawViewModel(ProgressBoard? progressBoard = null)
+    public RawViewModel(RawViewSettings settings, ProgressBoard? progressBoard = null)
     {
+        this.settings = settings;
         this.progressBoard = progressBoard ?? ProgressBoard.Shared;
     }
 
-    private int wrapWidth = RawWrapWidthPreference.Default;
+    private int wrapWidth = RawViewSettings.DefaultWrapWidth;
 
     protected override IDocumentSession? Session => this.session;
 
@@ -557,8 +561,8 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
     {
         this.Origin = origin;
         this.FilePath = origin.Path ?? origin.DisplayName;
-        this.wrapWidth = RawWrapWidthPreference.Load();
-        this.toolbar = new RawToolbarViewModel(this.wrapWidth, SetWrapWidth, SetEditing);
+        this.wrapWidth = this.settings.WrapWidth;
+        this.toolbar = new RawToolbarViewModel(this.wrapWidth, ChooseWrapWidth, SetEditing);
 
         var session = StartSession(origin, progressReporter);
 
@@ -577,6 +581,14 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
 
         StatusText = $"{FilePath} — {RowCount:N0} rows indexed so far";
         MonitorIndexing();
+    }
+
+    /// <summary>The toolbar's wrap-width choice: remembered for the next document, then applied
+    /// to this one.</summary>
+    private void ChooseWrapWidth(int bytes)
+    {
+        this.settings.WrapWidth = bytes;
+        SetWrapWidth(bytes);
     }
 
     /// <summary>

@@ -1,5 +1,4 @@
 using System.Text;
-using Argonaut.Engine.Settings;
 using Argonaut.Features.Raw;
 using Argonaut.Features.Raw.Editing;
 using Argonaut.Tests.Support;
@@ -25,7 +24,6 @@ namespace Argonaut.Tests.Features.Raw.Editing;
 /// (see docs/headless-test-dispatch-hole.md): the dispatch body ends with <c>return true;</c> and
 /// the test returns the dispatch task rather than awaiting it.
 /// </summary>
-[Collection("AppDataPaths")]
 public sealed class RawEditInputTests : IDisposable
 {
     private readonly string tempDir;
@@ -34,12 +32,10 @@ public sealed class RawEditInputTests : IDisposable
     {
         tempDir = Path.Combine(Path.GetTempPath(), "ArgonautTestFiles", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDir);
-        AppDataPaths.RootOverride = Path.Combine(tempDir, "settings");
     }
 
     public void Dispose()
     {
-        AppDataPaths.RootOverride = null;
         try { Directory.Delete(tempDir, recursive: true); }
         catch { /* best-effort test cleanup */ }
     }
@@ -96,7 +92,7 @@ public sealed class RawEditInputTests : IDisposable
         var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(RawEditInputTests).Assembly);
         return session.Dispatch(async () =>
         {
-            var vm = new RawViewModel();
+            var vm = new RawViewModel(new RawViewSettings());
             Window? window = null;
             try
             {

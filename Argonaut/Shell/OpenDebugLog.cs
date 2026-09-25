@@ -8,7 +8,7 @@ namespace Argonaut.Shell;
 // the file on macOS. Remove once that flow is confirmed working end-to-end.
 internal static class OpenDebugLog
 {
-    private static readonly string LogPath = AppDataPaths.GetSettingsFilePath("open-debug.log");
+    private static readonly string LogPath = AppDataPaths.GetFilePath("open-debug.log");
 
     public static void Write(string message)
     {

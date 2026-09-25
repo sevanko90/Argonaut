@@ -1,4 +1,3 @@
-using Argonaut.Engine.Settings;
 using Argonaut.Features.Json;
 using Argonaut.Features.Json.Hints;
 using Argonaut.Features.Json.Schema;
@@ -9,14 +8,12 @@ namespace Argonaut.Tests.Features.Json;
 
 /// <summary>
 /// Exercises the header toolbar's binding to <see cref="DateHintSettings"/> and the
-/// expand-depth callback/persistence, in isolation from any document view model.
-/// AppDataPaths.RootOverride redirects ExpandDepthPreference's on-disk store to a temp dir so
-/// the developer's real settings are never touched.
+/// expand-depth callback, in isolation from any document view model. Schemas are written to a
+/// temp folder per test.
 /// </summary>
-[Collection("AppDataPaths")]
 public sealed class JsonToolbarViewModelTests : IDisposable
 {
-    private readonly string settingsRoot;
+    private readonly string schemaDirectory;
 
     /// <summary>Acting on a schema/type pick is deferred a dispatcher turn (see
     /// <see cref="UiDeferral"/>); this stands in for that turn.</summary>
@@ -24,15 +21,13 @@ public sealed class JsonToolbarViewModelTests : IDisposable
 
     public JsonToolbarViewModelTests()
     {
-        settingsRoot = Path.Combine(Path.GetTempPath(), "ArgonautTests", Guid.NewGuid().ToString("N"));
-        AppDataPaths.RootOverride = settingsRoot;
+        schemaDirectory = Path.Combine(Path.GetTempPath(), "ArgonautTests", Guid.NewGuid().ToString("N"));
     }
 
     public void Dispose()
     {
         ui.Dispose();
-        AppDataPaths.RootOverride = null;
-        try { if (Directory.Exists(settingsRoot)) Directory.Delete(settingsRoot, recursive: true); }
+        try { if (Directory.Exists(schemaDirectory)) Directory.Delete(schemaDirectory, recursive: true); }
         catch { /* best-effort test cleanup */ }
     }
 
@@ -107,9 +102,9 @@ public sealed class JsonToolbarViewModelTests : IDisposable
         Assert.False(settings.IsUserSelected);
     }
 
-    private static SchemaCatalogEntry WriteSchema(string name)
+    private SchemaCatalogEntry WriteSchema(string name)
     {
-        string directory = JsonSchemaCatalog.EnsureUserDirectory();
+        string directory = Directory.CreateDirectory(schemaDirectory).FullName;
         string path = Path.Combine(directory, name + ".json");
         File.WriteAllText(path, $$"""{ "title": "{{name}}" }""");
         return new SchemaCatalogEntry(name, path, IsUser: true);
@@ -117,9 +112,9 @@ public sealed class JsonToolbarViewModelTests : IDisposable
 
     /// <summary>An OpenAPI document: several named roots, and a root of its own that isn't a
     /// schema - the case the root picker exists for.</summary>
-    private static SchemaCatalogEntry WriteOpenApiSchema(string name)
+    private SchemaCatalogEntry WriteOpenApiSchema(string name)
     {
-        string directory = JsonSchemaCatalog.EnsureUserDirectory();
+        string directory = Directory.CreateDirectory(schemaDirectory).FullName;
         string path = Path.Combine(directory, name + ".json");
         File.WriteAllText(path, """
             {
@@ -362,9 +357,9 @@ public sealed class JsonToolbarViewModelTests : IDisposable
 
     /// <summary>Two types that are indistinguishable on property names - the case no name-based
     /// scorer can settle, so the user must.</summary>
-    private static SchemaCatalogEntry WriteAmbiguousSchema(string name)
+    private SchemaCatalogEntry WriteAmbiguousSchema(string name)
     {
-        string directory = JsonSchemaCatalog.EnsureUserDirectory();
+        string directory = Directory.CreateDirectory(schemaDirectory).FullName;
         string path = Path.Combine(directory, name + ".json");
         File.WriteAllText(path, """
             {
@@ -487,24 +482,16 @@ public sealed class JsonToolbarViewModelTests : IDisposable
     [Fact]
     public void OpenSchemaFolderItem_OpensTheFolder_AndRevertsTheSelection()
     {
-        var opened = new List<string>();
-        JsonSchemaCatalog.OpenDirectoryOverride = opened.Add;
-        try
-        {
-            var schemaSettings = new JsonSchemaSettings();
-            schemaSettings.SetEntries(new[] { WriteSchema("alpha") });
-            var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
+        int opened = 0;
+        var schemaSettings = new JsonSchemaSettings();
+        schemaSettings.SetEntries(new[] { WriteSchema("alpha") });
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { }, openSchemaFolder: () => opened++);
 
-            SelectSchema(toolbar, toolbar.SchemaItems.Count - 1);
+        SelectSchema(toolbar, toolbar.SchemaItems.Count - 1);
 
-            Assert.Equal(new[] { JsonSchemaCatalog.GetUserDirectory() }, opened);
-            Assert.Equal(0, toolbar.SelectedSchemaIndex);
-            Assert.Null(schemaSettings.SelectedEntry);
-        }
-        finally
-        {
-            JsonSchemaCatalog.OpenDirectoryOverride = null;
-        }
+        Assert.Equal(1, opened);
+        Assert.Equal(0, toolbar.SelectedSchemaIndex);
+        Assert.Null(schemaSettings.SelectedEntry);
     }
 
     /// <summary>
@@ -516,29 +503,21 @@ public sealed class JsonToolbarViewModelTests : IDisposable
     [Fact]
     public void PickingASchemaItem_TouchesNothingUntilTheInputEventHasFinished()
     {
-        var opened = new List<string>();
-        JsonSchemaCatalog.OpenDirectoryOverride = opened.Add;
-        try
-        {
-            var schemaSettings = new JsonSchemaSettings();
-            schemaSettings.SetEntries(new[] { WriteSchema("alpha") });
-            var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
-            toolbar.IsSchemaFlyoutOpen = true;
+        int opened = 0;
+        var schemaSettings = new JsonSchemaSettings();
+        schemaSettings.SetEntries(new[] { WriteSchema("alpha") });
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { }, openSchemaFolder: () => opened++);
+        toolbar.IsSchemaFlyoutOpen = true;
 
-            toolbar.SelectedSchemaIndex = toolbar.SchemaItems.Count - 1;
+        toolbar.SelectedSchemaIndex = toolbar.SchemaItems.Count - 1;
 
-            Assert.Empty(opened);
-            Assert.True(toolbar.IsSchemaFlyoutOpen);
+        Assert.Equal(0, opened);
+        Assert.True(toolbar.IsSchemaFlyoutOpen);
 
-            ui.Pump();
+        ui.Pump();
 
-            Assert.Equal(new[] { JsonSchemaCatalog.GetUserDirectory() }, opened);
-            Assert.False(toolbar.IsSchemaFlyoutOpen);
-        }
-        finally
-        {
-            JsonSchemaCatalog.OpenDirectoryOverride = null;
-        }
+        Assert.Equal(1, opened);
+        Assert.False(toolbar.IsSchemaFlyoutOpen);
     }
 
     /// <summary>The same rule for the schema half of the flyout: binding a schema rebuilds
@@ -583,7 +562,7 @@ public sealed class JsonToolbarViewModelTests : IDisposable
         => ui.PumpUntilAsync(() => settings.Document is not null);
 
     [Fact]
-    public void ExpandDepthIndex_Set_PersistsAndInvokesCallback()
+    public void ExpandDepthIndex_Set_InvokesCallback()
     {
         var settings = new DateHintSettings();
         var applied = new List<int>();
@@ -591,7 +570,6 @@ public sealed class JsonToolbarViewModelTests : IDisposable
 
         toolbar.ExpandDepthIndex = 4;
 
-        Assert.Equal(4, ExpandDepthPreference.Load());
         Assert.Equal(new[] { 4 }, applied);
 
         toolbar.ExpandDepthIndex = 4;

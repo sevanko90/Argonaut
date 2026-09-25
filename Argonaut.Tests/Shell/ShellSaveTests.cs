@@ -1,3 +1,4 @@
+using Argonaut.Tests.Support;
 using System.Text;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Detection;
@@ -22,7 +23,6 @@ namespace Argonaut.Tests.Shell;
 /// drop them. The document is a fake that records what it was asked to do; the save itself is
 /// <see cref="RawSaveTests"/>'s subject.
 /// </summary>
-[Collection("AppDataPaths")]
 public sealed class ShellSaveTests : IDisposable
 {
     private readonly string tempDir;
@@ -31,12 +31,10 @@ public sealed class ShellSaveTests : IDisposable
     {
         tempDir = Path.Combine(Path.GetTempPath(), "ArgonautTestFiles", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDir);
-        AppDataPaths.RootOverride = Path.Combine(tempDir, "settings");
     }
 
     public void Dispose()
     {
-        AppDataPaths.RootOverride = null;
         try { Directory.Delete(tempDir, recursive: true); }
         catch { /* best-effort test cleanup */ }
     }
@@ -144,7 +142,7 @@ public sealed class ShellSaveTests : IDisposable
 
         public Harness(byte[]? clipboard = null)
         {
-            Shell = new MainWindowViewModel(
+            Shell = new MainWindowViewModel(SettingsStore.InMemory(), TestSchemas.Catalog(),
                 _ =>
                 {
                     ReplaceConfirmations++;

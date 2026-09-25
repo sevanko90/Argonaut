@@ -1,5 +1,4 @@
 using System.Text;
-using Argonaut.Engine.Settings;
 using Argonaut.Features.Raw;
 using Argonaut.Tests.Support;
 using Avalonia.Controls;
@@ -17,7 +16,6 @@ namespace Argonaut.Tests.Features.Raw;
 /// fewer characters than bytes wherever the content is not ASCII, and no real text averages the
 /// widest glyph in the font - so at wrap 160 the bar offered a long pan into empty space.
 /// </summary>
-[Collection("AppDataPaths")]
 public sealed class RawViewPanRangeTests : IDisposable
 {
     private readonly string tempDir;
@@ -26,12 +24,10 @@ public sealed class RawViewPanRangeTests : IDisposable
     {
         tempDir = Path.Combine(Path.GetTempPath(), "ArgonautTestFiles", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDir);
-        AppDataPaths.RootOverride = Path.Combine(tempDir, "settings");
     }
 
     public void Dispose()
     {
-        AppDataPaths.RootOverride = null;
         try { Directory.Delete(tempDir, recursive: true); }
         catch { /* best-effort test cleanup */ }
     }
@@ -70,7 +66,7 @@ public sealed class RawViewPanRangeTests : IDisposable
         var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(RawViewPanRangeTests).Assembly);
         return session.Dispatch(async () =>
         {
-            var vm = new RawViewModel();
+            var vm = new RawViewModel(new RawViewSettings());
             Window? window = null;
             try
             {
@@ -120,7 +116,7 @@ public sealed class RawViewPanRangeTests : IDisposable
         var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(RawViewPanRangeTests).Assembly);
         return session.Dispatch(async () =>
         {
-            var vm = new RawViewModel();
+            var vm = new RawViewModel(new RawViewSettings());
             Window? window = null;
             try
             {
@@ -163,7 +159,7 @@ public sealed class RawViewPanRangeTests : IDisposable
         var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(RawViewPanRangeTests).Assembly);
         return session.Dispatch(async () =>
         {
-            var vm = new RawViewModel();
+            var vm = new RawViewModel(new RawViewSettings());
             Window? window = null;
             try
             {

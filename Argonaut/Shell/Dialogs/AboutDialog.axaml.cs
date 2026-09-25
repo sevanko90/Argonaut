@@ -1,4 +1,4 @@
-using Argonaut.Engine.Settings;
+using Argonaut.Shell.Updates;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using System.Diagnostics;
@@ -8,6 +8,10 @@ namespace Argonaut.Shell.Dialogs;
 
 public partial class AboutDialog : Window
 {
+    // Set by ShowAbout before the dialog is shown. Not a constructor parameter, because the XAML
+    // runtime loader needs a parameterless one.
+    private UpdateSettings? updateSettings;
+
     public AboutDialog()
     {
         InitializeComponent();
@@ -15,11 +19,13 @@ public partial class AboutDialog : Window
         NameText.Text = AppInfo.Name;
         VersionText.Text = $"Version {AppInfo.Version}";
         RepoLinkButton.Content = AppInfo.RepoUrl;
-        AutoUpdateCheckBox.IsChecked = AutoUpdatePreference.Load();
     }
 
-    private void OnAutoUpdateToggled(object? sender, RoutedEventArgs e) =>
-        AutoUpdatePreference.Save(AutoUpdateCheckBox.IsChecked ?? true);
+    private void OnAutoUpdateToggled(object? sender, RoutedEventArgs e)
+    {
+        if (updateSettings is not null)
+            updateSettings.CheckOnStartup = AutoUpdateCheckBox.IsChecked ?? true;
+    }
 
     private void OnRepoLinkClicked(object? sender, RoutedEventArgs e)
     {
@@ -40,5 +46,11 @@ public partial class AboutDialog : Window
 
     private void OnClose(object? sender, RoutedEventArgs e) => Close();
 
-    public static Task ShowAbout(Window owner) => new AboutDialog().ShowDialog(owner);
+    public static Task ShowAbout(Window owner, UpdateSettings updateSettings)
+    {
+        var dialog = new AboutDialog();
+        dialog.AutoUpdateCheckBox.IsChecked = updateSettings.CheckOnStartup;
+        dialog.updateSettings = updateSettings;
+        return dialog.ShowDialog(owner);
+    }
 }

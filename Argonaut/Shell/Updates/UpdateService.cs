@@ -17,13 +17,14 @@ namespace Argonaut.Shell.Updates;
 /// </summary>
 public sealed class UpdateService
 {
-    private const string MarkerFileName = "update-check.json";
     private static readonly TimeSpan CheckInterval = TimeSpan.FromHours(24);
 
     private readonly UpdateManager manager;
+    private readonly UpdateSettings settings;
 
-    public UpdateService()
+    public UpdateService(UpdateSettings settings)
     {
+        this.settings = settings;
         manager = new UpdateManager(new GithubSource(AppInfo.RepoUrl, accessToken: null, prerelease: false));
     }
 
@@ -38,21 +39,20 @@ public sealed class UpdateService
     /// <summary>
     /// Gates the silent background startup check: off entirely when the user has disabled
     /// auto-update (see the About dialog), otherwise throttled to once per
-    /// <see cref="CheckInterval"/> via a marker file alongside the app's other settings files.
+    /// <see cref="CheckInterval"/> by the last check's time, remembered in <see cref="UpdateSettings"/>.
     /// Does not affect the manual "Check for Updates" toolbar action - disabling auto-update
     /// only stops the automatic check, not the user's ability to check on demand.
     /// </summary>
     public bool ShouldCheckOnStartup()
     {
-        if (!AutoUpdatePreference.Load())
+        if (!settings.CheckOnStartup)
             return false;
 
-        var marker = JsonSettingsStore.TryLoad<UpdateCheckMarker>(MarkerFileName);
-        return marker is null || DateTimeOffset.UtcNow - marker.LastCheckUtc >= CheckInterval;
+        return settings.LastStartupCheckUtc is not { } last || DateTimeOffset.UtcNow - last >= CheckInterval;
     }
 
     public void RecordStartupCheck() =>
-        JsonSettingsStore.Save(MarkerFileName, new UpdateCheckMarker(DateTimeOffset.UtcNow));
+        settings.LastStartupCheckUtc = DateTimeOffset.UtcNow;
 
     public async Task DownloadUpdatesAsync(UpdateInfo updateInfo, Action<int> onProgress)
     {
@@ -60,6 +60,4 @@ public sealed class UpdateService
     }
 
     public void ApplyUpdatesAndRestart(UpdateInfo updateInfo) => manager.ApplyUpdatesAndRestart(updateInfo);
-
-    private sealed record UpdateCheckMarker(DateTimeOffset LastCheckUtc);
 }

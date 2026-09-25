@@ -22,7 +22,7 @@ public abstract class AppendLogIndexBase<T> where T : struct
     // Single-writer (the scan task) / multi-reader (UI). The log's volatile Count
     // publication is what lets readers run lock-free - see SegmentedAppendLog for the
     // full reasoning.
-    protected readonly SegmentedAppendLog<T> items = new();
+    protected readonly SegmentedAppendLog<T> items;
 
     // Guards ONLY the cold waiter machinery below (registration and completion of the
     // outstanding waits). Nothing on the per-record hot path takes this lock.
@@ -50,6 +50,23 @@ public abstract class AppendLogIndexBase<T> where T : struct
     // lock-free by IBackgroundIndex.Failure. Written before `complete` so a reader that
     // observes AllItemsPublished also observes the failure that caused it.
     private volatile IndexFailure? failure;
+
+    /// <summary>An index that is about to scan into a log of its own.</summary>
+    protected AppendLogIndexBase()
+    {
+        this.items = new SegmentedAppendLog<T>();
+    }
+
+    /// <summary>
+    /// An index over records another index of the same bytes has already published in full - no
+    /// scan, complete from birth. The log is shared, not copied: a finished log has no writer
+    /// left, so every reader of it, in either index, only ever reads.
+    /// </summary>
+    protected AppendLogIndexBase(SegmentedAppendLog<T> finishedLog)
+    {
+        this.items = finishedLog;
+        this.complete = true;
+    }
 
     /// <summary>
     /// True once the scan has stopped publishing items - set in <see cref="RunIndexing"/>'s

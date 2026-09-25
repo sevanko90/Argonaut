@@ -53,8 +53,12 @@ public sealed class MemoryByteOrigin : IByteOrigin
         return new MemoryByteSource(this.bytes, checked((int)offset), checked((int)length));
     }
 
+    public KeptIndexes KeptIndexes { get; } = new();
+
     public void Dispose()
     {
+        KeptIndexes.Clear();
+
         // Nothing to release. The array is managed, and a source still reading it (a search that
         // outlived the document) keeps it alive by itself.
     }

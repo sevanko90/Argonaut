@@ -514,4 +514,60 @@ public class RawSegmentIndexTests
         Assert.Equal((0L, 0, 1), index.LineStartContaining(0));
         Assert.Equal((0L, false, 0, 1), index.LineEndContaining(0));
     }
+
+    /// <summary>Anchors a finished scan leaves behind reopen over a fresh source as the very same
+    /// rows - every row, and every offset's row - with no scan.</summary>
+    [Fact]
+    public void Reopen_FromDetachedAnchors_ReproducesEveryRow()
+    {
+        var content = Encoding.UTF8.GetBytes(string.Concat(Enumerable.Range(0, LinesBeyondOneAnchorBucket)
+            .Select(i => new string('é', i % 90) + "\n")));
+
+        WithIndex(content, 80, (scanned, file) =>
+        {
+            var anchors = scanned.DetachAnchors();
+            Assert.NotNull(anchors);
+
+            var reopened = RawSegmentIndex.Reopen(file, anchors);
+
+            Assert.True(reopened.IndexingTask.IsCompletedSuccessfully);
+            Assert.True(reopened.AllItemsPublished);
+            Assert.Equal(scanned.RowCount, reopened.RowCount);
+            for (int row = 0; row < scanned.RowCount; row++)
+                Assert.Equal(scanned.GetRowInfo(row), reopened.GetRowInfo(row));
+            for (long offset = 0; offset < content.Length; offset += 37)
+                Assert.Equal(scanned.RowForOffset(offset), reopened.RowForOffset(offset));
+        });
+    }
+
+    [Fact]
+    public void DetachAnchors_FromAStoppedScan_IsNull()
+    {
+        string path = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllBytes(path, new byte[1_000_000]);
+            using var file = new MMapFile(path);
+            var index = RawSegmentIndex.StartIndexing(file, 80, cancellationToken: new CancellationToken(canceled: true));
+            try { index.IndexingTask.GetAwaiter().GetResult(); } catch (OperationCanceledException) { }
+
+            Assert.Null(index.DetachAnchors());
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Reopen_OverBytesOfAnotherLength_Throws()
+    {
+        WithIndex(Encoding.UTF8.GetBytes("one\ntwo\n"), 80, (scanned, _) =>
+        {
+            var anchors = scanned.DetachAnchors()!;
+            var shorter = new MemoryByteSource(Encoding.UTF8.GetBytes("one\n"));
+
+            Assert.Throws<ArgumentException>(() => RawSegmentIndex.Reopen(shorter, anchors));
+        });
+    }
 }

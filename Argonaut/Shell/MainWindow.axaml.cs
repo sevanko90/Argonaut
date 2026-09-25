@@ -73,7 +73,7 @@ public partial class MainWindow : Window
 
         ToastService.Requested += ShowToast;
         viewModel.Progress.WorkStarted += (_, _) => StartProgressTicks();
-        RawJumpService.Requested += offset => _ = viewModel.JumpToRawOffsetAsync(offset);
+        RawJumpService.Requested += range => _ = viewModel.RevealInTextViewAsync(range);
         ArrayTableService.Requested += request => _ = viewModel.OpenArrayTableAsync(request);
 
         // The platform's own modifier, so the menu shows the shortcut the key handler honours.
@@ -216,6 +216,17 @@ public partial class MainWindow : Window
             if (viewModel.IsSaveAvailable)
             {
                 _ = (e.KeyModifiers & KeyModifiers.Shift) != 0 ? viewModel.SaveAsAsync() : viewModel.SaveAsync();
+                e.Handled = true;
+            }
+
+            return;
+        }
+
+        if (e.Key == Key.T && cmdOrCtrl)
+        {
+            if (viewModel.CanToggleTextView)
+            {
+                _ = viewModel.ToggleTextViewAsync();
                 e.Handled = true;
             }
 
@@ -532,6 +543,11 @@ public partial class MainWindow : Window
             // Velopack ends the process without the app's Exit, which is where settings are saved.
             settings.Save();
             updateService.ApplyUpdatesAndRestart(info);
+    }
+
+    private void OnToggleTextView(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        _ = viewModel.ToggleTextViewAsync();
     }
 
     private void OnJumpToFailureLine(object? sender, Avalonia.Interactivity.RoutedEventArgs e)

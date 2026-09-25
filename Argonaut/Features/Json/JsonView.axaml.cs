@@ -3,6 +3,7 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Linq;
 using System.Threading.Tasks;
+using Argonaut.Engine.Bytes;
 using Argonaut.Features.Json.Hints;
 using Argonaut.Features.Json.Indexing;
 using Argonaut.Features.Json.Paths;
@@ -316,7 +317,7 @@ public partial class JsonView : UserControl
         if (sender is not Control { DataContext: JsonRow { TruncatedValueOffset: { } offset } })
             return;
 
-        RawJumpService.Request(offset);
+        RawJumpService.Request(ByteRange.At(offset));
     }
 
     /// <summary>
@@ -374,6 +375,12 @@ public partial class JsonView : UserControl
             await clipboard.SetTextAsync(path);
 
         ToastService.Show("JSONPath copied to clipboard");
+    }
+
+    private void OnShowInTextClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is JsonViewModel vm)
+            vm.ShowSelectionInText();
     }
 
     private async void OnCopyValueClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)

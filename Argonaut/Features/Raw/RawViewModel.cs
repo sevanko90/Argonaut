@@ -29,7 +29,7 @@ namespace Argonaut.Features.Raw;
 /// whole new instance rather than reset in place, so the ListBox rebinds cleanly and the
 /// disposed old collection reports empty for Avalonia's trailing ItemsSource walk.
 /// </summary>
-public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigable, ISaveableDocument
+public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable, ISaveableDocument
 {
     private const int InitialIndexedRowTarget = 250;
 
@@ -69,6 +69,12 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
     }
 
     private int wrapWidth = RawViewSettings.DefaultWrapWidth;
+
+    // The origin the session's scan reads, and the version of it the mapping was opened at: what
+    // a finished scan's anchors are kept against, and what kept anchors must still match to be
+    // reused (see KeptIndexes).
+    private IByteOrigin? scannedOrigin;
+    private ByteOriginVersion? scannedVersion;
 
     protected override IDocumentSession? Session => this.session;
 
@@ -518,18 +524,59 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
         Caret?.PlaceAt(byteOffset);
     }
 
+    /// <summary>Reveals <paramref name="byteOffset"/> with the caret on it - see
+    /// <see cref="RevealByteRangeAsync"/>.</summary>
+    public Task JumpToByteOffsetAsync(long byteOffset) => RevealByteRangeAsync(ByteRange.At(byteOffset));
+
     /// <summary>
-    /// Resolves <paramref name="byteOffset"/> to a display row - waiting for indexing to reach
-    /// it (or finish) if necessary - and reveals it. Used by the "jump to failure location"
-    /// link on another document's incompatible/partial-failure display, which switches this
-    /// view in then calls here. Mirrors <see cref="Argonaut.Features.Raw.RawSearchNavigator.RevealAsync"/>'s
+    /// The rows the view is showing, reported by the surface on every layout - null when no view
+    /// is laid out over this document. Plain state rather than an observable property: nothing
+    /// reacts to it, it is only read when the user's position is asked for.
+    /// </summary>
+    internal (int First, int Last)? ViewportRows { get; set; }
+
+    /// <summary>
+    /// Where the user is: the selection, or the caret as a zero-length range - while the caret is
+    /// on screen. Scrolling moves the view and not the caret, so after scrolling away the caret
+    /// is where the user was, and the start of the top row on screen is where they are.
+    /// </summary>
+    public ByteRange? SelectedByteRange
+    {
+        get
+        {
+            if (Caret is not { } caret)
+                return null;
+
+            var selection = caret.Selection;
+            var atCaret = selection.IsEmpty ? ByteRange.At(caret.Caret.Offset) : new ByteRange(selection.Start, selection.Length);
+
+            if (ViewportRows is not { } viewport || RowIndex is not { } rows || viewport.First >= rows.RowCount)
+                return atCaret;
+
+            int caretRow = rows.RowForOffset(caret.Caret.Offset) ?? rows.RowCount - 1;
+            return caretRow >= viewport.First && caretRow <= viewport.Last
+                ? atCaret
+                : ByteRange.At(rows.GetRowInfo(viewport.First).Start);
+        }
+    }
+
+    /// <summary>
+    /// Resolves <paramref name="range"/>'s start to a display row - waiting for indexing to reach
+    /// it (or finish) if necessary - reveals it, and selects the range with the caret at its
+    /// start. Used by every jump in from elsewhere: a failure location's link, and a view switch
+    /// carrying the JSON view's selected node across. Mirrors <see cref="RawSearchNavigator.RevealAsync"/>'s
     /// generation re-check for a wrap-width change racing the resolve, and its own disposal:
     /// if the document is closed/switched away while resolving, resuming touches an
     /// already-unmapped file, which surfaces as a catchable <see cref="ObjectDisposedException"/>
     /// (see CLAUDE.md/MMapFile) rather than corrupting anything - simply ignored here since
     /// there is nothing left to reveal.
+    ///
+    /// The range's end is waited for too, before anything moves: a caret snaps against indexed
+    /// rows, so extending to an end the scan has not reached would clip the selection. The
+    /// selection is anchored at the end and extended back to the start so the caret - which the
+    /// view scrolls to - sits where the reveal is, not at the far end of a large node.
     /// </summary>
-    public async Task JumpToByteOffsetAsync(long byteOffset)
+    public async Task RevealByteRangeAsync(ByteRange range)
     {
         if (this.session is null)
             return;
@@ -537,24 +584,40 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
         try
         {
             int generation = IndexGeneration;
-            var row = await RawOffsetRowResolver.ResolveWhenCoveredAsync(this.session.Index, byteOffset, CancellationToken.None);
+            var row = await ResolveRangeAsync(range);
             if (this.IsDisposed)
                 return;
 
             if (generation != IndexGeneration)
             {
-                row = await RawOffsetRowResolver.ResolveWhenCoveredAsync(this.session!.Index, byteOffset, CancellationToken.None);
+                row = await ResolveRangeAsync(range);
                 if (this.IsDisposed)
                     return;
             }
 
-            if (row is int rowIndex)
-                RevealOffset(byteOffset, rowIndex);
+            if (row is not int rowIndex)
+                return;
+
+            RevealOffset(range.Offset, rowIndex);
+            if (range.Length > 0 && Caret is { } caret)
+            {
+                caret.PlaceAt(range.End);
+                caret.ExtendTo(range.Offset);
+            }
         }
         catch (ObjectDisposedException)
         {
             // Document closed/switched away mid-resolve; the mapping may already be gone.
         }
+    }
+
+    /// <summary>The row <paramref name="range"/> starts on, once the scan covers all of it.</summary>
+    private async Task<int?> ResolveRangeAsync(ByteRange range)
+    {
+        if (range.Length > 0)
+            await RawOffsetRowResolver.ResolveWhenCoveredAsync(this.session!.Index, range.End, CancellationToken.None);
+
+        return await RawOffsetRowResolver.ResolveWhenCoveredAsync(this.session!.Index, range.Offset, CancellationToken.None);
     }
 
     public async Task LoadAsync(IByteOrigin origin, IProgressReporter? progressReporter = null)
@@ -627,7 +690,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
         IndexFailure = null;
 
         var progress = this.progressBoard.Begin($"Re-indexing {Path.GetFileName(FilePath)}");
-        this.session.RestartIndex(bytes, progress);
+        this.session.RestartIndex(bytes, progress, FindKeptAnchors(bytes));
         progress.FinishWhen(this.session.IndexingTask);
 
         var old = this.rows;
@@ -659,13 +722,43 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
 
     /// <summary>Opens <paramref name="origin"/> and starts scanning it, reading through a
     /// <see cref="RemappableByteSource"/> so a later save can unmap it.</summary>
+    /// <remarks>Anchors kept on the origin by an earlier raw view over the same bytes replace the
+    /// scan: reopening the text view over an input it has already scanned is then instant.</remarks>
     private RawIndexSession StartSession(IByteOrigin origin, IProgressReporter? progressReporter)
     {
+        this.scannedOrigin = origin;
+        this.scannedVersion = ByteOriginVersion.Of(origin);
+
         var bytes = new RemappableByteSource(origin.Open());
-        var session = RawIndexSession.Start(bytes, this.wrapWidth, progressReporter);
+        var session = RawIndexSession.Start(bytes, this.wrapWidth, progressReporter, FindKeptAnchors(this.wrapWidth));
         this.fileBytes = bytes;
         this.session = session;
         return session;
+    }
+
+    /// <summary>Anchors kept for <paramref name="width"/> that still describe the bytes the session
+    /// has mapped, or null - including when the file has changed on disk since it was mapped, since
+    /// anchors for what is on disk now would not describe what the mapping shows.</summary>
+    private RawRowAnchors? FindKeptAnchors(int width)
+    {
+        if (this.scannedOrigin is not { } origin || this.scannedVersion is not { } version || ByteOriginVersion.Of(origin) != version)
+            return null;
+
+        return origin.KeptIndexes.TryGet<RawRowAnchors>(RawRowAnchors.KeyFor(width), version, out var kept) ? kept : null;
+    }
+
+    /// <summary>Keeps a finished scan's anchors on the origin for the next raw view over it -
+    /// unless the file changed while it was being scanned.</summary>
+    private void KeepAnchors()
+    {
+        if (this.session?.Index.DetachAnchors() is not { } anchors ||
+            this.scannedOrigin is not { } origin || this.scannedVersion is not { } version ||
+            ByteOriginVersion.Of(origin) != version)
+        {
+            return;
+        }
+
+        origin.KeptIndexes.Keep(RawRowAnchors.KeyFor(anchors.WrapWidth), version, anchors);
     }
 
     // ---- saving -------------------------------------------------------------------------
@@ -925,6 +1018,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteOffsetNavigabl
     protected override void OnIndexingCompleted()
     {
         StatusText = $"{FilePath} — {RowCount:N0} rows";
+        KeepAnchors();
 
         // Editing waits for the scan, so this is the moment the toggle becomes usable.
         if (this.toolbar is { } toolbar)

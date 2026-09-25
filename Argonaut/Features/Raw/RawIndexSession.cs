@@ -71,13 +71,15 @@ public sealed class RawIndexSession : IDocumentSession
     /// Takes ownership of <paramref name="bytes"/> immediately: if starting the indexer throws,
     /// the file is disposed here and the exception propagates.
     /// </summary>
-    public static RawIndexSession Start(IByteSource bytes, int wrapWidth, IProgressReporter? progressReporter = null)
+    /// <param name="kept">Anchors a finished scan of these same bytes at this wrap width left
+    /// behind, which replace the scan when given.</param>
+    public static RawIndexSession Start(IByteSource bytes, int wrapWidth, IProgressReporter? progressReporter = null, RawRowAnchors? kept = null)
     {
         var mappingCts = new CancellationTokenSource();
         var indexCts = CancellationTokenSource.CreateLinkedTokenSource(mappingCts.Token);
         try
         {
-            var index = RawSegmentIndex.StartIndexing(bytes, wrapWidth, progressReporter, indexCts.Token);
+            var index = BuildIndex(bytes, wrapWidth, progressReporter, kept, indexCts.Token);
             return new RawIndexSession(bytes, index, mappingCts, indexCts);
         }
         catch
@@ -99,7 +101,7 @@ public sealed class RawIndexSession : IDocumentSession
     /// closes. The mapping is deliberately not moving, so a find scan over the same path (which
     /// owns its own mapping anyway) and a linked reveal both ride through untouched.
     /// </summary>
-    public void RestartIndex(int wrapWidth, IProgressReporter? progressReporter = null)
+    public void RestartIndex(int wrapWidth, IProgressReporter? progressReporter = null, RawRowAnchors? kept = null)
     {
         ObjectDisposedException.ThrowIf(this.disposed, this);
 
@@ -108,8 +110,14 @@ public sealed class RawIndexSession : IDocumentSession
         this.indexCts.Dispose();
 
         this.indexCts = CancellationTokenSource.CreateLinkedTokenSource(this.mappingCts.Token);
-        this.Index = RawSegmentIndex.StartIndexing(this.Bytes, wrapWidth, progressReporter, this.indexCts.Token);
+        this.Index = BuildIndex(this.Bytes, wrapWidth, progressReporter, kept, this.indexCts.Token);
     }
+
+    private static RawSegmentIndex BuildIndex(IByteSource bytes, int wrapWidth, IProgressReporter? progressReporter,
+        RawRowAnchors? kept, CancellationToken stopping) =>
+        kept is not null && kept.WrapWidth == wrapWidth && bytes.LengthSettled && bytes.AvailableLength == kept.Length
+            ? RawSegmentIndex.Reopen(bytes, kept)
+            : RawSegmentIndex.StartIndexing(bytes, wrapWidth, progressReporter, stopping);
 
     /// <summary>
     /// Requests the current scan stop early, by cancelling the mapping source - the per-index

@@ -287,6 +287,52 @@ public sealed class RawViewModelTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// A range arriving from the JSON view is a node: it is selected, with the caret at its start
+    /// so the reveal and the caret agree on where the user now is.
+    /// </summary>
+    [Fact]
+    public async Task RevealByteRangeAsync_SelectsTheRange_WithTheCaretAtItsStart()
+    {
+        var vm = new RawViewModel(new RawViewSettings());
+        try
+        {
+            await vm.LoadAsync(WriteNewlinelessFile());
+            await vm.IndexingTask;
+
+            await vm.RevealByteRangeAsync(new ByteRange(165, 200));
+
+            Assert.Equal(1, vm.SelectedRowIndex);
+            Assert.Equal(165, vm.Caret!.Caret.Offset);
+            Assert.Equal(165, vm.Caret.Selection.Start);
+            Assert.Equal(365, vm.Caret.Selection.End);
+            Assert.Equal(new ByteRange(165, 200), vm.SelectedByteRange);
+        }
+        finally
+        {
+            vm.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task SelectedByteRange_WithNothingSelected_IsTheCaret()
+    {
+        var vm = new RawViewModel(new RawViewSettings());
+        try
+        {
+            await vm.LoadAsync(WriteNewlinelessFile());
+            await vm.IndexingTask;
+
+            await vm.JumpToByteOffsetAsync(42);
+
+            Assert.Equal(ByteRange.At(42), vm.SelectedByteRange);
+        }
+        finally
+        {
+            vm.Dispose();
+        }
+    }
+
     [Fact]
     public async Task JumpToByteOffsetAsync_AfterDispose_DoesNotThrow()
     {
@@ -478,6 +524,153 @@ public sealed class RawViewModelTests : IDisposable
 
             Assert.Equal("U+0078 LATIN SMALL LETTER X", vm.CaretCharacterText);
             Assert.Equal("Byte 100    Ln 1, Col 101", vm.CaretPositionText);
+        }
+        finally
+        {
+            vm.Dispose();
+        }
+    }
+
+    /// <summary>The anchors a finished scan keeps on its origin, once the completion monitor has
+    /// run - it resumes after the scan's task, so a test that only awaited that task can get here
+    /// first.</summary>
+    private static async Task<RawRowAnchors> KeptAnchorsAsync(IByteOrigin origin, int wrapWidth)
+    {
+        for (int attempt = 0; attempt < 200; attempt++)
+        {
+            if (ByteOriginVersion.Of(origin) is { } version &&
+                origin.KeptIndexes.TryGet<RawRowAnchors>(RawRowAnchors.KeyFor(wrapWidth), version, out var anchors))
+            {
+                return anchors;
+            }
+
+            await Task.Delay(10);
+        }
+
+        throw new TimeoutException("The finished scan's anchors were never kept.");
+    }
+
+    /// <summary>
+    /// The hop to the text view and back closes this view and opens a new one over the same origin.
+    /// The second opens complete, on the first one's anchors, with no scan.
+    /// </summary>
+    [Fact]
+    public async Task LoadAsync_OverAnOriginAlreadyScanned_ReusesItsAnchors()
+    {
+        var origin = new FileByteOrigin(WriteNewlinelessFile());
+        var first = new RawViewModel(new RawViewSettings());
+        await first.LoadAsync(origin);
+        await first.IndexingTask;
+        var anchors = await KeptAnchorsAsync(origin, RawViewSettings.DefaultWrapWidth);
+        first.Dispose();
+
+        var second = new RawViewModel(new RawViewSettings());
+        try
+        {
+            await second.LoadAsync(origin);
+
+            Assert.True(second.IndexingTask.IsCompletedSuccessfully);
+            Assert.Same(anchors.Log, second.Index!.DetachAnchors()!.Log);
+            Assert.Equal(3, second.RowCount);
+        }
+        finally
+        {
+            second.Dispose();
+        }
+    }
+
+    /// <summary>Anchors for bytes that have since changed on disk would put rows in the wrong
+    /// places - past the end, on a shorter file - so they are scanned again instead.</summary>
+    [Fact]
+    public async Task LoadAsync_AfterTheFileChanged_ScansAgain()
+    {
+        string path = WriteNewlinelessFile();
+        File.SetLastWriteTimeUtc(path, new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+        var origin = new FileByteOrigin(path);
+        var first = new RawViewModel(new RawViewSettings());
+        await first.LoadAsync(origin);
+        await first.IndexingTask;
+        var anchors = await KeptAnchorsAsync(origin, RawViewSettings.DefaultWrapWidth);
+        first.Dispose();
+
+        File.WriteAllBytes(path, Encoding.ASCII.GetBytes("short\nfile\n"));
+
+        var second = new RawViewModel(new RawViewSettings());
+        try
+        {
+            await second.LoadAsync(origin);
+            await second.IndexingTask;
+
+            Assert.NotSame(anchors.Log, second.Index!.DetachAnchors()!.Log);
+            Assert.Equal(2, second.RowCount);
+        }
+        finally
+        {
+            second.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task SetWrapWidth_BackToAWidthAlreadyScanned_ReusesItsAnchors()
+    {
+        var origin = new FileByteOrigin(WriteNewlinelessFile());
+        var vm = new RawViewModel(new RawViewSettings());
+        try
+        {
+            await vm.LoadAsync(origin);
+            await vm.IndexingTask;
+            var anchors = await KeptAnchorsAsync(origin, RawViewSettings.DefaultWrapWidth);
+
+            vm.SetWrapWidth(80);
+            await vm.IndexingTask;
+            await KeptAnchorsAsync(origin, 80);
+
+            vm.SetWrapWidth(RawViewSettings.DefaultWrapWidth);
+
+            Assert.True(vm.IndexingTask.IsCompletedSuccessfully);
+            Assert.Same(anchors.Log, vm.Index!.DetachAnchors()!.Log);
+        }
+        finally
+        {
+            vm.Dispose();
+        }
+    }
+
+    /// <summary>A caret the user scrolled away from is where they were, not where they are: the
+    /// top of what is on screen is carried instead.</summary>
+    [Fact]
+    public async Task SelectedByteRange_WithTheCaretScrolledOffScreen_IsTheTopOfTheViewport()
+    {
+        var vm = new RawViewModel(new RawViewSettings());
+        try
+        {
+            await vm.LoadAsync(WriteNewlinelessFile()); // rows at 0, 160, 320
+            await vm.IndexingTask;
+            await vm.JumpToByteOffsetAsync(5);
+
+            vm.ViewportRows = (2, 2);
+
+            Assert.Equal(ByteRange.At(320), vm.SelectedByteRange);
+        }
+        finally
+        {
+            vm.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task SelectedByteRange_WithTheCaretOnScreen_IsTheCaret()
+    {
+        var vm = new RawViewModel(new RawViewSettings());
+        try
+        {
+            await vm.LoadAsync(WriteNewlinelessFile());
+            await vm.IndexingTask;
+            await vm.JumpToByteOffsetAsync(170);
+
+            vm.ViewportRows = (1, 2);
+
+            Assert.Equal(ByteRange.At(170), vm.SelectedByteRange);
         }
         finally
         {

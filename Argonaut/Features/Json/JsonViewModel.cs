@@ -21,7 +21,7 @@ using Argonaut.Ui.Notifications;
 
 namespace Argonaut.Features.Json;
 
-public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
+public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable, IByteRangeNavigable
 {
     private const int InitialTokenTarget = 250;
 
@@ -202,6 +202,14 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
         rows?.EnsureVisible(tokenIndex);
     }
 
+    /// <summary>Selects the node a row stands for: the row's own token, or - for a closing
+    /// bracket's row, which is not a node of its own - the container it closes.</summary>
+    public void SelectNode(int tokenIndex)
+    {
+        if (session is { } current)
+            SelectToken(JsonOffsetTokenResolver.OpeningTokenOf(current.Index, tokenIndex));
+    }
+
     /// <summary>
     /// Resolves a JSONPath string (see <see cref="JsonPathResolver"/>) and selects/reveals
     /// the target token if found, or surfaces a toast on parse/lookup failure. Wired into
@@ -242,6 +250,83 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
             SelectToken(tokenIndex);
         else
             ToastService.Show(result.Error ?? "Path not found.");
+    }
+
+    /// <summary>
+    /// The selected node's own bytes, relative to the input rather than to this document's
+    /// mapping (see <see cref="JsonTokenInfo.Offset"/>): a string with its quotes, a container
+    /// bracket to bracket, a scalar as written. The property name is not part of it - the node is
+    /// the value. A container still open on a still-indexing file has no end yet, so it is only a
+    /// position.
+    /// </summary>
+    public ByteRange? SelectedByteRange
+    {
+        get
+        {
+            if (session is not { } current || SelectedTokenIndex is not int selected)
+                return null;
+
+            var index = current.Index;
+            int tokenIndex = JsonOffsetTokenResolver.OpeningTokenOf(index, selected);
+            var token = index.GetToken(tokenIndex);
+            long baseOffset = ScanTarget.Offset;
+
+            switch (token.Kind)
+            {
+                case JsonTokenKind.StartObject or JsonTokenKind.StartArray:
+                    if (token.EndIndex < 0)
+                        return ByteRange.At(baseOffset + token.Offset);
+
+                    var end = index.GetToken(token.EndIndex);
+                    return new ByteRange(baseOffset + token.Offset, end.Offset + end.Length - token.Offset);
+
+                case JsonTokenKind.String:
+                    return new ByteRange(baseOffset + token.Offset - 1, token.Length + 2L);
+
+                default:
+                    return new ByteRange(baseOffset + token.Offset, token.Length);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Selects the node <paramref name="range"/> starts in - waiting for the index to reach it
+    /// on a still-indexing file. A closing bracket selects the container it closes, and bytes
+    /// between nodes (a property name, punctuation) resolve the way a search hit does, to the
+    /// value they lead up to. A range outside this document's bytes (another line of an NDJSON
+    /// file) reveals nothing.
+    /// </summary>
+    public async Task RevealByteRangeAsync(ByteRange range)
+    {
+        if (session is not { } current || IsDisposed)
+            return;
+
+        long offset = range.Offset - ScanTarget.Offset;
+        if (offset < 0 || (ScanTarget.Length >= 0 && offset > ScanTarget.Length))
+            return;
+
+        int? tokenIndex;
+        try
+        {
+            tokenIndex = await JsonOffsetTokenResolver.ResolveWhenCoveredAsync(current.Index, offset, current.TearingDown);
+        }
+        catch (OperationCanceledException)
+        {
+            return; // the document closed while we waited
+        }
+
+        if (IsDisposed || tokenIndex is not int resolved)
+            return;
+
+        SelectToken(JsonOffsetTokenResolver.OpeningTokenOf(current.Index, resolved));
+    }
+
+    /// <summary>Asks the shell to show the selected node in the raw text view, through
+    /// <see cref="RawJumpService"/> - the view model never learns the shell exists.</summary>
+    public void ShowSelectionInText()
+    {
+        if (SelectedByteRange is { } range)
+            RawJumpService.Request(range);
     }
 
     /// <summary>

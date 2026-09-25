@@ -83,4 +83,8 @@ public interface IByteOrigin : IDisposable
     /// document's own source is live.
     /// </summary>
     IByteSource OpenRange(long offset, long length);
+
+    /// <summary>Indexes built over these bytes, kept for as long as this origin is open so a view
+    /// reopened over it need not scan again. Cleared when the origin is disposed.</summary>
+    KeptIndexes KeptIndexes { get; }
 }

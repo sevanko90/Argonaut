@@ -87,6 +87,25 @@ public static class JsonOffsetTokenResolver
     }
 
     /// <summary>
+    /// The Start token of the container <paramref name="tokenIndex"/> closes, when it is an End
+    /// token; any other token is returned as it is. What a selection wants, since a closing
+    /// bracket is not a node of its own. O(1): the token just before a closing bracket is either
+    /// the container's own Start (an empty container) or the last thing inside it, whose parent
+    /// is the container - which holds whether that is a scalar or a nested container's End,
+    /// because End tokens mirror their Start token's parent.
+    /// </summary>
+    public static int OpeningTokenOf(JsonStructureIndex index, int tokenIndex)
+    {
+        if (index.GetToken(tokenIndex).Kind is not (JsonTokenKind.EndObject or JsonTokenKind.EndArray))
+            return tokenIndex;
+
+        var previous = index.GetToken(tokenIndex - 1);
+        return previous.Kind is JsonTokenKind.StartObject or JsonTokenKind.StartArray && previous.EndIndex == tokenIndex
+            ? tokenIndex - 1
+            : previous.ParentIndex;
+    }
+
+    /// <summary>
     /// Like <see cref="ResolveTokenForOffset"/>, but first waits until indexing has reached
     /// <paramref name="offset"/> (or finished). Needed because a raw byte scan easily outruns
     /// the Utf8JsonReader-based indexer on large files.

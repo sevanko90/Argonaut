@@ -143,7 +143,7 @@ needs actual IPC.
   C2's in-process session-sharing optimization. Every table open, first one or a reload, pays a
   full index build.
 - **Platform risk**: macOS already has documented fragility around argv-driven multi-path opens —
-  see `App.axaml.cs`'s own comments and its `startupArgPaths`/`OpenDebugLog` machinery, added
+  see `App.axaml.cs`'s own comments and its `startupArgPaths` handling and its diagnostic log lines, added
   specifically because macOS re-signals each launched path as a separate `FileActivatedEventArgs`
   race against argv parsing. A second-process-with-args flow sits exactly on that fault line and
   should expect to hit similar issues. Velopack auto-update (checks GitHub Releases on launch,
@@ -196,7 +196,7 @@ would have turned a documented exception into a pattern.
 
 ### Chosen — capability interfaces
 
-`IPathNavigable` / `IByteOffsetNavigable`, opted into by the documents that can honour them. The
+`IPathNavigable` / `IByteRangeNavigable`, opted into by the documents that can honour them. The
 shell asks "can this document do the thing", not "what is this document". It also lets
 `JumpToRawOffsetAsync` drop its match, taking the shell from one concrete-type match to zero.
 

@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Detection;
 using Argonaut.Engine.Indexing;
+using Argonaut.Engine.Logging;
 using Argonaut.Engine.Progress;
 using Argonaut.Engine.Saving;
 using Argonaut.Engine.Settings;
@@ -75,6 +76,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly Func<string, Task<UnsavedChangesChoice>>? askAboutUnsavedChanges;
     private readonly Func<string, Task>? reportFailure;
     private readonly IFileReplacer fileReplacer;
+    private readonly IDiagnosticLog log;
 
     // True from the moment a save starts until it has finished, failed or been abandoned. Every
     // path that would change the document on screen, or read its file, waits it out: the save
@@ -92,6 +94,10 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private string? currentFilePath;
     private FileTypeDetector.FileKind currentKind;
+
+    // The view "Show in …" returns to from the text view: the last non-text view published over
+    // the current input. Unknown when there is none - a file detected as plain text, or a diff.
+    private FileTypeDetector.FileKind structuredKind;
     private string statusText = "No file loaded";
     private string title = DefaultTitle;
     private string fileName = string.Empty;
@@ -144,13 +150,16 @@ public sealed class MainWindowViewModel : ObservableObject
     /// unless a test substitutes one.</param>
     /// <param name="progressBoard">Where long operations are reported;
     /// <see cref="ProgressBoard.Shared"/> unless a test substitutes one.</param>
+    /// <param name="log">Where the open/load path records what it did; nothing is kept without
+    /// one.</param>
     public MainWindowViewModel(ISettingsStore settings, JsonSchemaCatalog schemaCatalog, Func<string, Task<bool>> confirmReplace,
         Func<Task<byte[]?>>? readClipboardBytes = null, DocumentLoader? documentLoader = null,
         Func<IByteOrigin, Task<string?>>? pickSaveDestination = null,
         Func<string, Task<UnsavedChangesChoice>>? askAboutUnsavedChanges = null,
         Func<string, Task>? reportFailure = null,
         IFileReplacer? fileReplacer = null,
-        ProgressBoard? progressBoard = null)
+        ProgressBoard? progressBoard = null,
+        IDiagnosticLog? log = null)
     {
         this.appearance = settings.Get<AppearanceSettings>();
         this.recentFileHistory = settings.Get<RecentFileHistory>();
@@ -162,6 +171,7 @@ public sealed class MainWindowViewModel : ObservableObject
         this.reportFailure = reportFailure;
         this.fileReplacer = fileReplacer ?? SiblingFileReplacer.ForCurrentPlatform();
         this.progressBoard = progressBoard ?? ProgressBoard.Shared;
+        this.log = log ?? NullDiagnosticLog.Instance;
 
         themeMode = appearance.Theme;
         contentFontMode = appearance.ContentFont;
@@ -271,23 +281,54 @@ public sealed class MainWindowViewModel : ObservableObject
     /// <summary>
     /// Switches to the raw viewer (if not already showing it) and jumps to
     /// <paramref name="byteOffset"/> - the shell-mediated action behind every failure
-    /// location's "Line N" link (the JSON banner's and the incompatible placeholder's alike)
-    /// and behind <see cref="RawJumpService"/> requests (e.g. JsonView's "view in raw" link
-    /// on a truncated value). Asks the current document for the CAPABILITY
-    /// (<see cref="IByteOffsetNavigable"/>) rather than matching its concrete type: "jump to an
-    /// offset" is meaningful for exactly one view today - every other document kind would have
-    /// to implement it as a no-op - so it stays off <see cref="IDocumentViewModel"/>, whose job
-    /// is the surface *every* document genuinely shares, but an opt-in interface still lets a
-    /// second view honour it one day without a shell edit. The shell holds no concrete-type
-    /// match on a document at all (see docs/architecture.md).
+    /// location's "Line N" link (the JSON banner's and the incompatible placeholder's alike).
+    /// See <see cref="RevealInTextViewAsync"/>.
     /// </summary>
-    public async Task JumpToRawOffsetAsync(long byteOffset)
+    public Task JumpToRawOffsetAsync(long byteOffset) => RevealInTextViewAsync(ByteRange.At(byteOffset));
+
+    /// <summary>
+    /// Switches to the raw viewer (if not already showing it) and reveals
+    /// <paramref name="range"/> there - behind <see cref="RawJumpService"/> requests (JsonView's
+    /// "show in text" for the selected node, and its "view in raw" link on a truncated value).
+    /// Asks the current document for the CAPABILITY (<see cref="IByteRangeNavigable"/>) rather
+    /// than matching its concrete type, so the shell holds no concrete-type match on a document
+    /// at all (see docs/architecture.md).
+    /// </summary>
+    public async Task RevealInTextViewAsync(ByteRange range)
     {
         if (currentKind != FileTypeDetector.FileKind.Unidentified)
-            await SwitchViewAsync(FileTypeDetector.FileKind.Unidentified);
+        {
+            await SwitchViewAsync(FileTypeDetector.FileKind.Unidentified, range);
+            return;
+        }
 
-        if (CurrentDocument is IByteOffsetNavigable navigable)
-            await navigable.JumpToByteOffsetAsync(byteOffset);
+        if (CurrentDocument is IByteRangeNavigable navigable)
+            await navigable.RevealByteRangeAsync(range);
+    }
+
+    /// <summary>Whether <see cref="ToggleTextViewAsync"/> has somewhere to go: into the text view
+    /// from any other, or back out of it to the view it was reached from.</summary>
+    public bool CanToggleTextView => IsFileOpen &&
+        (currentKind != FileTypeDetector.FileKind.Unidentified || structuredKind != FileTypeDetector.FileKind.Unknown);
+
+    /// <summary>What <see cref="ToggleTextViewAsync"/> will do, for its button.</summary>
+    public string TextViewToggleText => currentKind == FileTypeDetector.FileKind.Unidentified
+        ? $"Show in {DisplayNameFor(structuredKind)}"
+        : "Show in text";
+
+    /// <summary>
+    /// Hops between the text view and the view it was reached from, carrying the position across
+    /// (see <see cref="SwitchViewAsync"/>): the JSON view's selected node becomes the text view's
+    /// selection, and the text view's caret becomes the selected node on the way back.
+    /// </summary>
+    public Task ToggleTextViewAsync()
+    {
+        if (!CanToggleTextView)
+            return Task.CompletedTask;
+
+        return SwitchViewAsync(currentKind == FileTypeDetector.FileKind.Unidentified
+            ? structuredKind
+            : FileTypeDetector.FileKind.Unidentified);
     }
 
     public IReadOnlyList<RecentFileItem> RecentFiles
@@ -354,7 +395,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            OpenDebugLog.Write($"OpenDiff: load threw: {ex}");
+            this.log.Write($"OpenDiff: load threw: {ex}");
             document.Dispose();
             if (rightOrigin != this.ownedOrigins.FirstOrDefault())
                 rightOrigin.Dispose();
@@ -409,7 +450,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            OpenDebugLog.Write($"OpenArrayTable: load threw: {ex}");
+            this.log.Write($"OpenArrayTable: load threw: {ex}");
             document.Dispose();
             if (openRequest.IsCurrent(requestId))
                 StatusText = $"{sourceName} — failed to open as a table";
@@ -486,7 +527,7 @@ public sealed class MainWindowViewModel : ObservableObject
             }
             catch (Exception ex)
             {
-                OpenDebugLog.Write($"OpenPaths: DetectFileType threw: {ex}");
+                this.log.Write($"OpenPaths: DetectFileType threw: {ex}");
             }
         }
 
@@ -563,14 +604,14 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         if (string.IsNullOrWhiteSpace(path))
         {
-            OpenDebugLog.Write("OpenPath: path is null/whitespace, returning");
+            this.log.Write("OpenPath: path is null/whitespace, returning");
             return;
         }
 
         var normalizedPath = Path.GetFullPath(path);
         if (!File.Exists(normalizedPath))
         {
-            OpenDebugLog.Write($"OpenPath: File.Exists false for '{normalizedPath}'");
+            this.log.Write($"OpenPath: File.Exists false for '{normalizedPath}'");
             return;
         }
 
@@ -622,7 +663,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            OpenDebugLog.Write($"Paste: reading the clipboard threw: {ex}");
+            this.log.Write($"Paste: reading the clipboard threw: {ex}");
             ToastService.Show("Couldn't read the clipboard.");
             return;
         }
@@ -679,12 +720,12 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            OpenDebugLog.Write($"OpenOrigin: DetectFileType threw: {ex}");
+            this.log.Write($"OpenOrigin: DetectFileType threw: {ex}");
             origin.Dispose();
             return;
         }
 
-        OpenDebugLog.Write($"OpenOrigin: name='{name}', fileType={fileType}");
+        this.log.Write($"OpenOrigin: name='{name}', fileType={fileType}");
 
         // UI hygiene and defence in depth (see the remark in OpenDiffAsync) - the outgoing
         // document's own source scope is what actually stops a live search before the content
@@ -701,8 +742,17 @@ public sealed class MainWindowViewModel : ObservableObject
     /// kind - skipping the "replace file?" confirmation (same file, just a different view) and
     /// the recent-files entry (unlike opening a new path, this isn't a new "recently opened"
     /// event). No-ops if no file is open or <paramref name="kind"/> already matches.
+    ///
+    /// The position carries across: whatever the outgoing document has selected, as a byte range
+    /// of the input (<see cref="IByteRangeNavigable"/>), is revealed in the incoming one - unless
+    /// edits the user chose not to save are still showing, since their offsets describe text that
+    /// is about to be thrown away.
     /// </summary>
-    public async Task SwitchViewAsync(FileTypeDetector.FileKind kind)
+    public Task SwitchViewAsync(FileTypeDetector.FileKind kind) => SwitchViewAsync(kind, reveal: null);
+
+    /// <param name="reveal">What to reveal in the new view instead of carrying the outgoing
+    /// document's selection across.</param>
+    private async Task SwitchViewAsync(FileTypeDetector.FileKind kind, ByteRange? reveal)
     {
         if (this.ownedOrigins.Count == 0 || kind == currentKind)
             return;
@@ -731,7 +781,12 @@ public sealed class MainWindowViewModel : ObservableObject
         FindBarResetRequested?.Invoke();
         StatusText = $"Indexing {path}…";
 
+        var location = reveal ?? (HasUnsavedChanges ? null : (CurrentDocument as IByteRangeNavigable)?.SelectedByteRange);
+
         await LoadAndPublishAsync(kind, origin, requestId, addToRecents: false);
+
+        if (location is { } range && openRequest.IsCurrent(requestId) && CurrentDocument is IByteRangeNavigable navigable)
+            await navigable.RevealByteRangeAsync(range);
     }
 
     /// <summary>
@@ -755,7 +810,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            OpenDebugLog.Write($"LoadAndPublish: IsPlausibleFor threw: {ex}");
+            this.log.Write($"LoadAndPublish: IsPlausibleFor threw: {ex}");
             if (openRequest.IsCurrent(requestId))
                 StatusText = $"{path} — failed to open";
             return;
@@ -781,7 +836,7 @@ public sealed class MainWindowViewModel : ObservableObject
         catch (Exception ex)
         {
             progress.Finish();
-            OpenDebugLog.Write($"LoadAndPublish: load threw: {ex}");
+            this.log.Write($"LoadAndPublish: load threw: {ex}");
             if (openRequest.IsCurrent(requestId))
                 StatusText = $"{path} — failed to open";
             return;
@@ -868,6 +923,10 @@ public sealed class MainWindowViewModel : ObservableObject
         // sources - a temp-file-backed origin cannot be deleted while a mapping over it is open.
         AdoptOrigins(origins);
 
+        if (kind is not (FileTypeDetector.FileKind.Unknown or FileTypeDetector.FileKind.Unidentified))
+            structuredKind = kind;
+        NotifyTextViewToggleChanged();
+
         findController.Attach(navigator);
         IsFindAvailable = navigator is not null;
 
@@ -906,13 +965,20 @@ public sealed class MainWindowViewModel : ObservableObject
     /// </summary>
     private void AdoptOrigins(params IByteOrigin[] origins)
     {
+        // A different input has no view to return to yet; PublishDocument records one.
+        if (this.ownedOrigins.FirstOrDefault() != origins.FirstOrDefault())
+        {
+            structuredKind = FileTypeDetector.FileKind.Unknown;
+            NotifyTextViewToggleChanged();
+        }
+
         foreach (var owned in this.ownedOrigins)
         {
             if (Array.IndexOf(origins, owned) >= 0)
                 continue;
 
             try { owned.Dispose(); }
-            catch (Exception ex) { OpenDebugLog.Write($"AdoptOrigins: dispose threw: {ex}"); }
+            catch (Exception ex) { this.log.Write($"AdoptOrigins: dispose threw: {ex}"); }
         }
 
         this.ownedOrigins.Clear();
@@ -957,8 +1023,15 @@ public sealed class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(IsFileOpen));
         OnPropertyChanged(nameof(FilePath));
         OnPropertyChanged(nameof(CanCompare));
+        NotifyTextViewToggleChanged();
         NotifyFailurePropertiesChanged();
         NotifySavePropertiesChanged();
+    }
+
+    private void NotifyTextViewToggleChanged()
+    {
+        OnPropertyChanged(nameof(CanToggleTextView));
+        OnPropertyChanged(nameof(TextViewToggleText));
     }
 
     private void NotifyFailurePropertiesChanged()

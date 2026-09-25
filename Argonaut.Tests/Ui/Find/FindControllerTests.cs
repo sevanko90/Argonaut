@@ -93,6 +93,7 @@ public class FindControllerTests
         public string DisplayName => inner.DisplayName;
         public string? Path => null;
         public long AvailableLength => inner.AvailableLength;
+        public KeptIndexes KeptIndexes => inner.KeptIndexes;
         public IByteSource Open() => inner.Open();
         public void Dispose() => Release.Set();
 

@@ -153,7 +153,7 @@
                     <ListBox.ItemTemplate>
                         <DataTemplate x:DataType="json:JsonRow">
                             <!-- Transparent background keeps the full fixed-height row hit-testable
-                                 for the right-click copy handler even though the children are
+                                 for the right-click menu handler even though the children are
                                  vertically centered (and so shorter than the row). -->
                             <StackPanel Orientation="Horizontal"
                                         Background="Transparent"
@@ -291,6 +291,18 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                     <StackPanel Grid.Column="1" Orientation="Horizontal">
+                        <!-- Selects the node's bytes in the raw text view, where it can be edited. -->
+                        <Button x:Name="ShowInTextButton"
+                                Classes="iconbutton compact"
+                                Click="OnShowInTextClick"
+                                IsEnabled="{Binding SelectedPath, Converter={x:Static json:IsNotNullConverter.Instance}}"
+                                ToolTip.Tip="Show this node in the text view (Ctrl+T or Cmd+T toggles)"
+                                Margin="8,0,0,0">
+                            <Viewbox Width="12" Height="12">
+                                <Path Fill="{DynamicResource AppMutedTextBrush}"
+                                      Data="M3 4h18v2H3V4zm0 5h12v2H3V9zm0 5h18v2H3v-2zm0 5h12v2H3v-2z" />
+                            </Viewbox>
+                        </Button>
                         <Button x:Name="CopyValueButton"
                                 Classes="iconbutton compact"
                                 Click="OnCopyValueClick"

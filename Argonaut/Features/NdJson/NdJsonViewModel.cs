@@ -7,11 +7,13 @@ using Argonaut.Engine.Detection;
 using Argonaut.Engine.Indexing;
 using Argonaut.Engine.Indexing.Lines;
 using Argonaut.Engine.Progress;
+using Argonaut.Engine.Search;
 using Argonaut.Engine.Settings;
 using Argonaut.Features.Json;
 using Argonaut.Features.Json.Hints;
 using Argonaut.Features.Json.Schema;
 using Argonaut.Ui.Documents;
+using Argonaut.Ui.Documents.Navigation;
 using Argonaut.Ui.Find;
 using Argonaut.Ui.ViewModels;
 
@@ -19,7 +21,7 @@ namespace Argonaut.Features.NdJson;
 
 public sealed record NdJsonSelectedLine(int LineNumber, string Text);
 
-public sealed class NdJsonViewModel : IndexedDocumentViewModel
+public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNavigable
 {
     private const int InitialIndexedLineTarget = 250;
 
@@ -267,6 +269,40 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel
     }
 
     public override ISearchNavigator CreateSearchNavigator() => new NdJsonSearchNavigator(this);
+
+    /// <summary>The node selected in the line's JSON tree, or the selected line itself before the
+    /// tree has a selection - both already file offsets.</summary>
+    public ByteRange? SelectedByteRange
+    {
+        get
+        {
+            if (SelectedLineJsonViewModel?.SelectedByteRange is { } node)
+                return node;
+
+            if (SelectedLineNumber is not int lineNumber || this.Index is not { } index || this.Bytes is not { } bytes)
+                return null;
+
+            var line = LineReader.TrimTrailingNewline(bytes, index.GetLineSpan(lineNumber - 1));
+            return new ByteRange(line.Offset, line.Length);
+        }
+    }
+
+    /// <summary>Selects the line <paramref name="range"/> starts on and the node inside it -
+    /// exactly what revealing a search hit there does, so it is done the same way.</summary>
+    public async Task RevealByteRangeAsync(ByteRange range)
+    {
+        if (this.session is null || IsDisposed)
+            return;
+
+        try
+        {
+            await new NdJsonSearchNavigator(this).RevealAsync(new SearchMatch(range.Offset, 0), TearingDown);
+        }
+        catch (OperationCanceledException)
+        {
+            // The document closed while the line was resolving or loading.
+        }
+    }
 
     /// <summary>
     /// Returns true if the VM can process the specified file type

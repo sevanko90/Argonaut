@@ -190,4 +190,34 @@ public class JsonOffsetTokenResolverTests
             File.Delete(path);
         }
     }
+
+    // Fixture tokens: 6 EndArray closes 2, 7 EndObject closes 1, 8 EndObject closes the root.
+    [Theory]
+    [InlineData(6, 2)]
+    [InlineData(7, 1)]
+    [InlineData(8, 0)]
+    [InlineData(4, 4)] // not an End token - itself
+    [InlineData(2, 2)]
+    public void OpeningTokenOf_FindsTheStartAnEndCloses(int tokenIndex, int expected)
+    {
+        WithFixture(index => Assert.Equal(expected, JsonOffsetTokenResolver.OpeningTokenOf(index, tokenIndex)));
+    }
+
+    [Fact]
+    public void OpeningTokenOf_AnEmptyContainer_IsTheTokenBefore()
+    {
+        var (index, mmap, path) = BuildIndex("[{}, []]");
+        try
+        {
+            // 0 [   1 {   2 }   3 [   4 ]   5 ]
+            Assert.Equal(1, JsonOffsetTokenResolver.OpeningTokenOf(index, 2));
+            Assert.Equal(3, JsonOffsetTokenResolver.OpeningTokenOf(index, 4));
+            Assert.Equal(0, JsonOffsetTokenResolver.OpeningTokenOf(index, 5));
+        }
+        finally
+        {
+            mmap.Dispose();
+            File.Delete(path);
+        }
+    }
 }

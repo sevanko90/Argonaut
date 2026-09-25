@@ -3,7 +3,11 @@ using Argonaut.Engine.Bytes;
 using Argonaut.Features.Json;
 using Argonaut.Features.Json.Schema;
 using Argonaut.Tests.Support;
+using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
+using Avalonia.Input;
+using Avalonia.LogicalTree;
 using Avalonia.Headless;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
@@ -170,6 +174,58 @@ public sealed class JsonViewRevealTests
             }
         }, CancellationToken.None);
     }
+
+    /// <summary>A right-click on a row selects that node and opens the node menu, instead of
+    /// copying the value outright.</summary>
+    [Fact]
+    public Task RightClick_OnARow_SelectsItsNode_AndOpensTheMenu()
+    {
+        var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(JsonViewRevealTests).Assembly);
+        return session.Dispatch(async () =>
+        {
+            string path = WriteLongArray();
+            var vm = new JsonViewModel(new JsonViewSettings(), new SchemaBindings(), TestSchemas.Catalog());
+            Window? window = null;
+            try
+            {
+                await vm.LoadAsync(path);
+                await vm.IndexingTask;
+                window = new Window { Width = 900, Height = 600, Content = new JsonView { DataContext = vm } };
+                window.Show();
+                await PumpAsync();
+                window.UpdateLayout();
+
+                var item = window.GetVisualDescendants().OfType<ListBoxItem>()
+                    .First(i => i.DataContext is JsonRow { ArrayIndex: 3 });
+                var row = (JsonRow)item.DataContext!;
+                var centre = item.TranslatePoint(new Point(40, item.Bounds.Height / 2), window)!.Value;
+
+                window.MouseDown(centre, MouseButton.Right);
+                window.MouseUp(centre, MouseButton.Right);
+                await PumpAsync();
+
+                Assert.Equal(row.TokenIndex, vm.SelectedTokenIndex);
+                Assert.Equal(["Copy value", "Copy JSONPath", "Show in text view"], OpenMenuHeaders(item));
+            }
+            finally
+            {
+                window?.Close();
+                vm.Dispose();
+                File.Delete(path);
+            }
+        }, CancellationToken.None);
+    }
+
+    /// <summary>The headers of a menu open on <paramref name="target"/>: a flyout's popup is a
+    /// logical child of the control it was shown at.</summary>
+    private static string[] OpenMenuHeaders(Control target) =>
+        target.GetLogicalDescendants().OfType<Popup>()
+            .Where(popup => popup.IsOpen)
+            .Select(popup => popup.Child)
+            .OfType<ItemsControl>()
+            .SelectMany(menu => menu.Items.OfType<MenuItem>())
+            .Select(menuItem => menuItem.Header as string ?? string.Empty)
+            .ToArray();
 
     [Fact]
     public Task Reveal_AfterTheViewIsShowing_ScrollsToTheNode() => RevealTestAsync(revealBeforeAttach: false);

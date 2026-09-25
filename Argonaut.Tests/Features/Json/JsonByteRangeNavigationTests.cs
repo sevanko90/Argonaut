@@ -117,6 +117,26 @@ public class JsonByteRangeNavigationTests
         });
     }
 
+    /// <summary>What a right-click on a row selects: the row's node, and for a closing bracket's
+    /// row the container it closes.</summary>
+    [Fact]
+    public async Task SelectNode_OnAClosingBracketsRow_SelectsTheContainer()
+    {
+        await WithDocumentAsync(Json, async vm =>
+        {
+            await vm.RevealByteRangeAsync(ByteRange.At(At("]")));
+            int? closingBracketsContainer = vm.SelectedTokenIndex;
+
+            vm.SelectNode(5); // tokens: 0 {  1 "hi"  2 [  3 1  4 2  5 ]
+            Assert.Equal(2, vm.SelectedTokenIndex);
+            Assert.Equal(closingBracketsContainer, vm.SelectedTokenIndex);
+
+            vm.SelectNode(3);
+            Assert.Equal(3, vm.SelectedTokenIndex);
+            Assert.Equal("$.list[0]", vm.SelectedPath);
+        });
+    }
+
     [Fact]
     public async Task NoSelection_HasNoRange()
     {

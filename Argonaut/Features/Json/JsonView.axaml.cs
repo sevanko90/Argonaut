@@ -26,6 +26,7 @@ public partial class JsonView : UserControl
     private JsonVisibleRowCollection? subscribedRows;
     private JsonViewModel? subscribedViewModel;
     private MenuFlyout? hintFlyout;
+    private MenuFlyout? nodeMenu;
     private int hintFlyoutTokenIndex = -1;
     private KeyModifiers lastRowsPressModifiers;
 
@@ -392,17 +393,42 @@ public partial class JsonView : UserControl
         ToastService.Show("Value copied to clipboard");
     }
 
-    private async void OnRowPointerPressed(object? sender, Avalonia.Input.PointerPressedEventArgs e)
+    /// <summary>
+    /// Right-click selects the node under the pointer, then offers what can be done with it. The
+    /// menu's items are the footer's buttons - each acts on the selection - so selecting first is
+    /// what points them at the row that was clicked rather than whatever was selected before.
+    /// </summary>
+    private void OnRowPointerPressed(object? sender, Avalonia.Input.PointerPressedEventArgs e)
     {
-        if (sender is not Control { DataContext: JsonRow { IsPlaceholder: false } row })
+        if (sender is not Control { DataContext: JsonRow { IsPlaceholder: false } row } control)
             return;
 
         if (!e.GetCurrentPoint(null).Properties.IsRightButtonPressed)
             return;
 
+        if (DataContext is not JsonViewModel vm)
+            return;
+
         e.Handled = true;
-        await CopyValueToClipboardAsync(row);
-        ToastService.Show("Value copied to clipboard");
+        vm.SelectNode(row.TokenIndex);
+        (nodeMenu ??= BuildNodeMenu()).ShowAt(control, showAtPointer: true);
+    }
+
+    private MenuFlyout BuildNodeMenu()
+    {
+        var menu = new MenuFlyout();
+        // Copy value first: it is what right-click did on its own, and still the likeliest want.
+        AddNodeMenuItem(menu, "Copy value", OnCopyValueClick);
+        AddNodeMenuItem(menu, "Copy JSONPath", OnCopyPathClick);
+        AddNodeMenuItem(menu, "Show in text view", OnShowInTextClick);
+        return menu;
+    }
+
+    private static void AddNodeMenuItem(MenuFlyout menu, string header, EventHandler<Avalonia.Interactivity.RoutedEventArgs> click)
+    {
+        var item = new MenuItem { Header = header };
+        item.Click += click;
+        menu.Items.Add(item);
     }
 
     private async Task CopyValueToClipboardAsync(JsonRow row)

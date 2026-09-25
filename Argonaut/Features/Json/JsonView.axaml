@@ -153,7 +153,7 @@
                     <ListBox.ItemTemplate>
                         <DataTemplate x:DataType="json:JsonRow">
                             <!-- Transparent background keeps the full fixed-height row hit-testable
-                                 for the right-click copy handler even though the children are
+                                 for the right-click menu handler even though the children are
                                  vertically centered (and so shorter than the row). -->
                             <StackPanel Orientation="Horizontal"
                                         Background="Transparent"

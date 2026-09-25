@@ -202,6 +202,14 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable, IB
         rows?.EnsureVisible(tokenIndex);
     }
 
+    /// <summary>Selects the node a row stands for: the row's own token, or - for a closing
+    /// bracket's row, which is not a node of its own - the container it closes.</summary>
+    public void SelectNode(int tokenIndex)
+    {
+        if (session is { } current)
+            SelectToken(JsonOffsetTokenResolver.OpeningTokenOf(current.Index, tokenIndex));
+    }
+
     /// <summary>
     /// Resolves a JSONPath string (see <see cref="JsonPathResolver"/>) and selects/reveals
     /// the target token if found, or surfaces a toast on parse/lookup failure. Wired into

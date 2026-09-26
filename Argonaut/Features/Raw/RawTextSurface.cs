@@ -569,12 +569,8 @@ public class RawTextSurface : RowSurface
         long offset = this.caret.Caret.Offset;
         int rowIndex = index.RowForOffset(offset) ?? index.RowCount - 1;
 
-        if (this.caret.Caret.Affinity == CaretAffinity.Upstream
-            && rowIndex > 0
-            && index.GetRowInfo(rowIndex).Start == offset)
-        {
+        if (this.caret.Caret.Affinity == CaretAffinity.Upstream && RawCaretController.IsWrapBoundary(index, rowIndex, offset))
             rowIndex--;
-        }
 
         return rowIndex;
     }

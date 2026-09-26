@@ -186,17 +186,27 @@ public sealed class RawCaretController
 
     /// <summary>
     /// Moving left across a soft-wrap boundary should land the caret at the visible end of the
-    /// row above, not at the start of the row it just left.
+    /// row above, not at the start of the row it just left. Only a soft-wrap boundary: after a
+    /// line ending the row above ends before its newline, so a line's start is only ever the
+    /// start of its own row - drawing it at the end of the line above would leave no way to put
+    /// the caret before a line's first character.
     /// </summary>
     private CaretAffinity AffinityAfterMovingLeft(long target)
     {
         int? rowIndex = this.rows.RowForOffset(target);
-        if (rowIndex is null || rowIndex.Value == 0)
+        if (rowIndex is null)
             return CaretAffinity.Downstream;
 
-        var info = this.rows.GetRowInfo(rowIndex.Value);
-        return target == info.Start ? CaretAffinity.Upstream : CaretAffinity.Downstream;
+        return IsWrapBoundary(this.rows, rowIndex.Value, target) ? CaretAffinity.Upstream : CaretAffinity.Downstream;
     }
+
+    /// <summary>
+    /// Whether <paramref name="offset"/> is where row <paramref name="rowIndex"/> starts and the
+    /// row above was force-broken there - the one place a caret offset belongs to two rows, so
+    /// the only one where its affinity can put it on the row above.
+    /// </summary>
+    internal static bool IsWrapBoundary(IRawRowIndex rows, int rowIndex, long offset)
+        => rowIndex > 0 && rows.GetRowInfo(rowIndex).Start == offset && rows.GetRowInfo(rowIndex - 1).IsSoftWrapped;
 
     private (RawRowInfo Info, RawDecodedRow Decoded)? CurrentRow()
     {

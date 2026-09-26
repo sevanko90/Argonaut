@@ -109,6 +109,16 @@ it in (see "Saving" in architecture.md).
   plus a shared `DataTemplate` that materialises the visual only when shown. Measure as
   [json-array-table-scroll-perf.md](json-array-table-scroll-perf.md) warns: the first
   configuration measured in a process runs 2-3x slow.
+- **Keeping the table's index across view switches.** Every other view reopens from a structure
+  kept on the origin (`IndexBasis`, `KeptIndexes`); the table rescans its array on every entry,
+  including a hop to the text view and back. `JsonArrayTableSession.Start` indexes the array's
+  own sub-range with array-relative offsets, so the document's kept structure does not fit it.
+  Keep one slot - the last table's `DetachStructure()`, with the array's offset and length - and
+  pass it to `JsonSparseIndex.StartIndexing(source, kept, …)` when both match; `Reopen` already
+  checks the length. One slot rather than one per array, since kept entries live until the origin
+  changes. Deriving the table from the document's own structure by rebasing offsets would save
+  the first scan too, but that structure records only promoted containers, so element addressing
+  would change with it.
 
 ## Schema
 

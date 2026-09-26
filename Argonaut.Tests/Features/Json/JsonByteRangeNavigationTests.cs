@@ -199,4 +199,55 @@ public sealed class JsonByteRangeNavigationTests : IDisposable
             }
         });
     }
+
+    /// <summary>A document whose bytes arrive as <see cref="GrowingByteSource"/> releases them.</summary>
+    private sealed class GrowingOrigin(GrowingByteSource bytes) : IByteOrigin
+    {
+        private readonly MemoryByteOrigin kept = new([], "growing");
+
+        public string DisplayName => "growing";
+        public string? Path => null;
+        public long AvailableLength => bytes.AvailableLength;
+        public bool LengthSettled => bytes.LengthSettled;
+        public KeptIndexes KeptIndexes => kept.KeptIndexes;
+        public IByteSource Open() => bytes;
+        public IByteSource OpenRange(long offset, long length) => throw new NotSupportedException();
+        public void Dispose() => kept.Dispose();
+    }
+
+    /// <summary>
+    /// A reveal past what the index covers waits for it, and until then there is nothing for a
+    /// view to show - a view attached meanwhile (a switch back from the text view lays its view
+    /// out at once) would otherwise seek past the index and land on the wrong row.
+    /// </summary>
+    [Fact]
+    public async Task ARevealPastTheIndex_IsNotShownUntilTheIndexReachesIt()
+    {
+        var text = new StringBuilder("{\"features\":[\n");
+        for (int i = 0; i < 2000; i++)
+            text.Append(i == 0 ? "" : ",\n").Append($"{{\"id\":{i},\"coordinates\":[[{i},1],[{i},2]]}}");
+        byte[] json = Encoding.UTF8.GetBytes(text.Append("\n]}").ToString());
+        var growing = new GrowingByteSource(json, initiallyAvailable: json.Length / 4);
+        var vm = new JsonViewModel(new JsonViewSettings(), new SchemaBindings(), TestSchemas.Catalog());
+        try
+        {
+            await vm.LoadAsync(new GrowingOrigin(growing));
+            long target = Encoding.UTF8.GetString(json).IndexOf("{\"id\":1500,", StringComparison.Ordinal);
+
+            vm.Reveal(target);
+            Assert.Null(vm.PendingReveal);
+
+            growing.Seal();
+            await vm.IndexingTask;
+            for (int i = 0; i < 50 && vm.PendingReveal is null; i++)
+                await Task.Delay(50);
+
+            Assert.Equal(target, vm.PendingReveal);
+        }
+        finally
+        {
+            growing.Seal();
+            vm.Dispose();
+        }
+    }
 }

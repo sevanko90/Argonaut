@@ -131,11 +131,16 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable, IB
     }
 
     /// <summary>
-    /// The offset a reveal is waiting to show - set by <see cref="Reveal"/> and consumed by the
-    /// view, which may not exist yet when it is asked for (a search reveal into an NDJSON line
-    /// selects the line first, and its view arrives a moment later).
+    /// The offset a reveal is waiting to show - set by <see cref="Reveal"/> once the index covers
+    /// it, and consumed by the view, which may not exist yet when it is asked for (a search reveal
+    /// into an NDJSON line selects the line first, and its view arrives a moment later; a view
+    /// switch reveals before the new view is laid out).
     /// </summary>
     public long? PendingReveal { get; private set; }
+
+    // The offset a reveal is waiting for the index to reach, before it becomes PendingReveal. Kept
+    // apart so a view attaching meanwhile finds nothing to show rather than seeking past the index.
+    private long? revealAwaitingIndex;
 
     /// <summary>A reveal was asked for; the view shows <see cref="PendingReveal"/>.</summary>
     public event EventHandler? RevealRequested;
@@ -225,11 +230,22 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable, IB
     /// </summary>
     public void Reveal(long offset)
     {
-        PendingReveal = offset;
         if (IsCovered(offset))
-            RevealRequested?.Invoke(this, EventArgs.Empty);
-        else
-            _ = RevealWhenCoveredAsync(offset);
+        {
+            ShowWhenReady(offset);
+            return;
+        }
+
+        PendingReveal = null;
+        revealAwaitingIndex = offset;
+        _ = RevealWhenCoveredAsync(offset);
+    }
+
+    private void ShowWhenReady(long offset)
+    {
+        revealAwaitingIndex = null;
+        PendingReveal = offset;
+        RevealRequested?.Invoke(this, EventArgs.Empty);
     }
 
     private bool IsCovered(long offset)
@@ -250,8 +266,8 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable, IB
         }
 
         // A later reveal replaced this one while it waited.
-        if (!IsDisposed && PendingReveal == offset)
-            RevealRequested?.Invoke(this, EventArgs.Empty);
+        if (!IsDisposed && revealAwaitingIndex == offset)
+            ShowWhenReady(offset);
     }
 
     /// <summary>The view has shown <see cref="PendingReveal"/>.</summary>

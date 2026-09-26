@@ -185,7 +185,7 @@ The existing dense index stays available to diff until this is built, so diff is
 Each step lands on its own and leaves the app working. Tick a step when it is merged into the
 branch, and note under it anything the next step needs to know.
 
-Status: step 6 next; step 5 awaits a manual check of the raw view. Branch: `plan/json-sparse-index`.
+Status: step 7 next. Branch: `plan/json-sparse-index`.
 
 1. [x] **Benchmarks first.** A BenchmarkDotNet suite over three shapes - a token-dense array, deeply
    nested objects, a large array of small records - measuring index bytes per file byte, build time,
@@ -356,8 +356,27 @@ Status: step 6 next; step 5 awaits a manual check of the raw view. Branch: `plan
 
    Needs a manual check, since no test draws pixels: the raw view's scrolling, horizontal pan,
    selection, caret and find highlights look and behave as before.
-6. [ ] **`Ui/Tree/TreeSurface`** with styled-run painting, gutter providers, keyboard navigation,
+6. [x] **`Ui/Tree/TreeSurface`** with styled-run painting, gutter providers, keyboard navigation,
    selection and accessibility, exercised in tests through the test-only format.
+
+   `TreeSurface` on `RowSurface`, fed a `TreeDocument` (index, reader, `ITreeRowPainter`,
+   `TreeExpandState`, `ITreeGutter`s, available length, a `Grew` event). Rows are the painter's
+   `TreeRun`s laid out as one `TextLayout` with per-run brushes (`TreeRunStyle`, a format-neutral
+   vocabulary, mapped to brushes by `RunBrushes`). `TreeSurfaceAutomationPeer` reports a tree named
+   by the selected row. `TreeCursor.Clone` added so the surface walks without moving its anchor.
+   Tested headless over the S-expression format: realized rows are the viewport's, small scrolls
+   move by rows, a jump lands at the same fraction of the file, keyboard selection (arrows, page,
+   home/end, left/right collapse, expand and climb), reveal with ancestor expansion, the arrow click,
+   and the layout cache staying at a viewport while paging the whole document.
+
+   - **Scroll model**: offset = anchor's byte position / bytes per row on screen (smoothed); a move
+     of more than three viewports is a jump that seeks the byte, anything smaller moves the anchor
+     by rows and re-syncs the offset. The extent is never less than the anchor's position plus a
+     viewport, so the host cannot clamp the current offset.
+   - **Not built**: sticky ancestor headers, indent guides (deferred with the rest of the chrome
+     polish), text selection and copy within a row. Worth adding with step 7 or after.
+   - **Needs eyes once JSON is on it** (step 7): row drawing, arrows, selection colour,
+     highlights, gutters and the scrollbar thumb's behaviour while dragging.
 7. [ ] **JSON on the tree surface**: a JSON row painter, the schema gutter provider and hints, replacing
    the tree `ListBox`.
 8. [ ] **Consumers** moved one at a time per the table above: paths and search, then array table and

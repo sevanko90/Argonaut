@@ -70,6 +70,15 @@ public sealed class TreeCursor
         this.expandState = expandState;
     }
 
+    /// <summary>A second cursor on the same row, sharing the index, reader and expansion, that
+    /// moves independently - for walking ahead of a position without losing it.</summary>
+    public TreeCursor Clone()
+    {
+        var clone = new TreeCursor(index, reader, expandState) { Current = Current };
+        clone.frames.AddRange(frames);
+        return clone;
+    }
+
     /// <summary>The row the cursor stands on. Meaningful once a move or seek has returned
     /// true.</summary>
     public TreeRow Current { get; private set; }

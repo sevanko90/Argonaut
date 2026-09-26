@@ -215,4 +215,28 @@ internal static class SExpressionTreeFormat
 
         public long CloseStart(long containerStart, long containerEnd) => containerEnd - 1;
     }
+
+    /// <summary>The format's painter for <c>TreeSurface</c>: a list's parenthesis (with an
+    /// ellipsis while collapsed), its closing, or the atom's text.</summary>
+    public sealed class Painter(byte[] document) : Argonaut.Ui.Tree.ITreeRowPainter
+    {
+        public void AppendRuns(in TreeRow row, List<Argonaut.Ui.Tree.TreeRun> runs)
+        {
+            switch (row.Shape)
+            {
+                case TreeRowShape.Open:
+                    runs.Add(new("(", Argonaut.Ui.Tree.TreeRunStyle.Punctuation));
+                    if (!row.IsExpanded)
+                        runs.Add(new(" … )", Argonaut.Ui.Tree.TreeRunStyle.Summary));
+                    break;
+                case TreeRowShape.Close:
+                    runs.Add(new(")", Argonaut.Ui.Tree.TreeRunStyle.Punctuation));
+                    break;
+                default:
+                    int length = (int)(row.Node.ValueEnd - row.Node.ValueStart);
+                    runs.Add(new(System.Text.Encoding.ASCII.GetString(document, (int)row.Node.ValueStart, length), Argonaut.Ui.Tree.TreeRunStyle.Name));
+                    break;
+            }
+        }
+    }
 }

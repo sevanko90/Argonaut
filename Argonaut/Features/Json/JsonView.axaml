@@ -18,12 +18,10 @@
             Background="{DynamicResource AppWindowBackgroundBrush}"
             ClipToBounds="True">
         <Grid RowDefinitions="*,Auto">
-            <!-- The surface draws every visible row itself, schema gutter included. It is not in a
-                 ScrollViewer: its position is a fraction of the document, and these scrollbars
-                 only drive it and follow it (see TreeSurface's remarks for why sharing one offset
-                 with a host made a dragged thumb stutter). Sideways movement is the pan
-                 scrollbar driving TreeSurface.PanOffset, which moves the rows and leaves the
-                 gutter pinned. -->
+            <!-- The surface draws every visible row itself, schema gutter included. The two
+                 scrollbars drive it through RowScrollBars, as every self-drawn view's do: the
+                 vertical one over its position in the document, the pan one over TreeSurface.PanOffset,
+                 which moves the rows and leaves the gutter pinned. -->
             <Grid Grid.Row="0" RowDefinitions="*,Auto" ColumnDefinitions="*,Auto">
                 <tree:TreeSurface x:Name="Surface"
                                   Grid.Row="0"

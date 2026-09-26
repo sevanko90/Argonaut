@@ -4,6 +4,7 @@ using Argonaut.Features.Json.Hints;
 using Argonaut.Features.Json.Tree;
 using Argonaut.Ui.Documents.Navigation;
 using Argonaut.Ui.Notifications;
+using Argonaut.Ui.Rows;
 using Argonaut.Ui.Tree;
 using Avalonia;
 using Avalonia.Controls;
@@ -27,9 +28,7 @@ public partial class JsonView : UserControl
     private MenuFlyout? hintFlyout;
     private long hintFlyoutValueOffset = -1;
 
-    /// <summary>True while the vertical thumb is held: the bar is the one moving the view then,
-    /// so it is not told where the view went - that is what would fight the pointer.</summary>
-    private bool draggingThumb;
+    private readonly RowScrollBars scrollBars;
 
     public JsonView()
     {
@@ -43,12 +42,8 @@ public partial class JsonView : UserControl
         Surface.SelectionChanged += OnSurfaceSelectionChanged;
         Surface.LinkClicked += OnLinkClicked;
         Surface.ExpandLimitReached += OnExpandLimitReached;
-        Surface.WidestRowWidthChanged += OnWidestRowWidthChanged;
-        Surface.PanRequested += OnPanRequested;
         Surface.SizeChanged += OnSurfaceSizeChanged;
-        Surface.ScrollPositionChanged += OnScrollPositionChanged;
-        PanScrollBar.ValueChanged += OnPanValueChanged;
-        VerticalScrollBar.Scroll += OnVerticalScroll;
+        scrollBars = new RowScrollBars(Surface, VerticalScrollBar, PanScrollBar);
 
         // Right-click copies the row's value. The surface has already selected the row on the
         // press, so the release copies what is now selected.
@@ -58,7 +53,7 @@ public partial class JsonView : UserControl
     private void OnLoaded(object? sender, RoutedEventArgs e)
     {
         ApplyRunBrushes();
-        UpdatePanRange();
+        scrollBars.Refresh();
         ApplyPendingReveal();
     }
 
@@ -75,12 +70,8 @@ public partial class JsonView : UserControl
         Surface.SelectionChanged -= OnSurfaceSelectionChanged;
         Surface.LinkClicked -= OnLinkClicked;
         Surface.ExpandLimitReached -= OnExpandLimitReached;
-        Surface.WidestRowWidthChanged -= OnWidestRowWidthChanged;
-        Surface.PanRequested -= OnPanRequested;
         Surface.SizeChanged -= OnSurfaceSizeChanged;
-        Surface.ScrollPositionChanged -= OnScrollPositionChanged;
-        PanScrollBar.ValueChanged -= OnPanValueChanged;
-        VerticalScrollBar.Scroll -= OnVerticalScroll;
+        scrollBars.Dispose();
         Surface.RemoveHandler(PointerReleasedEvent, OnSurfacePointerReleased);
 
         UnsubscribeViewModel();
@@ -111,7 +102,7 @@ public partial class JsonView : UserControl
             Surface.Document = null;
         }
 
-        UpdatePanRange();
+        scrollBars.Refresh();
     }
 
     private void UnsubscribeViewModel()
@@ -152,7 +143,7 @@ public partial class JsonView : UserControl
     {
         Surface.InvalidateRows();
         Surface.InvalidateGutters();
-        UpdatePanRange();
+        scrollBars.Refresh();
     }
 
     private void OnExpansionReset(object? sender, EventArgs e) => Surface.Reseat();
@@ -243,111 +234,5 @@ public partial class JsonView : UserControl
         ToastService.Show("Value copied to clipboard");
     }
 
-    // ---- vertical scrolling -------------------------------------------------------------
-
-    /// <summary>
-    /// The user worked the scrollbar. Dragging the thumb puts that fraction of the document at
-    /// the top; the arrows and the track move by a row and a page, as the wheel does.
-    /// </summary>
-    private void OnVerticalScroll(object? sender, ScrollEventArgs e)
-    {
-        switch (e.ScrollEventType)
-        {
-            case ScrollEventType.ThumbTrack:
-                draggingThumb = true;
-                // At the bottom of the track, the end - not wherever the byte estimate lands.
-                if (e.NewValue >= VerticalScrollBar.Maximum)
-                    Surface.ScrollToEnd();
-                else
-                    Surface.ScrollToFraction(e.NewValue);
-                break;
-            case ScrollEventType.EndScroll:
-                draggingThumb = false;
-                UpdateVerticalBar();
-                break;
-            case ScrollEventType.SmallIncrement:
-                Surface.ScrollByPixels(TreeSurface.RowHeight);
-                break;
-            case ScrollEventType.SmallDecrement:
-                Surface.ScrollByPixels(-TreeSurface.RowHeight);
-                break;
-            case ScrollEventType.LargeIncrement:
-                Surface.ScrollByPixels(Math.Max(TreeSurface.RowHeight, Surface.Bounds.Height - TreeSurface.RowHeight));
-                break;
-            case ScrollEventType.LargeDecrement:
-                Surface.ScrollByPixels(-Math.Max(TreeSurface.RowHeight, Surface.Bounds.Height - TreeSurface.RowHeight));
-                break;
-        }
-    }
-
-    private void OnScrollPositionChanged(object? sender, EventArgs e)
-    {
-        if (!draggingThumb)
-            UpdateVerticalBar();
-    }
-
-    /// <summary>
-    /// Shows where the view is: the range is the document as fractions, the thumb a screen's
-    /// share of it. Hidden when a screen shows everything.
-    /// </summary>
-    private void UpdateVerticalBar()
-    {
-        double viewport = Surface.ViewportFraction;
-        if (Surface.Document is null || viewport >= 1)
-        {
-            VerticalScrollBar.IsVisible = false;
-            return;
-        }
-
-        double maximum = 1 - viewport;
-        VerticalScrollBar.Maximum = maximum;
-        VerticalScrollBar.ViewportSize = viewport;
-        VerticalScrollBar.LargeChange = viewport;
-        VerticalScrollBar.SmallChange = viewport / Math.Max(1, Surface.Bounds.Height / TreeSurface.RowHeight);
-        VerticalScrollBar.Value = Surface.ShowsEnd ? maximum : Math.Min(Surface.ScrollFraction, maximum);
-        VerticalScrollBar.IsVisible = true;
-    }
-
-    // ---- horizontal pan ---------------------------------------------------------------
-
-    private void OnSurfaceSizeChanged(object? sender, SizeChangedEventArgs e)
-    {
-        UpdatePanRange();
-        ApplyPendingReveal();
-    }
-
-    private void OnWidestRowWidthChanged(object? sender, EventArgs e) => UpdatePanRange();
-
-    private void OnPanValueChanged(object? sender, RangeBaseValueChangedEventArgs e) => Surface.PanOffset = e.NewValue;
-
-    private void OnPanRequested(object? sender, double desiredOffset)
-    {
-        if (PanScrollBar.IsVisible)
-            PanScrollBar.Value = Math.Clamp(desiredOffset, PanScrollBar.Minimum, PanScrollBar.Maximum);
-    }
-
-    /// <summary>
-    /// Sizes the pan scrollbar from the widest row the surface has laid out - a high-water mark,
-    /// so the range never shrinks under the user mid-scroll - against the width the rows have.
-    /// </summary>
-    private void UpdatePanRange()
-    {
-        double viewport = Surface.ContentViewportWidth;
-        double maximum = Math.Max(0, Surface.WidestRowWidth - viewport);
-        if (Surface.Document is null || viewport <= 0 || maximum <= 0)
-        {
-            PanScrollBar.IsVisible = false;
-            PanScrollBar.Value = 0;
-            Surface.PanOffset = 0;
-            return;
-        }
-
-        PanScrollBar.Maximum = maximum;
-        PanScrollBar.ViewportSize = viewport;
-        PanScrollBar.LargeChange = viewport;
-        PanScrollBar.SmallChange = TreeSurface.IndentWidth * 2;
-        if (PanScrollBar.Value > maximum)
-            PanScrollBar.Value = maximum;
-        PanScrollBar.IsVisible = true;
-    }
+    private void OnSurfaceSizeChanged(object? sender, SizeChangedEventArgs e) => ApplyPendingReveal();
 }

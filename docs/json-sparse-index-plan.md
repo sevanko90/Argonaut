@@ -185,7 +185,7 @@ The existing dense index stays available to diff until this is built, so diff is
 Each step lands on its own and leaves the app working. Tick a step when it is merged into the
 branch, and note under it anything the next step needs to know.
 
-Status: step 10 done; the token index is gone. Next: step 12 (one scroll interface), then 13 (the diff on the tree surface); step 11 only if the estimated scrollbar disappoints. The array table and the diff await a manual check. Branch: `plan/json-sparse-index`.
+Status: step 12 done. Next: step 13 (the diff on the tree surface); step 11 only if the estimated scrollbar disappoints. The array table and the diff await a manual check. Branch: `plan/json-sparse-index`.
 
 1. [x] **Benchmarks first.** A BenchmarkDotNet suite over three shapes - a token-dense array, deeply
    nested objects, a large array of small records - measuring index bytes per file byte, build time,
@@ -464,7 +464,7 @@ Status: step 10 done; the token index is gone. Next: step 12 (one scroll interfa
     - **Behaviour not carried over, deliberately**: expansion overrides do not survive a change of
       default depth (the view resets them), so that dense test went.
 11. [ ] **Per-depth row counts**, if the estimated scrollbar proves not good enough in use.
-12. [ ] **One scroll interface for every self-drawn view.** Move the tree's scroll API down into
+12. [x] **One scroll interface for every self-drawn view.** Move the tree's scroll API down into
     `RowSurface` - scroll by pixels, go to a fraction, go to the end, `ScrollPositionChanged`,
     `ShowsEnd` - and the scrollbar wiring now in `JsonView` into one reusable host in `Ui/Rows`,
     so the raw view, the JSON tree and the XML tree scroll through the same code and behave the
@@ -475,6 +475,22 @@ Status: step 10 done; the token index is gone. Next: step 12 (one scroll interfa
     tree an exact model under the same interface. The array table's cell pane gets a scrollbar
     from it too. Do before the XML view is built; the raw view's scrolling needs a manual check
     after it.
+
+    `RowSurface` carries the interface (`ScrollFraction`, `ViewportFraction`, `ShowsEnd`,
+    `ScrollByPixels`, `ScrollToFraction`, `ScrollToEnd`, `ScrollPositionChanged`, plus
+    `PanViewportWidth` and `PanStep` for the pan bar) and the wheel, and no longer implements
+    `ILogicalScrollable`. `RowScrollBars` is the host - a helper that wires a surface to two
+    `ScrollBar`s the view lays out, rather than a control, because the raw view keeps its edit
+    overview beside the bar. `RawTextSurface` has the exact model; its user moves (wheel, bar)
+    abandon a pending reveal the way a click or key already did, and `ResetScroll` (the re-wrap
+    reset) does not. The cell pane has both bars. Tested headless: `RowScrollBarsTests` over a
+    fake surface (bar follows, held thumb left alone, bottom of track is the end, arrows and
+    pages, pan range and clamping) and `RawViewVirtualizationTests.ScrollingIsExactAndTheBarFollows`.
+
+    Needs a manual check: the raw view's scrolling - wheel, trackpad, dragging the thumb, the
+    track, arrow keys and page keys moving the caret, a search reveal, a re-wrap - and the edit
+    overview beside the bar; the JSON tree's bars as before; the cell pane's new bars.
+
 13. [ ] **The diff on the tree surface**, so every tree view works one way. Today the diff is a
     `ListBox` over a materialised list of visible rows: it holds no dense index, but it keeps
     what the old JSON list had besides - a list growing with what is expanded (nesting

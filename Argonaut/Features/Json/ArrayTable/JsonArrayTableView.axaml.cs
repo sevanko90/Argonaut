@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel;
+using Argonaut.Ui.Rows;
 using Argonaut.Ui.TableGrid;
 using Argonaut.Ui.ViewModels;
 using Avalonia;
@@ -47,6 +48,7 @@ public partial class JsonArrayTableView : UserControl
     private const string CellClickHint = "Click to open this cell in the detail pane";
 
     private readonly TableGridColumns columns;
+    private readonly RowScrollBars detailScrollBars;
     private JsonArrayTableViewModel? subscribedViewModel;
     private double detailWidth = DefaultDetailWidth;
 
@@ -55,6 +57,7 @@ public partial class JsonArrayTableView : UserControl
         InitializeComponent();
 
         this.columns = new TableGridColumns(Table);
+        this.detailScrollBars = new RowScrollBars(DetailTree, DetailVerticalScrollBar, DetailPanScrollBar);
         Table.AddHandler(PointerPressedEvent, OnTablePointerPressed, RoutingStrategies.Tunnel);
         DataContextChanged += OnDataContextChanged;
         DetachedFromVisualTree += OnDetachedFromVisualTree;
@@ -73,6 +76,7 @@ public partial class JsonArrayTableView : UserControl
         RebuildColumns(this.subscribedViewModel);
         ShowDetail(this.subscribedViewModel.HasCellDetail);
         DetailTree.Document = this.subscribedViewModel.CellDetail?.Tree;
+        this.detailScrollBars.Refresh();
     }
 
     /// <summary>
@@ -143,6 +147,8 @@ public partial class JsonArrayTableView : UserControl
         {
             DetailTree.Document = vm.CellDetail?.Tree;
             JsonTreePalette.Apply(DetailTree, this);
+            this.detailScrollBars.ResetPan();
+            this.detailScrollBars.Refresh();
         }
     }
 
@@ -223,6 +229,7 @@ public partial class JsonArrayTableView : UserControl
         DataContextChanged -= OnDataContextChanged;
         DetachedFromVisualTree -= OnDetachedFromVisualTree;
         Table.RemoveHandler(PointerPressedEvent, OnTablePointerPressed);
+        this.detailScrollBars.Dispose();
 
         if (this.subscribedViewModel is not null)
         {

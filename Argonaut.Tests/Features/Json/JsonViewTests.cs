@@ -111,11 +111,11 @@ public sealed class JsonViewTests : IDisposable
     [Fact]
     public Task BindingASchemaOpensTheGutter() => WithView("""{"id":1,"name":"x"}""", async (_, vm, surface) =>
     {
-        double before = surface.ContentViewportWidth;
+        double before = surface.PanViewportWidth;
         var schema = JsonSchemaLoader.TryParse("""{"type":"object","properties":{"id":{"title":"Identifier"}}}""");
         vm.SchemaSettings.SetDocument(schema);
         await PumpAsync();
 
-        Assert.True(surface.ContentViewportWidth < before - 100, "the schema gutter should take room from the rows");
+        Assert.True(surface.PanViewportWidth < before - 100, "the schema gutter should take room from the rows");
     });
 }

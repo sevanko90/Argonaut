@@ -314,24 +314,32 @@ The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLeng
   read-only `IList` + `INotifyCollectionChanged` surface Avalonia's `VirtualizingStackPanel` needs.
 - **The raw view and the JSON tree are the exceptions, and deliberately so.** Both draw their own
   rows on `RowSurface` (`Ui/Rows`), which owns fixed row height, the appearance properties,
-  horizontal pan and the `ILogicalScrollable` plumbing. The JSON tree is `TreeSurface` (`Ui/Tree`)
+  horizontal pan, the wheel and one scroll interface. The JSON tree is `TreeSurface` (`Ui/Tree`)
   over a `TreeDocument`: it holds a `TreeCursor` on its top row and walks from it, so there is no
   row collection and no row count at all - see "The JSON tree" above. `RawTextSurface`
   (`Features/Raw/RawTextSurface.cs`) draws every visible row itself rather than templating a
   control per row, because a caret needs the text layout and a ListBox does not give it up: its
   selection is whole rows, and moving a caret between rows would mean coordinating dozens of
-  recycled containers around one piece of state. It implements `ILogicalScrollable`, so the
-  hosting `ScrollViewer` still supplies the wheel, scrollbar, page keys and bring-into-view while
-  the surface supplies the viewport arithmetic. `RawRowCollection` survives as the row cache it
+  recycled containers around one piece of state. `RawRowCollection` survives as the row cache it
   reads by index and whose growth notifications it follows, but nothing binds it as an
   `ItemsSource`.
+- **One scroll interface, two position models, no `ScrollViewer`.** A surface's position is a
+  fraction of its document (`ScrollFraction`, `ViewportFraction`, `ShowsEnd`), moved by
+  `ScrollByPixels`, `ScrollToFraction` and `ScrollToEnd`, and announced by
+  `ScrollPositionChanged`. `RowScrollBars` (`Ui/Rows`) wires any surface to a view's vertical and
+  pan scrollbars the same way - the JSON tree, the raw view and the array table's cell pane - and
+  the bars only drive and follow: a held thumb is not told where the view went, which is what
+  made one stutter when a `ScrollViewer` shared an offset with the surface. The raw view uses the
+  **exact** model (it knows its row count, so the fraction is its pixel offset over rows x height
+  and a dragged thumb is row-accurate); the trees use the **estimated** one (the top row's byte
+  position, since they have no row count).
 - **The surface decides its visible range during layout, never during rendering.** Beyond being
   the more honest place for it, headless has no renderer - so choosing the range inside `Render`
   would make virtualization, the one guarantee most worth testing, untestable. `RawViewVirtualizationTests`
   asserts on the surface's realized row range, which says *which* rows are held rather than merely
   how many.
 - **Scroll extents are computed live, never cached.** A cached extent is stale by however long it
-  has been since the last refresh, and the host clamps any offset it is handed against it. During
+  has been since the last refresh, and the surface clamps every move against it. During
   a full-speed scan one 120ms growth tick is over a million rows, so a reveal deep in a large file
   clamps short and stays there.
 - Subclasses implement only `GetCount()`, `GetItem(int)` and, if they hold anything, `DisposeCore()`. The base owns the

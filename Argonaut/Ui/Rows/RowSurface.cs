@@ -2,7 +2,6 @@ using System;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
-using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Media.TextFormatting;
@@ -13,15 +12,23 @@ namespace Argonaut.Ui.Rows;
 /// <summary>
 /// The base of every view that draws its own rows rather than templating a control per row: the
 /// raw text view, and the tree views. It owns what they share - fixed-height rows, the appearance
-/// properties, the background that makes the surface hit-testable, horizontal pan, and the
-/// <see cref="ILogicalScrollable"/> plumbing that lets a hosting <c>ScrollViewer</c> supply the
-/// wheel, the scrollbar and page keys. What a row is, how many there are and how the scroll offset
-/// maps onto them is the derived surface's.
+/// properties, the background that makes the surface hit-testable, horizontal pan, the wheel, and
+/// one scroll interface that <see cref="RowScrollBars"/> drives the same way for every surface.
+/// What a row is, how many there are and where the view is among them is the derived surface's.
+///
+/// <b>Vertical position is a fraction of the document</b> (<see cref="ScrollFraction"/>), and
+/// the host's scrollbar only drives it and follows it - no surface sits in a
+/// <c>ScrollViewer</c>, because sharing one offset with a host and re-syncing it after every
+/// scroll made a dragged thumb stutter and scrolling up from the end snap back. A surface
+/// supplies one of two models behind the interface: <b>exact</b>, for one that knows its row
+/// count (the raw view: the fraction is the offset over rows x height, so the thumb is
+/// row-accurate), or <b>estimated</b>, for one that does not (the trees: the fraction is the top
+/// row's byte position in the document).
 ///
 /// Horizontal movement is deliberately not scrolling: rows are laid out at their natural width and
 /// panned by <see cref="PanOffset"/>, which keeps gutters pinned while the text slides under them.
 /// </summary>
-public abstract class RowSurface : Control, ILogicalScrollable
+public abstract class RowSurface : Control
 {
     /// <summary>Row height, in device-independent pixels. Every row is exactly this tall, which is
     /// what makes the visible range arithmetic on the scroll offset.</summary>
@@ -30,10 +37,8 @@ public abstract class RowSurface : Control, ILogicalScrollable
     /// <summary>Padding inside the surface, matching the ListBox padding the surfaces replace.</summary>
     public const double ContentPaddingX = 8;
 
-    private Vector offset;
     private double panOffset;
     private double widestRowWidth;
-    private EventHandler? scrollInvalidated;
 
     static RowSurface()
     {
@@ -238,74 +243,52 @@ public abstract class RowSurface : Control, ILogicalScrollable
             context.FillRectangle(background, new Rect(Bounds.Size));
     }
 
-    // ---- ILogicalScrollable -------------------------------------------------------------
-    //
-    // Vertical only. Horizontal movement is PanOffset, driven by the view's own pan scrollbar,
-    // because scrolling horizontally would take the gutters with it.
+    // ---- scrolling ------------------------------------------------------------------------
 
-    /// <summary>How tall the rows are altogether, in pixels. Read live by <see cref="Extent"/>;
-    /// a derived surface computes it rather than caching it, so the host never clamps an offset
-    /// against a stale value.</summary>
-    protected abstract double ExtentHeight { get; }
+    /// <summary>Raised whenever the view moves or the document under it grows or shrinks - a
+    /// scroll, a reveal, a keyboard move, a scan's progress - so a scrollbar can follow.</summary>
+    public event EventHandler? ScrollPositionChanged;
 
-    /// <summary>The vertical offset moved: realize the rows it now covers.</summary>
-    protected abstract void OnOffsetChanged();
+    protected void NotifyScrollPosition() => ScrollPositionChanged?.Invoke(this, EventArgs.Empty);
 
-    public Size Extent => new(Bounds.Width, Math.Max(ExtentHeight, Bounds.Height));
+    /// <summary>Where the top of the view is in the document, from 0 to 1.</summary>
+    public abstract double ScrollFraction { get; }
 
-    public Size Viewport => Bounds.Size;
+    /// <summary>How much of the document a screen shows, from 0 to 1; 1 when it all fits.</summary>
+    public abstract double ViewportFraction { get; }
 
-    public Vector Offset
+    /// <summary>True when the document's last row is on screen in full - the view is at the end,
+    /// whatever an estimated fraction says.</summary>
+    public abstract bool ShowsEnd { get; }
+
+    /// <summary>Moves the view by <paramref name="delta"/> pixels of rows - the wheel, a trackpad,
+    /// a scrollbar's arrows and pages. Positive moves down the document.</summary>
+    public abstract void ScrollByPixels(double delta);
+
+    /// <summary>Puts <paramref name="fraction"/> of the document at the top - what a dragged thumb
+    /// does.</summary>
+    public abstract void ScrollToFraction(double fraction);
+
+    /// <summary>Shows the end of the document, its last row at the bottom.</summary>
+    public abstract void ScrollToEnd();
+
+    /// <summary>How wide the text column is - what the pan range is measured against.</summary>
+    public virtual double PanViewportWidth => Math.Max(0, Bounds.Width - 2 * ContentPaddingX);
+
+    /// <summary>One click of the pan scrollbar's arrows, in pixels.</summary>
+    public virtual double PanStep => RowHeight;
+
+    protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
     {
-        get => this.offset;
-        set
-        {
-            if (this.offset == value)
-                return;
+        base.OnPointerWheelChanged(e);
 
-            this.offset = value;
-            OnOffsetChanged();
-            InvalidateVisual();
-        }
-    }
+        // One row per unit of wheel delta; a trackpad reports fractions of that, which is what
+        // makes it smooth.
+        if (e.Delta.Y != 0)
+            ScrollByPixels(-e.Delta.Y * RowHeight);
+        if (e.Delta.X != 0)
+            RequestPan(Math.Max(0, PanOffset - e.Delta.X * RowHeight));
 
-    public bool CanHorizontallyScroll
-    {
-        get => false;
-        set { }
-    }
-
-    public bool CanVerticallyScroll
-    {
-        get => true;
-        set { }
-    }
-
-    public bool IsLogicalScrollEnabled => true;
-
-    /// <summary>One wheel notch, and the arrow-key step the ScrollViewer applies.</summary>
-    public Size ScrollSize => new(1, RowHeight);
-
-    public Size PageScrollSize => new(Viewport.Width, Math.Max(RowHeight, Viewport.Height - RowHeight));
-
-    public event EventHandler? ScrollInvalidated
-    {
-        add => this.scrollInvalidated += value;
-        remove => this.scrollInvalidated -= value;
-    }
-
-    public void RaiseScrollInvalidated(EventArgs e) => this.scrollInvalidated?.Invoke(this, e);
-
-    public bool BringIntoView(Control target, Rect targetRect) => false;
-
-    public Control? GetControlInDirection(NavigationDirection direction, Control? from) => null;
-
-    /// <summary>Moves the vertical offset to <paramref name="y"/>, clamped to the extent, and
-    /// tells the host.</summary>
-    protected void SetVerticalOffset(double y)
-    {
-        double limit = Math.Max(0, Extent.Height - Bounds.Height);
-        Offset = new Vector(this.offset.X, Math.Clamp(y, 0, limit));
-        RaiseScrollInvalidated(EventArgs.Empty);
+        e.Handled = true;
     }
 }

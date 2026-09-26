@@ -35,9 +35,9 @@ namespace Argonaut.Features.Raw;
 ///
 /// Virtualization survives the change intact and is the property most worth protecting: rows are
 /// a fixed <see cref="RowHeight"/> and byte-capped, so the visible range is arithmetic on the
-/// scroll offset and nothing outside it is ever materialized. <see cref="ILogicalScrollable"/>
-/// means the hosting <c>ScrollViewer</c> still supplies the wheel, the scrollbar, page keys and
-/// bring-into-view - this supplies the viewport arithmetic, not a scroll engine.
+/// scroll offset and nothing outside it is ever materialized. Its scrolling is
+/// <see cref="RowSurface"/>'s exact model: the row count is known, so the offset is pixels over
+/// rows x height and a dragged thumb lands on the row it points at.
 ///
 /// Horizontal movement is deliberately NOT scrolling: rows are laid out at their natural width
 /// and panned by <see cref="PanOffset"/>, which keeps both gutters pinned while the text slides
@@ -94,6 +94,7 @@ public class RawTextSurface : RowSurface
     /// </summary>
     private double? stickyX;
     private int? pendingRevealRow;
+    private double scrollTop;
 
     /// <summary>The realized range <see cref="widestRowWidth"/> was last measured over.</summary>
     private (int First, int Last) measuredRange = (0, -1);
@@ -138,6 +139,12 @@ public class RawTextSurface : RowSurface
     /// <summary>Width available to text before the wrap-marker gutter.</summary>
     private double TextViewportWidth
         => Math.Max(0, Bounds.Width - TextOriginX - WrapGutterWidth - ContentPaddingX);
+
+    public override double PanViewportWidth => TextViewportWidth;
+
+    /// <summary>Four characters of the content font.</summary>
+    public override double PanStep
+        => new TextLayout("W", new Typeface(FontFamily), FontSize, Brushes.Black).WidthIncludingTrailingWhitespace * 4;
 
     protected override void OnDataContextChanged(EventArgs e)
     {
@@ -321,8 +328,8 @@ public class RawTextSurface : RowSurface
         // Ceiling-minus-one rather than a plain truncation: a row whose top sits exactly on the
         // viewport's bottom edge shows nothing at all, and realizing it is a row of work for no
         // pixels.
-        int firstRow = Math.Clamp((int)(Offset.Y / RowHeight), 0, rowCount - 1);
-        int lastRow = Math.Clamp((int)Math.Ceiling((Offset.Y + height) / RowHeight) - 1, firstRow, rowCount - 1);
+        int firstRow = Math.Clamp((int)(scrollTop / RowHeight), 0, rowCount - 1);
+        int lastRow = Math.Clamp((int)Math.Ceiling((scrollTop + height) / RowHeight) - 1, firstRow, rowCount - 1);
         RealizedRowRange = (firstRow, lastRow);
 
         for (int rowIndex = firstRow; rowIndex <= lastRow; rowIndex++)
@@ -382,7 +389,7 @@ public class RawTextSurface : RowSurface
 
         foreach (var (rowIndex, row) in this.realized)
         {
-            double y = rowIndex * RowHeight - Offset.Y;
+            double y = rowIndex * RowHeight - scrollTop;
 
             DrawLineNumber(context, row, typeface, fontSize, gutter, y);
 
@@ -660,13 +667,13 @@ public class RawTextSurface : RowSurface
 
         var typeface = new Typeface(FontFamily);
         var layout = LayoutFor(rowIndex, typeface, FontSize, Foreground ?? Brushes.Black, row.Text);
-        double y = rowIndex * RowHeight - Offset.Y;
+        double y = rowIndex * RowHeight - scrollTop;
         return CaretRectFor(rowIndex, layout, CentreInRow(layout, y));
     }
 
     /// <summary>Top of the row band the caret sits in, for tests.</summary>
     internal double? CaretRowTop()
-        => CaretRowIndex() is int rowIndex ? rowIndex * RowHeight - Offset.Y : null;
+        => CaretRowIndex() is int rowIndex ? rowIndex * RowHeight - scrollTop : null;
 
     /// <summary>Byte offset under a point, for click and drag.</summary>
     private long? OffsetAt(Point point)
@@ -674,7 +681,7 @@ public class RawTextSurface : RowSurface
         if (RowIndex is not { } index || index.RowCount == 0)
             return null;
 
-        int rowIndex = Math.Clamp((int)((point.Y + Offset.Y) / RowHeight), 0, index.RowCount - 1);
+        int rowIndex = Math.Clamp((int)((point.Y + scrollTop) / RowHeight), 0, index.RowCount - 1);
         if (DecodedRow(rowIndex) is not { } row)
             return null;
 
@@ -1113,21 +1120,70 @@ public class RawTextSurface : RowSurface
     // ---- scrolling ---------------------------------------------------------------------
 
     /// <summary>
-    /// Computed live rather than cached. A cached extent goes stale between the row count
-    /// growing and whatever refreshes it running, and the host clamps any offset it is given
-    /// against that stale value - which silently turns a reveal deep in a large file into a
-    /// scroll that stops short. During a full-speed scan one 120ms growth tick is over a million
-    /// rows of staleness, so "stale by one tick" is not a rounding error, it is a mile.
+    /// How tall the rows are altogether. Computed live rather than cached: a cached extent goes
+    /// stale between the row count growing and whatever refreshes it running, and a clamp against
+    /// that stale value silently turns a reveal deep in a large file into a scroll that stops
+    /// short. During a full-speed scan one 120ms growth tick is over a million rows of staleness,
+    /// so "stale by one tick" is not a rounding error, it is a mile.
     /// </summary>
-    protected override double ExtentHeight => RowCount * RowHeight;
+    private double ExtentHeight => RowCount * RowHeight;
 
-    protected override void OnOffsetChanged() => UpdateRealizedRows(Bounds.Height);
+    private double MaxScrollTop => Math.Max(0, ExtentHeight - Bounds.Height);
+
+    /// <summary>How far down the rows the top of the view is, in pixels.</summary>
+    public double VerticalOffset => scrollTop;
+
+    public override double ScrollFraction => ExtentHeight <= 0 ? 0 : scrollTop / ExtentHeight;
+
+    public override double ViewportFraction => ExtentHeight <= 0 ? 1 : Math.Min(1, Bounds.Height / ExtentHeight);
+
+    public override bool ShowsEnd => scrollTop >= MaxScrollTop - 0.5;
+
+    // The public moves are the user's - the wheel, a trackpad, the scrollbar - so each abandons a
+    // reveal still waiting, as a click or a key does.
+
+    public override void ScrollByPixels(double delta)
+    {
+        AbandonPendingReveal();
+        SetVerticalOffset(scrollTop + delta);
+    }
+
+    public override void ScrollToFraction(double fraction)
+    {
+        AbandonPendingReveal();
+        SetVerticalOffset(Math.Clamp(fraction, 0, 1) * ExtentHeight);
+    }
+
+    public override void ScrollToEnd()
+    {
+        AbandonPendingReveal();
+        SetVerticalOffset(MaxScrollTop);
+    }
+
+    /// <summary>Back to the top, for rows about to be replaced wholesale - not the user's move, so
+    /// a reveal waiting for the new rows survives it.</summary>
+    public void ResetScroll() => SetVerticalOffset(0);
+
+    /// <summary>Moves the top of the view to <paramref name="y"/>, clamped to the rows, and tells
+    /// the host - also when only the extent under it changed.</summary>
+    private void SetVerticalOffset(double y)
+    {
+        double clamped = Math.Clamp(y, 0, MaxScrollTop);
+        if (clamped != scrollTop)
+        {
+            scrollTop = clamped;
+            UpdateRealizedRows(Bounds.Height);
+            InvalidateVisual();
+        }
+
+        NotifyScrollPosition();
+    }
 
     /// <summary>Tells the host the extent moved, and re-tries a reveal that is still waiting.</summary>
     private void InvalidateScrollable()
     {
         UpdateRealizedRows(Bounds.Height);
-        RaiseScrollInvalidated(EventArgs.Empty);
+        SetVerticalOffset(scrollTop); // the rows may have grown or shrunk under the view
         ApplyPendingReveal();
     }
 
@@ -1143,9 +1199,9 @@ public class RawTextSurface : RowSurface
         double top = rowIndex * RowHeight;
         double bottom = top + RowHeight;
 
-        if (top < Offset.Y)
+        if (top < scrollTop)
             SetVerticalOffset(top);
-        else if (bottom > Offset.Y + Bounds.Height)
+        else if (bottom > scrollTop + Bounds.Height)
             SetVerticalOffset(bottom - Bounds.Height);
     }
 
@@ -1179,7 +1235,7 @@ public class RawTextSurface : RowSurface
             return; // the scan has not reached it yet; a later growth tick will re-try
 
         double top = rowIndex * RowHeight;
-        if (top >= Offset.Y && top + RowHeight <= Offset.Y + Bounds.Height)
+        if (top >= scrollTop && top + RowHeight <= scrollTop + Bounds.Height)
         {
             this.pendingRevealRow = null; // already on screen
             return;

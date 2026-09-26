@@ -148,16 +148,32 @@
                 <!-- The cell's own tree, drawn by the same surface as the JSON view over just this
                      cell's bytes, so it holds nothing beyond the rows on screen - a 2,199-item
                      array opens instantly. -->
-                <tree:TreeSurface Grid.Row="1"
-                                  x:Name="DetailTree"
-                                  IsVisible="{Binding CellDetail.IsTree}"
-                                  Background="{DynamicResource AppWindowBackgroundBrush}"
-                                  FontFamily="{DynamicResource AppContentFontFamily}"
-                                  FontSize="{DynamicResource AppContentFontSize}"
-                                  Foreground="{DynamicResource AppTextBrush}"
-                                  GutterForeground="{DynamicResource AppMutedTextBrush}"
-                                  HighlightBrush="{DynamicResource AppSearchHighlightBrush}"
-                                  SelectionBrush="{DynamicResource AppAccentSurfaceBrush}" />
+                <Grid Grid.Row="1"
+                      RowDefinitions="*,Auto"
+                      ColumnDefinitions="*,Auto"
+                      IsVisible="{Binding CellDetail.IsTree}">
+                    <tree:TreeSurface x:Name="DetailTree"
+                                      Background="{DynamicResource AppWindowBackgroundBrush}"
+                                      FontFamily="{DynamicResource AppContentFontFamily}"
+                                      FontSize="{DynamicResource AppContentFontSize}"
+                                      Foreground="{DynamicResource AppTextBrush}"
+                                      GutterForeground="{DynamicResource AppMutedTextBrush}"
+                                      HighlightBrush="{DynamicResource AppSearchHighlightBrush}"
+                                      SelectionBrush="{DynamicResource AppAccentSurfaceBrush}" />
+
+                    <ScrollBar x:Name="DetailVerticalScrollBar"
+                               Grid.Column="1"
+                               Orientation="Vertical"
+                               IsVisible="False"
+                               Minimum="0" />
+
+                    <ScrollBar x:Name="DetailPanScrollBar"
+                               Grid.Row="1"
+                               Orientation="Horizontal"
+                               AllowAutoHide="False"
+                               IsVisible="False"
+                               Minimum="0" />
+                </Grid>
 
                 <TextBlock Grid.Row="2"
                            Text="Value truncated — open the file in the raw view to see all of it"

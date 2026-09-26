@@ -37,8 +37,15 @@ public class TreeSurface : RowSurface
     /// <summary>Width of the expand-arrow column before each row's text.</summary>
     public const double ToggleWidth = 16;
 
-    private const string ExpandedGlyph = "▾";
-    private const string CollapsedGlyph = "▸";
+    /// <summary>
+    /// The expand arrows, as geometry rather than text: a ▸/▾ glyph picks up font-fallback metrics
+    /// that differ by platform (and by glyph within one fallback chain on Windows), so the two
+    /// states drew at visibly different sizes. A path is the same size everywhere.
+    /// </summary>
+    private const double ArrowSize = 7;
+
+    private static readonly Geometry CollapsedArrowShape = Geometry.Parse("M 0,0 L 7,3.5 L 0,7 Z");
+    private static readonly Geometry ExpandedArrowShape = Geometry.Parse("M 0,0 L 7,0 L 3.5,7 Z");
 
     /// <summary>Width of the slot a row's marker (see <see cref="ITreeRowPainter.Marker"/>) takes
     /// before its arrow, including the gap after it.</summary>
@@ -73,8 +80,6 @@ public class TreeSurface : RowSurface
     private bool syncingOffset;
     private double bytesPerRow = InitialBytesPerRow;
     private TreeCursor? selection;
-    private TextLayout? expandedArrow;
-    private TextLayout? collapsedArrow;
     private string? highlightTerm;
     private IReadOnlyDictionary<TreeRunStyle, IBrush>? runBrushes;
 
@@ -490,8 +495,6 @@ public class TreeSurface : RowSurface
     private void DropLayouts()
     {
         layouts.Clear();
-        expandedArrow = null;
-        collapsedArrow = null;
     }
 
     protected override void OnTextStyleChanged()
@@ -527,8 +530,6 @@ public class TreeSurface : RowSurface
         double contentLeft = ContentLeft;
         double contentWidth = Math.Max(0, Bounds.Width - contentLeft - ContentPaddingX);
 
-        expandedArrow ??= new TextLayout(ExpandedGlyph, typeface, fontSize, gutterStyle.Brush);
-        collapsedArrow ??= new TextLayout(CollapsedGlyph, typeface, fontSize, gutterStyle.Brush);
 
         double gutterWidth = GutterWidth;
         if (gutterWidth > 0)
@@ -568,8 +569,10 @@ public class TreeSurface : RowSurface
 
                 if (row.Shape == TreeRowShape.Open)
                 {
-                    var arrow = row.IsExpanded ? expandedArrow : collapsedArrow;
-                    arrow.Draw(context, new Point(arrowX + (ToggleWidth - arrow.WidthIncludingTrailingWhitespace) / 2, CentreInRow(arrow, y)));
+                    var shape = row.IsExpanded ? ExpandedArrowShape : CollapsedArrowShape;
+                    var at = Matrix.CreateTranslation(arrowX + (ToggleWidth - ArrowSize) / 2, y + (RowHeight - ArrowSize) / 2);
+                    using (context.PushTransform(at))
+                        context.DrawGeometry(foreground, null, shape);
                 }
 
                 double textTop = CentreInRow(laid.Layout, y);

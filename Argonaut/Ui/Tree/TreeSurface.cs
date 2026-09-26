@@ -987,7 +987,7 @@ public class TreeSurface : RowSurface
         else
         {
             foreach (var ancestor in selection.Ancestors)
-                parent = ancestor;
+                parent = ancestor.Node;
         }
 
         if (parent is not { } container)

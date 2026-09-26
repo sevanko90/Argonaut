@@ -41,7 +41,7 @@ public static class JsonPathResolver
 
     private static readonly Regex BareIdentifier = new("^[A-Za-z_][A-Za-z0-9_]*$", RegexOptions.Compiled);
 
-    private readonly record struct Segment(bool IsArrayIndex, string? Name, int ArrayIndex);
+    internal readonly record struct Segment(bool IsArrayIndex, string? Name, int ArrayIndex);
 
     // Internal-only signal for "the file closed a container's parent before closing the
     // container itself" (truncated/malformed input) - caught in ResolveAsync and turned into
@@ -153,7 +153,7 @@ public static class JsonPathResolver
 
     private static bool IsContainer(JsonTokenKind kind) => kind is JsonTokenKind.StartObject or JsonTokenKind.StartArray;
 
-    private static string DescribeKind(JsonTokenKind kind) => kind switch
+    internal static string DescribeKind(JsonTokenKind kind) => kind switch
     {
         JsonTokenKind.StartObject => "an object",
         JsonTokenKind.StartArray => "an array",
@@ -164,10 +164,10 @@ public static class JsonPathResolver
         _ => kind.ToString()
     };
 
-    private static string FormatMemberName(string name) =>
+    internal static string FormatMemberName(string name) =>
         BareIdentifier.IsMatch(name) ? name : $"['{name.Replace("\\", "\\\\").Replace("'", "\\'")}']";
 
-    private static string FormatPath(IReadOnlyList<Segment> segments, int count)
+    internal static string FormatPath(IReadOnlyList<Segment> segments, int count)
     {
         var sb = new StringBuilder("$");
         for (int i = 0; i < count; i++)
@@ -191,7 +191,7 @@ public static class JsonPathResolver
     /// optional leading <c>$</c>, then any mix of <c>.name</c>, <c>['name']</c>/<c>["name"]</c>
     /// (with <c>\\</c>/<c>\'</c>/<c>\"</c> escaping), and <c>[N]</c> array-index segments.
     /// </summary>
-    private static bool TryParse(string path, out List<Segment> segments, out string? error)
+    internal static bool TryParse(string path, out List<Segment> segments, out string? error)
     {
         segments = new List<Segment>();
         error = null;

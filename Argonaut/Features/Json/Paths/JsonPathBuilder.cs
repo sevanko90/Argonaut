@@ -137,7 +137,7 @@ public static class JsonPathBuilder
         return arrayIndex;
     }
 
-    private static string FormatMemberSegment(string name)
+    internal static string FormatMemberSegment(string name)
     {
         if (BareIdentifier.IsMatch(name))
             return name;
@@ -146,7 +146,8 @@ public static class JsonPathBuilder
         return $"['{escaped}']";
     }
 
-    private static string ReadText(IByteSource bytes, long offset, int length)
+    /// <summary>A name's text with its escapes decoded - what a path spells it as.</summary>
+    internal static string ReadText(IByteSource bytes, long offset, int length)
     {
         if (length <= 0)
             return string.Empty;

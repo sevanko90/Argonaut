@@ -83,14 +83,18 @@ public sealed class TreeCursor
     /// true.</summary>
     public TreeRow Current { get; private set; }
 
-    /// <summary>The nodes of the containers enclosing <see cref="Current"/>, outermost first.
-    /// Not including the document level.</summary>
-    public IEnumerable<TreeNode> Ancestors
+    /// <summary>The open rows of the containers enclosing <see cref="Current"/>, outermost
+    /// first. Not including the document level.</summary>
+    public IEnumerable<TreeRow> Ancestors
     {
         get
         {
             for (int i = 1; i < frames.Count; i++)
-                yield return frames[i].Node;
+            {
+                var frame = frames[i];
+                yield return new TreeRow(TreeRowShape.Open, frame.Node, frame.Node.RowStart, frame.Depth, frame.Ordinal,
+                    frame.ParentKind, frames[i - 1].Node.ValueStart, IsExpanded: true);
+            }
         }
     }
 

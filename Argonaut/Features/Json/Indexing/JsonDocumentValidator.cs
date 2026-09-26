@@ -19,7 +19,8 @@ internal static class JsonDocumentValidator
     /// is longer still.</summary>
     private const int InitialGatherBytes = 1024 * 1024;
 
-    private static readonly JsonReaderOptions Options = new()
+    /// <summary>How the tree reads JSON, which every pass over it shares.</summary>
+    internal static readonly JsonReaderOptions Options = new()
     {
         CommentHandling = JsonCommentHandling.Skip,
         AllowTrailingCommas = true,
@@ -29,9 +30,10 @@ internal static class JsonDocumentValidator
     /// Null when the document is valid JSON; otherwise why and where it is not. Waits for a
     /// source still arriving, so it runs on a background thread. The failure's
     /// <see cref="IndexFailure.ItemsIndexed"/> is the tokens read before it - what the view could
-    /// show.
+    /// show. A <paramref name="hashes"/> recorder is fed every token on the way, so content
+    /// hashes cost no pass of their own.
     /// </summary>
-    public static IndexFailure? FindFailure(IByteSource source, CancellationToken cancellationToken)
+    public static IndexFailure? FindFailure(IByteSource source, CancellationToken cancellationToken, JsonContentHashRecorder? hashes = null)
     {
         long offset = 0;
         long lastGoodEnd = -1;
@@ -76,6 +78,7 @@ internal static class JsonDocumentValidator
 
                     while (reader.Read())
                     {
+                        hashes?.Observe(ref reader, offset);
                         lastGoodEnd = offset + reader.BytesConsumed;
                         if ((++tokens & 0xFFFF) == 0)
                             cancellationToken.ThrowIfCancellationRequested();

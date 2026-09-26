@@ -64,7 +64,7 @@ public class JsonRowTruncationTests
 
             // Value (not just name) was truncated, so the row exposes the raw-file offset of
             // the overflowing content for the "view in raw" link - GH issue #4.
-            Assert.Equal(index.GetToken(row.TokenIndex).Offset, row.TruncatedValueOffset);
+            Assert.Equal(row.ValueStart + 1, row.TruncatedValueOffset);
             Assert.True(row.ShowTruncationLink);
             Assert.False(row.ShowPlainTruncationHint);
         }

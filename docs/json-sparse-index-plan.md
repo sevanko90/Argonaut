@@ -185,7 +185,7 @@ The existing dense index stays available to diff until this is built, so diff is
 Each step lands on its own and leaves the app working. Tick a step when it is merged into the
 branch, and note under it anything the next step needs to know.
 
-Status: step 8 done; step 9 (diff) next. The array table awaits a manual check. Branch: `plan/json-sparse-index`.
+Status: step 9 done; step 10 (remove the token index) next. The array table and the diff await a manual check. Branch: `plan/json-sparse-index`.
 
 1. [x] **Benchmarks first.** A BenchmarkDotNet suite over three shapes - a token-dense array, deeply
    nested objects, a large array of small records - measuring index bytes per file byte, build time,
@@ -416,7 +416,34 @@ Status: step 8 done; step 9 (diff) next. The array table awaits a manual check. 
 
    Needs a manual check: open "view as table" on arrays of objects and of scalars, expand and
    collapse column headers, reshape, click cells (scalar and container) and use the pane's tree.
-9. [ ] **Diff** on its own hash budget.
+9. [x] **Diff** on its own hash budget.
+
+   `JsonSparseIndex.StartIndexingWithContentHashes` feeds the validation pass's tokens to a
+   `JsonContentHashRecorder`, which records the hash of every container of at least `T` (the
+   promotion size) as it closes - no pass of its own, and a record set the size of the sparse
+   index. `JsonContentHashes.Hash(start, end)` answers from the record or re-parses the value's
+   bytes, at most `T` for a container. `JsonDiffIndex` records `JsonDiffNode`s (row start and
+   value start) instead of token indices and reads children through `JsonDiffDocument`, which
+   also builds the diff's `JsonRow`s, paths and find locations; the worker and the view hold one
+   each. `JsonRow.TokenIndex` became `ValueStart`. The diff keeps its `ListBox` and record log -
+   moving it to a tree surface is a view change, not an index one, and nothing here needs it.
+
+   - **No per-child log.** The plan's spilled per-child hash log was not needed: alignment is
+     already capped at `MaxAlignableArrayElements` per level, and the children of a level are
+     hashed from their bytes as the level is aligned. A recorded array over the cap is now
+     flagged approximate from its count, without reading it.
+   - **Find keys a match by the deepest node holding it**, via a fully-expanded `TreeCursor`
+     seek, remembering the last leaf found so a name and its value cost one seek. The lookup of
+     the record covering a match now skips the end of a cross-parent move that does not draw
+     that side; before, a match there could resolve to the wrong end and never be a stop.
+   - The widest alignable array (`JsonDiffAlignmentBenchmarks`, 100K elements) takes 11-17 ms
+     and allocates 23-25 MB, against the token index's 5-6 ms and 13 MB: the elements are read
+     and hashed rather than looked up, and held as `TreeNode`s rather than token indices.
+     What hashing adds to the validation pass is not measured yet.
+
+   Needs a manual check: compare two files; changed paths open to the differing leaf; expand
+   unchanged, added, removed and moved rows; the context bar's values and paths (including
+   under a moved container); next/previous change; "changes only"; find across both files.
 10. [ ] **Remove `JsonStructureIndex`'s dense log** once nothing reads it, and the `ChildCap`/"show more"
     machinery with it.
 11. [ ] **Per-depth row counts**, if the estimated scrollbar proves not good enough in use.

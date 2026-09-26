@@ -446,7 +446,7 @@ public sealed class JsonVisibleRowCollection : VirtualizingItemsSourceBase
             string text = canLoadMore
                 ? "… more items (click to show more)"
                 : $"… display limit reached ({MaxDisplayedChildrenPerContainer:N0} items shown)";
-            return new JsonRow(position, vrow.PlaceholderContainerTokenIndex, container.Depth + 1 - depthOffset, container.Kind,
+            return new JsonRow(position, container.Offset, container.Depth + 1 - depthOffset, container.Kind,
                 name: null, value: text,
                 hasChildren: canLoadMore, isExpanded: false, isPlaceholder: true);
         }

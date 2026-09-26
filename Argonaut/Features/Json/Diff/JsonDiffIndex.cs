@@ -4,8 +4,8 @@ using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
-using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Indexing;
+using Argonaut.Engine.Indexing.Trees;
 using Argonaut.Engine.Progress;
 using Argonaut.Features.Json.Indexing;
 
@@ -26,8 +26,8 @@ public enum DiffStatus
 /// <see cref="JsonDiffIndex.PackedDiffRecord"/>.
 /// </summary>
 /// <param name="Index">This record's index in the diff log.</param>
-/// <param name="LeftToken">Token index in the left document, or -1 when absent there.</param>
-/// <param name="RightToken">Token index in the right document, or -1 when absent there.</param>
+/// <param name="Left">The node in the left document, or <see cref="JsonDiffNode.Absent"/>.</param>
+/// <param name="Right">The node in the right document, or <see cref="JsonDiffNode.Absent"/>.</param>
 /// <param name="Status">How this node differs.</param>
 /// <param name="Depth">Merged-tree nesting depth (0 at the root).</param>
 /// <param name="ParentRecord">Record index of the enclosing container's record, or -1 at the root.</param>
@@ -45,8 +45,8 @@ public enum DiffStatus
 /// <see cref="JsonDiffIndex.MaxAlignableArrayElements"/>, so it was not descended into.</param>
 public readonly record struct JsonDiffRecord(
     int Index,
-    int LeftToken,
-    int RightToken,
+    JsonDiffNode Left,
+    JsonDiffNode Right,
     DiffStatus Status,
     int Depth,
     int ParentRecord,
@@ -59,8 +59,8 @@ public readonly record struct JsonDiffRecord(
 
 /// <summary>
 /// The headless semantic differ (diff plan stages 2-3): compares two fully indexed JSON
-/// documents by Merkle content hash (see <see cref="JsonIndexOptions.ComputeContentHashes"/>)
-/// and publishes fixed-size records in merged render order - the record log IS the flattened
+/// documents by Merkle content hash (see <see cref="JsonContentHashes"/>: recorded for large
+/// containers, read from the bytes for everything else) and publishes fixed-size records in merged render order - the record log IS the flattened
 /// diff tree, walked directly by the diff row collection. Same publishing shape as the other
 /// scanners (<see cref="AppendLogIndexBase{T}"/>), so it gets AllItemsPublished/Failure/waiters and
 /// lock-free reads for free.
@@ -74,13 +74,12 @@ public readonly record struct JsonDiffRecord(
 ///  - Added/Removed subtrees are emitted whole (one record, no descent); the cross-parent
 ///    move pass over those records is therefore bounded by the size of the change.
 ///  - Two fields mutate after publication (the move pass rewrites Status/partner fields;
-///    a container's SubtreeEnd finalizes after its descent): both use the same
-///    publish-then-mutate Volatile discipline as PackedToken.EndIndex, with StatusBits as
-///    the release/acquire gate (written last, read first).
+///    a container's SubtreeEnd finalizes after its descent): both are published then
+///    mutated with Volatile, with StatusBits as the release/acquire gate (written last,
+///    read first).
 ///
 /// The diff runs on its own dedicated thread with an oversized stack: the descent recurses
-/// per nesting level and the token index permits depths up to 4095, which could overflow a
-/// default 1MB task stack.
+/// per nesting level, which could overflow a default 1MB task stack.
 /// </summary>
 public sealed class JsonDiffIndex : AppendLogIndexBase<JsonDiffIndex.PackedDiffRecord>
 {
@@ -103,8 +102,8 @@ public sealed class JsonDiffIndex : AppendLogIndexBase<JsonDiffIndex.PackedDiffR
 
     /// <summary>
     /// Compact stored form of one <see cref="JsonDiffRecord"/>. StatusBits carries the
-    /// <see cref="DiffStatus"/> in its low bits plus the flag bits above. StatusBits,
-    /// LeftToken, RightToken, MovePartnerRecord and SubtreeEnd may be mutated after
+    /// <see cref="DiffStatus"/> in its low bits plus the flag bits above. StatusBits, the
+    /// node offsets, MovePartnerRecord and SubtreeEnd may be mutated after
     /// publication (move reconciliation / descent finalization) and are accessed with
     /// Volatile on both sides; StatusBits is always written LAST and read FIRST, so a
     /// reader that observes a mutated status also observes the partner fields that came
@@ -112,8 +111,10 @@ public sealed class JsonDiffIndex : AppendLogIndexBase<JsonDiffIndex.PackedDiffR
     /// </summary>
     public struct PackedDiffRecord
     {
-        public int LeftToken;
-        public int RightToken;
+        public long LeftRowStart;
+        public long LeftValueStart;
+        public long RightRowStart;
+        public long RightValueStart;
         public int ParentRecord;
         public int SubtreeEnd;
         public int StatusBits;
@@ -123,10 +124,8 @@ public sealed class JsonDiffIndex : AppendLogIndexBase<JsonDiffIndex.PackedDiffR
         public ushort Depth;
     }
 
-    private readonly JsonStructureIndex leftIndex;
-    private readonly IByteSource leftFile;
-    private readonly JsonStructureIndex rightIndex;
-    private readonly IByteSource rightFile;
+    private readonly JsonDiffDocument left;
+    private readonly JsonDiffDocument right;
     private readonly IProgressReporter? progressReporter;
     private readonly CancellationToken cancellationToken;
 
@@ -136,7 +135,7 @@ public sealed class JsonDiffIndex : AppendLogIndexBase<JsonDiffIndex.PackedDiffR
     private readonly Dictionary<ulong, (int RecordIndex, int Count)> removedContainersByHash = new();
     private readonly Dictionary<ulong, (int RecordIndex, int Count)> addedContainersByHash = new();
 
-    private long progressEstimate;
+    private long progressLength;
     private long nextProgressReport;
 
     public Task IndexingTask { get; private set; } = Task.CompletedTask;
@@ -145,31 +144,31 @@ public sealed class JsonDiffIndex : AppendLogIndexBase<JsonDiffIndex.PackedDiffR
 
     public Task WaitForRecordCountAsync(int targetCount) => this.WaitForCountAsync(targetCount);
 
-    private JsonDiffIndex(JsonStructureIndex leftIndex, IByteSource leftFile, JsonStructureIndex rightIndex, IByteSource rightFile,
+    private JsonDiffIndex(JsonDiffDocument left, JsonDiffDocument right,
         IProgressReporter? progressReporter, CancellationToken cancellationToken)
     {
-        this.leftIndex = leftIndex;
-        this.leftFile = leftFile;
-        this.rightIndex = rightIndex;
-        this.rightFile = rightFile;
+        this.left = left;
+        this.right = right;
         this.progressReporter = progressReporter;
         this.cancellationToken = cancellationToken;
     }
 
     /// <summary>
-    /// Starts the diff worker. It first waits for BOTH indexes to finish (container hashes
-    /// are only final once every container closes); if either side fails or is cancelled the
-    /// diff completes empty - side failures are the caller's to attribute and report.
-    /// The caller (JsonDiffSession) guarantees both mappings outlive <see cref="IndexingTask"/>.
+    /// Starts the diff worker over two sessions indexed with content hashes
+    /// (<see cref="JsonSparseIndex.StartIndexingWithContentHashes(Argonaut.Engine.Bytes.IByteSource, IProgressReporter?, CancellationToken)"/>).
+    /// It first waits for BOTH indexes to finish (recorded hashes are only final once every
+    /// container closes); if either side fails or is cancelled the diff completes empty - side
+    /// failures are the caller's to attribute and report. The caller (JsonDiffSession)
+    /// guarantees both mappings outlive <see cref="IndexingTask"/>.
     /// </summary>
-    public static JsonDiffIndex Start(JsonStructureIndex leftIndex, IByteSource leftFile, JsonStructureIndex rightIndex, IByteSource rightFile,
+    public static JsonDiffIndex Start(IndexedSourceSession<JsonSparseIndex> left, IndexedSourceSession<JsonSparseIndex> right,
         IProgressReporter? progressReporter = null, CancellationToken cancellationToken = default)
     {
-        var diff = new JsonDiffIndex(leftIndex, leftFile, rightIndex, rightFile, progressReporter, cancellationToken);
+        // Its own readers: the view reads the same documents on the UI thread meanwhile.
+        var diff = new JsonDiffIndex(new JsonDiffDocument(left), new JsonDiffDocument(right), progressReporter, cancellationToken);
 
         // A dedicated thread with an oversized stack instead of Task.Run: the descent
-        // recurses per nesting level (up to the index's 4095 depth cap), which does not fit
-        // a default 1MB pool-thread stack. TCS mirrors Task.Run's completion semantics.
+        // recurses per nesting level, which does not fit a default 1MB pool-thread stack. TCS mirrors Task.Run's completion semantics.
         var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var thread = new Thread(() =>
         {
@@ -207,8 +206,8 @@ public sealed class JsonDiffIndex : AppendLogIndexBase<JsonDiffIndex.PackedDiffR
 
         return new JsonDiffRecord(
             index,
-            Volatile.Read(ref packed.LeftToken),
-            Volatile.Read(ref packed.RightToken),
+            new JsonDiffNode(Volatile.Read(ref packed.LeftRowStart), Volatile.Read(ref packed.LeftValueStart)),
+            new JsonDiffNode(Volatile.Read(ref packed.RightRowStart), Volatile.Read(ref packed.RightValueStart)),
             (DiffStatus)(statusBits & StatusMask),
             packed.Depth,
             packed.ParentRecord,
@@ -224,12 +223,12 @@ public sealed class JsonDiffIndex : AppendLogIndexBase<JsonDiffIndex.PackedDiffR
 
     private void Run()
     {
-        // Both sides must be fully indexed before container hashes are final. A faulted or
+        // Both sides must be fully indexed before recorded hashes are final. A faulted or
         // cancelled side means there is nothing to diff - complete empty; the session/view
         // model attributes the side failure.
         try
         {
-            Task.WaitAll(new[] { this.leftIndex.IndexingTask, this.rightIndex.IndexingTask }, this.cancellationToken);
+            Task.WaitAll(new[] { this.left.Index.IndexingTask, this.right.Index.IndexingTask }, this.cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -240,46 +239,45 @@ public sealed class JsonDiffIndex : AppendLogIndexBase<JsonDiffIndex.PackedDiffR
             return;
         }
 
-        if (!this.leftIndex.HasContentHashes || !this.rightIndex.HasContentHashes)
-            throw new InvalidOperationException("Diffing requires both indexes to be built with JsonIndexOptions.ComputeContentHashes.");
+        if (this.left.Index.ContentHashes is null || this.right.Index.ContentHashes is null)
+            throw new InvalidOperationException("Diffing requires both indexes to be built with content hashes.");
 
-        if (this.leftIndex.TokenCount == 0 && this.rightIndex.TokenCount == 0)
+        var leftRoot = this.left.Root;
+        var rightRoot = this.right.Root;
+        if (leftRoot is null && rightRoot is null)
             return;
 
-        this.progressEstimate = Math.Max(1, this.leftIndex.TokenCount);
-        this.nextProgressReport = 1;
+        this.progressLength = Math.Max(1, this.left.Bytes.AvailableLength);
+        this.nextProgressReport = 0;
 
-        if (this.leftIndex.TokenCount == 0)
+        if (leftRoot is not { } leftTop)
         {
-            Emit(-1, 0, DiffStatus.Added, 0, -1, -1, -1);
+            Emit(JsonDiffNode.Absent, JsonDiffNode.Of(rightRoot!.Value), DiffStatus.Added, 0, -1, -1, -1);
             return;
         }
 
-        if (this.rightIndex.TokenCount == 0)
+        if (rightRoot is not { } rightTop)
         {
-            Emit(0, -1, DiffStatus.Removed, 0, -1, -1, -1);
+            Emit(JsonDiffNode.Of(leftTop), JsonDiffNode.Absent, DiffStatus.Removed, 0, -1, -1, -1);
             return;
         }
 
-        DiffNode(0, 0, 0, -1, -1, -1);
+        DiffNode(leftTop, rightTop, 0, -1, -1, -1);
         ReconcileCrossParentMoves();
 
-        this.progressReporter?.Report("Comparing", this.progressEstimate, this.progressEstimate);
+        this.progressReporter?.Report("Comparing", this.progressLength, this.progressLength);
     }
 
-    private ulong LeftHash(int token) => (ulong)this.leftIndex.GetContentHash(token);
-    private ulong RightHash(int token) => (ulong)this.rightIndex.GetContentHash(token);
-
-    private static bool IsContainer(JsonTokenKind kind) => kind is JsonTokenKind.StartObject or JsonTokenKind.StartArray;
-
-    private int Emit(int leftToken, int rightToken, DiffStatus status, int depth, int parentRecord,
+    private int Emit(JsonDiffNode leftNode, JsonDiffNode rightNode, DiffStatus status, int depth, int parentRecord,
         int leftArrayIndex, int rightArrayIndex, int flags = 0, int subtreeEnd = 0)
     {
         int index = this.items.Count;
         this.items.Add(new PackedDiffRecord
         {
-            LeftToken = leftToken,
-            RightToken = rightToken,
+            LeftRowStart = leftNode.RowStart,
+            LeftValueStart = leftNode.ValueStart,
+            RightRowStart = rightNode.RowStart,
+            RightValueStart = rightNode.ValueStart,
             ParentRecord = parentRecord,
             SubtreeEnd = subtreeEnd == 0 ? index + 1 : subtreeEnd,
             StatusBits = (int)status | flags,
@@ -293,34 +291,31 @@ public sealed class JsonDiffIndex : AppendLogIndexBase<JsonDiffIndex.PackedDiffR
         if ((index & 0xFFF) == 0)
         {
             this.cancellationToken.ThrowIfCancellationRequested();
-            if (index >= this.nextProgressReport)
+
+            // Records are emitted in the left document's order, so where the last one sits in
+            // it is how far the comparison has come.
+            if (leftNode.IsPresent && leftNode.ValueStart >= this.nextProgressReport)
             {
-                // Records-emitted against the left token count: a rough denominator, but a
-                // fine one - progress only needs to visibly move.
-                this.progressReporter?.Report("Comparing", Math.Min(index, this.progressEstimate - 1), this.progressEstimate);
-                this.nextProgressReport = index + 4096;
+                this.progressReporter?.Report("Comparing", Math.Min(leftNode.ValueStart, this.progressLength - 1), this.progressLength);
+                this.nextProgressReport = leftNode.ValueStart + (1 << 20);
             }
         }
 
         return index;
     }
 
-    private void EmitRemoved(int leftToken, int depth, int parentRecord, int leftArrayIndex)
+    private void EmitRemoved(TreeNode leftNode, int depth, int parentRecord, int leftArrayIndex)
     {
-        int record = Emit(leftToken, -1, DiffStatus.Removed, depth, parentRecord, leftArrayIndex, -1);
-
-        var token = this.leftIndex.GetToken(leftToken);
-        if (IsContainer(token.Kind))
-            RegisterMoveCandidate(this.removedContainersByHash, LeftHash(leftToken), record);
+        int record = Emit(JsonDiffNode.Of(leftNode), JsonDiffNode.Absent, DiffStatus.Removed, depth, parentRecord, leftArrayIndex, -1);
+        if (leftNode.IsContainer)
+            RegisterMoveCandidate(this.removedContainersByHash, this.left.Hash(leftNode), record);
     }
 
-    private void EmitAdded(int rightToken, int depth, int parentRecord, int rightArrayIndex)
+    private void EmitAdded(TreeNode rightNode, int depth, int parentRecord, int rightArrayIndex)
     {
-        int record = Emit(-1, rightToken, DiffStatus.Added, depth, parentRecord, -1, rightArrayIndex);
-
-        var token = this.rightIndex.GetToken(rightToken);
-        if (IsContainer(token.Kind))
-            RegisterMoveCandidate(this.addedContainersByHash, RightHash(rightToken), record);
+        int record = Emit(JsonDiffNode.Absent, JsonDiffNode.Of(rightNode), DiffStatus.Added, depth, parentRecord, -1, rightArrayIndex);
+        if (rightNode.IsContainer)
+            RegisterMoveCandidate(this.addedContainersByHash, this.right.Hash(rightNode), record);
     }
 
     private static void RegisterMoveCandidate(Dictionary<ulong, (int RecordIndex, int Count)> bucket, ulong hash, int record)
@@ -335,33 +330,30 @@ public sealed class JsonDiffIndex : AppendLogIndexBase<JsonDiffIndex.PackedDiffR
     /// the Merkle short-circuit. Same-kind containers with differing hashes descend; every
     /// other combination is a Modified leaf record (the panes each render their own side).
     /// </summary>
-    private void DiffNode(int leftToken, int rightToken, int depth, int parentRecord, int leftArrayIndex, int rightArrayIndex)
+    private void DiffNode(TreeNode leftNode, TreeNode rightNode, int depth, int parentRecord, int leftArrayIndex, int rightArrayIndex)
     {
-        ulong leftHash = LeftHash(leftToken);
-        ulong rightHash = RightHash(rightToken);
+        var leftAt = JsonDiffNode.Of(leftNode);
+        var rightAt = JsonDiffNode.Of(rightNode);
 
-        if (leftHash == rightHash)
+        if (this.left.Hash(leftNode) == this.right.Hash(rightNode))
         {
-            Emit(leftToken, rightToken, DiffStatus.Unchanged, depth, parentRecord, leftArrayIndex, rightArrayIndex);
+            Emit(leftAt, rightAt, DiffStatus.Unchanged, depth, parentRecord, leftArrayIndex, rightArrayIndex);
             return;
         }
 
-        var leftInfo = this.leftIndex.GetToken(leftToken);
-        var rightInfo = this.rightIndex.GetToken(rightToken);
-
-        if (leftInfo.Kind != rightInfo.Kind || !IsContainer(leftInfo.Kind))
+        if (leftNode.FormatKind != rightNode.FormatKind || !leftNode.IsContainer)
         {
-            Emit(leftToken, rightToken, DiffStatus.Modified, depth, parentRecord, leftArrayIndex, rightArrayIndex);
+            Emit(leftAt, rightAt, DiffStatus.Modified, depth, parentRecord, leftArrayIndex, rightArrayIndex);
             return;
         }
 
-        int record = Emit(leftToken, rightToken, DiffStatus.Modified, depth, parentRecord, leftArrayIndex, rightArrayIndex, subtreeEnd: -1);
+        int record = Emit(leftAt, rightAt, DiffStatus.Modified, depth, parentRecord, leftArrayIndex, rightArrayIndex, subtreeEnd: -1);
 
         bool approximate = false;
-        if (leftInfo.Kind == JsonTokenKind.StartObject)
-            DiffObjectChildren(leftToken, rightToken, depth + 1, record);
+        if (leftNode.FormatKind == (byte)JsonTokenKind.StartObject)
+            DiffObjectChildren(leftNode, rightNode, depth + 1, record);
         else
-            approximate = !DiffArrayChildren(leftToken, rightToken, depth + 1, record);
+            approximate = !DiffArrayChildren(leftNode, rightNode, depth + 1, record);
 
         ref var packed = ref this.items.ItemRef(record);
         if (approximate)
@@ -378,28 +370,25 @@ public sealed class JsonDiffIndex : AppendLogIndexBase<JsonDiffIndex.PackedDiffR
     /// position from the right. All per-level state is dropped on return - memory is
     /// O(widest changed level), never O(document).
     /// </summary>
-    private void DiffObjectChildren(int leftContainer, int rightContainer, int depth, int parentRecord)
+    private void DiffObjectChildren(TreeNode leftContainer, TreeNode rightContainer, int depth, int parentRecord)
     {
-        var leftChildren = CollectChildren(this.leftIndex, leftContainer);
-        var rightChildren = CollectChildren(this.rightIndex, rightContainer);
+        var leftChildren = new List<TreeNode>(this.left.Children(leftContainer));
+        var rightChildren = new List<TreeNode>(this.right.Children(rightContainer));
 
         // Right name-hash -> ordinal. Duplicate keys (valid but degenerate JSON) keep the
         // last occurrence, mirroring how JSON consumers resolve duplicates.
         var rightByName = new Dictionary<ulong, int>(rightChildren.Count);
         for (int j = 0; j < rightChildren.Count; j++)
-        {
-            ulong nameHash = NameHash(this.rightIndex, this.rightFile, rightChildren[j]);
-            rightByName[nameHash] = j;
-        }
+            rightByName[JsonUnescape.DecodedHash(this.right.Text.NameBytes(rightChildren[j]))] = j;
 
         var matchOfLeft = new int[leftChildren.Count];
         var matchedRight = new bool[rightChildren.Count];
         for (int a = 0; a < leftChildren.Count; a++)
         {
             matchOfLeft[a] = -1;
-            ulong nameHash = NameHash(this.leftIndex, this.leftFile, leftChildren[a]);
-            if (rightByName.TryGetValue(nameHash, out int j) && !matchedRight[j]
-                && NamesEqual(leftChildren[a], rightChildren[j]))
+            var leftName = this.left.Text.NameBytes(leftChildren[a]);
+            if (rightByName.TryGetValue(JsonUnescape.DecodedHash(leftName), out int j) && !matchedRight[j]
+                && JsonUnescape.DecodedEquals(leftName, this.right.Text.NameBytes(rightChildren[j])))
             {
                 matchOfLeft[a] = j;
                 matchedRight[j] = true;
@@ -434,36 +423,6 @@ public sealed class JsonDiffIndex : AppendLogIndexBase<JsonDiffIndex.PackedDiffR
             if (!matchedRight[r])
                 EmitAdded(rightChildren[r], depth, parentRecord, -1);
         }
-    }
-
-    private static List<int> CollectChildren(JsonStructureIndex index, int containerToken)
-    {
-        var children = new List<int>();
-        int end = index.GetToken(containerToken).EndIndex;
-        int i = containerToken + 1;
-        while (i < end)
-        {
-            children.Add(i);
-            var token = index.GetToken(i);
-            i = IsContainer(token.Kind) ? token.EndIndex + 1 : i + 1;
-        }
-
-        return children;
-    }
-
-    private static ulong NameHash(JsonStructureIndex index, IByteSource file, int token)
-    {
-        var info = index.GetToken(token);
-        return JsonUnescape.DecodedHash(file.RequireContiguous(info.NameOffset, info.NameLength));
-    }
-
-    private bool NamesEqual(int leftToken, int rightToken)
-    {
-        var left = this.leftIndex.GetToken(leftToken);
-        var right = this.rightIndex.GetToken(rightToken);
-        return JsonUnescape.DecodedEquals(
-            this.leftFile.RequireContiguous(left.NameOffset, left.NameLength),
-            this.rightFile.RequireContiguous(right.NameOffset, right.NameLength));
     }
 
     // ── Arrays (stage 3: histogram anchors + Myers in the gaps) ────────────────────────
@@ -536,7 +495,7 @@ public sealed class JsonDiffIndex : AppendLogIndexBase<JsonDiffIndex.PackedDiffR
     /// every ancestor level's full scratch working set.</summary>
     private sealed class ArrayAlignmentPlan : IDisposable
     {
-        public ArrayAlignmentPlan(PooledBuffer<int> leftChildren, PooledBuffer<int> rightChildren,
+        public ArrayAlignmentPlan(PooledBuffer<TreeNode> leftChildren, PooledBuffer<TreeNode> rightChildren,
             ElementKind[] rightKind, int[] rightPartner, bool[] leftConsumed)
         {
             this.LeftChildren = leftChildren;
@@ -546,8 +505,8 @@ public sealed class JsonDiffIndex : AppendLogIndexBase<JsonDiffIndex.PackedDiffR
             this.LeftConsumed = leftConsumed;
         }
 
-        public PooledBuffer<int> LeftChildren { get; }
-        public PooledBuffer<int> RightChildren { get; }
+        public PooledBuffer<TreeNode> LeftChildren { get; }
+        public PooledBuffer<TreeNode> RightChildren { get; }
         public ElementKind[] RightKind { get; }
         public int[] RightPartner { get; }
         public bool[] LeftConsumed { get; }
@@ -567,7 +526,7 @@ public sealed class JsonDiffIndex : AppendLogIndexBase<JsonDiffIndex.PackedDiffR
     /// <see cref="MaxAlignableArrayElements"/> - the caller badges the container
     /// approximate and the level is not descended.
     /// </summary>
-    private bool DiffArrayChildren(int leftContainer, int rightContainer, int depth, int parentRecord)
+    private bool DiffArrayChildren(TreeNode leftContainer, TreeNode rightContainer, int depth, int parentRecord)
     {
         using var plan = BuildArrayAlignment(leftContainer, rightContainer);
         if (plan is null)
@@ -600,7 +559,7 @@ public sealed class JsonDiffIndex : AppendLogIndexBase<JsonDiffIndex.PackedDiffR
                 case ElementKind.Match:
                     FlushRemovedBefore(rightPartner[j]);
                     leftPointer = Math.Max(leftPointer, rightPartner[j] + 1);
-                    Emit(leftChildren[rightPartner[j]], rightChildren[j], DiffStatus.Unchanged, depth, parentRecord, rightPartner[j], j);
+                    Emit(JsonDiffNode.Of(leftChildren[rightPartner[j]]), JsonDiffNode.Of(rightChildren[j]), DiffStatus.Unchanged, depth, parentRecord, rightPartner[j], j);
                     break;
 
                 case ElementKind.Pair:
@@ -613,7 +572,7 @@ public sealed class JsonDiffIndex : AppendLogIndexBase<JsonDiffIndex.PackedDiffR
                     // Rendered at its new position only, badged with the source ordinal
                     // (LeftArrayIndex); the left pointer is NOT advanced - the element's
                     // old position contributes no row.
-                    Emit(leftChildren[rightPartner[j]], rightChildren[j], DiffStatus.Moved, depth, parentRecord, rightPartner[j], j);
+                    Emit(JsonDiffNode.Of(leftChildren[rightPartner[j]]), JsonDiffNode.Of(rightChildren[j]), DiffStatus.Moved, depth, parentRecord, rightPartner[j], j);
                     break;
 
                 default:
@@ -629,13 +588,13 @@ public sealed class JsonDiffIndex : AppendLogIndexBase<JsonDiffIndex.PackedDiffR
     /// <summary>Builds one array level's alignment plan. Child collection and the cap check are
     /// one pass (the old path walked every in-cap array twice). Only the compact emission plan is
     /// returned; all other large scratch buffers are pooled/returned before recursive emission.</summary>
-    private ArrayAlignmentPlan? BuildArrayAlignment(int leftContainer, int rightContainer)
+    private ArrayAlignmentPlan? BuildArrayAlignment(TreeNode leftContainer, TreeNode rightContainer)
     {
-        var leftChildren = CollectChildrenCapped(this.leftIndex, leftContainer, MaxAlignableArrayElements);
+        var leftChildren = CollectChildrenCapped(this.left, leftContainer, MaxAlignableArrayElements);
         if (leftChildren is null)
             return null;
 
-        var rightChildren = CollectChildrenCapped(this.rightIndex, rightContainer, MaxAlignableArrayElements);
+        var rightChildren = CollectChildrenCapped(this.right, rightContainer, MaxAlignableArrayElements);
         if (rightChildren is null)
         {
             leftChildren.Dispose();
@@ -657,9 +616,9 @@ public sealed class JsonDiffIndex : AppendLogIndexBase<JsonDiffIndex.PackedDiffR
             leftHashes = ArrayPool<ulong>.Shared.Rent(Math.Max(1, leftCount));
             rightHashes = ArrayPool<ulong>.Shared.Rent(Math.Max(1, rightCount));
             for (int i = 0; i < leftCount; i++)
-                leftHashes[i] = LeftHash(leftChildren[i]);
+                leftHashes[i] = this.left.Hash(leftChildren[i]);
             for (int j = 0; j < rightCount; j++)
-                rightHashes[j] = RightHash(rightChildren[j]);
+                rightHashes[j] = this.right.Hash(rightChildren[j]);
 
             // One dictionary per side carries both values the old code split across two:
             // occurrence count and the ordinal (consulted only when Count == 1).
@@ -751,12 +710,16 @@ public sealed class JsonDiffIndex : AppendLogIndexBase<JsonDiffIndex.PackedDiffR
         }
     }
 
-    private static PooledBuffer<int>? CollectChildrenCapped(JsonStructureIndex index, int containerToken, int cap)
+    private static PooledBuffer<TreeNode>? CollectChildrenCapped(JsonDiffDocument document, TreeNode container, int cap)
     {
-        var children = new PooledBuffer<int>(Math.Min(256, cap));
-        int end = index.GetToken(containerToken).EndIndex;
-        int i = containerToken + 1;
-        while (i < end)
+        // A recorded array knows its count, so one far over the cap is not read at all.
+        var structure = document.Index.Structure;
+        int record = structure.FindContainerStartingAt(container.ValueStart);
+        if (record >= 0 && structure.GetContainer(record).ChildCount > cap)
+            return null;
+
+        var children = new PooledBuffer<TreeNode>(Math.Min(256, cap));
+        foreach (var child in document.Children(container))
         {
             if (children.Count == cap)
             {
@@ -764,9 +727,7 @@ public sealed class JsonDiffIndex : AppendLogIndexBase<JsonDiffIndex.PackedDiffR
                 return null;
             }
 
-            children.Add(i);
-            var token = index.GetToken(i);
-            i = IsContainer(token.Kind) ? token.EndIndex + 1 : i + 1;
+            children.Add(child);
         }
 
         return children;
@@ -1017,7 +978,7 @@ public sealed class JsonDiffIndex : AppendLogIndexBase<JsonDiffIndex.PackedDiffR
     /// <summary>
     /// Pairs Removed/Added container records with identical content hashes - exactly once
     /// on each side, the unique-anchor rule - and rewrites both in place to Moved, each
-    /// carrying both token indexes and its partner's record index. Containers only: a
+    /// carrying both nodes and its partner's record index. Containers only: a
     /// scalar 1/true/"" hashes identically everywhere by design, so pairing scalars would
     /// manufacture spurious moves. Runs over whole-subtree records only, so cost is bounded
     /// by the size of the change, not the document.
@@ -1036,9 +997,11 @@ public sealed class JsonDiffIndex : AppendLogIndexBase<JsonDiffIndex.PackedDiffR
 
             // Partner fields first, StatusBits last (release) - paired with GetRecord
             // reading StatusBits first (acquire).
-            Volatile.Write(ref removedRecord.RightToken, addedRecord.RightToken);
+            Volatile.Write(ref removedRecord.RightRowStart, addedRecord.RightRowStart);
+            Volatile.Write(ref removedRecord.RightValueStart, addedRecord.RightValueStart);
             Volatile.Write(ref removedRecord.MovePartnerRecord, added.RecordIndex);
-            Volatile.Write(ref addedRecord.LeftToken, removedRecord.LeftToken);
+            Volatile.Write(ref addedRecord.LeftRowStart, removedRecord.LeftRowStart);
+            Volatile.Write(ref addedRecord.LeftValueStart, removedRecord.LeftValueStart);
             Volatile.Write(ref addedRecord.MovePartnerRecord, removed.RecordIndex);
             Volatile.Write(ref removedRecord.StatusBits, (int)DiffStatus.Moved | FlagMoveSource | FlagCrossParentMove);
             Volatile.Write(ref addedRecord.StatusBits, (int)DiffStatus.Moved | FlagCrossParentMove);

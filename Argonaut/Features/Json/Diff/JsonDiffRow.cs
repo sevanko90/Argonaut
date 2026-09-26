@@ -12,7 +12,7 @@ public sealed class JsonDiffRow
     public JsonDiffRow(int position, JsonRow? left, JsonRow? right, DiffStatus status, int depth,
         bool hasChildren, bool isExpanded, bool isPlaceholder, string? moveBadge = null, string? note = null, string? placeholderText = null,
         bool isValueChanged = false, bool isChangedPath = false,
-        int? mirrorLeftContainerToken = null, int? mirrorRightContainerToken = null)
+        long? mirrorLeftContainer = null, long? mirrorRightContainer = null)
     {
         Position = position;
         Left = left;
@@ -27,8 +27,8 @@ public sealed class JsonDiffRow
         PlaceholderText = placeholderText;
         IsValueChanged = isValueChanged;
         IsChangedPath = isChangedPath;
-        MirrorLeftContainerToken = mirrorLeftContainerToken;
-        MirrorRightContainerToken = mirrorRightContainerToken;
+        MirrorLeftContainer = mirrorLeftContainer;
+        MirrorRightContainer = mirrorRightContainer;
     }
 
     /// <summary>Index into the owning collection's current visible list.</summary>
@@ -68,12 +68,13 @@ public sealed class JsonDiffRow
     public bool IsChangedPath { get; }
 
     /// <summary>For a SubMirror row only (unchanged content walked off the left document
-    /// into both panes): the enclosing undescended record's left/right container tokens,
-    /// letting the target-side JSONPath be spliced from the right container's real path
-    /// instead of reusing the left path verbatim - which is wrong once an ancestor moved.</summary>
-    public int? MirrorLeftContainerToken { get; }
+    /// into both panes): where the enclosing undescended record's value starts in the left and
+    /// right documents, letting the target-side JSONPath be spliced from the right container's
+    /// real path instead of reusing the left path verbatim - which is wrong once an ancestor
+    /// moved.</summary>
+    public long? MirrorLeftContainer { get; }
 
-    public int? MirrorRightContainerToken { get; }
+    public long? MirrorRightContainer { get; }
 
     // Classes.* bindings for the row tint.
     public bool IsAdded => Status == DiffStatus.Added;

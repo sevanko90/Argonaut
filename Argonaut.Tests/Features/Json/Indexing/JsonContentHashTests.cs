@@ -1,43 +1,79 @@
 using System.Text;
 using Argonaut.Engine.Bytes;
 using Argonaut.Features.Json.Indexing;
+using Argonaut.Features.Json.Tree;
 
 namespace Argonaut.Tests.Features.Json.Indexing;
 
 /// <summary>
-/// The semantic-equality promises of the opt-in content hashes (see
-/// <see cref="JsonContentHasher"/>): key order never matters, array order always does,
-/// escaping and number spelling never matter, kinds never collide, and a subtree's hash is
-/// invariant under relocation. Plus the off-switch: an index built without the option never
-/// allocates the hash log.
+/// The semantic-equality promises of the content hashes (see <see cref="JsonContentHasher"/>):
+/// key order never matters, array order always does, escaping and number spelling never matter,
+/// kinds never collide, and a subtree's hash is invariant under relocation. Every hash is taken
+/// twice - recorded by the validation pass, and read again from the bytes - and must agree. Plus
+/// the off-switch: an index built without hashes has none.
 /// </summary>
 public class JsonContentHashTests
 {
-    /// <summary>Indexes <paramref name="json"/> with content hashes on and returns the root
-    /// token's hash. Each call builds and tears down its own temp file/mapping.</summary>
-    private static async Task<long> RootHashAsync(string json)
+    /// <summary>Every value's hash in document order - the root first, then each value before
+    /// its children - so index 1 is the root's first child.</summary>
+    private static Task<List<long>> HashesAsync(string json)
+        => HashesAsync(new UTF8Encoding(encoderShouldEmitUTF8Identifier: false).GetBytes(json));
+
+    private static async Task<List<long>> HashesAsync(byte[] json)
     {
-        var (index, file, path) = await IndexAsync(json);
+        string path = Path.GetTempFileName();
+        File.WriteAllBytes(path, json);
         try
         {
-            return index.GetContentHash(0);
+            // Every container recorded, and none: the two ways a hash is found.
+            var recorded = await ValueHashesAsync(path, promotionBytes: 1);
+            var fromBytes = await ValueHashesAsync(path, JsonSparseIndex.DefaultPromotionBytes);
+            Assert.Equal(recorded, fromBytes);
+            return recorded;
         }
         finally
         {
-            file.Dispose();
             File.Delete(path);
         }
     }
 
-    private static async Task<(JsonStructureIndex Index, MMapFile File, string Path)> IndexAsync(string json)
+    private static async Task<List<long>> ValueHashesAsync(string path, int promotionBytes)
     {
-        string path = Path.GetTempFileName();
-        File.WriteAllText(path, json, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-
-        var file = new MMapFile(path);
-        var index = JsonStructureIndex.StartIndexing(file, new JsonIndexOptions { ComputeContentHashes = true });
+        using var file = new MMapFile(path);
+        var index = JsonSparseIndex.StartIndexingWithContentHashes(file, promotionBytes, checkpointBytes: 1);
         await index.IndexingTask;
-        return (index, file, path);
+        var reader = new JsonTreeReader(file);
+        var text = new JsonTreeText(file, index.Structure, reader);
+        var hashes = new List<long>();
+
+        void Walk(byte parentKind, long position)
+        {
+            while (reader.TryReadChild(parentKind, ref position, out var node, out _))
+            {
+                long end = text.End(node);
+                hashes.Add((long)index.ContentHashes!.Hash(node.ValueStart, end));
+                if (node.IsContainer)
+                    Walk(node.FormatKind, reader.FirstChildPosition(node.ValueStart));
+                position = end;
+            }
+        }
+
+        Walk(JsonTreeReader.Document, 0);
+        return hashes;
+    }
+
+    private static async Task<long> RootHashAsync(string json) => (await HashesAsync(json))[0];
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public async Task RecordedHashes_MatchHashesReadFromTheBytes(int seed)
+    {
+        // HashesAsync asserts the two agree for every value; a random document with escapes,
+        // numbers and deep nesting gives it plenty to disagree on.
+        var hashes = await HashesAsync(Support.RandomJson.LargeContainers(new Random(seed), elements: 40));
+        Assert.True(hashes.Count > 40);
     }
 
     [Fact]
@@ -118,39 +154,22 @@ public class JsonContentHashTests
     {
         // The subtree {"x":1,"y":[true,null]} sits under a key, inside an object, at depth 1
         // here - and is the whole document there. Relocation invariance says the hashes match.
-        var (index, file, path) = await IndexAsync("""{"wrapper":{"x":1,"y":[true,null]},"other":2}""");
-        try
-        {
-            // Token 0 is the root object; token 1 is the "wrapper" container start.
-            long nested = index.GetContentHash(1);
-            long standalone = await RootHashAsync("""{"x":1,"y":[true,null]}""");
-            Assert.Equal(standalone, nested);
-        }
-        finally
-        {
-            file.Dispose();
-            File.Delete(path);
-        }
+        var hashes = await HashesAsync("""{"wrapper":{"x":1,"y":[true,null]},"other":2}""");
+
+        // Value 0 is the root object; value 1 is "wrapper"'s.
+        long standalone = await RootHashAsync("""{"x":1,"y":[true,null]}""");
+        Assert.Equal(standalone, hashes[1]);
     }
 
     [Fact]
     public async Task RelocatedUnderDifferentKeyAndDepth_SameSubtreeHash()
     {
-        var (leftIndex, leftFile, leftPath) = await IndexAsync("""{"a":{"x":1,"y":2}}""");
-        var (rightIndex, rightFile, rightPath) = await IndexAsync("""{"deep":{"deeper":{"renamed":{"y":2,"x":1}}}}""");
-        try
-        {
-            // Left: token 1 is the {"x":1,"y":2} start. Right: tokens 1,2 are the deep/deeper
-            // wrappers, token 3 is the renamed relocated copy (key order also flipped).
-            Assert.Equal(leftIndex.GetContentHash(1), rightIndex.GetContentHash(3));
-        }
-        finally
-        {
-            leftFile.Dispose();
-            rightFile.Dispose();
-            File.Delete(leftPath);
-            File.Delete(rightPath);
-        }
+        var left = await HashesAsync("""{"a":{"x":1,"y":2}}""");
+        var right = await HashesAsync("""{"deep":{"deeper":{"renamed":{"y":2,"x":1}}}}""");
+
+        // Left: value 1 is {"x":1,"y":2}. Right: values 1,2 are the deep/deeper wrappers,
+        // value 3 is the renamed relocated copy (key order also flipped).
+        Assert.Equal(left[1], right[3]);
     }
 
     [Fact]
@@ -158,35 +177,45 @@ public class JsonContentHashTests
     {
         // A member's name is folded into the PARENT's accumulator, never the child's own
         // hash - the invariant every downstream consumer leans on.
-        var (index, file, path) = await IndexAsync("""{"a":"same","b":"same"}""");
+        var hashes = await HashesAsync("""{"a":"same","b":"same"}""");
+        Assert.Equal(hashes[1], hashes[2]);
+    }
+
+    [Fact]
+    public async Task NotAskedFor_NoHashes()
+    {
+        string path = Path.GetTempFileName();
+        File.WriteAllText(path, "[1,2,3]");
         try
         {
-            Assert.Equal(index.GetContentHash(1), index.GetContentHash(2));
+            using var file = new MMapFile(path);
+            var index = JsonSparseIndex.StartIndexing(file);
+            await index.IndexingTask;
+
+            Assert.Null(index.ContentHashes);
         }
         finally
         {
-            file.Dispose();
             File.Delete(path);
         }
     }
 
     [Fact]
-    public async Task OptionsOff_NoHashLog()
+    public async Task Released_Throws()
     {
         string path = Path.GetTempFileName();
         File.WriteAllText(path, "[1,2,3]");
-        var file = new MMapFile(path);
         try
         {
-            var index = JsonStructureIndex.StartIndexing(file);
+            using var file = new MMapFile(path);
+            var index = JsonSparseIndex.StartIndexingWithContentHashes(file);
             await index.IndexingTask;
 
-            Assert.False(index.HasContentHashes);
-            Assert.Throws<InvalidOperationException>(() => index.GetContentHash(0));
+            index.ContentHashes!.Release();
+            Assert.Throws<InvalidOperationException>(() => index.ContentHashes.Hash(0, 7));
         }
         finally
         {
-            file.Dispose();
             File.Delete(path);
         }
     }

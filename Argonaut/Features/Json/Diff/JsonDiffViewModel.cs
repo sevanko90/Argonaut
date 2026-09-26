@@ -6,8 +6,6 @@ using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Detection;
 using Argonaut.Engine.Indexing;
 using Argonaut.Engine.Search;
-using Argonaut.Features.Json.Indexing;
-using Argonaut.Features.Json.Paths;
 using Argonaut.Ui.Documents;
 using Argonaut.Ui.Find;
 using Argonaut.Ui.Progress;
@@ -75,36 +73,30 @@ public sealed class JsonDiffViewModel : IndexedDocumentViewModel
         => session is { } s && rows is not null ? new JsonDiffSearchNavigator(this, s) : null;
 
     /// <summary>
-    /// Reveals a find match: resolves its byte offset to a token in the document it was found
-    /// in, then selects the merged row showing that token - expanding whatever stands in the
-    /// way (see <see cref="JsonDiffRowCollection.EnsureVisible"/>). Because a diff row carries
-    /// both sides, landing on it brings the other document's counterpart into view too.
+    /// Reveals a find match: selects the merged row showing the match's offset in the document
+    /// it was found in - expanding whatever stands in the way (see
+    /// <see cref="JsonDiffRowCollection.EnsureVisible"/>). Because a diff row carries both sides,
+    /// landing on it brings the other document's counterpart into view too.
     /// </summary>
-    public async Task RevealMatchAsync(bool leftSide, SearchMatch match, CancellationToken ct)
+    public Task RevealMatchAsync(bool leftSide, SearchMatch match, CancellationToken ct)
     {
-        if (session is not { } s || rows is null)
-            return;
+        if (session is null || rows is null || ct.IsCancellationRequested)
+            return Task.CompletedTask;
 
-        var index = leftSide ? s.Left.Index : s.Right.Index;
-        var token = await JsonOffsetTokenResolver.ResolveWhenCoveredAsync(index, match.Offset, ct);
-        ct.ThrowIfCancellationRequested();
-
-        if (token is int t && rows.EnsureVisible(leftSide, t) is { } position)
+        if (rows.EnsureVisible(leftSide, match.Offset) is { } position)
             SelectedPosition = position;
+        return Task.CompletedTask;
     }
 
     /// <summary>Where a match sits in the merged order find steps through - see
-    /// <see cref="JsonDiffRowCollection.RowOrderKey"/>. Synchronous and best-effort: a match in
-    /// a region not yet indexed sorts last rather than blocking the step.</summary>
+    /// <see cref="JsonDiffRowCollection.RowOrderKey"/>. A match no record covers yet sorts
+    /// last rather than blocking the step.</summary>
     public long? MatchOrderKey(bool leftSide, SearchMatch match)
     {
-        if (session is not { } s || rows is null)
+        if (session is null || rows is null)
             return match.Offset;
 
-        var index = leftSide ? s.Left.Index : s.Right.Index;
-        return JsonOffsetTokenResolver.ResolveTokenForOffset(index, match.Offset) is int t
-            ? rows.RowOrderKey(leftSide, t)
-            : long.MaxValue;
+        return rows.RowOrderKey(leftSide, match.Offset);
     }
 
     // ── Selection and the source/target context bar ────────────────────────────────────
@@ -226,7 +218,7 @@ public sealed class JsonDiffViewModel : IndexedDocumentViewModel
             return;
         }
 
-        // Deliberately the rows' own display strings: JsonRowFactory built them through
+        // Deliberately the rows' own display strings: JsonDiffDocument built them through
         // DisplayText.Read, so they are already capped at DisplayText.MaxLength (1KB) with
         // an ellipsis - a pathological multi-MB scalar never gets decoded here, and the
         // char-diff below runs over at most 1KB per side.
@@ -288,9 +280,9 @@ public sealed class JsonDiffViewModel : IndexedDocumentViewModel
         if (target)
         {
             // A genuine right-side row (Added, or the destination side of a Moved record) -
-            // its own token gives the real path directly.
+            // its own node gives the real path directly.
             if (row.Right is { } right && !ReferenceEquals(row.Right, row.Left))
-                return JsonPathBuilder.Build(s.Right.Index, s.Right.Bytes, right.TokenIndex);
+                return s.RightDocument.Path(right.ValueStart);
 
             // A mirrored row (unchanged content walked off the left document into both
             // panes): the left path is NOT valid here whenever an ancestor moved - e.g.
@@ -298,20 +290,15 @@ public sealed class JsonDiffViewModel : IndexedDocumentViewModel
             // documents even though this row's content doesn't. Splice the enclosing
             // record's real right-side container path with the structurally-identical
             // suffix below it instead of re-walking anything.
-            if (row.Left is { } mirrored && row.MirrorLeftContainerToken is { } leftContainer
-                && row.MirrorRightContainerToken is { } rightContainer)
+            if (row.Left is { } mirrored && row.MirrorLeftContainer is { } leftContainer
+                && row.MirrorRightContainer is { } rightContainer)
             {
-                string basePath = JsonPathBuilder.Build(s.Right.Index, s.Right.Bytes, rightContainer);
-                var suffix = JsonPathBuilder.BuildRelativeSegments(s.Left.Index, s.Left.Bytes, mirrored.TokenIndex, leftContainer);
-                var sb = new System.Text.StringBuilder(basePath);
-                foreach (var segment in suffix)
-                    sb.Append(segment.Label);
-                return sb.ToString();
+                return s.RightDocument.Path(rightContainer) + s.LeftDocument.RelativePath(mirrored.ValueStart, leftContainer);
             }
         }
 
-        return row.Left is { } left ? JsonPathBuilder.Build(s.Left.Index, s.Left.Bytes, left.TokenIndex)
-            : row.Right is { } r ? JsonPathBuilder.Build(s.Right.Index, s.Right.Bytes, r.TokenIndex)
+        return row.Left is { } left ? s.LeftDocument.Path(left.ValueStart)
+            : row.Right is { } r ? s.RightDocument.Path(r.ValueStart)
             : null;
     }
 
@@ -347,7 +334,7 @@ public sealed class JsonDiffViewModel : IndexedDocumentViewModel
     /// (it renders the left-document preview immediately); indexing and the diff continue
     /// in the background, monitored for status/failure updates.
     /// </summary>
-    public async Task LoadAsync(IByteOrigin leftOrigin, IByteOrigin rightOrigin)
+    public Task LoadAsync(IByteOrigin leftOrigin, IByteOrigin rightOrigin)
     {
         Origin = leftOrigin;
         FilePath = leftOrigin.Path ?? leftOrigin.DisplayName;
@@ -382,16 +369,12 @@ public sealed class JsonDiffViewModel : IndexedDocumentViewModel
             goToPreviousDiff: GoToPreviousDiff,
             goToNextDiff: GoToNextDiff);
 
-        // A small initial batch so the preview's first paint isn't empty (mirrors
-        // JsonViewModel.LoadCore); a tiny file completes the wait via MarkAllItemsPublished instead.
-        await session.Left.Index.WaitForTokenCountAsync(250);
-        if (IsDisposed)
-            return;
-
+        // The preview reads the left document's bytes directly, so it needs nothing indexed.
         rows = new JsonDiffRowCollection(session);
         StatusText = $"Comparing {FilePath} with {RightFilePath}";
 
         MonitorIndexing();
+        return Task.CompletedTask;
     }
 
     /// <summary>

@@ -323,6 +323,22 @@ public class JsonDiffFindTests
     }
 
     [Fact]
+    public async Task Find_CrossParentMove_StopsAtBothEnds()
+    {
+        // Both records of a cross-parent move carry both documents' nodes, but each end draws
+        // only one: the stub at the source the left document, the destination the right. A match
+        // on either side must be keyed to the end that draws it, or it is never a stop.
+        using var h = await LoadAsync(
+            """{"config":{"db":{"host":"needle"}},"meta":{}}""",
+            """{"config":{},"meta":{"db":{"host":"needle"}}}""");
+
+        await h.Controller.FindAsync("needle", 1);
+
+        await AssertSettlesOnAsync(h, "1 of 2 rows");
+        Assert.Equal("\"needle\"", (h.SelectedRow().Left ?? h.SelectedRow().Right)!.Value);
+    }
+
+    [Fact]
     public async Task Find_NoMatchInEitherDocument_ReportsNoMatches()
     {
         using var h = await LoadAsync("""{"a":1}""", """{"a":2}""");

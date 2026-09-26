@@ -9,13 +9,13 @@ namespace Argonaut.Features.Json;
 /// </summary>
 public sealed class JsonRow
 {
-    public JsonRow(int position, int tokenIndex, int depth, JsonTokenKind kind, string? name, string value, bool hasChildren, bool isExpanded, bool isPlaceholder, string? hint = null, string? truncationHint = null, long? truncatedValueOffset = null, int? arrayIndex = null, string? schemaTitle = null, string? schemaDescription = null, string? schemaLabel = null)
+    public JsonRow(int position, long valueStart, int depth, JsonTokenKind kind, string? name, string value, bool hasChildren, bool isExpanded, bool isPlaceholder, string? hint = null, string? truncationHint = null, long? truncatedValueOffset = null, int? arrayIndex = null, string? schemaTitle = null, string? schemaDescription = null, string? schemaLabel = null)
     {
         SchemaTitle = schemaTitle;
         SchemaDescription = schemaDescription;
         SchemaLabel = schemaLabel;
         Position = position;
-        TokenIndex = tokenIndex;
+        ValueStart = valueStart;
         Depth = depth;
         Kind = kind;
         Name = name;
@@ -29,9 +29,11 @@ public sealed class JsonRow
         ArrayIndex = arrayIndex;
     }
 
-    /// <summary>Index into the owning JsonVisibleRowCollection's current visible list.</summary>
+    /// <summary>Index into the owning collection's current visible list.</summary>
     public int Position { get; }
-    public int TokenIndex { get; }
+
+    /// <summary>Where the row's value starts in its document - the row's identity.</summary>
+    public long ValueStart { get; }
     public int Depth { get; }
     public JsonTokenKind Kind { get; }
     public string? Name { get; }

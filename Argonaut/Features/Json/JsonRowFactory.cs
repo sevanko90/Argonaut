@@ -109,7 +109,9 @@ internal sealed class JsonRowFactory
 
         int? arrayIndex = arrayIndexOrMinusOne >= 0 ? arrayIndexOrMinusOne : null;
 
-        return new JsonRow(position, tokenIndex, token.Depth - DepthOffset, token.Kind, name, value, hasChildren, expanded, isPlaceholder: false, hint: hint, truncationHint: truncationHint, truncatedValueOffset: truncatedValueOffset, arrayIndex: arrayIndex, schemaTitle: schemaTitle, schemaDescription: schemaDescription, schemaLabel: schemaLabel);
+        // A string's token starts after its opening quote; its value starts at the quote.
+        long valueStart = token.Kind == JsonTokenKind.String ? token.Offset - 1 : token.Offset;
+        return new JsonRow(position, valueStart, token.Depth - DepthOffset, token.Kind, name, value, hasChildren, expanded, isPlaceholder: false, hint: hint, truncationHint: truncationHint, truncatedValueOffset: truncatedValueOffset, arrayIndex: arrayIndex, schemaTitle: schemaTitle, schemaDescription: schemaDescription, schemaLabel: schemaLabel);
     }
 
     private string? BuildHint(int tokenIndex, JsonTokenInfo token)

@@ -43,6 +43,11 @@ public sealed class JsonTreePathsTests : IDisposable
         var text = new JsonTreeText(file, sparse.Structure, reader);
         var cursor = new TreeCursor(sparse.Structure, reader, new TreeExpandState(30));
 
+        // Dense rows carry their value start; paths there are built from token indices.
+        var tokenAt = new Dictionary<long, int>();
+        for (int t = 0; t < dense.TokenCount; t++)
+            tokenAt.TryAdd(dense.GetToken(t).Offset, t);
+
         int i = 0, checkedRows = 0;
         for (bool more = cursor.MoveToStart(); more; more = cursor.MoveNext(), i++)
         {
@@ -50,7 +55,8 @@ public sealed class JsonTreePathsTests : IDisposable
             if (cursor.Current.Shape == TreeRowShape.Close)
                 continue;
 
-            string expected = JsonPathBuilder.Build(dense, file, row.TokenIndex);
+            int tokenIndex = tokenAt[row.ValueStart + (row.Kind == JsonTokenKind.String ? 1 : 0)];
+            string expected = JsonPathBuilder.Build(dense, file, tokenIndex);
             var segments = JsonTreePaths.Segments(cursor, text);
             Assert.Equal(expected, JsonTreePaths.Format(segments));
             Assert.Equal(cursor.Current.Start, segments[^1].Target);

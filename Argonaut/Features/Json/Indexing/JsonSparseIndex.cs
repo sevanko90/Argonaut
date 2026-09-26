@@ -52,10 +52,12 @@ public sealed class JsonSparseIndex : IBackgroundIndex
     private int depth;
     private long strayClose = -1;
 
-    private JsonSparseIndex(int promotionBytes, int checkpointBytes)
+    private JsonSparseIndex(IByteSource source, int promotionBytes, int checkpointBytes, bool withContentHashes)
     {
         Structure = new SparseContainerIndex(promotionBytes, checkpointBytes);
         builder = new SparseContainerIndexBuilder(Structure);
+        if (withContentHashes)
+            ContentHashes = new JsonContentHashes(source, promotionBytes);
     }
 
     /// <summary>The recorded containers and checkpoints. <see cref="TreeContainer.FormatKind"/>
@@ -70,6 +72,10 @@ public sealed class JsonSparseIndex : IBackgroundIndex
     /// <see cref="AllItemsPublished"/>, which waits for both passes.</summary>
     public IndexFailure? Failure => validationFailure ?? structureFailure;
 
+    /// <summary>Every value's content hash, for a diff; null unless asked for. Recorded by the
+    /// validation pass for the same containers the structure records.</summary>
+    public JsonContentHashes? ContentHashes { get; }
+
     /// <summary>Recorded containers so far.</summary>
     public int ItemCount => Structure.ContainerCount;
 
@@ -80,8 +86,22 @@ public sealed class JsonSparseIndex : IBackgroundIndex
     /// promotion and checkpoints.</summary>
     public static JsonSparseIndex StartIndexing(IByteSource source, int promotionBytes, int checkpointBytes,
         IProgressReporter? progressReporter = null, CancellationToken cancellationToken = default)
+        => Start(source, promotionBytes, checkpointBytes, withContentHashes: false, progressReporter, cancellationToken);
+
+    /// <summary>Also records <see cref="ContentHashes"/> - what a diff compares by.</summary>
+    public static JsonSparseIndex StartIndexingWithContentHashes(IByteSource source, IProgressReporter? progressReporter = null,
+        CancellationToken cancellationToken = default)
+        => Start(source, DefaultPromotionBytes, DefaultCheckpointBytes, withContentHashes: true, progressReporter, cancellationToken);
+
+    /// <inheritdoc cref="StartIndexingWithContentHashes(IByteSource, IProgressReporter?, CancellationToken)"/>
+    public static JsonSparseIndex StartIndexingWithContentHashes(IByteSource source, int promotionBytes, int checkpointBytes,
+        IProgressReporter? progressReporter = null, CancellationToken cancellationToken = default)
+        => Start(source, promotionBytes, checkpointBytes, withContentHashes: true, progressReporter, cancellationToken);
+
+    private static JsonSparseIndex Start(IByteSource source, int promotionBytes, int checkpointBytes, bool withContentHashes,
+        IProgressReporter? progressReporter, CancellationToken cancellationToken)
     {
-        var index = new JsonSparseIndex(promotionBytes, checkpointBytes);
+        var index = new JsonSparseIndex(source, promotionBytes, checkpointBytes, withContentHashes);
 
         // No token on Task.Run, for the reason AppendLogIndexBase.StartScan gives: a token
         // already cancelled would skip the body, and with it the finally that publishes.
@@ -102,7 +122,7 @@ public sealed class JsonSparseIndex : IBackgroundIndex
         var structure = Task.Run(() => RunStructure(source, progressReporter, stopping.Token));
         var validation = Task.Run(() =>
         {
-            if (JsonDocumentValidator.FindFailure(source, stopping.Token) is { } found)
+            if (JsonDocumentValidator.FindFailure(source, stopping.Token, ContentHashes?.CreateRecorder()) is { } found)
             {
                 validationFailure = found;
                 throw new JsonDocumentInvalidException(found.Message);

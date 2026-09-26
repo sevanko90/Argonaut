@@ -1,5 +1,6 @@
 using System.Text;
 using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Indexing;
 using Argonaut.Features.Json.Diff;
 using Argonaut.Features.Json.Indexing;
 
@@ -17,17 +18,20 @@ public class JsonDiffIndexTests
     {
         public JsonDiffIndex Diff { get; private set; } = null!;
         public List<JsonDiffRecord> Records { get; private set; } = null!;
-        private readonly List<MMapFile> owned = new();
+        private readonly List<IDisposable> owned = new();
         private readonly List<string> paths = new();
 
-        public static async Task<DiffFixture> CreateAsync(string leftJson, string rightJson)
+        /// <param name="promotionBytes">Containers at least this long have their hashes
+        /// recorded; the default records none of these small documents, 1 records them all.</param>
+        public static async Task<DiffFixture> CreateAsync(string leftJson, string rightJson,
+            int promotionBytes = JsonSparseIndex.DefaultPromotionBytes)
         {
             var fixture = new DiffFixture();
 
-            var (leftIndex, leftFile) = await fixture.IndexAsync(leftJson);
-            var (rightIndex, rightFile) = await fixture.IndexAsync(rightJson);
+            var left = await fixture.IndexAsync(leftJson, promotionBytes);
+            var right = await fixture.IndexAsync(rightJson, promotionBytes);
 
-            fixture.Diff = JsonDiffIndex.Start(leftIndex, leftFile, rightIndex, rightFile);
+            fixture.Diff = JsonDiffIndex.Start(left, right);
             await fixture.Diff.IndexingTask;
 
             fixture.Records = new List<JsonDiffRecord>();
@@ -37,16 +41,16 @@ public class JsonDiffIndexTests
             return fixture;
         }
 
-        private async Task<(JsonStructureIndex, MMapFile)> IndexAsync(string json)
+        private async Task<IndexedSourceSession<JsonSparseIndex>> IndexAsync(string json, int promotionBytes)
         {
             string path = Path.GetTempFileName();
             File.WriteAllText(path, json, new UTF8Encoding(false));
-            var file = new MMapFile(path);
-            owned.Add(file);
             paths.Add(path);
-            var index = JsonStructureIndex.StartIndexing(file, new JsonIndexOptions { ComputeContentHashes = true });
-            await index.IndexingTask;
-            return (index, file);
+            var session = IndexedSourceSession<JsonSparseIndex>.Start(new MMapFile(path),
+                (source, progress, stopping) => JsonSparseIndex.StartIndexingWithContentHashes(source, promotionBytes, checkpointBytes: 1, progress, stopping));
+            owned.Add(session);
+            await session.IndexingTask;
+            return session;
         }
 
         public void Dispose()
@@ -61,6 +65,26 @@ public class JsonDiffIndexTests
     private static int CountStatus(List<JsonDiffRecord> records, DiffStatus status)
         => records.Count(r => r.Status == status);
 
+    // ── Hash budget ────────────────────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public async Task RecordedAndReadHashes_GiveTheSameDiff(int seed)
+    {
+        // Recorded hashes (every container) against hashes read from the bytes (none recorded):
+        // the record logs must be identical, offsets and all.
+        string leftJson = Encoding.UTF8.GetString(Support.RandomJson.LargeContainers(new Random(seed), elements: 30));
+        string rightJson = leftJson.Replace("1", "2");
+
+        using var recorded = await DiffFixture.CreateAsync(leftJson, rightJson, promotionBytes: 1);
+        using var read = await DiffFixture.CreateAsync(leftJson, rightJson);
+
+        Assert.True(recorded.Records.Count > 1);
+        Assert.Equal(read.Records, recorded.Records);
+    }
+
     // ── Merkle short-circuit ───────────────────────────────────────────────────────────
 
     [Fact]
@@ -72,8 +96,8 @@ public class JsonDiffIndexTests
 
         var record = Assert.Single(f.Records);
         Assert.Equal(DiffStatus.Unchanged, record.Status);
-        Assert.Equal(0, record.LeftToken);
-        Assert.Equal(0, record.RightToken);
+        Assert.Equal(new JsonDiffNode(0, 0), record.Left);
+        Assert.Equal(new JsonDiffNode(0, 0), record.Right);
     }
 
     [Fact]
@@ -281,9 +305,9 @@ public class JsonDiffIndexTests
         var target = Assert.Single(moved, r => !r.IsMoveSource);
         Assert.Equal(target.Index, source.MovePartnerRecord);
         Assert.Equal(source.Index, target.MovePartnerRecord);
-        Assert.Equal(source.LeftToken, target.LeftToken);
-        Assert.Equal(source.RightToken, target.RightToken);
-        Assert.True(source.LeftToken >= 0 && source.RightToken >= 0);
+        Assert.Equal(source.Left, target.Left);
+        Assert.Equal(source.Right, target.Right);
+        Assert.True(source.Left.IsPresent && source.Right.IsPresent);
     }
 
     [Fact]
@@ -353,6 +377,6 @@ public class JsonDiffIndexTests
 
         var removed = Assert.Single(f.Records, r => r.Status == DiffStatus.Removed);
         Assert.Equal(removed.Index + 1, removed.SubtreeEnd);
-        Assert.Equal(-1, removed.RightToken);
+        Assert.False(removed.Right.IsPresent);
     }
 }

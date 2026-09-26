@@ -298,7 +298,14 @@ The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLeng
   only elements known to have ended while the scan runs; rows, column discovery and cells read
   element children through `JsonTreeReader` and `JsonTreeText`. A container cell's pane
   (`JsonArrayCellDetail`) is a `TreeDocument` over that cell's bytes on its own `TreeSurface`.
-- **Still on the token index**: the diff (`JsonDiffSession`), which opens its own sessions.
+- **The diff compares by content hash on the same budget.** `JsonDiffSession` indexes both
+  files with `JsonSparseIndex.StartIndexingWithContentHashes`: the validation pass, which reads
+  every token anyway, records the hash of each container of 64 KB or more (`JsonContentHashes`,
+  by `JsonContentHasher`'s rules), and anything smaller is hashed from its bytes when the diff
+  asks. `JsonDiffIndex` records nodes by offset (`JsonDiffNode`: row start and value start) and
+  reads children through `JsonDiffDocument`; the worker and the view each hold their own
+  `JsonDiffDocument`, since the readers are not shared across threads. The diff's rows stay a
+  `ListBox` over the record log, with a display cap for an expanded unchanged subtree.
 
 ## Virtualized ItemsSources
 

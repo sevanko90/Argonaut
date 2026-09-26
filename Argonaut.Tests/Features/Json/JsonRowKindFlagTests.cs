@@ -11,7 +11,7 @@ namespace Argonaut.Tests.Features.Json;
 public class JsonRowKindFlagTests
 {
     private static JsonRow MakeRow(JsonTokenKind kind) =>
-        new(position: 0, tokenIndex: 0, depth: 0, kind, name: null, value: "x",
+        new(position: 0, valueStart: 0, depth: 0, kind, name: null, value: "x",
             hasChildren: false, isExpanded: false, isPlaceholder: false);
 
     [Theory]
@@ -51,7 +51,7 @@ public class JsonRowKindFlagTests
     {
         // A "N more items" row borrows its container's Kind but describes a display cap, not the
         // container - it must not pick up the gutter's container-heading treatment.
-        var row = new JsonRow(position: 0, tokenIndex: 0, depth: 0, kind, name: null, value: "… more items",
+        var row = new JsonRow(position: 0, valueStart: 0, depth: 0, kind, name: null, value: "… more items",
             hasChildren: true, isExpanded: false, isPlaceholder: true);
 
         Assert.False(row.IsContainerRow);

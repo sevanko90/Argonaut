@@ -60,7 +60,7 @@ public class JsonTreeReaderTests
         for (int i = 0; i < denseRows.Count; i++)
         {
             var row = (JsonRow)denseRows[i]!;
-            expected.Add((row.Kind, dense.GetToken(row.TokenIndex).Offset));
+            expected.Add((row.Kind, row.ValueStart + (row.Kind == JsonTokenKind.String ? 1 : 0)));
         }
 
         var sparse = JsonSparseIndex.StartIndexing(file.Source, promotionBytes: 256, checkpointBytes: 64);

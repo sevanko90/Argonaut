@@ -238,6 +238,38 @@ Status: step 3 next. Branch: `plan/json-sparse-index`.
 3. [ ] **`SparseContainerIndex`** in `Engine/Indexing/Trees`, fed by the JSON scanner as an
    `IBackgroundIndex`, alongside the existing index rather than replacing it. The test-only tree
    format drives it too, from the first commit.
+
+   Design worked out before starting:
+   - **Events.** A format feeds `Open(offset, formatKind)`, `Separator(resumeOffset)` (the
+     previous child ended and another follows; a parse may resume here) and
+     `Close(end, isEmpty)`. The first child is implied by `Open`. JSON defers each comma until
+     the next significant byte, so a trailing comma (`[1,2,]`, allowed today) is not a separator;
+     that needs a non-whitespace mask from `Classify`.
+   - **Promotion, not close-time recording.** A container is recorded when the scan passes
+     `start + T`, while still open - the root array of a multi-GB file is open until the last
+     byte, and the view needs its checkpoints long before then. Ancestors cross before
+     descendants, so records are appended in start order and a parent is always recorded before
+     its children. `End` and `ChildCount` are written on close, publish-then-mutate with
+     `Volatile`, the same pattern as `EndIndex` today.
+   - **Record**: start, end, parent, depth, ordinal in parent, child count, format kind.
+   - **One global checkpoint log** in offset order: `(offset, ordinal, container)`. Taken only
+     in the innermost open container, only once it is recorded, at the first separator `B` bytes
+     past that container's previous checkpoint.
+   - **Resume at offset X**: the innermost recorded container C enclosing X (binary search on
+     start, then up the parent chain); the greatest checkpoint at or before X; if that belongs to
+     a descendant, walk up to C's direct child D and resume at `D.end` with ordinal
+     `D.ordinalInParent + 1` - a large child's end is itself a resume point in C. If it belongs to
+     an ancestor, resume at C's start.
+   - **Resume at ordinal k in C**: over the checkpoints inside C, "ordinal in C" is monotonic
+     (a descendant's checkpoint maps to its ancestor-in-C's ordinal), so binary search works at
+     O(depth) per probe.
+   - **Comments.** Rather than a `Utf8JsonReader` event source, a comment-aware scalar
+     `Classify` producing the same masks (comment bytes read as whitespace, comment state in the
+     carry). The first slash outside a string switches that block and the rest of the scan to it.
+     `TrySkipValue` can use it too, and stop answering `NeedsFullParse` for comments.
+   - **Sub-commits**: the generic index with the test-only format; the JSON event source over
+     `Classify`; the comment-aware classifier; the validation pass; build benchmarks beside the
+     dense ones.
 4. [ ] **`ITreeRowCursor` and `JsonRowCursor`**: forward and backward over display rows with expand
    state, cross-checked against a walk of the dense index on the same corpus - the dense index is
    the test oracle. The test-only format gets its cursor here. Run it over

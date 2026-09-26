@@ -11,6 +11,28 @@ using Argonaut.Engine.Progress;
 namespace Argonaut.Features.Json.Indexing;
 
 /// <summary>
+/// A finished scan's structure, detached from the index that built it so it can be kept past
+/// that session (see <see cref="KeptIndexes"/>) and bound again to a source over the same bytes
+/// with <see cref="JsonSparseIndex.Reopen"/>. Holds no source.
+/// </summary>
+public sealed class JsonKeptStructure
+{
+    internal JsonKeptStructure(SparseContainerIndex structure, long length)
+    {
+        Structure = structure;
+        Length = length;
+    }
+
+    /// <summary>The key a document's structure is kept under.</summary>
+    public static object Key { get; } = typeof(JsonKeptStructure);
+
+    internal SparseContainerIndex Structure { get; }
+
+    /// <summary>The length of the bytes it was built over.</summary>
+    public long Length { get; }
+}
+
+/// <summary>
 /// The JSON tree's index: a <see cref="SparseContainerIndex"/> of the containers large enough to
 /// be worth a record, built in the background from <see cref="JsonBlockClassifier"/> masks. Its
 /// size depends on the file's size, not on how many tokens it holds - everything between its
@@ -59,6 +81,37 @@ public sealed class JsonSparseIndex : IBackgroundIndex
         if (withContentHashes)
             ContentHashes = new JsonContentHashes(source, promotionBytes);
     }
+
+    private JsonSparseIndex(SparseContainerIndex structure)
+    {
+        Structure = structure;
+        builder = new SparseContainerIndexBuilder(structure);
+        allItemsPublished = true;
+    }
+
+    /// <summary>
+    /// An index over <paramref name="source"/> built from the structure a finished scan of the
+    /// same bytes left behind: complete at once, no scan. The caller vouches that the bytes are the
+    /// same (a <see cref="ByteOriginVersion"/> match); the length is checked here as well, because
+    /// a seek past the end of a shorter source would read out of bounds.
+    /// </summary>
+    public static JsonSparseIndex Reopen(IByteSource source, JsonKeptStructure kept)
+    {
+        if (source.AvailableLength != kept.Length || !source.LengthSettled)
+            throw new ArgumentException("The structure was built over different bytes.", nameof(kept));
+
+        return new JsonSparseIndex(kept.Structure);
+    }
+
+    /// <summary>
+    /// This index's structure, detached so it can be kept past this session - or null unless the
+    /// scan finished over a valid document. A cancelled scan covers only part of the bytes, and a
+    /// failed one carries a failure the reopened index would not report.
+    /// </summary>
+    public JsonKeptStructure? DetachStructure() =>
+        IndexingTask.IsCompletedSuccessfully && Failure is null && Structure.IsComplete
+            ? new JsonKeptStructure(Structure, Structure.ScannedTo)
+            : null;
 
     /// <summary>The recorded containers and checkpoints. <see cref="TreeContainer.FormatKind"/>
     /// is a <see cref="JsonTokenKind"/>: <c>StartObject</c> or <c>StartArray</c>.</summary>

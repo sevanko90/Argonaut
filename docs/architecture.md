@@ -237,15 +237,23 @@ The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLeng
   the open input and is owned by the shell (above).
 - **An origin also keeps finished indexes that are cheap to hold** (`IByteOrigin.KeptIndexes`,
   cleared on dispose), so a view closed and reopened over the same input - a switch to the text
-  view and back, a wrap width tried and undone - skips its scan. Today that is only the raw
-  view's row anchors (`RawRowAnchors`, about 16 bytes per 64 rows, one entry per wrap width):
-  `RawViewModel` keeps them when a scan runs to the end, and `RawIndexSession` builds the next
-  index from them with `RawSegmentIndex.Reopen`, sharing the finished log rather than copying it.
+  view and back, a wrap width tried and undone - skips its scan. Two are kept:
+  - the raw view's row anchors (`RawRowAnchors`, about 16 bytes per 64 rows, one entry per wrap
+    width): `RawViewModel` keeps them when a scan runs to the end, and `RawIndexSession` builds
+    the next index from them with `RawSegmentIndex.Reopen`, sharing the finished log rather than
+    copying it;
+  - the JSON view's sparse structure (`JsonKeptStructure`, under 1 MB per GB): a whole-document
+    `JsonViewModel` keeps it when a scan finishes over a valid document, and the next one opens
+    complete on it with `JsonSparseIndex.Reopen`. An invalid document is scanned again, since a
+    reopened index would not report its failure, and an NDJSON line's document is never kept -
+    its structure covers only its line.
+
   What is kept holds no source - the session that built it releases its source as usual, and the
   next one binds the records to its own. Every entry is stamped with the `ByteOriginVersion` it
   was built at (length, plus last-write time for a file) and is dropped rather than returned once
-  that no longer matches: a file edited by another program or replaced by a save is scanned
-  again. The JSON view's sparse index is not kept.
+  that no longer matches: a file edited by another program or replaced by a save - the text
+  view's included - is scanned again. Edits discarded in the text view never reach the file, so
+  they leave what is kept valid.
 - **`IByteSource` (`Engine/Bytes/IByteSource.cs`) is one session's reader.** Every consumer is
   typed to it. Implemented by `MMapFile`, `RawPieceTable` (a piece table over (mapping,
   scratch), which is why a span can come back short) and `MemoryByteSource`, the in-memory

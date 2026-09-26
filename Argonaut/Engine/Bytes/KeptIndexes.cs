@@ -5,7 +5,7 @@ namespace Argonaut.Engine.Bytes;
 
 /// <summary>
 /// Indexes derived from an origin's bytes, kept for as long as the origin is open so a view that
-/// is closed and reopened over the same input - a hop to the text view and back - finds its index
+/// is closed and reopened over the same input - a switch to the text view and back - finds its index
 /// already built instead of scanning again. Lives on the origin (<see cref="IByteOrigin.KeptIndexes"/>)
 /// because that is the one object whose lifetime is the open input, across view swaps.
 ///
@@ -15,7 +15,8 @@ namespace Argonaut.Engine.Bytes;
 /// matches the origin is dropped rather than returned.
 ///
 /// Only worth it for an index that is small next to what it saves: the raw view's row anchors
-/// (16 bytes per 64 rows) qualify, a JSON structure index (tens of bytes per token) does not.
+/// (16 bytes per 64 rows) and the JSON view's sparse structure (under 1 MB per GB) qualify; a
+/// per-line offset index (CSV, NDJSON: about 16 bytes a line) is left to be scanned again.
 /// </summary>
 public sealed class KeptIndexes
 {

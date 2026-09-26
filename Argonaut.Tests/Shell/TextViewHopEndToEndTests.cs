@@ -42,11 +42,10 @@ public sealed class TextViewHopEndToEndTests
             await shell.SwitchViewAsync(FileTypeDetector.FileKind.Json);
             var back = Assert.IsType<JsonViewModel>(shell.CurrentDocument);
 
-            // Shown once the new index reaches it; the view then resolves the offset to a row
+            // The first JSON view's structure was kept, so this one opens complete and the caret is
+            // ready to show at once; the view then resolves it to a row
             // (JsonByteRangeNavigationTests).
-            await back.IndexingTask;
-            for (int i = 0; i < 50 && back.PendingReveal is null; i++)
-                await Task.Delay(50);
+            Assert.True(back.IndexingTask.IsCompletedSuccessfully);
             Assert.Equal(target, back.PendingReveal);
         }
         finally

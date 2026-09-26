@@ -458,6 +458,21 @@ Status: step 9 done; step 10 (remove the token index) next. The array table and 
     tree an exact model under the same interface. The array table's cell pane gets a scrollbar
     from it too. Do before the XML view is built; the raw view's scrolling needs a manual check
     after it.
+13. [ ] **The diff on the tree surface**, so every tree view works one way. Today the diff is a
+    `ListBox` over a materialised list of visible rows: it holds no dense index, but it keeps
+    what the old JSON list had besides - a list growing with what is expanded (nesting
+    multiplies the 10K-per-container cap), a full re-walk on every toggle, and children past the
+    cap unreachable. Instead:
+    - **A merged-tree cursor** that steps through the record log and, inside an expanded
+      undescended region, hands over to a `TreeCursor` on the side that draws it (left for
+      removed and unchanged, right for added, the drawing end of a move), then back.
+    - **A two-pane painter**: each row paints its left and right runs at the shared depth, with
+      the status tint, the value-changed highlight, move badges and notes.
+    - **A scroll model for the merged tree**, which has no one byte offset to take a fraction of
+      - an estimate over the record log, and each expanded region's own byte fraction within
+      its record. Needs step 12's interface first.
+    - Selection, next/previous change, "changes only", find reveal and the context bar move to
+      it; `JsonDiffRowCollection`, `JsonRow`, `JsonRowPresenter` and the display cap go.
 
 ## Later
 

@@ -487,9 +487,7 @@ Status: step 12 done. Next: step 13 (the diff on the tree surface); step 11 only
     fake surface (bar follows, held thumb left alone, bottom of track is the end, arrows and
     pages, pan range and clamping) and `RawViewVirtualizationTests.ScrollingIsExactAndTheBarFollows`.
 
-    Needs a manual check: the raw view's scrolling - wheel, trackpad, dragging the thumb, the
-    track, arrow keys and page keys moving the caret, a search reveal, a re-wrap - and the edit
-    overview beside the bar; the JSON tree's bars as before; the cell pane's new bars.
+    Checked by hand: scrolling in the raw view, the JSON tree and the cell pane.
 
 13. [ ] **The diff on the tree surface**, so every tree view works one way. Today the diff is a
     `ListBox` over a materialised list of visible rows: it holds no dense index, but it keeps

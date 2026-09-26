@@ -30,6 +30,33 @@ public class JsonStructuralScannerTests
     }
 
     [Fact]
+    public void TrySkipValue_MatchesUtf8JsonReaderOnEveryValueOfTheUnicodeFixture()
+    {
+        byte[] json = File.ReadAllBytes(Fixtures.UnicodeNamesAndValuesJson);
+        var values = new List<(long Start, long End)>();
+        var reader = new Utf8JsonReader(json);
+        while (reader.Read())
+        {
+            if (reader.TokenType is JsonTokenType.PropertyName or JsonTokenType.EndObject or JsonTokenType.EndArray)
+                continue;
+
+            var skipping = reader;
+            skipping.Skip();
+            values.Add((reader.TokenStartIndex, skipping.BytesConsumed));
+        }
+
+        Assert.True(values.Count > 30);
+        foreach (var source in new IByteSource[] { new MemoryByteSource(json), new SplitByteSource(json, 7) })
+        {
+            foreach (var (start, expectedEnd) in values)
+            {
+                Assert.Equal(JsonSkipOutcome.Skipped, JsonStructuralScanner.TrySkipValue(source, start, out long end));
+                Assert.Equal(expectedEnd, end);
+            }
+        }
+    }
+
+    [Fact]
     public void TrySkipValue_TracksBackslashRunsAcrossEveryBlockBoundary()
     {
         // Runs of one to six backslashes before a quote, slid through every alignment so each

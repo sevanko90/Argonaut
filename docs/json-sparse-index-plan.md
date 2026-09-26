@@ -240,7 +240,10 @@ Status: step 3 next. Branch: `plan/json-sparse-index`.
    format drives it too, from the first commit.
 4. [ ] **`ITreeRowCursor` and `JsonRowCursor`**: forward and backward over display rows with expand
    state, cross-checked against a walk of the dense index on the same corpus - the dense index is
-   the test oracle. The test-only format gets its cursor here.
+   the test oracle. The test-only format gets its cursor here. Run it over
+   `Fixtures/unicode-names-and-values.json` too, and step 7's painter the same way
+   (`JsonUnicodeRenderingTests` is the dense tree's version): names and values in many scripts,
+   emoji sequences, combining marks, invisible characters and `\u` escapes.
 5. [ ] **`Ui/RowSurface`**: extract the shared parts of `RawTextSurface`, with the raw view unchanged in
    behaviour.
 6. [ ] **`Ui/Tree/TreeSurface`** with styled-run painting, gutter providers, keyboard navigation,

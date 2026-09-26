@@ -10,7 +10,7 @@ namespace Argonaut.Engine.Indexing;
 /// <summary>
 /// Shared base for the background scanners that publish fixed-size records into a
 /// <see cref="SegmentedAppendLog{T}"/> from a single writer thread while UI-thread readers
-/// consume them lock-free (FileOffsetIndex, JsonDiffIndex, SearchSession).
+/// consume them lock-free (FileOffsetIndex, RawSegmentIndex, JsonDiffIndex, SearchSession).
 ///
 /// The base owns the log and the cold waiter machinery (WaitForCountAsync / MarkAllItemsPublished).
 /// The hot scan loops stay in the derived classes and interact with the base only through
@@ -86,7 +86,15 @@ public abstract class AppendLogIndexBase<T> where T : struct
     /// <summary>
     /// Number of items published so far (may grow until <see cref="AllItemsPublished"/> is true).
     /// </summary>
-    public int ItemCount => this.items.Count;
+    public int ItemCount => PublishedCount;
+
+    /// <summary>
+    /// What the index counts for its readers, and what <see cref="WaitForCountAsync"/> waits on:
+    /// the records in the log, unless the log is sparse - anchors every so many lines - and the
+    /// index publishes the count its anchors stand for. A derived count must only ever grow, and
+    /// be published (with <see cref="OnItemsPublished"/>) no earlier than the anchors it needs.
+    /// </summary>
+    protected virtual int PublishedCount => this.items.Count;
 
     /// <summary>
     /// Waits (asynchronously) for the writer to reach a target item count. Any number of these
@@ -99,7 +107,7 @@ public abstract class AppendLogIndexBase<T> where T : struct
     {
         lock (this.sync)
         {
-            if (this.items.Count >= targetCount || this.complete)
+            if (PublishedCount >= targetCount || this.complete)
                 return Task.CompletedTask;
 
             var ready = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -112,7 +120,7 @@ public abstract class AppendLogIndexBase<T> where T : struct
             // the flag - this re-check only matters if no further item is ever appended.
             // MarkAllItemsPublished drains the list under this same lock, so a scan that stopped
             // before the flag went up is caught here rather than left waiting.
-            if (this.items.Count >= targetCount || this.complete)
+            if (PublishedCount >= targetCount || this.complete)
             {
                 this.waiters.RemoveAt(this.waiters.Count - 1);
                 this.pendingWaitTarget = LowestTarget();
@@ -159,7 +167,7 @@ public abstract class AppendLogIndexBase<T> where T : struct
         List<TaskCompletionSource<bool>>? reached = null;
         lock (this.sync)
         {
-            int count = this.items.Count;
+            int count = PublishedCount;
             for (int i = this.waiters.Count - 1; i >= 0; i--)
             {
                 if (this.waiters[i].Target > count)

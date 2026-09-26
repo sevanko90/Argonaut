@@ -78,7 +78,7 @@ over a growing source stops at whatever had arrived and then publishes a *comple
 partial document. So:
 
 - **Scan loops advance by the length returned, not the length requested**, and treat an empty
-  return as the termination signal (`FileOffsetIndex.ProduceOffsets`, `FileTypeDetector`'s three
+  return as the termination signal (`FileOffsetIndex.ProduceAnchors`, `FileTypeDetector`'s three
   finders, `SearchSession.Scan`). A loop that assumes it got its whole chunk silently skips
   bytes over a split source.
 - **Never snapshot `AvailableLength`.** Re-read it each turn, and when the scan reaches it, ask

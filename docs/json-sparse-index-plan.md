@@ -185,7 +185,7 @@ The existing dense index stays available to diff until this is built, so diff is
 Each step lands on its own and leaves the app working. Tick a step when it is merged into the
 branch, and note under it anything the next step needs to know.
 
-Status: step 7 next. Branch: `plan/json-sparse-index`.
+Status: steps 7-8 done for the JSON tree and NDJSON; array table, diff and dense-index removal remain. The new tree awaits a manual check. Branch: `plan/json-sparse-index`.
 
 1. [x] **Benchmarks first.** A BenchmarkDotNet suite over three shapes - a token-dense array, deeply
    nested objects, a large array of small records - measuring index bytes per file byte, build time,
@@ -377,10 +377,32 @@ Status: step 7 next. Branch: `plan/json-sparse-index`.
      polish), text selection and copy within a row. Worth adding with step 7 or after.
    - **Needs eyes once JSON is on it** (step 7): row drawing, arrows, selection colour,
      highlights, gutters and the scrollbar thumb's behaviour while dragging.
-7. [ ] **JSON on the tree surface**: a JSON row painter, the schema gutter provider and hints, replacing
+7. [x] **JSON on the tree surface**: a JSON row painter, the schema gutter provider and hints, replacing
    the tree `ListBox`.
+
+   Replaced in place, no toggle. `JsonViewModel` runs `IndexedSourceSession<JsonSparseIndex>` and
+   exposes a `TreeDocument`; `JsonView` is a `TreeSurface`, a pan scrollbar and the path bar.
+   `Features/Json/Tree` holds `JsonTreeText` (row text, child counts, value ends),
+   `JsonTreePainter`, `JsonSchemaResolver` (top-down, cached per container), `JsonSchemaGutter`
+   (resizable, tooltips), `JsonTreePaths` and the `JsonRowLink`s. The surface gained link runs,
+   row markers, gutter tooltips and resizing, Alt deep-toggle within a row budget, and
+   `TreeDocument.Close` so a surface lets go before the mapping is released. `TreeRow` carries
+   its parent's start; `TreeCursor.Ancestors` yields rows. The array index moved from before the
+   arrow to a marker slot in the same place; indent guides and hover highlight are not drawn.
+   `JsonViewTests` drives the view headless; everything else is checked row for row against the
+   dense tree (`JsonTreePainterTests`, `JsonTreePathsTests`).
+
+   Needs a manual check: rows, colours, arrows, the array-index marker, selection, the schema
+   gutter (drag its edge, hover for the tooltip), date-hint and "view as table" links, Alt-click,
+   right-click copy, the path bar, find highlights and the pan and vertical scrollbars.
 8. [ ] **Consumers** moved one at a time per the table above: paths and search, then array table and
    samplers.
+
+   Done: paths (`JsonTreePaths`), search (`JsonSearchNavigator`, `NdJsonSearchNavigator` reveal an
+   offset), the schema root-key sampler and date-scheme inference (sparse overloads), hint
+   overrides keyed by value offset, NDJSON's nested per-line tree. Remaining: the array table -
+   `JsonArrayTableSession`, `JsonArrayElementIndex`, column discovery and the cell pane's
+   `JsonVisibleRowCollection` - which opens its own dense session over the array's range.
 9. [ ] **Diff** on its own hash budget.
 10. [ ] **Remove `JsonStructureIndex`'s dense log** once nothing reads it, and the `ChildCap`/"show more"
     machinery with it.

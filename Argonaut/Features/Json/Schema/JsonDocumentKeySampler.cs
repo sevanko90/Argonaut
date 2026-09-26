@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Indexing.Trees;
 using Argonaut.Features.Json.Indexing;
+using Argonaut.Features.Json.Tree;
 
 namespace Argonaut.Features.Json.Schema;
 
@@ -72,6 +74,50 @@ public static class JsonDocumentKeySampler
         }
 
         return ReadMemberNames(index, bytes, containerIndex);
+    }
+
+    /// <summary>
+    /// <see cref="ReadRootKeys(JsonStructureIndex, IByteSource, out bool)"/> for the sparse tree:
+    /// the same answer, read from the bytes. Hopping a member reads at most a small container
+    /// through - a large one's end is recorded - and a container still arriving ends the sample,
+    /// as a still-open one does in the token index.
+    /// </summary>
+    public static IReadOnlyList<byte[]> ReadRootKeys(JsonTreeReader reader, JsonTreeText text, out bool matchedElementOfArray)
+    {
+        matchedElementOfArray = false;
+        long position = 0;
+        if (!reader.TryReadChild(JsonTreeReader.Document, ref position, out var root, out _))
+            return Array.Empty<byte[]>();
+
+        var container = root;
+        if (root.FormatKind == (byte)JsonTokenKind.StartArray)
+        {
+            long first = reader.FirstChildPosition(root.ValueStart);
+            if (!reader.TryReadChild(root.FormatKind, ref first, out var element, out _) || element.FormatKind != (byte)JsonTokenKind.StartObject)
+                return Array.Empty<byte[]>();
+
+            container = element;
+            matchedElementOfArray = true;
+        }
+        else if (root.FormatKind != (byte)JsonTokenKind.StartObject)
+        {
+            return Array.Empty<byte[]>();
+        }
+
+        var keys = new List<byte[]>();
+        long at = reader.FirstChildPosition(container.ValueStart);
+        while (keys.Count < MaxKeys && reader.TryReadChild((byte)JsonTokenKind.StartObject, ref at, out var member, out _))
+        {
+            var row = new TreeRow(TreeRowShape.Leaf, member, member.RowStart, 0, keys.Count, (byte)JsonTokenKind.StartObject,
+                container.ValueStart, IsExpanded: false);
+            keys.Add(text.NameBytes(row).ToArray());
+
+            at = text.End(member);
+            if (at == long.MaxValue)
+                break;
+        }
+
+        return keys;
     }
 
     /// <summary>

@@ -1,49 +1,63 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
-using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Detection;
 using Argonaut.Engine.Indexing;
+using Argonaut.Engine.Indexing.Trees;
 using Argonaut.Engine.Progress;
 using Argonaut.Engine.Search;
-using Argonaut.Engine.Settings;
 using Argonaut.Features.Json.Hints;
 using Argonaut.Features.Json.Indexing;
-using Argonaut.Features.Json.Paths;
 using Argonaut.Features.Json.Schema;
+using Argonaut.Features.Json.Tree;
 using Argonaut.Ui.Documents;
 using Argonaut.Ui.Documents.Navigation;
 using Argonaut.Ui.Find;
 using Argonaut.Ui.Notifications;
+using Argonaut.Ui.Tree;
 
 namespace Argonaut.Features.Json;
 
+/// <summary>
+/// A JSON document shown as a tree. The tree reads the bytes through a sparse index
+/// (<see cref="JsonSparseIndex"/>) and a <see cref="TreeDocument"/> the view's surface draws;
+/// nothing holds a record per token, and the tree can be shown before indexing has got anywhere.
+/// Selection, reveals and path segments are byte offsets - the start of the row they name.
+/// </summary>
 public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
 {
-    private const int InitialTokenTarget = 250;
+    /// <summary>How often a still-indexing document tells its surface there is more to show.</summary>
+    private static readonly TimeSpan GrowthInterval = TimeSpan.FromMilliseconds(500);
 
-    private IndexedSourceSession<JsonStructureIndex>? session;
-    private JsonVisibleRowCollection? rows;
-    private int? selectedTokenIndex;
+    private IndexedSourceSession<JsonSparseIndex>? session;
+    private TreeDocument? tree;
+    private JsonTreeReader? reader;
+    private JsonTreeText? text;
+    private JsonSchemaResolver? schemaResolver;
+    private TreeExpandState? expand;
+    private IndexGrowthMonitor? growthMonitor;
+    private TreeRow? selectedRow;
     private string? selectedPath;
+    private string? selectedValueText;
     private string? highlightTerm;
-    private IReadOnlyList<JsonPathSegment> selectedPathSegments = Array.Empty<JsonPathSegment>();
+    private IReadOnlyList<JsonTreePathSegment> selectedPathSegments = Array.Empty<JsonTreePathSegment>();
 
     protected override IDocumentSession? Session => session;
 
-    protected override IDisposable? MappedRows => rows;
+    protected override IDisposable? MappedRows => growthMonitor is null && tree is null ? null : new CloseTree(this);
 
     internal IByteSource? Bytes => session?.Bytes;
 
-    internal JsonStructureIndex? Index => session?.Index;
+    /// <summary>The sparse index, once loading has started.</summary>
+    internal JsonSparseIndex? Index => session?.Index;
 
     /// <summary>
     /// What a find should scan for this document: the whole file for a top-level load, or just
     /// this line's byte range for the nested per-line view model NdJsonViewModel hosts. Carrying
-    /// the range matters - the nested document's index is zero-based at the line start, so a
+    /// the range matters - the nested document's offsets are zero-based at the line start, so a
     /// whole-file scan would report offsets it cannot resolve (see ScanTarget).
     /// </summary>
     internal ScanTarget ScanTarget { get; private set; }
@@ -53,13 +67,12 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
     /// rather than touching a released mapping.</summary>
     internal CancellationToken TearingDown => session?.TearingDown ?? default;
 
-    public int TokenCount => session?.Index.TokenCount ?? 0;
-
-    public JsonVisibleRowCollection Rows => rows ?? throw new InvalidOperationException("LoadAsync must complete before Rows is accessed.");
+    /// <summary>The tree the view's surface draws. Null until LoadAsync has started.</summary>
+    public TreeDocument? Tree => tree;
 
     /// <summary>Session state for date hints: the file-level default scheme (inferred or
-    /// user-picked) and any per-token overrides. Created eagerly so MainWindow/NdJson can
-    /// attach to it before or during load.</summary>
+    /// user-picked) and any per-value overrides. Created eagerly so MainWindow/NdJson can attach
+    /// to it before or during load.</summary>
     public DateHintSettings HintSettings { get; } = new();
 
     /// <summary>Session state for schema hints: the schemas on offer, the selected one and its
@@ -68,25 +81,23 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
     public JsonSchemaSettings SchemaSettings { get; } = new();
 
     /// <summary>
-    /// How many container levels to auto-expand when the tree is first built. Must be set
-    /// before <see cref="LoadAsync(string,IProgressReporter?)"/>/<see cref="LoadAsync(string,long,long,IProgressReporter?)"/>
-    /// completes to affect the initial view - see <see cref="JsonToolbarViewModel"/>'s
-    /// expand-depth combo.
+    /// How many container levels are expanded by default. Set before LoadAsync to affect the
+    /// initial view; <see cref="SetDefaultExpandDepth"/> changes it afterwards.
     /// </summary>
     public int DefaultExpandDepth { get; set; } = 2;
 
     private JsonToolbarViewModel? toolbar;
 
     /// <summary>This document's header toolbar (see <see cref="IDocumentViewModel.Toolbar"/>).
-    /// Null until <see cref="LoadAsync(string,IProgressReporter?)"/> creates it; always null for
-    /// the nested per-NDJSON-line instances loaded via the offset/length overload, since those
-    /// are never a shell document.</summary>
+    /// Null until LoadAsync creates it; always null for the nested per-NDJSON-line instances,
+    /// since those are never a shell document.</summary>
     public override JsonToolbarViewModel? Toolbar => toolbar;
 
-    public int? SelectedTokenIndex
+    /// <summary>The selected row, or null.</summary>
+    public TreeRow? SelectedRow
     {
-        get => selectedTokenIndex;
-        private set => SetField(ref selectedTokenIndex, value);
+        get => selectedRow;
+        private set => SetField(ref selectedRow, value);
     }
 
     public string? SelectedPath
@@ -95,21 +106,45 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
         private set => SetField(ref selectedPath, value);
     }
 
-    public IReadOnlyList<JsonPathSegment> SelectedPathSegments
+    public IReadOnlyList<JsonTreePathSegment> SelectedPathSegments
     {
         get => selectedPathSegments;
         private set => SetField(ref selectedPathSegments, value);
     }
 
+    /// <summary>The selected row's value as copy-value puts it on the clipboard: a string without
+    /// its quotes, anything else as shown.</summary>
+    public string? SelectedValueText
+    {
+        get => selectedValueText;
+        private set => SetField(ref selectedValueText, value);
+    }
+
     /// <summary>
-    /// The active find term; rows re-find and highlight it in their displayed text (see
-    /// SearchHighlight). Null when no find is active.
+    /// The active find term; rows highlight it in their displayed text. Null when no find is
+    /// active.
     /// </summary>
     public string? HighlightTerm
     {
         get => highlightTerm;
         set => SetField(ref highlightTerm, value);
     }
+
+    /// <summary>
+    /// The offset a reveal is waiting to show - set by <see cref="Reveal"/> and consumed by the
+    /// view, which may not exist yet when it is asked for (a search reveal into an NDJSON line
+    /// selects the line first, and its view arrives a moment later).
+    /// </summary>
+    public long? PendingReveal { get; private set; }
+
+    /// <summary>A reveal was asked for; the view shows <see cref="PendingReveal"/>.</summary>
+    public event EventHandler? RevealRequested;
+
+    /// <summary>What rows say changed - a schema bound, a hint setting - though the rows did not.</summary>
+    public event EventHandler? RowsInvalidated;
+
+    /// <summary>The default expand depth changed: the rows on screen are different rows.</summary>
+    public event EventHandler? ExpansionReset;
 
     private readonly JsonViewSettings viewSettings;
     private readonly SchemaBindings schemaBindings;
@@ -126,37 +161,39 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
 
         SchemaSettings.SchemaChanged += OnSchemaChanged;
         SchemaSettings.PropertyChanged += OnSchemaSettingsPropertyChanged;
+        HintSettings.HintsChanged += OnHintsChanged;
     }
 
+    private void OnHintsChanged(object? sender, EventArgs e) => RowsInvalidated?.Invoke(this, EventArgs.Empty);
+
     /// <summary>The bound schema changed (a new selection finished loading, or was cleared) -
-    /// rebind the rows. Null-safe for the window between selection and the row collection
-    /// existing; LoadCore applies whatever is current once it creates the rows.</summary>
+    /// rebind the rows. Null-safe for the window before loading has started; LoadCore applies
+    /// whatever is current once it builds the tree.</summary>
     private void OnSchemaChanged(object? sender, EventArgs e)
     {
         if (IsDisposed)
             return;
 
-        rows?.SetSchema(SchemaSettings.Document);
+        if (schemaResolver is not null)
+            schemaResolver.Schema = SchemaSettings.Document;
+        RowsInvalidated?.Invoke(this, EventArgs.Empty);
         UpdateSchemaRootMatches();
     }
 
     /// <summary>
     /// Scores the bound schema's selectable types against the property names this document
     /// actually carries, so the type picker can lead with the likely answers instead of an
-    /// alphabetical list of a hundred opaque names.
-    ///
-    /// Cheap enough to run inline on the UI thread - a bounded key sample the document walk
-    /// already has the machinery for, then a linear merge per candidate - and it is only ever
-    /// reached for a schema offering a choice at all. Silent when the sample is empty: indexing
-    /// may not have reached the root's members yet, and <see cref="OnIndexingCompleted"/> calls
-    /// back once it has.
+    /// alphabetical list of a hundred opaque names. Cheap enough to run inline - a bounded key
+    /// sample, then a linear merge per candidate - and only reached for a schema offering a
+    /// choice at all. Silent when the sample is empty; <see cref="OnIndexingCompleted"/> calls
+    /// back.
     /// </summary>
     private void UpdateSchemaRootMatches()
     {
-        if (SchemaSettings.Document is not { } schema || schema.NamedRoots.Count == 0 || session is not { } current)
+        if (SchemaSettings.Document is not { } schema || schema.NamedRoots.Count == 0 || reader is null || text is null)
             return;
 
-        var keys = JsonDocumentKeySampler.ReadRootKeys(current.Index, current.Bytes, out bool fromArrayElement);
+        var keys = JsonDocumentKeySampler.ReadRootKeys(reader, text, out bool fromArrayElement);
         if (keys.Count == 0)
             return;
 
@@ -166,13 +203,8 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
     /// <summary>
     /// Persists the schema choice against this document so reopening the file restores it.
     /// Keyed on the *selection* rather than the loaded document, so a schema that fails to parse
-    /// is still remembered as the user's choice (they'll want to fix the file, not re-pick it).
-    /// Skipped for the nested per-NDJSON-line instances, whose selection is driven from - and
-    /// persisted by - the owning NdJsonViewModel.
-    ///
-    /// The bound root is part of the choice, and lands here a moment after the entry does (the
-    /// schema has to parse before its root is known), so this writes twice for one user action -
-    /// harmless, and it keeps "what was selected" and "which root of it" in one record.
+    /// is still remembered as the user's choice. Skipped for the nested per-NDJSON-line
+    /// instances, whose selection is driven from - and persisted by - the owning NdJsonViewModel.
     /// </summary>
     private void OnSchemaSettingsPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
@@ -185,48 +217,76 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
             schemaBindings.Remember(documentPath, SchemaSettings.SelectedEntry?.FilePath, SchemaSettings.IsRootExplicitlyChosen ? SchemaSettings.SelectedRootName : null);
     }
 
-    /// <summary>
-    /// Selects a token by index, computes its JSONPath, and ensures it's reachable in the
-    /// tree (expanding any collapsed ancestor - see JsonVisibleRowCollection.EnsureVisible).
-    /// Model fields are set before EnsureVisible so that if it does trigger a row-list
-    /// rebuild, that rebuild observes the new SelectedTokenIndex already in place. Only
-    /// walks tokenIndex's ancestor chain (see <see cref="JsonPathBuilder"/>) - cheap
-    /// regardless of how large the document is, since it never touches unrelated parts of
-    /// the index.
-    /// </summary>
-    public void SelectToken(int tokenIndex)
+    /// <summary>Asks the view to select and show the row holding <paramref name="offset"/>,
+    /// expanding whatever hides it.</summary>
+    public void Reveal(long offset)
     {
-        SelectedTokenIndex = tokenIndex;
-        SelectedPath = JsonPathBuilder.Build(Index!, Bytes!, tokenIndex);
-        SelectedPathSegments = JsonPathBuilder.BuildSegments(Index!, Bytes!, tokenIndex);
-        rows?.EnsureVisible(tokenIndex);
+        PendingReveal = offset;
+        RevealRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>The view has shown <see cref="PendingReveal"/>.</summary>
+    public void ClearPendingReveal() => PendingReveal = null;
+
+    /// <summary>
+    /// The view's selection moved to <paramref name="row"/>: works out its JSONPath and its
+    /// value. Only the row's ancestry is read, so this costs the same anywhere in any document.
+    /// </summary>
+    public void OnRowSelected(TreeRow? row)
+    {
+        SelectedRow = row;
+        if (row is not { } selected || session is null || text is null || reader is null)
+        {
+            SelectedPath = null;
+            SelectedPathSegments = Array.Empty<JsonTreePathSegment>();
+            SelectedValueText = null;
+            return;
+        }
+
+        var cursor = new TreeCursor(session.Index.Structure, reader, expand!);
+        cursor.SeekTo(selected.Start);
+        var segments = JsonTreePaths.Segments(cursor, text);
+        SelectedPathSegments = segments;
+        SelectedPath = JsonTreePaths.Format(segments);
+        SelectedValueText = ValueText(selected);
+    }
+
+    private string ValueText(in TreeRow row)
+    {
+        if (row.Shape != TreeRowShape.Leaf)
+            return text!.Summary(row.Shape == TreeRowShape.Close ? row with { Shape = TreeRowShape.Open, IsExpanded = false } : row);
+
+        string shown = text!.Scalar(row, out bool truncated, out _, out _);
+        if (row.Node.FormatKind != (byte)JsonTokenKind.String || shown.Length < 2)
+            return shown;
+
+        // Strip the quotes so the clipboard holds the raw value rather than a JSON-literal
+        // rendering of it; a truncated string has no closing quote to strip.
+        return truncated ? shown[1..] : shown[1..^1];
     }
 
     /// <summary>
-    /// Resolves a JSONPath string (see <see cref="JsonPathResolver"/>) and selects/reveals
-    /// the target token if found, or surfaces a toast on parse/lookup failure. Wired into
-    /// <see cref="JsonToolbarViewModel"/>'s "Go to path" action.
-    ///
-    /// Starts and registers the resolver on the pool because, on a
-    /// still-indexing file, it can await across several ticks while the document is closed -
-    /// without this, Dispose could free the mapping while ResolveAsync is still reading it.
+    /// Resolves a JSONPath string (see <see cref="JsonTreePaths"/>) and reveals the target, or
+    /// surfaces a toast on parse/lookup failure. Wired into <see cref="JsonToolbarViewModel"/>'s
+    /// "Go to path" action. Runs as a dependent read so closing the document mid-resolve joins it
+    /// before the mapping is released.
     /// </summary>
     public async Task NavigateToPathAsync(string path)
     {
-        if (session is null || IsDisposed)
+        if (session is null || IsDisposed || reader is null || text is null)
         {
             ToastService.Show("No file loaded yet.");
             return;
         }
 
         var current = session;
-        var resolveTask = current.StartDependentRead(tearingDown =>
-            JsonPathResolver.ResolveAsync(current.Index, current.Bytes, path, tearingDown));
-
-        JsonPathResolveResult result;
+        var currentReader = reader;
+        var currentText = text;
+        JsonTreePathResult result;
         try
         {
-            result = await resolveTask;
+            result = await current.StartDependentRead(_ =>
+                Task.Run(() => JsonTreePaths.Resolve(current.Index.Structure, currentReader, currentText, path)));
         }
         catch (Exception ex)
         {
@@ -238,80 +298,58 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
         if (IsDisposed)
             return;
 
-        if (result.TokenIndex is { } tokenIndex)
-            SelectToken(tokenIndex);
+        if (result.Target is { } target)
+            Reveal(target);
         else
             ToastService.Show(result.Error ?? "Path not found.");
     }
 
     /// <summary>
     /// Whether this document can offer "view as table" on its array rows. False for the
-    /// sub-range documents NDJSON nests per line: <see cref="JsonTokenInfo.Offset"/> is relative
-    /// to the indexed MAPPING, so a token offset from one of those is not a file offset, and the
-    /// table would map the wrong bytes. The base offset is right here in
-    /// <see cref="ScanTarget"/> if that restriction is ever lifted - the link is hidden rather
-    /// than the conversion skipped.
+    /// sub-range documents NDJSON nests per line: their offsets are relative to the line, not
+    /// the file, so the table would map the wrong bytes.
     /// </summary>
     public bool SupportsArrayTable => ScanTarget.Offset == 0;
 
     /// <summary>
-    /// Resolves the array at <paramref name="tokenIndex"/> to a file byte range and raises an
-    /// <see cref="ArrayTableService"/> request for it. Raising rather than acting keeps this
-    /// view model unaware of the shell, the same way the truncated-value link reaches the raw
-    /// viewer through <see cref="RawJumpService"/>.
-    ///
-    /// The wait matters: <see cref="JsonTokenInfo.EndIndex"/> is -1 until the container closes,
-    /// so on a still-indexing file the array's end - and therefore its length - is not yet
-    /// known. "Enabled once the array has an element" is not a sufficient guard. A file that
-    /// ends without closing the array throws out of the wait, and there is simply nothing to
-    /// open.
+    /// Resolves the array starting at <paramref name="arrayStart"/> to a byte range and raises an
+    /// <see cref="ArrayTableService"/> request for it. Raising rather than acting keeps this view
+    /// model unaware of the shell, the same way the truncated-value link reaches the raw viewer
+    /// through <see cref="RawJumpService"/>.
     /// </summary>
-    public async Task RequestArrayTableAsync(int tokenIndex)
+    public void RequestArrayTable(long arrayStart)
     {
-        if (session is not { } current || !SupportsArrayTable)
+        if (session is null || !SupportsArrayTable || reader is null || text is null)
             return;
 
-        int endTokenIndex;
-        try
-        {
-            endTokenIndex = await JsonPathResolver.WaitForEndIndexAsync(current.Index, tokenIndex, current.TearingDown);
-        }
-        catch (OperationCanceledException)
-        {
-            return; // the document closed while we waited - nothing to open it into
-        }
-        catch (Exception ex)
-        {
-            if (!IsDisposed)
-                ToastService.Show($"Can't open as a table: {ex.Message}");
-            return;
-        }
-
-        if (IsDisposed)
+        var cursor = new TreeCursor(session.Index.Structure, reader, new TreeExpandState(int.MaxValue));
+        if (!cursor.SeekTo(arrayStart) || cursor.Current.Node.ValueStart != arrayStart)
             return;
 
-        var start = current.Index.GetToken(tokenIndex);
-        var end = current.Index.GetToken(endTokenIndex);
-
-        // A StartArray/EndArray token records its offset AT the bracket with Length 1, so the
-        // closing term includes that bracket and the range is a whole JSON document. An
-        // off-by-one here surfaces as a JsonReaderException out of the table's own indexer
-        // rather than as anything legible.
-        long offset = start.Offset;
-        long length = end.Offset + end.Length - offset;
+        long end = text.End(cursor.Current.Node);
+        if (end == long.MaxValue)
+        {
+            ToastService.Show("That array hasn't finished loading yet.");
+            return;
+        }
 
         ArrayTableService.Request(new ArrayTableRequest(
-            Origin!, offset, length, JsonPathBuilder.Build(current.Index, current.Bytes, tokenIndex)));
+            Origin!, arrayStart, end - arrayStart, JsonTreePaths.Format(JsonTreePaths.Segments(cursor, text))));
     }
 
     /// <summary>
-    /// Changes the default-expand depth and applies it immediately if a file is already
-    /// loaded, in addition to affecting future loads.
+    /// Changes the default-expand depth and applies it immediately if a file is already loaded,
+    /// in addition to affecting future loads.
     /// </summary>
     public void SetDefaultExpandDepth(int depth)
     {
         DefaultExpandDepth = depth;
-        rows?.SetDefaultExpandDepth(depth);
+        if (expand is null)
+            return;
+
+        expand.DefaultDepth = depth;
+        expand.Reset();
+        ExpansionReset?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>The toolbar's expand-depth choice: remembered for the next document, then applied
@@ -334,8 +372,8 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
         var loadTask = LoadCore(origin.Open(), progressReporter);
 
         // Runs alongside indexing rather than blocking the open: whichever finishes first, the
-        // other side picks the schema up (LoadCore applies whatever is current when it creates
-        // the rows; OnSchemaChanged handles the reverse order).
+        // other side picks the schema up (LoadCore applies whatever is current when it builds
+        // the tree; OnSchemaChanged handles the reverse order).
         _ = ApplyInitialSchemaAsync(origin.Path);
 
         return loadTask;
@@ -344,8 +382,8 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
     /// <summary>
     /// Populates the schema catalog for this document and applies the initial binding, if any: a
     /// <c>&lt;file&gt;.schema.json</c> sidecar wins, otherwise the schema last bound to this path
-    /// (see <see cref="SchemaBindings"/>). Nothing here is ever an error - a missing
-    /// sidecar and an unreadable schema folder both just mean "no schema".
+    /// (see <see cref="SchemaBindings"/>). Nothing here is ever an error - a missing sidecar and
+    /// an unreadable schema folder both just mean "no schema".
     /// </summary>
     private async Task ApplyInitialSchemaAsync(string? documentPath)
     {
@@ -361,8 +399,7 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
     }
 
     /// <summary>Re-lists the schema catalog without touching the current selection - so a
-    /// schema dropped into the user folder mid-session shows up next time the combo opens,
-    /// rather than requiring a restart. See <see cref="JsonToolbarViewModel.IsSchemaFlyoutOpen"/>.</summary>
+    /// schema dropped into the user folder mid-session shows up next time the combo opens.</summary>
     private async Task RefreshSchemaEntriesAsync(string? documentPath)
     {
         var bindings = schemaBindings.Entries;
@@ -385,53 +422,52 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
         return LoadCore(origin.OpenRange(offset, length), progressReporter);
     }
 
-    private async Task LoadCore(IByteSource bytes, IProgressReporter? progressReporter)
+    private Task LoadCore(IByteSource bytes, IProgressReporter? progressReporter)
     {
-        var session = IndexedSourceSession<JsonStructureIndex>.Start(bytes, JsonStructureIndex.StartIndexing, progressReporter);
+        var session = IndexedSourceSession<JsonSparseIndex>.Start(bytes, JsonSparseIndex.StartIndexing, progressReporter);
         this.session = session;
 
-        // Await a small initial batch so the first paint isn't empty; the row collection
-        // then tracks index.TokenCount live as indexing continues in the background.
-        await session.Index.WaitForTokenCountAsync(InitialTokenTarget);
+        // The tree reads the bytes directly, so it is shown at once: the index only speeds up
+        // jumps, and grows underneath it.
+        reader = new JsonTreeReader(session.Bytes);
+        text = new JsonTreeText(session.Bytes, session.Index.Structure, reader);
+        schemaResolver = new JsonSchemaResolver(session.Index.Structure, reader, text) { Schema = SchemaSettings.Document };
+        expand = new TreeExpandState(DefaultExpandDepth);
+        var painter = new JsonTreePainter(text, new IValueHintProvider[] { new DateHintProvider(HintSettings) }, SupportsArrayTable);
+        var gutters = new ITreeGutter[] { new JsonSchemaGutter(schemaResolver, text) };
+        var sourceBytes = session.Bytes;
+        tree = new TreeDocument(session.Index.Structure, reader, painter, expand, () => sourceBytes.AvailableLength, gutters);
 
-        if (session.Index.Failure is { } failure)
-            IndexFailure = failure;
-
-        rows = new JsonVisibleRowCollection(session.Index, session.Bytes,
-            new IValueHintProvider[] { new DateHintProvider(HintSettings) }, DefaultExpandDepth);
-
-        // A schema may already have been selected (sidecar/remembered, or pushed down by
-        // NdJsonViewModel) while indexing's initial batch was still being awaited.
-        if (SchemaSettings.Document is { } schema)
-            rows.SetSchema(schema);
+        if (!session.Index.AllItemsPublished)
+        {
+            var index = session.Index;
+            growthMonitor = new IndexGrowthMonitor(GrowthInterval, index.IndexingTask, () => index.AllItemsPublished,
+                () => tree?.NotifyGrew());
+        }
 
         UpdateSchemaRootMatches();
 
         // Inference dereferences the mapping, so the session must join it before unmapping.
-        _ = InferDefaultDateSchemeAsync(session);
+        _ = InferDefaultDateSchemeAsync(session, reader, text);
 
-        StatusText = $"{FilePath} — {TokenCount:N0} tokens indexed so far";
+        StatusText = $"{FilePath} — indexing…";
         MonitorIndexing();
+        return Task.CompletedTask;
     }
 
     public override ISearchNavigator CreateSearchNavigator() => new JsonSearchNavigator(this);
 
-    /// <summary>
-    /// Returns true if the VM can process the specified file type
-    /// </summary>
-    /// <param name="fileType">Type of file to query</param>
-    /// <returns>True if the view model can process the specified file type</returns>
     public override bool CanHandleFileType(FileTypeDetector.FileKind fileType)
     {
         return fileType == FileTypeDetector.FileKind.Json;
     }
 
-    /// <summary>Indexing finished: reports the final token count, then re-scores schema roots
-    /// against the complete key set now that every token is indexed - the sample taken at open
-    /// may have seen only the first few (five keys, each a huge array).</summary>
+    /// <summary>Indexing finished: reports the size, then re-scores schema roots against the
+    /// complete document - the sample taken at open may have seen only the start.</summary>
     protected override void OnIndexingCompleted()
     {
-        StatusText = $"{FilePath} — {TokenCount:N0} tokens";
+        StatusText = $"{FilePath} — {FormatByteLength(session?.Bytes.AvailableLength ?? 0)}";
+        tree?.NotifyGrew();
         UpdateSchemaRootMatches();
     }
 
@@ -445,26 +481,48 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
     }
 
     /// <summary>
-    /// Scans at most DateHintInference.MaxTokensToScan already-indexed tokens in the
-    /// background for the first classifiable date value, and sets it as the file default if
-    /// found. Never a full-file scan. No-ops if the user has already picked a scheme.
+    /// Reads at most DateHintInference.MaxTokensToScan values in the background for the first
+    /// classifiable date, and sets it as the file default if found. Never a full-file scan.
+    /// No-ops if the user has already picked a scheme.
     /// </summary>
-    private async Task InferDefaultDateSchemeAsync(IndexedSourceSession<JsonStructureIndex> current)
+    private async Task InferDefaultDateSchemeAsync(IndexedSourceSession<JsonSparseIndex> current, JsonTreeReader currentReader, JsonTreeText currentText)
     {
         try
         {
-            var scheme = await current.StartDependentRead(async tearingDown =>
+            var scheme = await current.StartDependentRead(tearingDown => Task.Run(() =>
             {
-                await current.Index.WaitForTokenCountAsync(DateHintInference.MaxTokensToScan);
                 tearingDown.ThrowIfCancellationRequested();
-                return DateHintInference.FindFirstScheme(current.Index, current.Bytes, DateHintInference.MaxTokensToScan);
-            });
+                return DateHintInference.FindFirstScheme(current.Index.Structure, currentReader, currentText, DateHintInference.MaxTokensToScan);
+            }));
             if (!IsDisposed && scheme is { } inferred)
                 HintSettings.TrySetInferredDefault(inferred);
         }
         catch
         {
             // Indexing failures are surfaced elsewhere; teardown also cancels this reader.
+        }
+    }
+
+    private static string FormatByteLength(long bytes) => bytes switch
+    {
+        < 1024 => $"{bytes:N0} bytes",
+        < 1024 * 1024 => $"{bytes / 1024.0:0.#} KB",
+        < 1024 * 1024 * 1024 => $"{bytes / (1024.0 * 1024.0):0.#} MB",
+        _ => $"{bytes / (1024.0 * 1024.0 * 1024.0):0.#} GB",
+    };
+
+    /// <summary>
+    /// What the base disposes before releasing the session: the growth monitor stops, and every
+    /// surface drawing the tree lets go of it, since another row drawn after the release would
+    /// read an unmapped file.
+    /// </summary>
+    private sealed class CloseTree(JsonViewModel owner) : IDisposable
+    {
+        public void Dispose()
+        {
+            owner.growthMonitor?.Dispose();
+            owner.growthMonitor = null;
+            owner.tree?.Close();
         }
     }
 }

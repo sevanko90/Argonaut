@@ -37,5 +37,12 @@ public sealed class TreeDocument(
 
     public void NotifyGrew() => Grew?.Invoke(this, EventArgs.Empty);
 
+    /// <summary>Raised when the bytes behind this document are about to be released: a surface
+    /// showing it lets go at once, since drawing another row would read a released mapping.</summary>
+    public event EventHandler? Closing;
+
+    /// <summary>Called by the owner before it releases the bytes.</summary>
+    public void Close() => Closing?.Invoke(this, EventArgs.Empty);
+
     public TreeCursor NewCursor() => new(Index, Reader, Expand);
 }

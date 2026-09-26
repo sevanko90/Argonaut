@@ -105,6 +105,18 @@ public sealed class JsonTreeText(IByteSource bytes, SparseContainerIndex index, 
         return $"{open} {counted} {close}";
     }
 
+    /// <summary>Where <paramref name="node"/>'s value ends: a scalar's recorded end, a large
+    /// container's end from the index, or a small one's by scanning it - <c>long.MaxValue</c> for a
+    /// container still arriving.</summary>
+    public long End(TreeNode node)
+    {
+        if (!node.IsContainer)
+            return node.ValueEnd;
+
+        int record = index.FindContainerStartingAt(node.ValueStart);
+        return record >= 0 && index.GetContainer(record).End is var end and >= 0 ? end : reader.SkipValue(node.ValueStart);
+    }
+
     /// <summary>Whether the container starting at <paramref name="containerStart"/> has any
     /// children - read from its first bytes, so it costs nothing however large it is.</summary>
     public bool HasChildren(long containerStart, byte kind)

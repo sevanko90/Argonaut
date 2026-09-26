@@ -86,8 +86,8 @@ public static class JsonTreePaths
                     $"{JsonPathResolver.FormatPath(segments, s)} is {JsonPathResolver.DescribeKind(kind)}, not an object - can't look up member '{segment.Name}'.");
 
             var found = segment.IsArrayIndex
-                ? FindElement(index, reader, current, segment.ArrayIndex)
-                : FindMember(index, reader, text, current, Encoding.UTF8.GetBytes(segment.Name!));
+                ? FindElement(index, reader, text, current, segment.ArrayIndex)
+                : FindMember(reader, text, current, Encoding.UTF8.GetBytes(segment.Name!));
             if (found is not { } next)
             {
                 string label = segment.IsArrayIndex ? $"[{segment.ArrayIndex}]" : $".{JsonPathResolver.FormatMemberName(segment.Name!)}";
@@ -102,7 +102,7 @@ public static class JsonTreePaths
 
     /// <summary>Element <paramref name="ordinal"/> of an array, read from the nearest resume
     /// point before it.</summary>
-    private static TreeNode? FindElement(SparseContainerIndex index, JsonTreeReader reader, TreeNode array, long ordinal)
+    private static TreeNode? FindElement(SparseContainerIndex index, JsonTreeReader reader, JsonTreeText text, TreeNode array, long ordinal)
     {
         long position = reader.FirstChildPosition(array.ValueStart);
         long at = 0;
@@ -119,7 +119,7 @@ public static class JsonTreePaths
             if (at++ == ordinal)
                 return child;
 
-            position = End(index, reader, child);
+            position = text.End(child);
             if (position == long.MaxValue)
                 return null;
         }
@@ -128,7 +128,7 @@ public static class JsonTreePaths
     }
 
     /// <summary>The member of an object whose name, unescaped, is <paramref name="nameUtf8"/>.</summary>
-    private static TreeNode? FindMember(SparseContainerIndex index, JsonTreeReader reader, JsonTreeText text, TreeNode obj, byte[] nameUtf8)
+    private static TreeNode? FindMember(JsonTreeReader reader, JsonTreeText text, TreeNode obj, byte[] nameUtf8)
     {
         long position = reader.FirstChildPosition(obj.ValueStart);
         while (reader.TryReadChild((byte)JsonTokenKind.StartObject, ref position, out var child, out _))
@@ -138,20 +138,11 @@ public static class JsonTreePaths
             if (JsonUnescape.EqualsDecodedUtf8(text.NameBytes(asRow), nameUtf8))
                 return child;
 
-            position = End(index, reader, child);
+            position = text.End(child);
             if (position == long.MaxValue)
                 return null;
         }
 
         return null;
-    }
-
-    private static long End(SparseContainerIndex index, JsonTreeReader reader, TreeNode node)
-    {
-        if (!node.IsContainer)
-            return node.ValueEnd;
-
-        int record = index.FindContainerStartingAt(node.ValueStart);
-        return record >= 0 && index.GetContainer(record).End is var end and >= 0 ? end : reader.SkipValue(node.ValueStart);
     }
 }

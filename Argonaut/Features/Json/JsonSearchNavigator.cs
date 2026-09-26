@@ -1,16 +1,14 @@
 using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Engine.Search;
-using Argonaut.Features.Json.Indexing;
 using Argonaut.Ui.Find;
 
 namespace Argonaut.Features.Json;
 
 /// <summary>
-/// Reveal strategy for a whole-file JSON view: resolve the match's byte offset to a token
-/// (waiting for index coverage if the byte scan outran the indexer), then reuse the
-/// breadcrumb-navigation path - SelectToken expands collapsed ancestors and the view syncs
-/// selection/scroll from SelectedTokenIndex.
+/// Reveal strategy for a whole-file JSON view: the match's byte offset goes straight to the view
+/// model, whose tree selects the row holding it and expands whatever hides it. The tree reads the
+/// bytes directly, so there is no waiting for an index to cover the match first.
 /// </summary>
 public sealed class JsonSearchNavigator : ISearchNavigator
 {
@@ -27,12 +25,10 @@ public sealed class JsonSearchNavigator : ISearchNavigator
 
     public CancellationToken DocumentTearingDown => viewModel.TearingDown;
 
-    public async Task RevealAsync(SearchMatch match, CancellationToken ct)
+    public Task RevealAsync(SearchMatch match, CancellationToken ct)
     {
-        var tokenIndex = await JsonOffsetTokenResolver.ResolveWhenCoveredAsync(viewModel.Index!, match.Offset, ct);
         ct.ThrowIfCancellationRequested();
-
-        if (tokenIndex is int t)
-            viewModel.SelectToken(t);
+        viewModel.Reveal(match.Offset);
+        return Task.CompletedTask;
     }
 }

@@ -88,10 +88,17 @@ public class TreeSurface : RowSurface
                 return;
 
             if (document is not null)
+            {
                 document.Grew -= OnDocumentGrew;
+                document.Closing -= OnDocumentClosing;
+            }
+
             document = value;
             if (document is not null)
+            {
                 document.Grew += OnDocumentGrew;
+                document.Closing += OnDocumentClosing;
+            }
 
             ResetToTop();
         }
@@ -218,6 +225,10 @@ public class TreeSurface : RowSurface
         }
     }
 
+    /// <summary>How wide the rows' own area is - the surface less its gutters and padding - which
+    /// is what a host's pan range compares <see cref="RowSurface.WidestRowWidth"/> against.</summary>
+    public double ContentViewportWidth => Math.Max(0, Bounds.Width - ContentLeft - ContentPaddingX);
+
     /// <summary>Where a row's arrow sits, panned: after its indent and any marker.</summary>
     private double ArrowLeft(in TreeRow row, RowLayout layout)
         => ContentLeft + row.Depth * IndentWidth + (layout.Marker is null ? 0 : MarkerWidth) - PanOffset;
@@ -324,6 +335,8 @@ public class TreeSurface : RowSurface
         SyncOffset();
         InvalidateVisual();
     }
+
+    private void OnDocumentClosing(object? sender, EventArgs e) => Document = null;
 
     private void OnDocumentGrew(object? sender, EventArgs e)
     {

@@ -102,7 +102,10 @@ them). Keep this in sync when the ownership chain changes.
   stopped because of an error, null on success *and* on cancellation. `AppendLogIndexBase.RunIndexing`
   is the one place that catches a scan's exception, records it (via the overridable
   `DescribeFailure`, which `JsonStructureIndex` enriches with line/column/byte-offset from a
-  `JsonException`), and rethrows — so `IndexingTask` faults as if nothing had caught it.
+  `JsonException`), and rethrows — so `IndexingTask` faults as if nothing had caught it. The JSON
+  tree's `JsonSparseIndex` does not validate as it scans; `JsonDocumentValidator` reads the
+  document beside it and reports the same message, line, column and trouble offset (both go
+  through `JsonFailureLocation`), with `ItemsIndexed` counting the tokens read before the error.
 - Forcing an incompatible kind onto a file (via the switcher) is classified in two stages:
   1. **Pre-flight** — `FileTypeDetector.IsPlausibleFor(kind, origin, out reason)` is a cheap header
      check (no indexing) that rejects an obvious mismatch (e.g. CSV content forced to JSON)
@@ -130,8 +133,7 @@ them). Keep this in sync when the ownership chain changes.
   from the actual problem. `SetCurrentDocument` and `OnDocumentPropertyChanged` both call
   `NotifyFailurePropertiesChanged()` to raise change notification for the three whenever
   `CurrentDocument` (or its `IndexFailure`) changes.
-- Where a failure carries a byte offset (`JsonStructureIndex`'s enriched `DescribeFailure` always
-  sets one; a pre-flight rejection never does, since it never got as far as reading a token),
+- Where a failure carries a byte offset (a JSON parse failure always sets one; a pre-flight rejection never does, since it never got as far as reading a token),
   its "Line N" location is a clickable link — in the banner (`MainWindow.axaml`'s
   `JumpToFailureLineButton`) and in `IncompatibleView`'s location panel alike — that calls
   `MainWindowViewModel.JumpToRawOffsetAsync(byteOffset)`: switches to the raw viewer (if
@@ -273,6 +275,28 @@ The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLeng
   `AllItemsPublished` would stay false forever, and every waiter would hang for the life of the process. The body observes
   cancellation itself and still reaches the `finally`.
 
+## The JSON tree
+
+- **Sparse index, re-parse on demand.** `JsonSparseIndex` (`Features/Json/Indexing`) records only
+  containers that reach 64 KB and a resume point per 64 KB of a recorded container's children,
+  in the format-agnostic `SparseContainerIndex` (`Engine/Indexing/Trees`). Its size follows the
+  file's size, not its token count. Everything between records is read from the bytes when a row
+  is shown, by `JsonTreeReader` and the vectorised `JsonStructuralScanner`.
+- **Rows are a cursor, not a list.** `TreeCursor` steps forward, backward and to an offset over
+  the expanded tree through a format's `ITreeFormatReader`; `TreeExpandState` is a default depth
+  plus offset-keyed overrides. A row's identity is its value's byte offset (`TreeRow.Key`), and so
+  is everything that points at one: selection, reveals, path segments, date-hint overrides.
+- **The view needs no index to draw.** The tree is shown as soon as the file is open; the index
+  only makes jumps fast and grows underneath, and the view model tells the surface when it has
+  grown. Before the view model releases the mapping, `TreeDocument.Close` makes every surface
+  drawing it let go.
+- **What a format supplies is small.** A reader (next child, first-child position, value end,
+  close start), a painter (`ITreeRowPainter`: styled runs per row, and an optional marker) and
+  gutters (`ITreeGutter`). JSON's are `JsonTreeReader`, `JsonTreePainter` and `JsonSchemaGutter`
+  (`Features/Json/Tree`); an XML view would add its own three and nothing else.
+- **Still on the token index**: the array table (`JsonArrayTableSession`, whose cell pane uses
+  `JsonVisibleRowCollection`) and the diff (`JsonDiffSession`). Both open their own sessions.
+
 ## Virtualized ItemsSources
 
 - `VirtualizingItemsSourceBase` (`Ui/Documents/VirtualizingItemsSourceBase.cs`) is the shared
@@ -281,7 +305,11 @@ The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLeng
   It supplies the read-only `IList` +
   `INotifyCollectionChanged` surface
   Avalonia's `VirtualizingStackPanel` needs.
-- **The raw view is the exception, and deliberately so.** `RawTextSurface`
+- **The raw view and the JSON tree are the exceptions, and deliberately so.** Both draw their own
+  rows on `RowSurface` (`Ui/Rows`), which owns fixed row height, the appearance properties,
+  horizontal pan and the `ILogicalScrollable` plumbing. The JSON tree is `TreeSurface` (`Ui/Tree`)
+  over a `TreeDocument`: it holds a `TreeCursor` on its top row and walks from it, so there is no
+  row collection and no row count at all - see "The JSON tree" above. `RawTextSurface`
   (`Features/Raw/RawTextSurface.cs`) draws every visible row itself rather than templating a
   control per row, because a caret needs the text layout and a ListBox does not give it up: its
   selection is whole rows, and moving a caret between rows would mean coordinating dozens of

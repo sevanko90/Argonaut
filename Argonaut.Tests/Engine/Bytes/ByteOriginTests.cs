@@ -110,7 +110,7 @@ public class ByteOriginTests
         Assert.Null(vm.IndexFailure);
         Assert.Same(origin, vm.Origin);
         Assert.Equal("Pasted text", vm.FilePath);
-        Assert.True(vm.TokenCount > 0);
+        Assert.True(vm.Tree!.NewCursor().MoveToStart());
     }
 
     [Fact]

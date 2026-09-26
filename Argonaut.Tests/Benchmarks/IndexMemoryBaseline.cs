@@ -17,13 +17,18 @@ namespace Argonaut.Tests.Benchmarks;
 /// A point-in-time measurement of what indexing costs, per kind of document: how fast, how much it
 /// allocates, how high memory peaks, what the finished index keeps, and whether anything is left
 /// behind once it is released. Run with
-/// <c>dotnet run -c Release --project Argonaut.Tests -- --index-memory [--size-mib N] [--out file.md]</c>.
+/// <c>dotnet run -c Release --project Argonaut.Tests -- --index-memory [--size-mib N] [--processes N] [--out file.md]</c>.
 ///
 /// Not BenchmarkDotNet: peak memory needs sampling while the scan runs, and a process's peak
 /// working set is only meaningful for a process that did nothing else. So the parent writes
-/// deterministic documents and runs each case in a fresh child process, which indexes a small
-/// document of the same kind first (so JIT and type loading are not counted), then opens, indexes
-/// and releases the real one three times, measuring each cycle.
+/// deterministic documents and runs each case in fresh child processes, each of which indexes a
+/// small document of the same kind first (so JIT and type loading are not counted), then opens,
+/// indexes and releases the real one three times, measuring each cycle.
+///
+/// A whole process can run slow - one run had JSON 3-16% off while the next two matched - so each
+/// case runs in several processes (<c>--processes</c>, default 3) and speed is reported as the
+/// median process with the range across them. Memory is the same from process to process, so it
+/// is reported from the median process.
 ///
 /// The working set includes the file's mapped pages once the scan has touched them. On macOS
 /// those are clean and cost nothing to reclaim, so the managed heap is the number that reflects
@@ -32,6 +37,7 @@ namespace Argonaut.Tests.Benchmarks;
 public static class IndexMemoryBaseline
 {
     private const int Cycles = 3;
+    private const int DefaultProcesses = 3;
     private const int WarmupMiB = 4;
 
     private enum Kind
@@ -60,11 +66,14 @@ public static class IndexMemoryBaseline
             return RunCase(Enum.Parse<Kind>(args[1]), args[2], args[3]);
 
         int sizeMiB = 256;
+        int processes = DefaultProcesses;
         string? output = null;
         for (int i = 0; i < args.Length; i++)
         {
             if (args[i] == "--size-mib")
                 sizeMiB = int.Parse(args[++i], CultureInfo.InvariantCulture);
+            else if (args[i] == "--processes")
+                processes = Math.Max(1, int.Parse(args[++i], CultureInfo.InvariantCulture));
             else if (args[i] == "--out")
                 output = args[++i];
         }
@@ -73,7 +82,7 @@ public static class IndexMemoryBaseline
         Directory.CreateDirectory(directory);
         try
         {
-            var results = new List<(Kind Kind, string Indexer, string Describes, CaseResult Result)>();
+            var results = new List<(Kind Kind, string Indexer, string Describes, List<CaseResult> Runs)>();
             foreach (var (kind, indexer, describes) in Cases)
             {
                 string path = Path.Combine(directory, $"{kind}.dat");
@@ -82,13 +91,19 @@ public static class IndexMemoryBaseline
                 Write(kind, path, sizeMiB * 1024L * 1024L);
                 Write(kind, warmup, WarmupMiB * 1024L * 1024L);
 
-                Console.Error.WriteLine($"{kind}: indexing…");
-                results.Add((kind, indexer, describes, RunChild(kind, path, warmup)));
+                var runs = new List<CaseResult>();
+                for (int run = 1; run <= processes; run++)
+                {
+                    Console.Error.WriteLine($"{kind}: indexing, process {run} of {processes}…");
+                    runs.Add(RunChild(kind, path, warmup));
+                }
+
+                results.Add((kind, indexer, describes, runs));
                 File.Delete(path);
                 File.Delete(warmup);
             }
 
-            string report = Report(sizeMiB, results);
+            string report = Report(sizeMiB, processes, results);
             Console.WriteLine(report);
             if (output is not null)
                 File.WriteAllText(output, report);
@@ -347,28 +362,36 @@ public static class IndexMemoryBaseline
 
     // ---- the report ----------------------------------------------------------------------
 
-    private static string Report(int sizeMiB, List<(Kind Kind, string Indexer, string Describes, CaseResult Result)> results)
+    /// <summary>A process's median cycle - the one its speed is read from.</summary>
+    private static Cycle MedianCycle(CaseResult run) => run.Cycles.OrderBy(c => c.Seconds).ElementAt(run.Cycles.Count / 2);
+
+    private static string Report(int sizeMiB, int processes, List<(Kind Kind, string Indexer, string Describes, List<CaseResult> Runs)> results)
     {
         var text = new StringBuilder();
-        text.AppendLine($"Documents of {sizeMiB} MiB each; {Cycles} open-index-release cycles per document in a fresh");
-        text.AppendLine("process, after a warm-up on a small document of the same kind. Speed and allocation are the");
-        text.AppendLine("median cycle; peaks are the highest of the cycles.");
+        text.AppendLine($"Documents of {sizeMiB} MiB each; {processes} fresh processes per document, each running {Cycles}");
+        text.AppendLine("open-index-release cycles after a warm-up on a small document of the same kind. Each process's");
+        text.AppendLine("speed is its median cycle; the table shows the median process, with the range of speeds across");
+        text.AppendLine("the processes. Allocation and what is kept come from that process; peaks are the highest of all.");
         text.AppendLine();
         text.AppendLine($"- Machine: {Machine()}");
         text.AppendLine($"- Runtime: {RuntimeInformation.FrameworkDescription}, {RuntimeInformation.OSDescription}, " +
                         $"{(GCSettings.IsServerGC ? "Server" : "Workstation")} GC");
         text.AppendLine();
-        text.AppendLine("| Document | Indexer | Items | Time | Speed | Allocated | Alloc / byte | GCs (0/1/2) | Peak heap | Peak working set | Index kept | Left after release (1st / last) |");
-        text.AppendLine("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|");
-        foreach (var (kind, indexer, _, result) in results)
+        text.AppendLine("| Document | Indexer | Items | Time | Speed | Speed range | Allocated | Alloc / byte | GCs (0/1/2) | Peak heap | Peak working set | Index kept | Left after release (1st / last) |");
+        text.AppendLine("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|");
+        foreach (var (kind, indexer, _, runs) in results)
         {
+            var result = runs.OrderBy(run => MedianCycle(run).Seconds).ElementAt(runs.Count / 2);
             var cycles = result.Cycles;
-            var median = cycles.OrderBy(c => c.Seconds).ElementAt(cycles.Count / 2);
+            var median = MedianCycle(result);
             double mib = result.FileBytes / (1024.0 * 1024.0);
+            double slowest = mib / runs.Max(run => MedianCycle(run).Seconds);
+            double fastest = mib / runs.Min(run => MedianCycle(run).Seconds);
             text.Append($"| {kind} | {indexer} | {median.Items:N0} | {median.Seconds * 1000:N0} ms | {mib / median.Seconds:N0} MiB/s ")
+                .Append($"| {slowest:N0}-{fastest:N0} ")
                 .Append($"| {Bytes(median.Allocated)} | {(double)median.Allocated / result.FileBytes:0.0000} ")
                 .Append($"| {median.Gen0}/{median.Gen1}/{median.Gen2} ")
-                .Append($"| {Bytes(cycles.Max(c => c.PeakHeap))} | {Bytes(cycles.Max(c => c.PeakWorkingSet))} ")
+                .Append($"| {Bytes(runs.Max(run => run.Cycles.Max(c => c.PeakHeap)))} | {Bytes(runs.Max(run => run.Cycles.Max(c => c.PeakWorkingSet)))} ")
                 .Append($"| {Bytes(median.Retained)} | {Bytes(cycles[0].AfterRelease)} / {Bytes(cycles[^1].AfterRelease)} |")
                 .AppendLine();
         }
@@ -376,8 +399,11 @@ public static class IndexMemoryBaseline
         text.AppendLine();
         text.AppendLine("Documents:");
         text.AppendLine();
-        foreach (var (kind, _, describes, result) in results)
+        foreach (var (kind, _, describes, runs) in results)
+        {
+            var result = runs.OrderBy(run => MedianCycle(run).Seconds).ElementAt(runs.Count / 2);
             text.AppendLine($"- **{kind}**: {describes}. Baseline before indexing: heap {Bytes(result.BaselineHeap)}, working set {Bytes(result.BaselineWorkingSet)}.");
+        }
 
         text.AppendLine();
         text.AppendLine("Columns: *Peak heap* and *Index kept* and *Left after release* are managed heap above the");

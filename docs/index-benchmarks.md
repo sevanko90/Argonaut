@@ -13,12 +13,14 @@ dotnet run -c Release --no-build --project Argonaut.Tests -- --index-memory --si
 
 `--size-mib` sets each document's size (default 256; the runs below use 1024). The harness is
 `Argonaut.Tests/Benchmarks/IndexMemoryBaseline.cs`: it writes deterministic documents, and runs
-each in its own process so the peak working set belongs to that document alone. Each process
+each in fresh processes so the peak working set belongs to that document alone. Each process
 indexes a small document of the same kind first, then opens, indexes and releases the real one
-three times; speed and allocation are the median cycle, peaks the highest.
+three times, and its speed is the median cycle.
 
-A single run can be off - one run of the sparse-line-index change had JSON 3-16% slow, and the
-next two matched the baseline. So take three runs and record the median one.
+A whole process can run slow, so each document runs in three processes (`--processes N` changes
+that; 1 gives a quick look) and the table shows the median process with the *Speed range* across
+them. A change inside that range is noise. Memory is the same from process to process. A 1024 MiB
+run takes about 75 seconds.
 
 To add a run: a new section at the top of [Runs](#runs) with the date, the commit, what changed
 and the harness's table, and a row at the top of each table in [Trend](#trend). Compare on the
@@ -53,14 +55,14 @@ Index kept:
 
 | Run | Text | Csv | NdJson | JsonRecords | JsonTokenDense | JsonRecordsWithHashes |
 |---|---:|---:|---:|---:|---:|---:|
-| 2026-09-26 `07f5cf5` sparse line index | 2.5 MB | 259.2 KB | 259.2 KB | 777.0 KB | 777.0 KB | 781.5 KB |
+| 2026-09-26 `07f5cf5` sparse line index | 2.5 MB | 259.2 KB | 259.0 KB | 776.8 KB | 777.3 KB | 781.6 KB |
 | 2026-09-26 `7b3e5e3` baseline | 2.5 MB | 98.0 MB | 95.7 MB | 777.0 KB | 776.8 KB | 781.5 KB |
 
 Speed:
 
 | Run | Text | Csv | NdJson | JsonRecords | JsonTokenDense | JsonRecordsWithHashes |
 |---|---:|---:|---:|---:|---:|---:|
-| 2026-09-26 `07f5cf5` sparse line index | 5,857 MiB/s | 7,826 MiB/s | 8,031 MiB/s | 560 MiB/s | 423 MiB/s | 468 MiB/s |
+| 2026-09-26 `07f5cf5` sparse line index | 5,864 MiB/s | 8,066 MiB/s | 8,098 MiB/s | 565 MiB/s | 420 MiB/s | 473 MiB/s |
 | 2026-09-26 `7b3e5e3` baseline | 5,701 MiB/s | 7,559 MiB/s | 7,771 MiB/s | 563 MiB/s | 435 MiB/s | 477 MiB/s |
 
 ## Runs
@@ -71,20 +73,20 @@ The CSV and NDJSON line index went from a span per line to an anchor every 64 KB
 
 - Machine: Apple M5, 32 GB, 10 cores
 - Runtime: .NET 10.0.5, macOS 27.0.0, Workstation GC
-- Median of three runs.
+- 3 processes per document.
 
-| Document | Indexer | Items | Time | Speed | Allocated | Alloc / byte | GCs (0/1/2) | Peak heap | Peak working set | Index kept | Left after release (1st / last) |
-|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Text | RawSegmentIndex (wrap 160) | 9,996,610 | 175 ms | 5,857 MiB/s | 2.5 MB | 0.0024 | 0/0/0 | 2.5 MB | 1.05 GB | 2.5 MB | 488 B / 952 B |
-| Csv | FileOffsetIndex | 6,414,338 | 131 ms | 7,826 MiB/s | 266.8 KB | 0.0003 | 0/0/0 | 296.8 KB | 1.05 GB | 259.2 KB | 488 B / 952 B |
-| NdJson | FileOffsetIndex | 6,262,785 | 128 ms | 8,031 MiB/s | 266.8 KB | 0.0003 | 0/0/0 | 296.8 KB | 1.05 GB | 259.2 KB | 488 B / 952 B |
-| JsonRecords | JsonSparseIndex | 16,370 | 1,829 ms | 560 MiB/s | 773.7 KB | 0.0007 | 0/0/0 | 800.8 KB | 1.06 GB | 777.0 KB | 488 B / 952 B |
-| JsonTokenDense | JsonSparseIndex | 16,384 | 2,423 ms | 423 MiB/s | 773.7 KB | 0.0007 | 0/0/0 | 800.8 KB | 1.05 GB | 777.0 KB | 488 B / 952 B |
-| JsonRecordsWithHashes | JsonSparseIndex + content hashes | 16,371 | 2,188 ms | 468 MiB/s | 779.0 KB | 0.0007 | 0/0/0 | 808.4 KB | 1.06 GB | 781.5 KB | 488 B / 952 B |
+| Document | Indexer | Items | Time | Speed | Speed range | Allocated | Alloc / byte | GCs (0/1/2) | Peak heap | Peak working set | Index kept | Left after release (1st / last) |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Text | RawSegmentIndex (wrap 160) | 9,996,610 | 175 ms | 5,864 MiB/s | 5,786-5,900 | 2.5 MB | 0.0024 | 0/0/0 | 2.5 MB | 1.05 GB | 2.5 MB | 488 B / 952 B |
+| Csv | FileOffsetIndex | 6,414,338 | 127 ms | 8,066 MiB/s | 8,030-8,131 | 266.8 KB | 0.0003 | 0/0/0 | 296.8 KB | 1.05 GB | 259.2 KB | 488 B / 952 B |
+| NdJson | FileOffsetIndex | 6,262,785 | 126 ms | 8,098 MiB/s | 8,088-8,137 | 266.8 KB | 0.0003 | 0/0/0 | 296.8 KB | 1.05 GB | 259.0 KB | 488 B / 952 B |
+| JsonRecords | JsonSparseIndex | 16,370 | 1,812 ms | 565 MiB/s | 561-566 | 774.6 KB | 0.0007 | 0/0/0 | 800.8 KB | 1.06 GB | 776.8 KB | 488 B / 952 B |
+| JsonTokenDense | JsonSparseIndex | 16,384 | 2,440 ms | 420 MiB/s | 419-434 | 774.6 KB | 0.0007 | 0/0/0 | 816.7 KB | 1.05 GB | 777.3 KB | 488 B / 2.7 KB |
+| JsonRecordsWithHashes | JsonSparseIndex + content hashes | 16,371 | 2,165 ms | 473 MiB/s | 464-475 | 779.0 KB | 0.0007 | 0/0/0 | 800.8 KB | 1.06 GB | 781.6 KB | 488 B / 952 B |
 
 - **CSV and NDJSON: 98 MB → 259 KB kept**, allocation down by the same, and the three gen-2
-  collections are gone. Speed is unchanged within run-to-run noise. *Items* is still the line
-  count.
+  collections are gone. Speed reads about 6% up, but the baseline was a single process with no
+  range, so treat it as unchanged. *Items* is still the line count.
 - **Peak working set 1.14 GB → 1.05 GB** for CSV and NDJSON: the per-line list was the only thing
   above the mapped file.
 - Text and JSON: unchanged within noise.

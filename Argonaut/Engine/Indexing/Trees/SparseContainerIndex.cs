@@ -159,8 +159,9 @@ public sealed class SparseContainerIndex
 
         // The checkpoint is inside the container (it is after the container's start and at or
         // before an offset the container encloses), so it is the container's own or a
-        // descendant's.
-        return ResumeFrom(checkpoint, container);
+        // descendant's - and never inside a child still open, since an open recorded container
+        // encloses every offset past its start and would have been the innermost one.
+        return ResumeFrom(checkpoint, container) ?? new TreeResumePoint(container, start, 0, AtOpen: true);
     }
 
     /// <summary>
@@ -185,8 +186,10 @@ public sealed class SparseContainerIndex
         while (low <= high)
         {
             int middle = low + ((high - low) >> 1);
-            var point = ResumeFrom(middle, container);
-            if (point.Ordinal <= ordinal)
+            // A checkpoint inside a child still open gives no usable point, and those are the
+            // last in the range - after everything else of the container's - so it counts as
+            // past the target like a later child would.
+            if (ResumeFrom(middle, container) is { } point && point.Ordinal <= ordinal)
             {
                 best = point;
                 low = middle + 1;
@@ -202,8 +205,10 @@ public sealed class SparseContainerIndex
 
     /// <summary>The resume point in <paramref name="container"/> a checkpoint inside it gives:
     /// the checkpoint itself if it is the container's own, else the end of the container's child
-    /// that holds it.</summary>
-    private TreeResumePoint ResumeFrom(int checkpoint, int container)
+    /// that holds it - or null while that child is still open, since nothing recorded says where
+    /// its row begins (a member's row begins at its name, before the value start the index
+    /// holds).</summary>
+    private TreeResumePoint? ResumeFrom(int checkpoint, int container)
     {
         var point = checkpoints.ItemRef(checkpoint);
         if (point.Container == container)
@@ -216,15 +221,7 @@ public sealed class SparseContainerIndex
             if (slot.Parent == container)
             {
                 long childEnd = Volatile.Read(ref slot.End);
-                if (childEnd < 0)
-                {
-                    // Still open, so the target is not past it - this only happens for an
-                    // ordinal search reaching into a child still being scanned. Its start is
-                    // the latest point known in the container.
-                    return new TreeResumePoint(container, slot.Start, slot.OrdinalInParent, AtOpen: false);
-                }
-
-                return new TreeResumePoint(container, childEnd, slot.OrdinalInParent + 1, AtOpen: false);
+                return childEnd < 0 ? null : new TreeResumePoint(container, childEnd, slot.OrdinalInParent + 1, AtOpen: false);
             }
 
             child = slot.Parent;

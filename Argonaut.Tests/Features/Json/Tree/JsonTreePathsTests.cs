@@ -205,4 +205,38 @@ public sealed class JsonTreePathsTests
         Assert.Equal((byte)'"', bytes.ByteAt(result.Target!.Value));
         await index.IndexingTask;
     }
+
+    /// <summary>
+    /// A seek while a large member is still open - the index has recorded it but not its end - reads
+    /// its name from where its row begins. The shape of a GeoJSON file mid-scan: "features" stays
+    /// open for almost the whole document, and every seek into it rebuilds it as an ancestor.
+    /// </summary>
+    [Fact]
+    public void ASeekIntoAMemberStillOpenReadsItsName()
+    {
+        var text = new StringBuilder("{\"type\":\"FeatureCollection\",\"features\":[\n");
+        for (int i = 0; i < 400; i++)
+            text.Append(i == 0 ? "" : ",\n").Append($"{{\"id\":{i},\"coordinates\":[[{i},1],[{i},2],[{i},3]]}}");
+        byte[] json = Encoding.UTF8.GetBytes(text.Append("\n]}").ToString());
+        var growing = new GrowingByteSource(json, initiallyAvailable: json.Length / 2);
+        var index = JsonSparseIndex.StartIndexing(growing, promotionBytes: 256, checkpointBytes: 64);
+        try
+        {
+            Assert.True(SpinWait.SpinUntil(() => index.Structure.ScannedTo >= json.Length / 2 - 256, TimeSpan.FromSeconds(10)));
+            Assert.False(index.Structure.IsComplete);
+
+            var reader = new JsonTreeReader(growing);
+            var cursor = new TreeCursor(index.Structure, reader, new TreeExpandState(int.MaxValue));
+            long target = Encoding.UTF8.GetString(json).IndexOf("{\"id\":150,", StringComparison.Ordinal);
+
+            Assert.True(cursor.SeekTo(target));
+            var segments = JsonTreePaths.Segments(cursor, new JsonTreeText(growing, index.Structure, reader));
+            Assert.Equal("$.features[150]", JsonTreePaths.Format(segments));
+        }
+        finally
+        {
+            growing.Seal();
+            index.IndexingTask.Wait();
+        }
+    }
 }

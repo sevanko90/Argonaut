@@ -410,6 +410,16 @@ Status: steps 7-8 done for the JSON tree and NDJSON; array table, diff and dense
 10. [ ] **Remove `JsonStructureIndex`'s dense log** once nothing reads it, and the `ChildCap`/"show more"
     machinery with it.
 11. [ ] **Per-depth row counts**, if the estimated scrollbar proves not good enough in use.
+12. [ ] **One scroll interface for every self-drawn view.** Move the tree's scroll API down into
+    `RowSurface` - scroll by pixels, go to a fraction, go to the end, `ScrollPositionChanged`,
+    `ShowsEnd` - and the scrollbar wiring now in `JsonView` into one reusable host in `Ui/Rows`,
+    so the raw view, the JSON tree and the XML tree scroll through the same code and behave the
+    same at the ends and under a dragged thumb. Two position models behind it: **exact** (row x
+    height, for a view that knows its row count - the raw view, whose thumb stays row-accurate)
+    and **estimated** (the top row's byte offset as a fraction of the document - the trees).
+    The raw view then leaves its `ScrollViewer` too. Per-depth row counts (step 11) would give the
+    tree an exact model under the same interface. Do before the XML view is built; the raw view's
+    scrolling needs a manual check after it.
 
 ## Later
 

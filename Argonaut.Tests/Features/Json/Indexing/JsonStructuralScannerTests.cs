@@ -9,13 +9,13 @@ namespace Argonaut.Tests.Features.Json.Indexing;
 public class JsonStructuralScannerTests
 {
     [Theory]
-    [InlineData(1)]
-    [InlineData(2)]
-    [InlineData(3)]
-    [InlineData(4)]
-    public void TrySkipValue_MatchesUtf8JsonReaderOnEveryElement(int seed)
+    [InlineData(1, false)]
+    [InlineData(2, false)]
+    [InlineData(3, true)]
+    [InlineData(4, true)]
+    public void TrySkipValue_MatchesUtf8JsonReaderOnEveryElement(int seed, bool jsonc)
     {
-        byte[] json = RandomDocument(new Random(seed), elements: 400);
+        byte[] json = RandomJson.Document(new Random(seed), elements: 400, jsonc);
 
         foreach (var source in new IByteSource[] { new MemoryByteSource(json), new SplitByteSource(json, 37), new SplitByteSource(json, 64) })
         {
@@ -112,14 +112,18 @@ public class JsonStructuralScannerTests
         Assert.Equal(json.Length, end);
     }
 
-    [Fact]
-    public void TrySkipValue_HandsOverAtACommentInsideTheValue()
+    [Theory]
+    [InlineData("[1, /* ] */ 2]")]
+    [InlineData("[1, // ]\n 2]")]
+    [InlineData("{\"a\": /* } \" */ [1, /*/ ] */ 2]}")]
+    public void TrySkipValue_ReadsCommentsInsideTheValueAsWhitespace(string text)
     {
-        byte[] json = "[1, /* ] */ 2]"u8.ToArray();
+        byte[] json = Encoding.UTF8.GetBytes(text + " , 3");
 
-        var outcome = JsonStructuralScanner.TrySkipValue(new MemoryByteSource(json), 0, out _);
+        var outcome = JsonStructuralScanner.TrySkipValue(new MemoryByteSource(json), 0, out long end);
 
-        Assert.Equal(JsonSkipOutcome.NeedsFullParse, outcome);
+        Assert.Equal(JsonSkipOutcome.Skipped, outcome);
+        Assert.Equal(Encoding.UTF8.GetByteCount(text), end);
     }
 
     [Fact]
@@ -173,30 +177,11 @@ public class JsonStructuralScannerTests
         Assert.Equal(json.Length, end);
     }
 
-    [Fact]
-    public void Escaped_OddRunsEscapeTheNextByteAndCarryAcrossTheBlock()
-    {
-        bool escapesNext = false;
-
-        // Backslashes at 0, 2-3 and 63: 0 escapes 1, 2 escapes the backslash at 3 (so 3 escapes
-        // nothing, and byte 4 is not escaped), and 63 carries into the next block.
-        ulong escaped = JsonStructuralScanner.Escaped(0b1101UL | (1UL << 63), ref escapesNext);
-
-        Assert.Equal(0b1010UL, escaped);
-        Assert.True(escapesNext);
-
-        // The carried escape consumes this block's leading backslash, so it escapes nothing.
-        escaped = JsonStructuralScanner.Escaped(0b1UL, ref escapesNext);
-
-        Assert.Equal(0b1UL, escaped);
-        Assert.False(escapesNext);
-    }
-
     /// <summary>Each root-array element's start and the end <c>Utf8JsonReader</c> reports.</summary>
     private static List<(long Start, long End)> ElementSpans(byte[] json)
     {
         var spans = new List<(long, long)>();
-        var reader = new Utf8JsonReader(json);
+        var reader = new Utf8JsonReader(json, new JsonReaderOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
         reader.Read(); // the root array
         while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
         {
@@ -207,84 +192,4 @@ public class JsonStructuralScannerTests
 
         return spans;
     }
-
-    private static byte[] RandomDocument(Random random, int elements)
-    {
-        var text = new StringBuilder("[");
-        for (int i = 0; i < elements; i++)
-        {
-            if (i > 0)
-                text.Append(',');
-            text.Append(Whitespace(random));
-            AppendValue(text, random, depth: 0);
-            text.Append(Whitespace(random));
-        }
-
-        return Encoding.UTF8.GetBytes(text.Append(']').ToString());
-    }
-
-    private static void AppendValue(StringBuilder text, Random random, int depth)
-    {
-        int pick = random.Next(depth > 6 ? 5 : 7);
-        switch (pick)
-        {
-            case 0:
-                text.Append(random.Next(-100000, 100000));
-                break;
-            case 1:
-                text.Append(random.Next(2) == 0 ? "true" : "false");
-                break;
-            case 2:
-                text.Append("null");
-                break;
-            case 3:
-            case 4:
-                AppendString(text, random);
-                break;
-            case 5:
-                text.Append('[');
-                for (int i = 0, n = random.Next(8); i < n; i++)
-                {
-                    if (i > 0)
-                        text.Append(',');
-                    text.Append(Whitespace(random));
-                    AppendValue(text, random, depth + 1);
-                }
-                text.Append(']');
-                break;
-            default:
-                text.Append('{');
-                for (int i = 0, n = random.Next(8); i < n; i++)
-                {
-                    if (i > 0)
-                        text.Append(',');
-                    AppendString(text, random);
-                    text.Append(':').Append(Whitespace(random));
-                    AppendValue(text, random, depth + 1);
-                }
-                text.Append('}');
-                break;
-        }
-    }
-
-    private static readonly string[] StringPieces =
-    {
-        "a", "key", "{", "}", "[", "]", ",", ":", "/", "//", "/*", "\\\"", "\\\\", "\\\\\\\"", "\\n", "\\u00e9", "é", "日本", "😀", " ",
-    };
-
-    private static void AppendString(StringBuilder text, Random random)
-    {
-        text.Append('"');
-        for (int i = 0, n = random.Next(30); i < n; i++)
-            text.Append(StringPieces[random.Next(StringPieces.Length)]);
-        text.Append('"');
-    }
-
-    private static string Whitespace(Random random) => random.Next(4) switch
-    {
-        0 => "",
-        1 => " ",
-        2 => "\n  ",
-        _ => new string(' ', random.Next(70)),
-    };
 }

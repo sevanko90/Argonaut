@@ -135,6 +135,14 @@ public sealed class JsonSparseIndex : IBackgroundIndex
     public static JsonSparseIndex StartIndexing(IByteSource source, IProgressReporter? progressReporter = null, CancellationToken cancellationToken = default)
         => StartIndexing(source, DefaultPromotionBytes, DefaultCheckpointBytes, progressReporter, cancellationToken);
 
+    /// <summary>
+    /// <see cref="Reopen"/> on a <paramref name="kept"/> structure when there is one, else a fresh
+    /// scan - the factory a view hands its session.
+    /// </summary>
+    public static JsonSparseIndex StartIndexing(IByteSource source, JsonKeptStructure? kept, IProgressReporter? progressReporter = null,
+        CancellationToken cancellationToken = default)
+        => kept is null ? StartIndexing(source, progressReporter, cancellationToken) : Reopen(source, kept);
+
     /// <summary>With explicit sizes - small ones let a test document of a few KB exercise
     /// promotion and checkpoints.</summary>
     public static JsonSparseIndex StartIndexing(IByteSource source, int promotionBytes, int checkpointBytes,

@@ -14,9 +14,10 @@ namespace Argonaut.Engine.Bytes;
 /// Each entry carries the <see cref="ByteOriginVersion"/> it was built at, and one that no longer
 /// matches the origin is dropped rather than returned.
 ///
-/// Only worth it for an index that is small next to what it saves: the raw view's row anchors
-/// (16 bytes per 64 rows) and the JSON view's sparse structure (under 1 MB per GB) qualify; a
-/// per-line offset index (CSV, NDJSON: about 16 bytes a line) is left to be scanned again.
+/// Only worth it for an index that is small next to what it saves - which every document index
+/// is: the raw view's row anchors (16 bytes per 64 rows), the line anchors CSV and NDJSON share,
+/// and the JSON view's sparse structure (under 1 MB per GB). Views reach it through
+/// <see cref="IndexBasis"/>.
 /// </summary>
 public sealed class KeptIndexes
 {

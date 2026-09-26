@@ -48,7 +48,7 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable, IB
     // What the whole-document index was built over, so a finished one can be kept on the origin
     // for the next JSON view of it (see KeptIndexes). Null for an NDJSON line's document, whose
     // structure covers only its line, and while the origin's bytes are still arriving.
-    private ByteOriginVersion? indexedVersion;
+    private IndexBasis? indexBasis;
 
     protected override IDocumentSession? Session => session;
 
@@ -485,8 +485,8 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable, IB
         toolbar = new JsonToolbarViewModel(HintSettings, SchemaSettings, DefaultExpandDepth, ChooseExpandDepth, NavigateToPathAsync,
             refreshSchemaEntries: () => RefreshSchemaEntriesAsync(origin.Path), openSchemaFolder: schemaCatalog.OpenUserDirectory);
 
-        indexedVersion = ByteOriginVersion.Of(origin);
-        var loadTask = LoadCore(origin.Open(), progressReporter, FindKeptStructure(origin));
+        indexBasis = IndexBasis.Of(origin);
+        var loadTask = LoadCore(origin.Open(), progressReporter, indexBasis?.FindKept<JsonKeptStructure>(JsonKeptStructure.Key));
 
         // Runs alongside indexing rather than blocking the open: whichever finishes first, the
         // other side picks the schema up (LoadCore applies whatever is current when it builds
@@ -539,31 +539,12 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable, IB
         return LoadCore(origin.OpenRange(offset, length), progressReporter, kept: null);
     }
 
-    /// <summary>The structure a previous JSON view of <paramref name="origin"/> kept, if the bytes
-    /// have not changed since - a save from the text view, or another program's edit, drops it.</summary>
-    private JsonKeptStructure? FindKeptStructure(IByteOrigin origin)
-        => indexedVersion is { } version && origin.KeptIndexes.TryGet<JsonKeptStructure>(JsonKeptStructure.Key, version, out var kept)
-            ? kept
-            : null;
-
-    /// <summary>Keeps a finished scan's structure on the origin for the next JSON view of it -
-    /// unless the file changed while it was being scanned.</summary>
-    private void KeepStructure()
-    {
-        if (session?.Index.DetachStructure() is not { } structure || Origin is not { } origin ||
-            indexedVersion is not { } version || ByteOriginVersion.Of(origin) != version)
-        {
-            return;
-        }
-
-        origin.KeptIndexes.Keep(JsonKeptStructure.Key, version, structure);
-    }
-
+    /// <param name="kept">The structure a previous JSON view of the same bytes kept, if any - a
+    /// save from the text view, or another program's edit, means there is none.</param>
     private Task LoadCore(IByteSource bytes, IProgressReporter? progressReporter, JsonKeptStructure? kept)
     {
-        var session = kept is null
-            ? IndexedSourceSession<JsonSparseIndex>.Start(bytes, JsonSparseIndex.StartIndexing, progressReporter)
-            : IndexedSourceSession<JsonSparseIndex>.Start(bytes, (source, _, _) => JsonSparseIndex.Reopen(source, kept));
+        var session = IndexedSourceSession<JsonSparseIndex>.Start(bytes,
+            (source, progress, stopping) => JsonSparseIndex.StartIndexing(source, kept, progress, stopping), progressReporter);
         this.session = session;
 
         // The tree reads the bytes directly, so it is shown at once: the index only speeds up
@@ -605,7 +586,7 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable, IB
     /// complete document - the sample taken at open may have seen only the start.</summary>
     protected override void OnIndexingCompleted()
     {
-        KeepStructure();
+        indexBasis?.Keep(JsonKeptStructure.Key, session?.Index.DetachStructure());
         StatusText = $"{FilePath} — {FormatByteLength(session?.Bytes.AvailableLength ?? 0)}";
         tree?.NotifyGrew();
         UpdateSchemaRootMatches();

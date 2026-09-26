@@ -237,23 +237,36 @@ The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLeng
   the open input and is owned by the shell (above).
 - **An origin also keeps finished indexes that are cheap to hold** (`IByteOrigin.KeptIndexes`,
   cleared on dispose), so a view closed and reopened over the same input - a switch to the text
-  view and back, a wrap width tried and undone - skips its scan. Two are kept:
+  view and back, a wrap width tried and undone - skips its scan. Every document index is sparse,
+  so every one is kept:
   - the raw view's row anchors (`RawRowAnchors`, about 16 bytes per 64 rows, one entry per wrap
     width): `RawViewModel` keeps them when a scan runs to the end, and `RawIndexSession` builds
-    the next index from them with `RawSegmentIndex.Reopen`, sharing the finished log rather than
-    copying it;
-  - the JSON view's sparse structure (`JsonKeptStructure`, under 1 MB per GB): a whole-document
-    `JsonViewModel` keeps it when a scan finishes over a valid document, and the next one opens
-    complete on it with `JsonSparseIndex.Reopen`. An invalid document is scanned again, since a
-    reopened index would not report its failure, and an NDJSON line's document is never kept -
-    its structure covers only its line.
+    the next index from them with `RawSegmentIndex.Reopen`;
+  - the line anchors (`FileLineAnchors`, about 0.3 MB per GB), shared by CSV and NDJSON since
+    both read the same lines - a switch between the two scans once - and reopened with
+    `FileOffsetIndex.Reopen`;
+  - the JSON view's sparse structure (`JsonKeptStructure`, under 1 MB per GB), reopened with
+    `JsonSparseIndex.Reopen`. An invalid document is scanned again, since a reopened index would
+    not report its failure, and an NDJSON line's document is never kept - its structure covers
+    only its line.
 
-  What is kept holds no source - the session that built it releases its source as usual, and the
-  next one binds the records to its own. Every entry is stamped with the `ByteOriginVersion` it
-  was built at (length, plus last-write time for a file) and is dropped rather than returned once
-  that no longer matches: a file edited by another program or replaced by a save - the text
-  view's included - is scanned again. Edits discarded in the text view never reach the file, so
-  they leave what is kept valid.
+  CSV, NDJSON and JSON reach the store through `IndexBasis` (`Engine/Bytes`): the origin at the
+  version it had when the view opened it, whose `FindKept` feeds the session's factory
+  (`StartIndexing(source, kept, …)` reopens when there is something kept) and whose `Keep`
+  takes the detached index on completion. A reopened index shares the finished log rather than
+  copying it. What is kept holds no source - the session that built it releases its source as
+  usual, and the next one binds the records to its own. Every entry is stamped with the
+  `ByteOriginVersion` it was built at (length, plus last-write time for a file) and is dropped
+  rather than returned once that no longer matches: a file edited by another program or replaced
+  by a save - the text view's included - is scanned again. Edits discarded in the text view never
+  reach the file, so they leave what is kept valid.
+- **The line index is sparse like the others** (`FileOffsetIndex`, `Engine/Indexing/Lines`). It
+  anchors a line start once 64 KB or 1024 lines have passed since the last anchor, and finds the
+  lines between by searching forward for newlines, so a lookup reads at most about that much
+  however long the lines are, and remembers the last line it reached so a screen of consecutive
+  rows walks on from the previous one. The line count is published per scan chunk, never ahead of
+  the anchors it relies on, and `AppendLogIndexBase`'s waits follow it (`PublishedCount`) rather
+  than the anchor count.
 - **`IByteSource` (`Engine/Bytes/IByteSource.cs`) is one session's reader.** Every consumer is
   typed to it. Implemented by `MMapFile`, `RawPieceTable` (a piece table over (mapping,
   scratch), which is why a span can come back short) and `MemoryByteSource`, the in-memory

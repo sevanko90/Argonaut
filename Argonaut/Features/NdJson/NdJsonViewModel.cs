@@ -26,6 +26,10 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
     private const int InitialIndexedLineTarget = 250;
 
     private IndexedSourceSession<FileOffsetIndex>? session;
+
+    // What the line index was built over, so a finished one is kept for the next view of the
+    // same bytes - this one reopened, or CSV's, which shares it (see KeptIndexes).
+    private IndexBasis? indexBasis;
     private NdJsonLineCollection? lines;
     private NdJsonSelectedLine? selectedLine;
     private JsonViewModel? selectedLineJsonViewModel;
@@ -225,7 +229,10 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
         // Alongside indexing, not blocking it - see JsonViewModel.ApplyInitialSchemaAsync.
         _ = ApplyInitialSchemaAsync(origin.Path);
 
-        var session = IndexedSourceSession<FileOffsetIndex>.Start(origin.Open(), FileOffsetIndex.StartIndexing, progressReporter);
+        this.indexBasis = IndexBasis.Of(origin);
+        var kept = this.indexBasis?.FindKept<FileLineAnchors>(FileLineAnchors.Key);
+        var session = IndexedSourceSession<FileOffsetIndex>.Start(origin.Open(),
+            (bytes, progress, stopping) => FileOffsetIndex.StartIndexing(bytes, kept, progress, stopping), progressReporter);
         this.session = session;
 
         // Await a small initial batch so the first paint isn't a totally empty scrollbar;
@@ -322,7 +329,11 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
     }
 
     /// <summary>Indexing finished: keeps the "Selected line" suffix if one is selected by then.</summary>
-    protected override void OnIndexingCompleted() => UpdateStatusText();
+    protected override void OnIndexingCompleted()
+    {
+        this.indexBasis?.Keep(FileLineAnchors.Key, this.session?.Index.DetachAnchors());
+        UpdateStatusText();
+    }
 
     /// <summary>Indexing stopped early (failure, or cancellation on <paramref name="failure"/> null).</summary>
     protected override void OnIndexingFailed(IndexFailure? failure)

@@ -113,9 +113,11 @@ Argonaut doesn't load a file into RAM. It memory-maps it and shows a small windo
 
 The indexes are small next to the file. Roughly, per GB of file:
 
+- **CSV and NDJSON:** about 0.3 MB
 - **JSON:** under 1 MB
 - **Text:** about 2.5 MB
-- **CSV and NDJSON:** about 16 bytes per line - around 100 MB for typical rows
+
+They're small enough to keep, so switching views on the same file (say JSON to text and back) reuses the index instead of rebuilding it - unless the file has changed.
 
 Your OS may show a higher figure for Argonaut: pages of the file it has read count towards its memory, but that's the OS's file cache, and it's given back when something else needs it.
 

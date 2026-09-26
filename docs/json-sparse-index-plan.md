@@ -185,7 +185,7 @@ The existing dense index stays available to diff until this is built, so diff is
 Each step lands on its own and leaves the app working. Tick a step when it is merged into the
 branch, and note under it anything the next step needs to know.
 
-Status: step 2 in progress. Branch: `plan/json-sparse-index`.
+Status: step 3 next. Branch: `plan/json-sparse-index`.
 
 1. [x] **Benchmarks first.** A BenchmarkDotNet suite over three shapes - a token-dense array, deeply
    nested objects, a large array of small records - measuring index bytes per file byte, build time,
@@ -209,10 +209,32 @@ Status: step 2 in progress. Branch: `plan/json-sparse-index`.
      10,002 / 690,002 / 140,002 rows of the 17M / 11M / 7.7M tokens.
    - Build throughput is the other headline: 217-426 MB/s is 10-20 s for a 4 GB file. The
      structural scanner is expected to beat it by several times.
-2. [ ] **Structural scanner** in `Features/Json/Indexing`, with no Avalonia reference: stage-1 masks,
+2. [x] **Structural scanner** in `Features/Json/Indexing`, with no Avalonia reference: stage-1 masks,
    subtree skip, and a validating mode. Tested against `Utf8JsonReader` on a corpus including
    escapes, surrogates, strings containing brackets and quotes across chunk boundaries, and
    `GrowingByteSource`.
+
+   `JsonStructuralScanner`: `Classify` (per-64-byte masks, `Vector128`, carry-state across blocks)
+   and `TrySkipValue` returning `JsonSkipOutcome` (`Skipped` / `Incomplete` / `NeedsFullParse`).
+   Tested against `Utf8JsonReader` on seeded random documents over whole, 37-byte-split and
+   64-byte-split sources (`Support/SplitByteSource`), and on `GrowingByteSource`.
+   `JsonStructuralScannerBenchmarks`, whole 64 MiB document: 12.4 / 13.9 / 14.1 ms
+   (4.5-5.4 GB/s) against `Utf8JsonReader.Skip`'s 135 / 148 / 106 ms - 8-11x, no allocation.
+
+   Decisions for the next steps:
+   - **No validating mode in the scanner.** Validation stays with `Utf8JsonReader`, as a
+     skip-only pass on its own background thread alongside the sparse build: it holds no memory,
+     keeps today's error messages and `DescribeFailure` offsets, and at ~0.5 GB/s on another core
+     does not hold up the build. A second, validating SIMD parser would be simdjson stage 2 for no
+     gain the tree can see.
+   - **Comments hand over.** A slash outside a string ends the masked scan (`NeedsFullParse`).
+     The sparse build (step 3) does the same: on the first comment it continues from the enclosing
+     checkpoint with a `Utf8JsonReader`-driven event source, which is slower but emits the same
+     events.
+   - Step 3 adds a comma mask to `Classify` for child boundaries; a `:` mask is not needed, since
+     a checkpoint goes after a comma and a key is re-read from there.
+   - Escapes are walked a backslash at a time, not with simdjson's carry-add; revisit only if a
+     backslash-heavy corpus profiles as hot.
 3. [ ] **`SparseContainerIndex`** in `Engine/Indexing/Trees`, fed by the JSON scanner as an
    `IBackgroundIndex`, alongside the existing index rather than replacing it. The test-only tree
    format drives it too, from the first commit.

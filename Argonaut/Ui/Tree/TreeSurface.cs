@@ -7,6 +7,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Media.TextFormatting;
+using Avalonia.Threading;
 using Avalonia.Utilities;
 using Argonaut.Engine.Indexing.Trees;
 using Argonaut.Ui.Find;
@@ -72,6 +73,7 @@ public class TreeSurface : RowSurface
     private double resizeStartX;
     private double resizeStartWidth;
     private object? toolTipShown;
+    private DispatcherTimer? toolTipDelay;
 
     private TreeDocument? document;
     private TreeCursor? anchor;
@@ -903,14 +905,39 @@ public class TreeSurface : RowSurface
         SetToolTip(tip);
     }
 
+    /// <summary>
+    /// Puts <paramref name="tip"/> up for the cell under the pointer. Avalonia opens a tooltip only
+    /// when the pointer enters its control, and every gutter cell is this one control - so moving
+    /// between cells would close the old tooltip and never open the new one. The surface opens it
+    /// itself: at once when one was already showing, the way moving between tooltips feels
+    /// anywhere else, and otherwise after the usual hover delay.
+    /// </summary>
     private void SetToolTip(object? tip)
     {
         if (Equals(tip, toolTipShown))
             return;
 
+        bool wasOpen = ToolTip.GetIsOpen(this);
         toolTipShown = tip;
+        toolTipDelay?.Stop();
         ToolTip.SetIsOpen(this, false);
         ToolTip.SetTip(this, tip);
+        if (tip is null)
+            return;
+
+        if (wasOpen)
+        {
+            ToolTip.SetIsOpen(this, true);
+            return;
+        }
+
+        toolTipDelay ??= new DispatcherTimer(TimeSpan.FromMilliseconds(ToolTip.GetShowDelay(this)), DispatcherPriority.Normal, (_, _) =>
+        {
+            toolTipDelay!.Stop();
+            if (toolTipShown is not null && IsPointerOver)
+                ToolTip.SetIsOpen(this, true);
+        });
+        toolTipDelay.Start();
     }
 
     /// <summary>

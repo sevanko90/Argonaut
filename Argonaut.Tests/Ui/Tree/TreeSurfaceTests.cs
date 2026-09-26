@@ -373,4 +373,28 @@ public sealed class TreeSurfaceTests
         Assert.Equal(160, gutter.Width, 1);
         Assert.Null(h.Surface.SelectedRow); // a drag on the edge is not a click on a row
     }, gutters: new ITreeGutter[] { new FixedGutter() });
+
+    [Fact]
+    public Task MovingBetweenGutterRowsShowsEachRowsTooltip() => WithSurface(defaultDepth: 9, async h =>
+    {
+        Point InGutter(int row) => h.Surface.TranslatePoint(
+            new Point(RowSurface.ContentPaddingX + 20, row * RowSurface.RowHeight + RowSurface.RowHeight / 2), h.Window)!.Value;
+
+        h.Window.MouseMove(InGutter(1));
+        await Task.Delay(ToolTip.GetShowDelay(h.Surface) + 200);
+        Dispatcher.UIThread.RunJobs();
+        Assert.True(ToolTip.GetIsOpen(h.Surface));
+        Assert.Equal($"tip {h.Surface.RealizedRows[1].Node.ValueStart}", ToolTip.GetTip(h.Surface));
+
+        // Along the gutter to another row, without leaving it: the new row's tooltip, at once.
+        h.Window.MouseMove(InGutter(4));
+        Dispatcher.UIThread.RunJobs();
+        Assert.True(ToolTip.GetIsOpen(h.Surface));
+        Assert.Equal($"tip {h.Surface.RealizedRows[4].Node.ValueStart}", ToolTip.GetTip(h.Surface));
+
+        // Off the gutter into the rows: no tooltip.
+        h.Window.MouseMove(h.Surface.TranslatePoint(new Point(400, 30), h.Window)!.Value);
+        Dispatcher.UIThread.RunJobs();
+        Assert.False(ToolTip.GetIsOpen(h.Surface));
+    }, gutters: new ITreeGutter[] { new FixedGutter() });
 }

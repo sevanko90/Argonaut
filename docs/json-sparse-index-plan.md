@@ -93,12 +93,65 @@ selection, find highlights, schema gutter and hint badges.
 
 Shared machinery moves down rather than sideways: scroll arithmetic, row height, horizontal pan,
 gutters and caret/selection plumbing go to `Ui/RowSurface`, used by both `RawTextSurface` and the
-JSON surface, each supplying only a cursor and a row painter.
+tree surface. Everything tree-shaped goes one level further, into a format-agnostic tree layer the
+XML view will reuse - see the next section.
 
 What the `ListBox` gave for free has to be built: keyboard navigation, focus, hit testing, context
 menus, tooltips and automation peers. Accessibility is the one most likely to be forgotten, so it is
 part of the surface work, not a follow-up. Row templates become draw code; cache a `TextLayout` per
 visible row.
+
+## Shared with the XML view
+
+The roadmap's XML tree is the same problem: collapsible nodes over a multi-GB file, with elements
+where JSON has `{}`/`[]`. It must not become a third fully custom view, so everything that is about
+*a tree of byte ranges* is format-agnostic from the start, and a format supplies only a scanner, a
+cursor and a row painter.
+
+**Generic, in `Engine/Indexing/Trees`** (no Avalonia, beside `Engine/Indexing/Lines`):
+
+- **`SparseContainerIndex`**: the large-container records and child checkpoints above. It knows
+  byte spans, ordinals, parents and depths, never JSON. A format's scanner feeds it open, close and
+  child-boundary events through a narrow sink interface, and it applies `T`, `B`, the depth cap and
+  the growth rules.
+- **`ITreeRowCursor`**: `MoveNext`, `MovePrevious`, `SeekTo(offset)`, and the current row as
+  `(offset, depth, shape, formatKind)`, where shape is `Open`, `Close` or `Leaf` and `formatKind` is
+  a byte only the format interprets. `JsonRowCursor` implements it; an XML cursor would too.
+- **Expand state**: default depth XOR offset-keyed overrides.
+- **Row block cache and extent estimate**, including the anchor-preserving correction.
+
+**Generic, in `Ui/Tree`** (on top of `Ui/RowSurface`):
+
+- **`TreeSurface`**: indentation, expand toggles, indent guides, selection, find highlights, sticky
+  ancestor headers, keyboard navigation (up/down, left collapses or goes to parent, right expands,
+  page, home/end), hit testing and automation peers. Driven by an `ITreeRowCursor`.
+- **Row painting by styled runs.** The format turns a row into runs of `(text, style class)` -
+  JSON's key, punctuation and typed value; XML's tag, attribute name, attribute value and text -
+  and the surface owns layout, caching, clipping at the display cap and the palette. That makes
+  syntax colouring a shared feature, which is the XML roadmap's last item for free.
+- **Collapsed summaries** supplied by the format (`{ 12 keys }`, `<item> … </item>`) through the
+  same run interface.
+- **Gutters as providers.** The surface hosts any number of gutter columns; JSON's schema gutter is
+  one provider, not surface code.
+- **Breadcrumb bar** fed by the format naming each ancestor segment, and a generic
+  `ISearchNavigator` adapter that seeks the cursor to a match offset.
+
+**Where XML differs**, so the generic types leave room for it without anything XML being built:
+
+- Close tags are real rows, so `Close` is a first-class shape, not a JSON afterthought.
+- Mixed content: text, comments, CDATA and processing instructions are `Leaf` rows interleaved with
+  elements, and checkpoints may land before any of them.
+- Resuming at a checkpoint needs the namespace bindings in scope. The ancestor chain gives each
+  enclosing element's start offset, so the XML cursor re-reads those start tags - one short read per
+  ancestor. The generic cursor contract has to allow a format-specific resume step for this.
+- Attributes: inline in the element's row, with a long attribute list clipped by the display cap
+  like a long JSON string. Whether they can also expand as child rows is an XML-view decision the
+  run interface does not constrain.
+
+**Keeping the abstraction honest.** With JSON the only real format, the generic types would drift
+JSON-shaped. The tests include a minimal test-only tree format - an S-expression-style scanner and
+cursor with mixed leaf and container children and explicit close rows - driven through
+`SparseContainerIndex` and `TreeSurface`. It stands in for XML until XML exists.
 
 ## Consumers
 
@@ -135,23 +188,28 @@ Each step lands on its own and leaves the app working.
    nested objects, a large array of small records - measuring index bytes per file byte, build time,
    time to first row, seek latency and backward-page latency. Run against the current index to fix
    the baseline.
-2. **Structural scanner** in `Engine`, with no Avalonia reference: stage-1 masks, subtree skip, and
-   a validating mode. Tested against `Utf8JsonReader` on a corpus including escapes, surrogates,
-   strings containing brackets and quotes across chunk boundaries, and `GrowingByteSource`.
-3. **Sparse index**: large containers and checkpoints, built by the scanner as an
-   `IBackgroundIndex`, alongside the existing index rather than replacing it.
-4. **`JsonRowCursor`**: forward and backward over display rows with expand state, cross-checked
-   against a walk of the dense index on the same corpus - the dense index is the test oracle.
+2. **Structural scanner** in `Features/Json/Indexing`, with no Avalonia reference: stage-1 masks,
+   subtree skip, and a validating mode. Tested against `Utf8JsonReader` on a corpus including
+   escapes, surrogates, strings containing brackets and quotes across chunk boundaries, and
+   `GrowingByteSource`.
+3. **`SparseContainerIndex`** in `Engine/Indexing/Trees`, fed by the JSON scanner as an
+   `IBackgroundIndex`, alongside the existing index rather than replacing it. The test-only tree
+   format drives it too, from the first commit.
+4. **`ITreeRowCursor` and `JsonRowCursor`**: forward and backward over display rows with expand
+   state, cross-checked against a walk of the dense index on the same corpus - the dense index is
+   the test oracle. The test-only format gets its cursor here.
 5. **`Ui/RowSurface`**: extract the shared parts of `RawTextSurface`, with the raw view unchanged in
    behaviour.
-6. **JSON surface** replacing the tree `ListBox`, including keyboard navigation, selection, schema
-   gutter, hints and accessibility.
-7. **Consumers** moved one at a time per the table above: paths and search, then array table and
+6. **`Ui/Tree/TreeSurface`** with styled-run painting, gutter providers, keyboard navigation,
+   selection and accessibility, exercised in tests through the test-only format.
+7. **JSON on the tree surface**: a JSON row painter, the schema gutter provider and hints, replacing
+   the tree `ListBox`.
+8. **Consumers** moved one at a time per the table above: paths and search, then array table and
    samplers.
-8. **Diff** on its own hash budget.
-9. **Remove `JsonStructureIndex`'s dense log** once nothing reads it, and the `ChildCap`/"show more"
-   machinery with it.
-10. **Per-depth row counts**, if the estimated scrollbar proves not good enough in use.
+9. **Diff** on its own hash budget.
+10. **Remove `JsonStructureIndex`'s dense log** once nothing reads it, and the `ChildCap`/"show more"
+    machinery with it.
+11. **Per-depth row counts**, if the estimated scrollbar proves not good enough in use.
 
 ## Open questions
 

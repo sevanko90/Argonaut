@@ -119,13 +119,17 @@ Not designed yet; this is the starting idea.
   characters form a tag (`<name ...>`). Skip a BOM and leading whitespace first. A bare tag is
   also what HTML starts with, so that case may want a second signal before it wins.
 - **A collapsible XML tree view.** Like the JSON tree, with elements as the collapsible nodes in
-  place of `{}`/`[]`, virtualized the same way.
-- **An XML structure index.** Built on the background like `JsonStructureIndex`: per node its
-  kind, depth, byte offsets, end index for skipping subtrees, and attributes. Needs a span-based
-  scanner over `IByteSource` in the `Utf8JsonReader` mould rather than `XmlReader`, which
-  allocates a string for every name and value. Decide how comments, CDATA, processing
-  instructions and mixed text content show up as rows.
-- **Syntax colouring.** Separate colours for element names, attribute names and attribute values.
+  place of `{}`/`[]`, built on the shared `Ui/Tree/TreeSurface` and `ITreeRowCursor` rather than a
+  view of its own. What XML adds is a row painter and a cursor; see "Shared with the XML view" in
+  [json-sparse-index-plan.md](json-sparse-index-plan.md).
+- **An XML structural scanner.** Span-based over `IByteSource`, in the `Utf8JsonReader` mould rather
+  than `XmlReader`, which allocates a string for every name and value. It feeds the generic
+  `SparseContainerIndex` - elements as containers, checkpoints at child boundaries - so there is no
+  XML-specific index. Resuming at a checkpoint re-reads the ancestors' start tags for namespace
+  bindings. Decide how comments, CDATA, processing instructions and mixed text content show up as
+  rows.
+- **Syntax colouring.** Separate colours for element names, attribute names and attribute values,
+  as style classes on the tree surface's styled runs.
 
 ## Input sources
 

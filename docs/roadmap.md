@@ -207,15 +207,12 @@ format keeps it honest. An XML view adds a scanner, a reader and a painter.
 
 ## Memory and performance
 
-Measure against [index-benchmark-2026-09-26.md](index-benchmark-2026-09-26.md), rerun the same way.
+Measure against [index-benchmarks.md](index-benchmarks.md), rerun the same way.
 
 - **Closing a multi-GB file lags.** `MMapFile.Dispose` unmaps a fully-resident view synchronously
   on the UI thread (~43ms per 480MB, so ~400ms at 4.5GB). Moving it off-thread needs a synchronous
   "release visible items" phase before the swap plus a background unmap, and the shell as the sole
   disposal owner to avoid racing the view's detach.
-- **Halve the NDJSON line index by storing offsets, not spans.** `FileLineSpan` is 16 bytes;
-  lines are contiguous, so a length is derivable from the next line's offset. A `List<long>` of
-  line starts is 8 bytes per line. Not `uint` - 4GB files sit exactly at the wraparound.
 - **Span-based unescape for quoted CSV fields.** `CsvFieldReader.DecodeField` allocates twice for
   a quoted field. Never measured; only if CSV load ever profiles as hot.
 

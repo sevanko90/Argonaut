@@ -37,7 +37,8 @@ public sealed class TreeSurfaceTests
 
     /// <summary>A surface over a generated document, and every row the document shows at the
     /// given default depth, from a cursor walk - the reference the surface is held to.</summary>
-    private static Task WithSurface(int defaultDepth, Func<Harness, Task> body, int topLevelChildren = 200)
+    private static Task WithSurface(int defaultDepth, Func<Harness, Task> body, int topLevelChildren = 200,
+        Func<byte[], ITreeRowPainter>? painter = null, IReadOnlyList<ITreeGutter>? gutters = null)
     {
         var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(TreeSurfaceTests).Assembly);
         return session.Dispatch(async () =>
@@ -45,8 +46,9 @@ public sealed class TreeSurfaceTests
             byte[] bytes = SExpressionTreeFormat.Generate(new Random(7), topLevelChildren);
             var index = new SparseContainerIndex(promotionBytes: 64, checkpointBytes: 16);
             SExpressionTreeFormat.Scan(bytes, new SparseContainerIndexBuilder(index));
-            var document = new TreeDocument(index, new SExpressionTreeFormat.Reader(bytes), new SExpressionTreeFormat.Painter(bytes),
-                new TreeExpandState(defaultDepth), () => bytes.Length);
+            var document = new TreeDocument(index, new SExpressionTreeFormat.Reader(bytes),
+                painter?.Invoke(bytes) ?? new SExpressionTreeFormat.Painter(bytes),
+                new TreeExpandState(defaultDepth), () => bytes.Length, gutters);
 
             var rows = new List<TreeRow>();
             var walker = document.NewCursor();
@@ -229,4 +231,94 @@ public sealed class TreeSurfaceTests
         Assert.False(string.IsNullOrEmpty(peer.GetName()));
         return Task.CompletedTask;
     });
+
+    /// <summary>Atoms get a link run and lists a marker - enough to drive the link and marker
+    /// paths without a real format.</summary>
+    private sealed class LinkingPainter(byte[] bytes) : ITreeRowPainter
+    {
+        private readonly SExpressionTreeFormat.Painter inner = new(bytes);
+
+        public void AppendRuns(in TreeRow row, List<TreeRun> runs)
+        {
+            inner.AppendRuns(row, runs);
+            if (row.Shape == TreeRowShape.Leaf)
+                runs.Add(new TreeRun("  [go]", TreeRunStyle.Link, Link: row.Node.ValueStart));
+        }
+
+        public string? Marker(in TreeRow row) => row.Shape == TreeRowShape.Leaf ? row.Ordinal.ToString() : null;
+    }
+
+    private sealed class FixedGutter : IResizableTreeGutter
+    {
+        public double Width { get; private set; } = 100;
+        public double MinWidth => 40;
+        public void Resize(double width) => Width = width;
+        public void Draw(Avalonia.Media.DrawingContext context, in TreeRow row, Rect cell, in TreeGutterStyle style) { }
+        public object? ToolTipFor(in TreeRow row) => $"tip {row.Node.ValueStart}";
+    }
+
+    [Fact]
+    public Task ClickingALinkRaisesItInsteadOfToggling() => WithSurface(defaultDepth: 9, async h =>
+    {
+        int leafIndex = h.Surface.RealizedRows.ToList().FindIndex(r => r.Shape == TreeRowShape.Leaf);
+        var leaf = h.Surface.RealizedRows[leafIndex];
+        TreeLinkClickedEventArgs? clicked = null;
+        h.Surface.LinkClicked += (_, e) => clicked = e;
+
+        var bounds = h.Surface.LinkBounds(leafIndex)!.Value;
+        Assert.True(bounds.Width > 0);
+        var point = bounds.Center;
+        var translated = h.Surface.TranslatePoint(point, h.Window)!.Value;
+
+        h.Window.MouseDown(translated, MouseButton.Left);
+        h.Window.MouseUp(translated, MouseButton.Left);
+        await PumpAsync();
+
+        Assert.NotNull(clicked);
+        Assert.Equal(leaf.Node.ValueStart, clicked!.Link);
+        Assert.Equal(leaf.Key, h.Surface.SelectedRow!.Value.Key);
+    }, painter: bytes => new LinkingPainter(bytes));
+
+    [Fact]
+    public Task AltExpandOpensTheWholeSubtreeAndAltCollapseForgetsIt() => WithSurface(defaultDepth: 1, async h =>
+    {
+        var root = h.Surface.RealizedRows[0];
+        var list = h.Surface.RealizedRows.First(r => r.Shape == TreeRowShape.Open && r.Depth == 1);
+
+        h.Surface.ToggleDeep(list);
+        await PumpAsync();
+
+        var everything = new TreeCursor(h.Document.Index, h.Document.Reader, new TreeExpandState(99));
+        var shown = new TreeCursor(h.Document.Index, h.Document.Reader, h.Document.Expand);
+        everything.SeekTo(list.Start);
+        shown.SeekTo(list.Start);
+        while (everything.MoveNext() && everything.Current.Depth > 1)
+        {
+            Assert.True(shown.MoveNext());
+            Assert.Equal(everything.Current.Key, shown.Current.Key);
+        }
+
+        shown.SeekTo(list.Start);
+        h.Surface.ToggleDeep(shown.Current);
+        h.Surface.ToggleDeep(shown.Current with { IsExpanded = false }); // open again: only the default beneath
+        await PumpAsync();
+        Assert.Equal(root.Key, h.Surface.RealizedRows[0].Key);
+    });
+
+    [Fact]
+    public Task DraggingAResizableGutterEdgeResizesIt() => WithSurface(defaultDepth: 9, async h =>
+    {
+        var gutter = (FixedGutter)h.Document.Gutters[0];
+        double edge = RowSurface.ContentPaddingX + gutter.Width;
+        var from = h.Surface.TranslatePoint(new Point(edge, 30), h.Window)!.Value;
+        var to = h.Surface.TranslatePoint(new Point(edge + 60, 30), h.Window)!.Value;
+
+        h.Window.MouseDown(from, MouseButton.Left);
+        h.Window.MouseMove(to);
+        h.Window.MouseUp(to, MouseButton.Left);
+        await PumpAsync();
+
+        Assert.Equal(160, gutter.Width, 1);
+        Assert.Null(h.Surface.SelectedRow); // a drag on the edge is not a click on a row
+    }, gutters: new ITreeGutter[] { new FixedGutter() });
 }

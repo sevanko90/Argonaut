@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 using Avalonia;
 using Avalonia.Automation.Peers;
+using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Media.TextFormatting;
@@ -39,12 +40,31 @@ public class TreeSurface : RowSurface
     private const string ExpandedGlyph = "▾";
     private const string CollapsedGlyph = "▸";
 
+    /// <summary>Width of the slot a row's marker (see <see cref="ITreeRowPainter.Marker"/>) takes
+    /// before its arrow, including the gap after it.</summary>
+    public const double MarkerWidth = 28;
+
+    /// <summary>How close to a resizable gutter's edge the pointer has to be to grab it.</summary>
+    private const double ResizeGrip = 4;
+
+    /// <summary>Rows an Alt-expand may reveal before it stops: enough to open any sensible
+    /// subtree, few enough that one click near the root of a huge file stays quick.</summary>
+    public const int DeepExpandRowBudget = 100_000;
+
     /// <summary>A row covers this many bytes until rows on screen say otherwise.</summary>
     private const double InitialBytesPerRow = 32;
 
+    /// <summary>One row as laid out: its text, the marker before its arrow, and where its links
+    /// are in the text.</summary>
+    private sealed record RowLayout(TextLayout Layout, string Text, TextLayout? Marker, List<(int Start, int Length, object Link)>? Links);
+
     private readonly List<TreeRow> realized = new();
-    private readonly Dictionary<(long, TreeRowShape, bool), (TextLayout Layout, string Text)> layouts = new();
+    private readonly Dictionary<(long, TreeRowShape, bool), RowLayout> layouts = new();
     private readonly List<TreeRun> runs = new();
+    private IResizableTreeGutter? resizing;
+    private double resizeStartX;
+    private double resizeStartWidth;
+    private object? toolTipShown;
 
     private TreeDocument? document;
     private TreeCursor? anchor;
@@ -108,6 +128,43 @@ public class TreeSurface : RowSurface
 
     public event EventHandler? SelectionChanged;
 
+    /// <summary>A link run was clicked: the row, and the run's <see cref="TreeRun.Link"/>.</summary>
+    public event EventHandler<TreeLinkClickedEventArgs>? LinkClicked;
+
+    /// <summary>An Alt-expand stopped at <see cref="DeepExpandRowBudget"/> rows.</summary>
+    public event EventHandler? ExpandLimitReached;
+
+    /// <summary>Behind the gutters, so they read as a panel beside the tree.</summary>
+    public static readonly StyledProperty<IBrush?> GutterBackgroundProperty =
+        AvaloniaProperty.Register<TreeSurface, IBrush?>(nameof(GutterBackground));
+
+    /// <summary>The line between the gutters and the tree.</summary>
+    public static readonly StyledProperty<IBrush?> DividerBrushProperty =
+        AvaloniaProperty.Register<TreeSurface, IBrush?>(nameof(DividerBrush));
+
+    public IBrush? GutterBackground
+    {
+        get => GetValue(GutterBackgroundProperty);
+        set => SetValue(GutterBackgroundProperty, value);
+    }
+
+    public IBrush? DividerBrush
+    {
+        get => GetValue(DividerBrushProperty);
+        set => SetValue(DividerBrushProperty, value);
+    }
+
+    static TreeSurface()
+    {
+        AffectsRender<TreeSurface>(GutterBackgroundProperty, DividerBrushProperty);
+    }
+
+    /// <summary>A gutter changed width or what it shows - a schema bound or unbound.</summary>
+    public void InvalidateGutters()
+    {
+        InvalidateVisual();
+    }
+
     /// <summary>A container was expanded or collapsed from the surface.</summary>
     public event EventHandler? ExpansionChanged;
 
@@ -116,6 +173,23 @@ public class TreeSurface : RowSurface
 
     /// <summary>Text layouts held, for tests: bounded by the viewport, not by distance scrolled.</summary>
     internal int CachedLayoutCount => layouts.Count;
+
+    /// <summary>Where the first link on realized row <paramref name="index"/> is drawn, in surface
+    /// coordinates, for tests; null when it has none.</summary>
+    internal Rect? LinkBounds(int index)
+    {
+        var row = realized[index];
+        var laid = LayoutFor(row, new Typeface(FontFamily), FontSize);
+        if (laid.Links is not { Count: > 0 } links)
+            return null;
+
+        double textX = ArrowLeft(row, laid) + ToggleWidth;
+        double textTop = CentreInRow(laid.Layout, index * RowHeight - anchorPixel);
+        foreach (var rect in laid.Layout.HitTestTextRange(links[0].Start, links[0].Length))
+            return rect.Translate(new Vector(textX, textTop));
+
+        return null;
+    }
 
     /// <summary>Pixels of the top row scrolled off the top.</summary>
     internal double AnchorPixel => anchorPixel;
@@ -135,9 +209,18 @@ public class TreeSurface : RowSurface
         }
     }
 
-    private double ContentLeft => ContentPaddingX + GutterWidth;
+    private double ContentLeft
+    {
+        get
+        {
+            double gutters = GutterWidth;
+            return gutters > 0 ? ContentPaddingX + gutters + ContentPaddingX : ContentPaddingX;
+        }
+    }
 
-    private double TextLeft(in TreeRow row) => ContentLeft + row.Depth * IndentWidth + ToggleWidth;
+    /// <summary>Where a row's arrow sits, panned: after its indent and any marker.</summary>
+    private double ArrowLeft(in TreeRow row, RowLayout layout)
+        => ContentLeft + row.Depth * IndentWidth + (layout.Marker is null ? 0 : MarkerWidth) - PanOffset;
 
     // ---- navigation the view model drives -------------------------------------------------
 
@@ -299,14 +382,15 @@ public class TreeSurface : RowSurface
         double widest = WidestRowWidth;
         foreach (var row in realized)
         {
-            var (layout, _) = LayoutFor(row, typeface, FontSize);
-            widest = Math.Max(widest, row.Depth * IndentWidth + ToggleWidth + layout.WidthIncludingTrailingWhitespace);
+            var laid = LayoutFor(row, typeface, FontSize);
+            double marker = laid.Marker is null ? 0 : MarkerWidth;
+            widest = Math.Max(widest, row.Depth * IndentWidth + marker + ToggleWidth + laid.Layout.WidthIncludingTrailingWhitespace);
         }
 
         RecordRowWidth(widest);
     }
 
-    private (TextLayout Layout, string Text) LayoutFor(in TreeRow row, Typeface typeface, double fontSize)
+    private RowLayout LayoutFor(in TreeRow row, Typeface typeface, double fontSize)
     {
         var key = (row.Node.ValueStart, row.Shape, row.IsExpanded);
         if (layouts.TryGetValue(key, out var cached))
@@ -318,6 +402,7 @@ public class TreeSurface : RowSurface
 
         var text = new StringBuilder();
         var overrides = new List<ValueSpan<TextRunProperties>>(runs.Count);
+        List<(int, int, object)>? links = null;
         foreach (var run in runs)
         {
             if (run.Text.Length == 0)
@@ -326,13 +411,23 @@ public class TreeSurface : RowSurface
             var brush = runBrushes is not null && runBrushes.TryGetValue(run.Style, out var styled) ? styled : foreground;
             overrides.Add(new ValueSpan<TextRunProperties>(text.Length, run.Text.Length,
                 new GenericTextRunProperties(typeface, fontSize, foregroundBrush: brush)));
+            if (run.Link is { } link)
+                (links ??= new()).Add((text.Length, run.Text.Length, link));
             text.Append(run.Text);
         }
 
         string content = text.ToString();
         var layout = new TextLayout(content, typeface, fontSize, foreground, TextAlignment.Left, TextWrapping.NoWrap,
             textStyleOverrides: overrides);
-        var entry = (layout, content);
+
+        TextLayout? marker = null;
+        if (document.Painter.Marker(row) is { } label)
+        {
+            var markerBrush = runBrushes is not null && runBrushes.TryGetValue(TreeRunStyle.Hint, out var muted) ? muted : foreground;
+            marker = new TextLayout(label, typeface, Math.Max(6, fontSize * 0.75), markerBrush);
+        }
+
+        var entry = new RowLayout(layout, content, marker, links);
         layouts[key] = entry;
         return entry;
     }
@@ -413,35 +508,52 @@ public class TreeSurface : RowSurface
         expandedArrow ??= new TextLayout(ExpandedGlyph, typeface, fontSize, gutterStyle.Brush);
         collapsedArrow ??= new TextLayout(CollapsedGlyph, typeface, fontSize, gutterStyle.Brush);
 
+        double gutterWidth = GutterWidth;
+        if (gutterWidth > 0)
+        {
+            if (GutterBackground is { } panel)
+                context.FillRectangle(panel, new Rect(0, 0, ContentPaddingX + gutterWidth, Bounds.Height));
+            if (DividerBrush is { } divider)
+                context.FillRectangle(divider, new Rect(ContentPaddingX + gutterWidth, 0, 1, Bounds.Height));
+        }
+
         for (int i = 0; i < realized.Count; i++)
         {
             var row = realized[i];
             double y = i * RowHeight - anchorPixel;
 
             if (SelectionBrush is { } selectionBrush && row.Key == selectedKey)
-                context.FillRectangle(selectionBrush, new Rect(0, y, Bounds.Width, RowHeight));
+                context.FillRectangle(selectionBrush, new Rect(contentLeft, y, Math.Max(0, Bounds.Width - contentLeft), RowHeight));
 
             double gutterX = ContentPaddingX;
             foreach (var gutter in document.Gutters)
             {
-                gutter.Draw(context, row, new Rect(gutterX, y, gutter.Width, RowHeight), gutterStyle);
+                if (gutter.Width <= 0)
+                    continue;
+
+                using (context.PushClip(new Rect(gutterX, y, gutter.Width, RowHeight)))
+                    gutter.Draw(context, row, new Rect(gutterX, y, gutter.Width, RowHeight), gutterStyle);
                 gutterX += gutter.Width;
             }
 
             using (context.PushClip(new Rect(contentLeft, y, contentWidth, RowHeight)))
             {
-                double indentX = contentLeft + row.Depth * IndentWidth - PanOffset;
+                var laid = LayoutFor(row, typeface, fontSize);
+                double arrowX = ArrowLeft(row, laid);
+
+                if (laid.Marker is { } marker)
+                    marker.Draw(context, new Point(arrowX - 2 - marker.WidthIncludingTrailingWhitespace, CentreInRow(marker, y)));
+
                 if (row.Shape == TreeRowShape.Open)
                 {
                     var arrow = row.IsExpanded ? expandedArrow : collapsedArrow;
-                    arrow.Draw(context, new Point(indentX + (ToggleWidth - arrow.WidthIncludingTrailingWhitespace) / 2, CentreInRow(arrow, y)));
+                    arrow.Draw(context, new Point(arrowX + (ToggleWidth - arrow.WidthIncludingTrailingWhitespace) / 2, CentreInRow(arrow, y)));
                 }
 
-                var (layout, text) = LayoutFor(row, typeface, fontSize);
-                double textTop = CentreInRow(layout, y);
-                double textX = indentX + ToggleWidth;
-                DrawHighlights(context, layout, text, textX, textTop);
-                layout.Draw(context, new Point(textX, textTop));
+                double textTop = CentreInRow(laid.Layout, y);
+                double textX = arrowX + ToggleWidth;
+                DrawHighlights(context, laid.Layout, laid.Text, textX, textTop);
+                laid.Layout.Draw(context, new Point(textX, textTop));
             }
         }
     }
@@ -559,24 +671,209 @@ public class TreeSurface : RowSurface
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
         base.OnPointerPressed(e);
-        if (document is null || realized.Count == 0)
+        if (document is null)
+            return;
+
+        var point = e.GetPosition(this);
+        if (GutterEdgeAt(point.X) is { } edge)
+        {
+            resizing = edge;
+            resizeStartX = point.X;
+            resizeStartWidth = edge.Width;
+            e.Pointer.Capture(this);
+            e.Handled = true;
+            return;
+        }
+
+        if (realized.Count == 0)
             return;
 
         Focus();
-        var point = e.GetPosition(this);
         int index = (int)Math.Floor((point.Y + anchorPixel) / RowHeight);
         if ((uint)index >= (uint)realized.Count)
             return;
 
         var row = realized[index];
+        var laid = LayoutFor(row, new Typeface(FontFamily), FontSize);
+        double arrowX = ArrowLeft(row, laid);
+
+        if (LinkAt(laid, point.X - arrowX - ToggleWidth, point.Y - CentreInRow(laid.Layout, index * RowHeight - anchorPixel)) is { } link)
+        {
+            Select(row);
+            LinkClicked?.Invoke(this, new TreeLinkClickedEventArgs(row, link));
+            e.Handled = true;
+            return;
+        }
+
         Select(row);
 
-        double arrowLeft = ContentLeft + row.Depth * IndentWidth - PanOffset;
-        bool onArrow = point.X >= arrowLeft && point.X < arrowLeft + ToggleWidth;
+        bool onArrow = point.X >= arrowX && point.X < arrowX + ToggleWidth;
         if (row.Shape == TreeRowShape.Open && (onArrow || e.ClickCount == 2))
-            Toggle(row);
+        {
+            if ((e.KeyModifiers & KeyModifiers.Alt) != 0)
+                ToggleDeep(row);
+            else
+                Toggle(row);
+        }
 
         e.Handled = true;
+    }
+
+    protected override void OnPointerMoved(PointerEventArgs e)
+    {
+        base.OnPointerMoved(e);
+        var point = e.GetPosition(this);
+
+        if (resizing is { } gutter)
+        {
+            gutter.Resize(Math.Max(gutter.MinWidth, resizeStartWidth + point.X - resizeStartX));
+            InvalidateVisual();
+            return;
+        }
+
+        bool overEdge = GutterEdgeAt(point.X) is not null;
+        bool overLink = !overEdge && RowAt(point.Y) is { } hovered
+            && LayoutFor(hovered.Row, new Typeface(FontFamily), FontSize) is var laid
+            && LinkAt(laid, point.X - ArrowLeft(hovered.Row, laid) - ToggleWidth,
+                point.Y - CentreInRow(laid.Layout, hovered.Index * RowHeight - anchorPixel)) is not null;
+        Cursor = overEdge ? new Cursor(StandardCursorType.SizeWestEast)
+            : overLink ? new Cursor(StandardCursorType.Hand)
+            : null;
+
+        UpdateToolTip(point);
+    }
+
+    protected override void OnPointerReleased(PointerReleasedEventArgs e)
+    {
+        base.OnPointerReleased(e);
+        if (resizing is null)
+            return;
+
+        resizing = null;
+        e.Pointer.Capture(null);
+        DropLayouts();
+        InvalidateVisual();
+    }
+
+    protected override void OnPointerExited(PointerEventArgs e)
+    {
+        base.OnPointerExited(e);
+        SetToolTip(null);
+    }
+
+    private (TreeRow Row, int Index)? RowAt(double y)
+    {
+        int index = (int)Math.Floor((y + anchorPixel) / RowHeight);
+        return (uint)index < (uint)realized.Count ? (realized[index], index) : null;
+    }
+
+    /// <summary>The resizable gutter whose right edge is under <paramref name="x"/>, if any.</summary>
+    private IResizableTreeGutter? GutterEdgeAt(double x)
+    {
+        if (document is null)
+            return null;
+
+        double edge = ContentPaddingX;
+        foreach (var gutter in document.Gutters)
+        {
+            if (gutter.Width <= 0)
+                continue;
+
+            edge += gutter.Width;
+            if (gutter is IResizableTreeGutter resizable && Math.Abs(x - edge) <= ResizeGrip)
+                return resizable;
+        }
+
+        return null;
+    }
+
+    /// <summary>The link under a point given in the row text's own coordinates.</summary>
+    private static object? LinkAt(RowLayout laid, double x, double y)
+    {
+        if (laid.Links is null || x < 0 || x > laid.Layout.WidthIncludingTrailingWhitespace)
+            return null;
+
+        int position = laid.Layout.HitTestPoint(new Point(x, Math.Clamp(y, 0, laid.Layout.Height - 1))).TextPosition;
+        foreach (var (start, length, link) in laid.Links)
+        {
+            if (position >= start && position < start + length)
+                return link;
+        }
+
+        return null;
+    }
+
+    /// <summary>Shows the tooltip of the gutter cell under the pointer, or none.</summary>
+    private void UpdateToolTip(Point point)
+    {
+        object? tip = null;
+        if (document is not null && RowAt(point.Y) is { } hovered)
+        {
+            double left = ContentPaddingX;
+            foreach (var gutter in document.Gutters)
+            {
+                if (gutter.Width <= 0)
+                    continue;
+
+                if (point.X >= left && point.X < left + gutter.Width)
+                {
+                    tip = gutter.ToolTipFor(hovered.Row);
+                    break;
+                }
+
+                left += gutter.Width;
+            }
+        }
+
+        SetToolTip(tip);
+    }
+
+    private void SetToolTip(object? tip)
+    {
+        if (Equals(tip, toolTipShown))
+            return;
+
+        toolTipShown = tip;
+        ToolTip.SetIsOpen(this, false);
+        ToolTip.SetTip(this, tip);
+    }
+
+    /// <summary>
+    /// Alt-toggle. A collapsed container opens along with everything beneath it, stopping after
+    /// <see cref="DeepExpandRowBudget"/> rows; an expanded one closes and forgets what was opened
+    /// beneath it, so opening it again shows the default.
+    /// </summary>
+    public void ToggleDeep(in TreeRow row)
+    {
+        if (document is null || row.Shape == TreeRowShape.Leaf)
+            return;
+
+        long start = row.Node.ValueStart;
+        if (row.IsExpanded || row.Shape == TreeRowShape.Close)
+        {
+            document.Expand.SetExpanded(start, row.Depth, false);
+            document.Expand.ResetWithin(start, ContainerEndOrMax(start));
+        }
+        else
+        {
+            // Walk the subtree as if everything were open, opening each container for real.
+            var everything = new TreeCursor(document.Index, document.Reader, new TreeExpandState(int.MaxValue));
+            everything.SeekTo(row.Start);
+            document.Expand.SetExpanded(start, row.Depth, true);
+
+            int budget = DeepExpandRowBudget;
+            while (budget-- > 0 && everything.MoveNext() && everything.Current.Depth > row.Depth)
+            {
+                if (everything.Current is { Shape: TreeRowShape.Open } open)
+                    document.Expand.SetExpanded(open.Node.ValueStart, open.Depth, true);
+            }
+
+            if (budget < 0)
+                ExpandLimitReached?.Invoke(this, EventArgs.Empty);
+        }
+
+        Reseat();
+        ExpansionChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private void Select(in TreeRow row)
@@ -640,14 +937,20 @@ public class TreeSurface : RowSurface
                 AfterSelectionMoved(downward: true);
                 break;
             case Key.Right when current is { Shape: TreeRowShape.Open, IsExpanded: false }:
-                Toggle(current);
+                if ((e.KeyModifiers & KeyModifiers.Alt) != 0)
+                    ToggleDeep(current);
+                else
+                    Toggle(current);
                 break;
             case Key.Right when current is { Shape: TreeRowShape.Open }:
                 if (selection.MoveNext())
                     AfterSelectionMoved(downward: true);
                 break;
             case Key.Left when current is { Shape: TreeRowShape.Open, IsExpanded: true }:
-                Toggle(current);
+                if ((e.KeyModifiers & KeyModifiers.Alt) != 0)
+                    ToggleDeep(current);
+                else
+                    Toggle(current);
                 break;
             case Key.Left:
                 SelectParent();

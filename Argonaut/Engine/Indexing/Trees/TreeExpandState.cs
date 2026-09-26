@@ -33,6 +33,11 @@ public sealed class TreeExpandState
             Toggle(containerStart);
     }
 
+    /// <summary>Drops the overrides of every container starting strictly between
+    /// <paramref name="start"/> and <paramref name="end"/> - a container's descendants, given its
+    /// own start and end - so re-expanding it shows the default beneath it again.</summary>
+    public void ResetWithin(long start, long end) => overrides.RemoveWhere(o => o > start && o < end);
+
     /// <summary>Drops every override, leaving only the default.</summary>
     public void Reset() => overrides.Clear();
 }

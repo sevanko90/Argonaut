@@ -185,7 +185,7 @@ The existing dense index stays available to diff until this is built, so diff is
 Each step lands on its own and leaves the app working. Tick a step when it is merged into the
 branch, and note under it anything the next step needs to know.
 
-Status: step 5 next. Branch: `plan/json-sparse-index`.
+Status: step 6 next; step 5 awaits a manual check of the raw view. Branch: `plan/json-sparse-index`.
 
 1. [x] **Benchmarks first.** A BenchmarkDotNet suite over three shapes - a token-dense array, deeply
    nested objects, a large array of small records - measuring index bytes per file byte, build time,
@@ -340,8 +340,22 @@ Status: step 5 next. Branch: `plan/json-sparse-index`.
    reads bytes. Both are far inside a frame. Sparse seek on a flat array is dominated by reading up
    to 64 KB of tiny siblings one at a time from the checkpoint; counting commas over classifier
    masks instead would cut it if it ever matters.
-5. [ ] **`Ui/RowSurface`**: extract the shared parts of `RawTextSurface`, with the raw view unchanged in
+5. [x] **`Ui/RowSurface`**: extract the shared parts of `RawTextSurface`, with the raw view unchanged in
    behaviour.
+
+   `Ui/Rows/RowSurface` - `Ui/Rows` rather than `Ui/RowSurface`, so the namespace and the class
+   do not share a name. It holds the fixed row height, the appearance properties, the background
+   fill that makes the surface hit-testable, horizontal pan with the widest-row high-water mark,
+   and the `ILogicalScrollable` plumbing; a derived surface supplies `ExtentHeight` and
+   `OnOffsetChanged`. `RawTextSurface` derives from it with no change in behaviour; the raw view's
+   351 tests pass unchanged.
+
+   Deliberately left in `RawTextSurface`: the caret, its blink and text selection (the tree
+   selects rows, it has no text caret), and the line-number and wrap gutters (the tree's gutters
+   are providers, built in step 6). Move them down if a second surface ever needs them.
+
+   Needs a manual check, since no test draws pixels: the raw view's scrolling, horizontal pan,
+   selection, caret and find highlights look and behave as before.
 6. [ ] **`Ui/Tree/TreeSurface`** with styled-run painting, gutter providers, keyboard navigation,
    selection and accessibility, exercised in tests through the test-only format.
 7. [ ] **JSON on the tree surface**: a JSON row painter, the schema gutter provider and hints, replacing

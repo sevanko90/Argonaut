@@ -88,6 +88,12 @@ and [json-array-nesting-options.md](json-array-nesting-options.md).
   schema describes. Full design in [schema-row-bind-plan.md](schema-row-bind-plan.md); it is
   deferred for want of a document that exhibits the problem, and finding one is the first task and
   the one that decides whether it gets built at all.
+- **Remember bundled schemas by name, not by path.** `SchemaBindings` stores the absolute path a
+  schema was loaded from, and for a bundled schema that is wherever the app happened to run from -
+  a `bin/Debug` copy, an installed app bundle. The copy can be stale, or gone after a clean build or
+  a reinstall, so a remembered binding silently shows an old schema or none, and only unbinding and
+  rebinding fixes it. Store a bundled schema as its bundled name and resolve it against the current
+  bundled folder; keep absolute paths for the user folder and sidecars.
 
 ## Markdown
 

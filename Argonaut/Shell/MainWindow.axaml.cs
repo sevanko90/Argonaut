@@ -83,7 +83,7 @@ public partial class MainWindow : Window
 
         ToastService.Requested += ShowToast;
         viewModel.Progress.WorkStarted += (_, _) => StartProgressTicks();
-        RawJumpService.Requested += offset => _ = viewModel.JumpToRawOffsetAsync(offset);
+        RawJumpService.Requested += range => _ = viewModel.RevealInTextViewAsync(range);
         ArrayTableService.Requested += request => _ = viewModel.OpenArrayTableAsync(request);
 
         // The platform's own modifier, so the menu shows the shortcut the key handler honours.

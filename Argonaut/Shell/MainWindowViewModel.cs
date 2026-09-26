@@ -277,23 +277,29 @@ public sealed class MainWindowViewModel : ObservableObject
     /// <summary>
     /// Switches to the raw viewer (if not already showing it) and jumps to
     /// <paramref name="byteOffset"/> - the shell-mediated action behind every failure
-    /// location's "Line N" link (the JSON banner's and the incompatible placeholder's alike)
-    /// and behind <see cref="RawJumpService"/> requests (e.g. JsonView's "view in raw" link
-    /// on a truncated value). Asks the current document for the CAPABILITY
-    /// (<see cref="IByteOffsetNavigable"/>) rather than matching its concrete type: "jump to an
-    /// offset" is meaningful for exactly one view today - every other document kind would have
-    /// to implement it as a no-op - so it stays off <see cref="IDocumentViewModel"/>, whose job
-    /// is the surface *every* document genuinely shares, but an opt-in interface still lets a
-    /// second view honour it one day without a shell edit. The shell holds no concrete-type
-    /// match on a document at all (see docs/architecture.md).
+    /// location's "Line N" link (the JSON banner's and the incompatible placeholder's alike).
+    /// See <see cref="RevealInTextViewAsync"/>.
     /// </summary>
-    public async Task JumpToRawOffsetAsync(long byteOffset)
+    public Task JumpToRawOffsetAsync(long byteOffset) => RevealInTextViewAsync(ByteRange.At(byteOffset));
+
+    /// <summary>
+    /// Switches to the raw viewer (if not already showing it) and reveals
+    /// <paramref name="range"/> there - behind <see cref="RawJumpService"/> requests (JsonView's
+    /// "Show in text view" on a node's menu, and its "view in raw" link on a truncated value).
+    /// Asks the current document for the CAPABILITY (<see cref="IByteRangeNavigable"/>) rather
+    /// than matching its concrete type, so the shell holds no concrete-type match on a document
+    /// at all (see docs/architecture.md).
+    /// </summary>
+    public async Task RevealInTextViewAsync(ByteRange range)
     {
         if (currentKind != FileTypeDetector.FileKind.Unidentified)
-            await SwitchViewAsync(FileTypeDetector.FileKind.Unidentified);
+        {
+            await SwitchViewAsync(FileTypeDetector.FileKind.Unidentified, range);
+            return;
+        }
 
-        if (CurrentDocument is IByteOffsetNavigable navigable)
-            await navigable.JumpToByteOffsetAsync(byteOffset);
+        if (CurrentDocument is IByteRangeNavigable navigable)
+            await navigable.RevealByteRangeAsync(range);
     }
 
     public IReadOnlyList<RecentFileItem> RecentFiles
@@ -707,8 +713,17 @@ public sealed class MainWindowViewModel : ObservableObject
     /// kind - skipping the "replace file?" confirmation (same file, just a different view) and
     /// the recent-files entry (unlike opening a new path, this isn't a new "recently opened"
     /// event). No-ops if no file is open or <paramref name="kind"/> already matches.
+    ///
+    /// The position carries across: whatever the outgoing document has selected, as a byte range
+    /// of the input (<see cref="IByteRangeNavigable"/>), is revealed in the incoming one - unless
+    /// edits the user chose not to save are still showing, since their offsets describe text that
+    /// is about to be thrown away.
     /// </summary>
-    public async Task SwitchViewAsync(FileTypeDetector.FileKind kind)
+    public Task SwitchViewAsync(FileTypeDetector.FileKind kind) => SwitchViewAsync(kind, reveal: null);
+
+    /// <param name="reveal">What to reveal in the new view instead of carrying the outgoing
+    /// document's selection across.</param>
+    private async Task SwitchViewAsync(FileTypeDetector.FileKind kind, ByteRange? reveal)
     {
         if (this.ownedOrigins.Count == 0 || kind == currentKind)
             return;
@@ -737,7 +752,12 @@ public sealed class MainWindowViewModel : ObservableObject
         FindBarResetRequested?.Invoke();
         StatusText = $"Indexing {path}…";
 
+        var location = reveal ?? (HasUnsavedChanges ? null : (CurrentDocument as IByteRangeNavigable)?.SelectedByteRange);
+
         await LoadAndPublishAsync(kind, origin, requestId, addToRecents: false);
+
+        if (location is { } range && openRequest.IsCurrent(requestId) && CurrentDocument is IByteRangeNavigable navigable)
+            await navigable.RevealByteRangeAsync(range);
     }
 
     /// <summary>

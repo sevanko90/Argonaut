@@ -50,8 +50,12 @@ public sealed class FileByteOrigin : IByteOrigin
         return new MMapFile(this.path, offset, length);
     }
 
+    public KeptIndexes KeptIndexes { get; } = new();
+
     public void Dispose()
     {
+        KeptIndexes.Clear();
+
         // Nothing to release: the file is the user's, and every source handed out is owned and
         // released by whoever asked for it.
     }

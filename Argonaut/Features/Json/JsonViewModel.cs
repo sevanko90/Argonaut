@@ -27,7 +27,7 @@ namespace Argonaut.Features.Json;
 /// nothing holds a record per token, and the tree can be shown before indexing has got anywhere.
 /// Selection, reveals and path segments are byte offsets - the start of the row they name.
 /// </summary>
-public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
+public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable, IByteRangeNavigable
 {
     /// <summary>How often a still-indexing document tells its surface there is more to show.</summary>
     private static readonly TimeSpan GrowthInterval = TimeSpan.FromMilliseconds(500);
@@ -256,6 +256,72 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
 
     /// <summary>The view has shown <see cref="PendingReveal"/>.</summary>
     public void ClearPendingReveal() => PendingReveal = null;
+
+    /// <summary>
+    /// The selected node's own bytes, relative to the input rather than to this document's
+    /// source (an NDJSON line's tree is offset by its line start): a string with its quotes, a
+    /// container bracket to bracket, a scalar as written. The property name is not part of it -
+    /// the node is the value - and a closing row stands for the container it closes. A container
+    /// whose end is not known cheaply is only a position (see <see cref="KnownEnd"/>).
+    /// </summary>
+    public ByteRange? SelectedByteRange
+    {
+        get
+        {
+            if (SelectedRow is not { } row || session is not { } current || reader is null)
+                return null;
+
+            var node = row.Node;
+            long start = ScanTarget.Offset + node.ValueStart;
+            return KnownEnd(current.Index.Structure, node) is { } end
+                ? new ByteRange(start, end - node.ValueStart)
+                : ByteRange.At(start);
+        }
+    }
+
+    /// <summary>
+    /// Where <paramref name="node"/> ends, when that costs a bounded read: a scalar's recorded end,
+    /// a recorded container's end once it has closed, or - for a container the scan has gone far
+    /// enough past to have recorded were it large - a scan of fewer than
+    /// <see cref="SparseContainerIndex.PromotionBytes"/>. Null for a container still open, or one
+    /// the scan has not reached, whose end could be gigabytes away.
+    /// </summary>
+    private long? KnownEnd(SparseContainerIndex structure, TreeNode node)
+    {
+        if (!node.IsContainer)
+            return node.ValueEnd;
+
+        int record = structure.FindContainerStartingAt(node.ValueStart);
+        if (record >= 0)
+            return structure.GetContainer(record).End is var end and >= 0 ? end : null;
+
+        bool small = structure.IsComplete || node.ValueStart + structure.PromotionBytes <= structure.ScannedTo;
+        return small ? reader!.SkipValue(node.ValueStart) : null;
+    }
+
+    /// <summary>
+    /// Selects the row <paramref name="range"/> starts in, exactly as a search hit there would:
+    /// bytes between nodes (a property name, punctuation) resolve to the value they lead up to,
+    /// and a closing bracket to its container's closing row. A range outside this document's
+    /// bytes (another line of an NDJSON file) reveals nothing.
+    /// </summary>
+    public Task RevealByteRangeAsync(ByteRange range)
+    {
+        long offset = range.Offset - ScanTarget.Offset;
+        if (session is null || IsDisposed || offset < 0 || (ScanTarget.Length >= 0 && offset > ScanTarget.Length))
+            return Task.CompletedTask;
+
+        Reveal(offset);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Asks the shell to show the selected node in the raw text view, through
+    /// <see cref="RawJumpService"/> - the view model never learns the shell exists.</summary>
+    public void ShowSelectionInText()
+    {
+        if (SelectedByteRange is { } range)
+            RawJumpService.Request(range);
+    }
 
     /// <summary>
     /// The view's selection moved to <paramref name="row"/>: works out its JSONPath and its

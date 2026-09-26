@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Collections;
 using Argonaut.Engine.Indexing;
 using Argonaut.Engine.Progress;
 
@@ -25,6 +26,36 @@ public readonly record struct RawRowInfo(long Start, long End, bool IsSoftWrappe
 /// containing the anchor row.
 /// </summary>
 public readonly record struct RawRowAnchor(long PackedOffset, int LineNumber);
+
+/// <summary>
+/// A finished scan's anchors with nothing bound to them - no source, no scan - which is what lets
+/// them outlive the session that built them (see <see cref="KeptIndexes"/>) and be bound again to
+/// the next session's source by <see cref="RawSegmentIndex.Reopen"/>. About 16 bytes per
+/// <see cref="RawSegmentIndex.AnchorStride"/> rows.
+/// </summary>
+public sealed class RawRowAnchors
+{
+    internal RawRowAnchors(SegmentedAppendLog<RawRowAnchor> log, int rowCount, int wrapWidth, long length)
+    {
+        Log = log;
+        RowCount = rowCount;
+        WrapWidth = wrapWidth;
+        Length = length;
+    }
+
+    internal SegmentedAppendLog<RawRowAnchor> Log { get; }
+
+    public int RowCount { get; }
+
+    public int WrapWidth { get; }
+
+    /// <summary>How many bytes the scan covered - all of them, since only a finished scan is kept.</summary>
+    public long Length { get; }
+
+    /// <summary>What these are kept under on an origin: one entry per wrap width, since each width
+    /// is a different set of rows.</summary>
+    public static object KeyFor(int wrapWidth) => (typeof(RawRowAnchors), wrapWidth);
+}
 
 /// <summary>
 /// Sparse index for the raw viewer: the file is segmented into display rows ("segments") that
@@ -71,6 +102,38 @@ public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IBackgro
         this.source = source;
         WrapWidth = wrapWidth;
     }
+
+    private RawSegmentIndex(IByteSource source, RawRowAnchors anchors)
+        : base(anchors.Log)
+    {
+        this.source = source;
+        WrapWidth = anchors.WrapWidth;
+        this.publishedRowCount = anchors.RowCount;
+    }
+
+    /// <summary>
+    /// An index over <paramref name="source"/> built from anchors a finished scan of the same
+    /// bytes left behind: complete at once, no scan. The caller vouches that the bytes are the
+    /// same (a <see cref="ByteOriginVersion"/> match); the length is checked here as well, because
+    /// a row walk past the end of a shorter source would read out of bounds.
+    /// </summary>
+    public static RawSegmentIndex Reopen(IByteSource source, RawRowAnchors anchors)
+    {
+        if (source.AvailableLength != anchors.Length || !source.LengthSettled)
+            throw new ArgumentException("The anchors were built over different bytes.", nameof(anchors));
+
+        return new RawSegmentIndex(source, anchors);
+    }
+
+    /// <summary>
+    /// This index's anchors, detached from its source so they can be kept past this session -
+    /// or null unless the scan ran to the end. A cancelled or failed scan covers only part of the
+    /// bytes, and anchors for part of a file would reopen as the whole of it.
+    /// </summary>
+    public RawRowAnchors? DetachAnchors() =>
+        IndexingTask.IsCompletedSuccessfully && Failure is null && this.source.LengthSettled
+            ? new RawRowAnchors(this.items, RowCount, WrapWidth, this.source.AvailableLength)
+            : null;
 
     public int WrapWidth { get; }
 

@@ -196,7 +196,7 @@ would have turned a documented exception into a pattern.
 
 ### Chosen — capability interfaces
 
-`IPathNavigable` / `IByteOffsetNavigable`, opted into by the documents that can honour them. The
+`IPathNavigable` / `IByteRangeNavigable`, opted into by the documents that can honour them. The
 shell asks "can this document do the thing", not "what is this document". It also lets
 `JumpToRawOffsetAsync` drop its match, taking the shell from one concrete-type match to zero.
 

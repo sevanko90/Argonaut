@@ -321,6 +321,8 @@ public class RawTextSurface : RowSurface
         if (this.viewModel is null || rowCount == 0 || height <= 0)
         {
             RealizedRowRange = (0, -1);
+            if (this.viewModel is not null)
+                this.viewModel.ViewportRows = null;
             this.layouts.Clear();
             return;
         }
@@ -331,6 +333,7 @@ public class RawTextSurface : RowSurface
         int firstRow = Math.Clamp((int)(scrollTop / RowHeight), 0, rowCount - 1);
         int lastRow = Math.Clamp((int)Math.Ceiling((scrollTop + height) / RowHeight) - 1, firstRow, rowCount - 1);
         RealizedRowRange = (firstRow, lastRow);
+        this.viewModel.ViewportRows = RealizedRowRange;
 
         for (int rowIndex = firstRow; rowIndex <= lastRow; rowIndex++)
         {

@@ -58,7 +58,8 @@ them). Keep this in sync when the ownership chain changes.
 - Consequently the shell never reaches into a document view model **by concrete type**. Where it
   needs a behaviour only some documents can honour, it asks for an opt-in capability interface
   the document declares — `IPathNavigable` (reveal a JSONPath; `JsonViewModel`) and
-  `IByteOffsetNavigable` (reveal a byte offset; `RawViewModel`), both in `Shell/`. These stay
+  `IByteRangeNavigable` (report and reveal a byte range of the input; `RawViewModel`,
+  `JsonViewModel`, `NdJsonViewModel`), both in `Ui/Documents/Navigation`. These stay
   *off* `IDocumentViewModel`, whose job is the surface every document genuinely shares, but a
   new view that can honour one implements it with no shell edit. Toolbar-driven state is passed
   *down* at construction instead: the owning document view model builds its
@@ -136,21 +137,30 @@ them). Keep this in sync when the ownership chain changes.
   its "Line N" location is a clickable link — in the banner (`MainWindow.axaml`'s
   `JumpToFailureLineButton`) and in `IncompatibleView`'s location panel alike — that calls
   `MainWindowViewModel.JumpToRawOffsetAsync(byteOffset)`: switches to the raw viewer (if
-  not already showing it) via `SwitchViewAsync`, then asks `CurrentDocument` for the
-  `IByteOffsetNavigable` capability — a query, not a type test, because "jump to a byte offset"
-  is meaningful for exactly one view today and so has no place on `IDocumentViewModel` — and calls
-  `JumpToByteOffsetAsync`, which resolves the offset to a display row via the
-  existing `RawOffsetRowResolver` (waiting out an in-progress scan if needed - the same machinery
-  `RawSearchNavigator` uses for a search reveal) and selects it. A resolve that outlives the
-  document (closed/switched away mid-wait) surfaces as a catchable `ObjectDisposedException`
-  from the now-unmapped file, not a crash - `JumpToByteOffsetAsync` swallows it, since there is
-  nothing left to reveal.
-- A JSON row whose value was display-truncated (see `MaxDisplayTextLength` above) ends in a
-  "view in raw" link run carrying the value's file offset (`ViewInRawLink`, from
-  `JsonTreePainter`); `JsonView` handles the click by calling `RawJumpService.Request(byteOffset)` -
-  the same view-to-shell decoupling `ToastService` uses, so `JsonView` never needs a reference
-  back to `MainWindowViewModel`. `MainWindow` is the sole subscriber and forwards straight into
-  `JumpToRawOffsetAsync`.
+  not already showing it) and reveals that offset there, through the view switch below.
+- **A view switch carries the position across.** `SwitchViewAsync` - what the view switcher
+  calls - asks the outgoing document for the `IByteRangeNavigable` capability (a query, not a
+  type test) and reads its `SelectedByteRange`: the JSON view's selected node (a string with its
+  quotes, a container bracket to bracket, never the property name; a closing row stands for its
+  container), NDJSON's nested node or selected line, the raw view's selection or caret. File
+  offsets are the one coordinate every view of the same input shares, so a nested NDJSON line's
+  tree adds its `ScanTarget.Offset` going out and subtracts it coming in. Once the incoming
+  document is published it is asked to `RevealByteRangeAsync` that range: the raw view selects it
+  with the caret at its start (waiting for its scan to cover the whole range first, since a caret
+  snaps against indexed rows); the JSON view reveals the range's start exactly as a search hit;
+  NDJSON reveals it as a search hit too. A JSON container whose end is not cheap to know - still
+  open, or not yet reached by the index, so possibly gigabytes long - goes out as a position
+  only, never a scan on the UI thread. Nothing is carried while unsaved edits the user chose to
+  discard are still on screen - their offsets describe text the new view never shows. A resolve
+  that outlives the document surfaces as a catchable `ObjectDisposedException` (raw) or a
+  `TearingDown` cancellation (JSON), both swallowed.
+- **Showing one node in the text view** is that switch with the range picked for the user. 
+  `JsonViewModel.ShowSelectionInText` does it for the selected node, and a display-truncated value (see
+  `MaxDisplayTextLength` above) ends in a "view in raw" link (`ViewInRawLink`, from
+  `JsonTreePainter`); both raise `RawJumpService.Request(range)` - the same view-to-shell
+  decoupling `ToastService` uses, so `JsonView` never needs a reference back to
+  `MainWindowViewModel`. `MainWindow` is the sole subscriber and forwards straight into
+  `RevealInTextViewAsync`, which switches with that range in place of the carried selection.
 
 ## Views ↔ view models
 
@@ -225,6 +235,17 @@ The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLeng
   array's bytes as a table, or one search chunk. Implemented by `FileByteOrigin` (holds no
   handle; every `Open` is a new `MMapFile`) and `MemoryByteOrigin` (a paste). It lives as long as
   the open input and is owned by the shell (above).
+- **An origin also keeps finished indexes that are cheap to hold** (`IByteOrigin.KeptIndexes`,
+  cleared on dispose), so a view closed and reopened over the same input - a switch to the text
+  view and back, a wrap width tried and undone - skips its scan. Today that is only the raw
+  view's row anchors (`RawRowAnchors`, about 16 bytes per 64 rows, one entry per wrap width):
+  `RawViewModel` keeps them when a scan runs to the end, and `RawIndexSession` builds the next
+  index from them with `RawSegmentIndex.Reopen`, sharing the finished log rather than copying it.
+  What is kept holds no source - the session that built it releases its source as usual, and the
+  next one binds the records to its own. Every entry is stamped with the `ByteOriginVersion` it
+  was built at (length, plus last-write time for a file) and is dropped rather than returned once
+  that no longer matches: a file edited by another program or replaced by a save is scanned
+  again. The JSON view's sparse index is not kept.
 - **`IByteSource` (`Engine/Bytes/IByteSource.cs`) is one session's reader.** Every consumer is
   typed to it. Implemented by `MMapFile`, `RawPieceTable` (a piece table over (mapping,
   scratch), which is why a span can come back short) and `MemoryByteSource`, the in-memory

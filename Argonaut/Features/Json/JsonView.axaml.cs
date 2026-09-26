@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel;
+using Argonaut.Engine.Bytes;
 using Argonaut.Features.Json.Hints;
 using Argonaut.Features.Json.Tree;
 using Argonaut.Ui.Documents.Navigation;
@@ -158,7 +159,8 @@ public partial class JsonView : UserControl
         switch (e.Link)
         {
             case ViewInRawLink raw:
-                RawJumpService.Request(raw.Offset);
+                // The link's offset is in this document's bytes; an NDJSON line's start puts it in the file's.
+                RawJumpService.Request(ByteRange.At((subscribedViewModel?.ScanTarget.Offset ?? 0) + raw.Offset));
                 break;
             case ViewAsTableLink table:
                 subscribedViewModel?.RequestArrayTable(table.ArrayStart);

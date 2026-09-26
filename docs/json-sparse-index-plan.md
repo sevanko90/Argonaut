@@ -185,12 +185,30 @@ The existing dense index stays available to diff until this is built, so diff is
 Each step lands on its own and leaves the app working. Tick a step when it is merged into the
 branch, and note under it anything the next step needs to know.
 
-Status: not started. Branch: `plan/json-sparse-index`.
+Status: step 2 in progress. Branch: `plan/json-sparse-index`.
 
-1. [ ] **Benchmarks first.** A BenchmarkDotNet suite over three shapes - a token-dense array, deeply
+1. [x] **Benchmarks first.** A BenchmarkDotNet suite over three shapes - a token-dense array, deeply
    nested objects, a large array of small records - measuring index bytes per file byte, build time,
    time to first row, seek latency and backward-page latency. Run against the current index to fix
    the baseline.
+
+   `JsonTreeIndexBuildBenchmarks` and `JsonTreeNavigationBenchmarks` over `JsonShapeCorpus` (64 MiB,
+   compact). Run: `dotnet run -c Release --project Argonaut.Tests -- --filter "*JsonTree*" --join`.
+   Baseline for the dense index, Apple M5, .NET 10:
+
+   | Shape | Index / file | Full build | First screen | Seek to middle | Page back |
+   |---|---|---|---|---|---|
+   | TokenDenseArray | 6.17x | 295 ms (217 MB/s) | 1.0 ms | 8.6 ms, not reached | 1.9 us |
+   | DeepNesting | 4.01x | 226 ms (283 MB/s) | 1.3 ms | 2.1 ms, not reached | 2.1 us |
+   | RecordArray | 2.74x | 150 ms (426 MB/s) | 1.3 ms | 7.3 ms, not reached | 2.4 us |
+
+   - Seek resolves the token but the tree cannot show it: the middle of a large root array sits past
+     `MaxDisplayedChildrenPerContainer`, so `FindVisiblePosition` returns null on every shape. The
+     sparse surface has to *reach* the target, not only match the time.
+   - Page back is cheap because the rows are materialised - but "fully expanded" is capped at
+     10,002 / 690,002 / 140,002 rows of the 17M / 11M / 7.7M tokens.
+   - Build throughput is the other headline: 217-426 MB/s is 10-20 s for a 4 GB file. The
+     structural scanner is expected to beat it by several times.
 2. [ ] **Structural scanner** in `Features/Json/Indexing`, with no Avalonia reference: stage-1 masks,
    subtree skip, and a validating mode. Tested against `Utf8JsonReader` on a corpus including
    escapes, surrogates, strings containing brackets and quotes across chunk boundaries, and

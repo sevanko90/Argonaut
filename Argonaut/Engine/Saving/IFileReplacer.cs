@@ -11,7 +11,7 @@ namespace Argonaut.Engine.Saving;
 /// by platform, and the Mac App Store sandbox forbids the obvious version outright. The writer
 /// never touches the file system itself; it writes to <see cref="StagedFile.Content"/>.
 ///
-/// See docs/save-plan.md for what every implementation must get right.
+/// See "Saving" in docs/architecture.md for what every implementation must get right.
 /// </summary>
 public interface IFileReplacer
 {

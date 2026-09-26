@@ -309,8 +309,10 @@ The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLeng
   `MaxAlignableArrayElements` is compared in place with a bounded look-ahead, and past a record
   budget ends in one range record. Records hold nodes by offset (`JsonDiffNode`: row start and
   value start) and read children through `JsonDiffDocument`; the worker and the view each hold
-  their own `JsonDiffDocument`, since the readers are not shared across threads. See
-  docs/json-diff-merged-tree-plan.md.
+  their own `JsonDiffDocument`, since the readers are not shared across threads. A move whose
+  content changed is paired by similarity after the descent and descended then, so its children
+  sit after the descent's records in the log (`FirstChild`/`ChildrenEnd`), anchored where it is;
+  `MainRecordCount` marks where the descent's own records end.
 - **The diff draws on the tree surface.** `JsonDiffTree` is an `ITreeRowSource` whose cursor
   (`JsonDiffCursor`) walks the record log in merged order and, inside a record's regions - a
   run's pairs, a removed or added node's children, a range's sides - hands over to a
@@ -478,9 +480,22 @@ The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLeng
 - Only code physically on a background thread marshals back, via `Dispatcher.UIThread.Post`
   (fire-and-forget), never `InvokeAsync`.
 
-## Known open item
+## Saving
 
-- Closing a multi-GB file has a small lag: `MMapFile.Dispose` unmaps a fully-resident view
-  (~43ms/480MB, so ~400ms at 4.5GB) synchronously on the UI thread. Not yet moved off-thread;
-  doing so needs a synchronous "release visible items" phase before the swap plus a background
-  unmap, and making the shell the sole disposal owner to avoid a race with the view's detach.
+The raw view's save (`RawViewModel.SaveAsync`) copies the document into a stage on the
+background, then on the UI thread unmaps, swaps through an `IFileReplacer` and reopens - see
+CLAUDE.md for why every reader of the file is let go of first. `WindowsFileReplacer`,
+`UnixFileReplacer` and `MacFileReplacer` implement the swap over the shared `SiblingFileReplacer`,
+which stages beside the file, and every implementation must:
+
+- **Stage on the destination's volume**, beside it or in a directory the OS guarantees is on it -
+  never `Path.GetTempPath()`, or the swap is not atomic.
+- **Be durable before the swap.** `Seal()` flushes to stable storage - on macOS `F_FULLFSYNC`, not
+  plain `fsync` - on the background copy, so `Commit()` is only the swap.
+- **Leave the destination untouched unless the commit succeeded.** `RawViewModel` depends on it:
+  a failed commit remaps the original and the edits carry on over it.
+- **Replace a symlink's target, not the link.** Hard links are broken by any rename-based save;
+  accepted.
+- **Fail before writing** when the volume lacks room for the whole new file.
+- **Never delete a stage that may be the only copy.** `KeepStagedContent()` is called when a
+  failed commit also left the original unreadable.

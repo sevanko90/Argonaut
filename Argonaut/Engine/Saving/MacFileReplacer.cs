@@ -8,7 +8,7 @@ namespace Argonaut.Engine.Saving;
 /// Saving on macOS outside the App Store sandbox: <see cref="UnixFileReplacer"/>, plus the one
 /// thing macOS needs for the content to be durable. Finder tags and other extended attributes are
 /// still lost to the rename; the <c>NSFileManager</c> replacer that would keep them is queued in
-/// docs/save-plan.md.
+/// docs/roadmap.md.
 /// </summary>
 [SupportedOSPlatform("macos")]
 public sealed class MacFileReplacer : UnixFileReplacer

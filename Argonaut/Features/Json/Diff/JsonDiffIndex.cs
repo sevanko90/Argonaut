@@ -24,9 +24,9 @@ public enum DiffStatus
 
 /// <summary>
 /// One decoded diff record - the unpacked, reader-facing shape of
-/// <see cref="JsonDiffIndex.PackedDiffRecord"/>. What each kind of record covers is laid out in
-/// docs/json-diff-merged-tree-plan.md: a record is a run of unchanged sibling pairs, a descended
-/// pair of containers, a changed or one-sided node, one end of a move, or a range given up on.
+/// <see cref="JsonDiffIndex.PackedDiffRecord"/>. A record is a run of unchanged sibling pairs, a
+/// descended pair of containers, a changed or one-sided node, one end of a move, or a range given
+/// up on; the parameters below say what each side of each covers.
 /// </summary>
 /// <param name="Index">This record's index in the diff log.</param>
 /// <param name="Left">The (first) node the record covers in the left document, or

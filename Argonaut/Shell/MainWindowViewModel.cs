@@ -1024,7 +1024,7 @@ public sealed class MainWindowViewModel : ObservableObject
     //
     // The document owns the save itself (ISaveableDocument); the shell owns what surrounds it -
     // where it goes, stopping search before the file is swapped, adopting a new origin after a
-    // Save As, and asking before anything would drop unsaved edits. See docs/save-plan.md.
+    // Save As, and asking before anything would drop unsaved edits. See "Saving" in docs/architecture.md.
 
     /// <summary>True when the current document is one that can be saved at all; drives whether the
     /// toolbar shows a Save button.</summary>

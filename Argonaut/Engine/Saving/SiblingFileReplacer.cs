@@ -18,7 +18,7 @@ namespace Argonaut.Engine.Saving;
 ///
 /// See <see cref="WindowsFileReplacer"/>, <see cref="UnixFileReplacer"/> and
 /// <see cref="MacFileReplacer"/>; <see cref="ForCurrentPlatform"/> picks one. None of them works
-/// under the Mac App Store sandbox, which forbids a file beside the original - docs/save-plan.md.
+/// under the Mac App Store sandbox, which forbids a file beside the original - docs/roadmap.md.
 ///
 /// A symlink is followed: the file it points at is replaced and the link is left alone. Hard links
 /// are broken by any rename-based save, and that is accepted.

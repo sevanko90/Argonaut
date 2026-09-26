@@ -154,8 +154,8 @@ them). Keep this in sync when the ownership chain changes.
   discard are still on screen - their offsets describe text the new view never shows. A resolve
   that outlives the document surfaces as a catchable `ObjectDisposedException` (raw) or a
   `TearingDown` cancellation (JSON), both swallowed.
-- **Showing one node in the text view** is that switch with the range picked for the user. 
-  `JsonViewModel.ShowSelectionInText` does it for the selected node, and a display-truncated value (see
+- **Showing one node in the text view** is that switch with the range picked for the user.  The
+  JSON view's node menu (right-click) has "Show in text view", and a display-truncated value (see
   `MaxDisplayTextLength` above) ends in a "view in raw" link (`ViewInRawLink`, from
   `JsonTreePainter`); both raise `RawJumpService.Request(range)` - the same view-to-shell
   decoupling `ToastService` uses, so `JsonView` never needs a reference back to

@@ -3,9 +3,12 @@ using Argonaut.Engine.Indexing.Trees;
 using Argonaut.Features.Json;
 using Argonaut.Features.Json.Schema;
 using Argonaut.Tests.Support;
+using Argonaut.Ui.Rows;
 using Argonaut.Ui.Tree;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless;
+using Avalonia.Input;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 
@@ -118,4 +121,27 @@ public sealed class JsonViewTests : IDisposable
 
         Assert.True(surface.PanViewportWidth < before - 100, "the schema gutter should take room from the rows");
     });
+
+    /// <summary>A right-click on a row selects its node and opens the node menu, instead of
+    /// copying the value outright.</summary>
+    [Fact]
+    public Task RightClickingARowSelectsItAndOpensTheNodeMenu() => WithView("""{"a":1,"b":[1,2],"c":"x"}""", async (window, vm, surface) =>
+    {
+        // The second row: "a": 1.
+        var point = surface.TranslatePoint(new Point(RowSurface.ContentPaddingX + 60, RowSurface.RowHeight * 1.5), window)!.Value;
+
+        window.MouseDown(point, MouseButton.Right);
+        window.MouseUp(point, MouseButton.Right);
+        await PumpAsync();
+
+        Assert.Equal("$.a", vm.SelectedPath);
+        Assert.Equal(["Copy value", "Copy JSONPath", "Show in text view"], OpenMenuHeaders(window));
+    });
+
+    /// <summary>The headers of every menu item on screen: an open flyout's items are realised in
+    /// a popup, which the headless platform hosts in the window's overlay layer.</summary>
+    private static string[] OpenMenuHeaders(Window window) =>
+        window.GetVisualDescendants().OfType<MenuItem>()
+            .Select(menuItem => menuItem.Header as string ?? string.Empty)
+            .ToArray();
 }

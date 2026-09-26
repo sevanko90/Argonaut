@@ -27,6 +27,7 @@ public partial class JsonView : UserControl
 {
     private JsonViewModel? subscribedViewModel;
     private MenuFlyout? hintFlyout;
+    private MenuFlyout? nodeMenu;
     private long hintFlyoutValueOffset = -1;
 
     private readonly RowScrollBars scrollBars;
@@ -46,8 +47,8 @@ public partial class JsonView : UserControl
         Surface.SizeChanged += OnSurfaceSizeChanged;
         scrollBars = new RowScrollBars(Surface, VerticalScrollBar, PanScrollBar);
 
-        // Right-click copies the row's value. The surface has already selected the row on the
-        // press, so the release copies what is now selected.
+        // Right-click opens the node menu. The surface has already selected the row on the
+        // press, so the menu acts on what is now selected.
         Surface.AddHandler(PointerReleasedEvent, OnSurfacePointerReleased, RoutingStrategies.Bubble, handledEventsToo: true);
     }
 
@@ -214,14 +215,38 @@ public partial class JsonView : UserControl
 
     private async void OnCopyValueClick(object? sender, RoutedEventArgs e) => await CopySelectedValueAsync();
 
-    private async void OnSurfacePointerReleased(object? sender, PointerReleasedEventArgs e)
+    /// <summary>
+    /// Right-click offers what can be done with the node under the pointer. The menu's items act
+    /// on the selection, as the footer's buttons do, and the press has already selected the row
+    /// clicked - a closing row stands for the container it closes.
+    /// </summary>
+    private void OnSurfacePointerReleased(object? sender, PointerReleasedEventArgs e)
     {
-        if (e.InitialPressMouseButton != MouseButton.Right)
+        if (e.InitialPressMouseButton != MouseButton.Right || Surface.SelectedRow is null)
             return;
 
         e.Handled = true;
-        await CopySelectedValueAsync();
+        (nodeMenu ??= BuildNodeMenu()).ShowAt(Surface, showAtPointer: true);
     }
+
+    private MenuFlyout BuildNodeMenu()
+    {
+        var menu = new MenuFlyout();
+        // Copy value first: it is what right-click did on its own, and still the likeliest want.
+        AddNodeMenuItem(menu, "Copy value", OnCopyValueClick);
+        AddNodeMenuItem(menu, "Copy JSONPath", OnCopyPathClick);
+        AddNodeMenuItem(menu, "Show in text view", OnShowInTextClick);
+        return menu;
+    }
+
+    private static void AddNodeMenuItem(MenuFlyout menu, string header, EventHandler<RoutedEventArgs> click)
+    {
+        var item = new MenuItem { Header = header };
+        item.Click += click;
+        menu.Items.Add(item);
+    }
+
+    private void OnShowInTextClick(object? sender, RoutedEventArgs e) => subscribedViewModel?.ShowSelectionInText();
 
     private async System.Threading.Tasks.Task CopySelectedValueAsync()
     {

@@ -185,7 +185,7 @@ The existing dense index stays available to diff until this is built, so diff is
 Each step lands on its own and leaves the app working. Tick a step when it is merged into the
 branch, and note under it anything the next step needs to know.
 
-Status: step 4 next. Branch: `plan/json-sparse-index`.
+Status: step 5 next. Branch: `plan/json-sparse-index`.
 
 1. [x] **Benchmarks first.** A BenchmarkDotNet suite over three shapes - a token-dense array, deeply
    nested objects, a large array of small records - measuring index bytes per file byte, build time,
@@ -303,12 +303,43 @@ Status: step 4 next. Branch: `plan/json-sparse-index`.
    records themselves are a few KB. That fixed cost matters for small documents - the NDJSON pane
    indexes one line at a time - so size the first segment down or skip the index below `T` when
    step 7 wires it in.
-4. [ ] **`ITreeRowCursor` and `JsonRowCursor`**: forward and backward over display rows with expand
+4. [x] **`ITreeRowCursor` and `JsonRowCursor`**: forward and backward over display rows with expand
    state, cross-checked against a walk of the dense index on the same corpus - the dense index is
    the test oracle. The test-only format gets its cursor here. Run it over
    `Fixtures/unicode-names-and-values.json` too, and step 7's painter the same way
    (`JsonUnicodeRenderingTests` is the dense tree's version): names and values in many scripts,
    emoji sequences, combining marks, invisible characters and `\u` escapes.
+
+   Built differently from the names above: the stepping logic is generic, so there is no
+   `ITreeRowCursor` interface and no `JsonRowCursor`. `TreeCursor` (in `Engine/Indexing/Trees`,
+   with `TreeRow`, `TreeNode` and `TreeExpandState`) walks any format through an
+   `ITreeFormatReader`, which only finds the next child, a container's first-child position, a
+   value's end and a close row's start. `JsonTreeReader` is JSON's; `SExpressionTreeFormat.Reader`
+   is the test format's, and XML will be the third. Tested forward, backward and by seek against
+   whole-document models for both formats with random expansion, on the Unicode fixture, and row
+   for row against `JsonVisibleRowCollection`.
+
+   - **Backward** finds the previous sibling from the nearest resume point and skips siblings
+     whole; it never walks rows. The cursor keeps the last 1,024 siblings a walk passed, which took
+     paging back through a flat array of numbers from 8.3 ms to 9 us a screen.
+   - **Row identity** is `TreeRow.Key`: the value's start, and whether it is the close row.
+   - **Still to handle when wiring the view**: a container still arriving reports its end as
+     `long.MaxValue` from `JsonTreeReader.SkipValue`, so rows after it are not reachable until
+     it closes.
+
+   `JsonTreeNavigationBenchmarks`, 64 MiB, fully expanded, seek then a screen of 50 rows / page
+   back 50 rows:
+
+   | Shape | Sparse seek | Dense seek | Sparse page back | Dense page back |
+   |---|---|---|---|---|
+   | TokenDenseArray | 364 us, reached | 8.6 ms, not reached | 9 us | 1.9 us |
+   | DeepNesting | 24 us, reached | 2.1 ms, not reached | 14 us | 2.1 us |
+   | RecordArray | 15 us, reached | 7.3 ms, not reached | 67 us | 2.4 us |
+
+   The dense page-back is a lookup into rows it already materialised (and capped); the sparse one
+   reads bytes. Both are far inside a frame. Sparse seek on a flat array is dominated by reading up
+   to 64 KB of tiny siblings one at a time from the checkpoint; counting commas over classifier
+   masks instead would cut it if it ever matters.
 5. [ ] **`Ui/RowSurface`**: extract the shared parts of `RawTextSurface`, with the raw view unchanged in
    behaviour.
 6. [ ] **`Ui/Tree/TreeSurface`** with styled-run painting, gutter providers, keyboard navigation,

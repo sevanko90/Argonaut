@@ -41,6 +41,11 @@ public sealed class TreeCursor
 
     private const int NotLookedUp = -2;
 
+    /// <summary>Sibling nodes kept from the last walk through a container - enough that paging
+    /// back through a flat array of tiny values reads each run of siblings once, not once per
+    /// row.</summary>
+    private const int SiblingCacheSize = 1024;
+
     private readonly SparseContainerIndex index;
     private readonly ITreeFormatReader reader;
     private readonly TreeExpandState expandState;
@@ -48,6 +53,15 @@ public sealed class TreeCursor
     // The containers enclosing the current row, outermost first, starting with the document
     // level. A close row's container is not among them: the close row sits beside its open row.
     private readonly List<Frame> frames = new();
+
+    // The last siblings a walk passed, for one container: ordinals siblingsFirstOrdinal onward.
+    // Nodes never change - the bytes do not - so nothing invalidates them.
+    // A ring: the sibling with ordinal o sits at (o % SiblingCacheSize), for o in
+    // [siblingsFirstOrdinal, siblingsFirstOrdinal + siblingsCount).
+    private readonly TreeNode[] siblings = new TreeNode[SiblingCacheSize];
+    private int siblingsCount;
+    private long siblingsContainer = long.MinValue;
+    private long siblingsFirstOrdinal;
 
     public TreeCursor(SparseContainerIndex index, ITreeFormatReader reader, TreeExpandState expandState)
     {
@@ -296,16 +310,33 @@ public sealed class TreeCursor
     }
 
     /// <summary>Child <paramref name="ordinal"/> of the frame at <paramref name="frameIndex"/>,
-    /// read from the nearest known point before it, skipping the children between whole.</summary>
+    /// read from the nearest known point before it, skipping the children between whole. The
+    /// siblings passed on the way are kept, so the next few earlier ordinals cost nothing.</summary>
     private TreeNode FindChild(int frameIndex, long ordinal)
     {
+        long container = frames[frameIndex].Node.ValueStart;
+        if (container == siblingsContainer && ordinal >= siblingsFirstOrdinal && ordinal < siblingsFirstOrdinal + siblingsCount)
+            return siblings[ordinal % SiblingCacheSize];
+
         var (position, at) = ResumeIn(frameIndex, ordinal);
         byte kind = frames[frameIndex].Node.FormatKind;
+        siblingsCount = 0;
+        siblingsContainer = container;
+        siblingsFirstOrdinal = at;
 
         while (true)
         {
             if (!reader.TryReadChild(kind, ref position, out var child, out _))
+            {
+                siblingsContainer = long.MinValue;
                 throw new System.InvalidOperationException($"Child {ordinal} not found; the container ended after {at}.");
+            }
+
+            siblings[at % SiblingCacheSize] = child;
+            if (siblingsCount == SiblingCacheSize)
+                siblingsFirstOrdinal++;
+            else
+                siblingsCount++;
 
             if (at == ordinal)
                 return child;

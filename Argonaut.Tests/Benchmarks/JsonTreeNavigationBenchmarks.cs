@@ -1,4 +1,5 @@
 using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Indexing.Trees;
 using Argonaut.Features.Json;
 using Argonaut.Features.Json.Indexing;
 using BenchmarkDotNet.Attributes;
@@ -32,6 +33,9 @@ public class JsonTreeNavigationBenchmarks
     private JsonVisibleRowCollection seekRows = null!;
     private JsonVisibleRowCollection expandedRows = null!;
     private int pagePosition;
+    private JsonSparseIndex sparse = null!;
+    private TreeCursor seekCursor = null!;
+    private TreeCursor pageCursor = null!;
 
     [GlobalSetup]
     public void Setup()
@@ -44,6 +48,15 @@ public class JsonTreeNavigationBenchmarks
 
         expandedRows = new JsonVisibleRowCollection(index, file, defaultExpandDepth: FullyExpanded);
         pagePosition = expandedRows.Count / 2;
+
+        sparse = JsonSparseIndex.StartIndexing(file);
+        sparse.IndexingTask.GetAwaiter().GetResult();
+
+        // Seeking reveals the target, so its ancestors are expanded - the sparse tree's
+        // equivalent of EnsureVisible, which costs it nothing.
+        seekCursor = new TreeCursor(sparse.Structure, new JsonTreeReader(file), new TreeExpandState(FullyExpanded));
+        pageCursor = new TreeCursor(sparse.Structure, new JsonTreeReader(file), new TreeExpandState(FullyExpanded));
+        pageCursor.SeekTo(file.AvailableLength / 2);
     }
 
     [GlobalCleanup]
@@ -79,6 +92,35 @@ public class JsonTreeNavigationBenchmarks
             _ = seekRows[row];
 
         return position;
+    }
+
+    /// <summary>Seek to the middle and step through a screen of rows. The rows are positions,
+    /// not decoded text - decoding a screen is the same cost for both trees and belongs to the
+    /// painter.</summary>
+    [Benchmark]
+    public long SparseIndex_SeekToMiddle()
+    {
+        seekCursor.SeekTo(file.AvailableLength / 2);
+        long reached = seekCursor.Current.Start;
+        for (int row = 1; row < ScreenRows && seekCursor.MoveNext(); row++)
+        {
+        }
+
+        return reached;
+    }
+
+    /// <summary>One screen further back each call through the fully expanded tree, wrapping at
+    /// the top. Unlike the dense tree, nothing is capped: the middle is the middle of the file.</summary>
+    [Benchmark]
+    public long SparseIndex_PageBackward()
+    {
+        for (int row = 0; row < ScreenRows; row++)
+        {
+            if (!pageCursor.MovePrevious())
+                pageCursor.MoveToEnd();
+        }
+
+        return pageCursor.Current.Start;
     }
 
     /// <summary>One screen further back each call, wrapping at the top, so every call realises

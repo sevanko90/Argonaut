@@ -182,34 +182,37 @@ The existing dense index stays available to diff until this is built, so diff is
 
 ## Order of work
 
-Each step lands on its own and leaves the app working.
+Each step lands on its own and leaves the app working. Tick a step when it is merged into the
+branch, and note under it anything the next step needs to know.
 
-1. **Benchmarks first.** A BenchmarkDotNet suite over three shapes - a token-dense array, deeply
+Status: not started. Branch: `plan/json-sparse-index`.
+
+1. [ ] **Benchmarks first.** A BenchmarkDotNet suite over three shapes - a token-dense array, deeply
    nested objects, a large array of small records - measuring index bytes per file byte, build time,
    time to first row, seek latency and backward-page latency. Run against the current index to fix
    the baseline.
-2. **Structural scanner** in `Features/Json/Indexing`, with no Avalonia reference: stage-1 masks,
+2. [ ] **Structural scanner** in `Features/Json/Indexing`, with no Avalonia reference: stage-1 masks,
    subtree skip, and a validating mode. Tested against `Utf8JsonReader` on a corpus including
    escapes, surrogates, strings containing brackets and quotes across chunk boundaries, and
    `GrowingByteSource`.
-3. **`SparseContainerIndex`** in `Engine/Indexing/Trees`, fed by the JSON scanner as an
+3. [ ] **`SparseContainerIndex`** in `Engine/Indexing/Trees`, fed by the JSON scanner as an
    `IBackgroundIndex`, alongside the existing index rather than replacing it. The test-only tree
    format drives it too, from the first commit.
-4. **`ITreeRowCursor` and `JsonRowCursor`**: forward and backward over display rows with expand
+4. [ ] **`ITreeRowCursor` and `JsonRowCursor`**: forward and backward over display rows with expand
    state, cross-checked against a walk of the dense index on the same corpus - the dense index is
    the test oracle. The test-only format gets its cursor here.
-5. **`Ui/RowSurface`**: extract the shared parts of `RawTextSurface`, with the raw view unchanged in
+5. [ ] **`Ui/RowSurface`**: extract the shared parts of `RawTextSurface`, with the raw view unchanged in
    behaviour.
-6. **`Ui/Tree/TreeSurface`** with styled-run painting, gutter providers, keyboard navigation,
+6. [ ] **`Ui/Tree/TreeSurface`** with styled-run painting, gutter providers, keyboard navigation,
    selection and accessibility, exercised in tests through the test-only format.
-7. **JSON on the tree surface**: a JSON row painter, the schema gutter provider and hints, replacing
+7. [ ] **JSON on the tree surface**: a JSON row painter, the schema gutter provider and hints, replacing
    the tree `ListBox`.
-8. **Consumers** moved one at a time per the table above: paths and search, then array table and
+8. [ ] **Consumers** moved one at a time per the table above: paths and search, then array table and
    samplers.
-9. **Diff** on its own hash budget.
-10. **Remove `JsonStructureIndex`'s dense log** once nothing reads it, and the `ChildCap`/"show more"
+9. [ ] **Diff** on its own hash budget.
+10. [ ] **Remove `JsonStructureIndex`'s dense log** once nothing reads it, and the `ChildCap`/"show more"
     machinery with it.
-11. **Per-depth row counts**, if the estimated scrollbar proves not good enough in use.
+11. [ ] **Per-depth row counts**, if the estimated scrollbar proves not good enough in use.
 
 ## Open questions
 

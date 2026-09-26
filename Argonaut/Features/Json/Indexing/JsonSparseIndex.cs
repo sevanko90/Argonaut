@@ -22,8 +22,10 @@ namespace Argonaut.Features.Json.Indexing;
 /// until the next bracket or comma shows whether content came between. The same content test
 /// tells an empty container from one with a single child.
 ///
-/// It does not validate: brackets are counted, not matched. A document that does not close
-/// fails the scan; a subtler error is left to the parse that reads those bytes.
+/// It does not validate: brackets are counted, not matched. Validation runs beside it on its
+/// own thread (<see cref="JsonDocumentValidator"/>), holding no memory, and its failure - with the
+/// reader's message, line and column - is the one reported. A document that does not close fails
+/// the structural scan too, and that failure stands only if validation somehow passed.
 /// </summary>
 public sealed class JsonSparseIndex : IBackgroundIndex
 {
@@ -38,7 +40,8 @@ public sealed class JsonSparseIndex : IBackgroundIndex
 
     private readonly SparseContainerIndexBuilder builder;
     private volatile bool allItemsPublished;
-    private volatile IndexFailure? failure;
+    private volatile IndexFailure? structureFailure;
+    private volatile IndexFailure? validationFailure;
 
     // Scan state carried from block to block - see ProcessBlock.
     private long pendingSeparator = -1;
@@ -60,7 +63,9 @@ public sealed class JsonSparseIndex : IBackgroundIndex
 
     public bool AllItemsPublished => allItemsPublished;
 
-    public IndexFailure? Failure => failure;
+    /// <summary>Why the document failed: validation's answer when it has one. Set before
+    /// <see cref="AllItemsPublished"/>, which waits for both passes.</summary>
+    public IndexFailure? Failure => validationFailure ?? structureFailure;
 
     /// <summary>Recorded containers so far.</summary>
     public int ItemCount => Structure.ContainerCount;
@@ -77,11 +82,38 @@ public sealed class JsonSparseIndex : IBackgroundIndex
 
         // No token on Task.Run, for the reason AppendLogIndexBase.StartScan gives: a token
         // already cancelled would skip the body, and with it the finally that publishes.
-        index.IndexingTask = Task.Run(() => index.Run(source, progressReporter, cancellationToken));
+        index.IndexingTask = Task.Run(() => index.RunBothPasses(source, progressReporter, cancellationToken));
         return index;
     }
 
-    private void Run(IByteSource source, IProgressReporter? progressReporter, CancellationToken cancellationToken)
+    /// <summary>The structural scan and validation side by side. A validation failure stops the
+    /// scan - there is no point finishing an index of a document that is not JSON - while a
+    /// structural failure lets validation run on to find the precise error.</summary>
+    private async Task RunBothPasses(IByteSource source, IProgressReporter? progressReporter, CancellationToken cancellationToken)
+    {
+        using var stopping = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var structure = Task.Run(() => RunStructure(source, progressReporter, stopping.Token));
+        var validation = Task.Run(() =>
+        {
+            if (JsonDocumentValidator.FindFailure(source, stopping.Token) is { } found)
+            {
+                validationFailure = found;
+                stopping.Cancel();
+                throw new JsonDocumentInvalidException(found.Message);
+            }
+        });
+
+        try
+        {
+            await Task.WhenAll(structure, validation);
+        }
+        finally
+        {
+            allItemsPublished = true;
+        }
+    }
+
+    private void RunStructure(IByteSource source, IProgressReporter? progressReporter, CancellationToken cancellationToken)
     {
         long offset = 0;
         try
@@ -94,12 +126,8 @@ public sealed class JsonSparseIndex : IBackgroundIndex
         }
         catch (Exception ex)
         {
-            failure = new IndexFailure(ex.Message, offset, null, null, Structure.ContainerCount);
+            structureFailure = new IndexFailure(ex.Message, offset, null, null, Structure.ContainerCount);
             throw;
-        }
-        finally
-        {
-            allItemsPublished = true;
         }
     }
 

@@ -185,7 +185,7 @@ The existing dense index stays available to diff until this is built, so diff is
 Each step lands on its own and leaves the app working. Tick a step when it is merged into the
 branch, and note under it anything the next step needs to know.
 
-Status: step 3 next. Branch: `plan/json-sparse-index`.
+Status: step 4 next. Branch: `plan/json-sparse-index`.
 
 1. [x] **Benchmarks first.** A BenchmarkDotNet suite over three shapes - a token-dense array, deeply
    nested objects, a large array of small records - measuring index bytes per file byte, build time,
@@ -235,7 +235,7 @@ Status: step 3 next. Branch: `plan/json-sparse-index`.
      a checkpoint goes after a comma and a key is re-read from there.
    - Escapes are walked a backslash at a time, not with simdjson's carry-add; revisit only if a
      backslash-heavy corpus profiles as hot.
-3. [ ] **`SparseContainerIndex`** in `Engine/Indexing/Trees`, fed by the JSON scanner as an
+3. [x] **`SparseContainerIndex`** in `Engine/Indexing/Trees`, fed by the JSON scanner as an
    `IBackgroundIndex`, alongside the existing index rather than replacing it. The test-only tree
    format drives it too, from the first commit.
 
@@ -270,6 +270,39 @@ Status: step 3 next. Branch: `plan/json-sparse-index`.
    - **Sub-commits**: the generic index with the test-only format; the JSON event source over
      `Classify`; the comment-aware classifier; the validation pass; build benchmarks beside the
      dense ones.
+
+   Built as designed: `Engine/Indexing/Trees` (`SparseContainerIndex`, `SparseContainerIndexBuilder`,
+   `TreeContainer`, `TreeCheckpoint`, `TreeResumePoint`), `JsonBlockClassifier` (vector path, and
+   a comment-aware scalar path it switches to for good at the first comment), `JsonSparseIndex`,
+   `JsonDocumentValidator`, `JsonFailureLocation` (shared with the dense index). Tested through
+   `Support/SExpressionTreeFormat` against a whole-document model, and for JSON against a
+   `Utf8JsonReader` model with and without comments and trailing commas, over whole, split and
+   still-arriving sources.
+
+   Learned on the way:
+   - **Checkpoint eligibility is by position** (past `start + T`), not by whether the container
+     is recorded yet: promotion also happens at `Advance`, whose timing follows the source's buffer
+     boundaries, and the same bytes must give the same index.
+   - **A parent's checkpoint can sit exactly at a child container's start**, so "inside a
+     container" means strictly after its start, in both resume searches.
+   - **The validator gathers across piece boundaries** into a pooled buffer, since
+     `Utf8JsonReader` cannot resume inside a token cut by one. The dense index still cannot read a
+     split source; it never gets one today.
+   - **`AllItemsPublished` waits for validation**, so a failure is always visible before it.
+     `Structure.IsComplete` says the structure is done, which is sooner.
+
+   Measured on the benchmark corpus (64 MiB):
+
+   | Shape | Structure only | With validation | Dense build | Index / file |
+   |---|---|---|---|---|
+   | TokenDenseArray | 66 ms | 147 ms | 295 ms | 0.009x |
+   | DeepNesting | 53 ms | 142 ms | 226 ms | 0.009x |
+   | RecordArray | 40 ms | 111 ms | 150 ms | 0.009x |
+
+   The 0.009x is almost all the two logs' first `SegmentedAppendLog` segments (~580 KB); the
+   records themselves are a few KB. That fixed cost matters for small documents - the NDJSON pane
+   indexes one line at a time - so size the first segment down or skip the index below `T` when
+   step 7 wires it in.
 4. [ ] **`ITreeRowCursor` and `JsonRowCursor`**: forward and backward over display rows with expand
    state, cross-checked against a walk of the dense index on the same corpus - the dense index is
    the test oracle. The test-only format gets its cursor here. Run it over

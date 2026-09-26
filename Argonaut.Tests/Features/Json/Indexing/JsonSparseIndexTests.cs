@@ -126,6 +126,45 @@ public class JsonSparseIndexTests
         Assert.NotNull(index.Failure);
     }
 
+    [Theory]
+    [InlineData("[1 2]")]
+    [InlineData("{\"a\" 1}")]
+    [InlineData("[1, oops]")]
+    public void ABalancedButInvalidDocumentFailsWithTheReadersMessage(string text)
+    {
+        var index = JsonSparseIndex.StartIndexing(new MemoryByteSource(Encoding.UTF8.GetBytes(text)), promotionBytes: 1, checkpointBytes: 1);
+
+        Assert.Throws<JsonDocumentInvalidException>(() => index.IndexingTask.GetAwaiter().GetResult());
+        Assert.True(index.AllItemsPublished);
+        Assert.NotNull(index.Failure);
+        Assert.NotNull(index.Failure!.Line);
+        Assert.NotNull(index.Failure.Column);
+    }
+
+    [Fact]
+    public void AValidDocumentHasNoFailure()
+    {
+        var index = Build(new MemoryByteSource(RandomJson.LargeContainers(new Random(9), elements: 50, jsonc: true)));
+
+        Assert.Null(index.Failure);
+        Assert.True(index.AllItemsPublished);
+    }
+
+    [Fact]
+    public void StoppingTheScanCancelsBothPassesWithoutAFailure()
+    {
+        byte[] json = RandomJson.LargeContainers(new Random(10), elements: 50);
+        var growing = new GrowingByteSource(json, initiallyAvailable: json.Length / 2);
+        using var stopping = new CancellationTokenSource();
+        var index = JsonSparseIndex.StartIndexing(growing, Promotion, Checkpoint, cancellationToken: stopping.Token);
+
+        stopping.Cancel();
+
+        Assert.ThrowsAny<OperationCanceledException>(() => index.IndexingTask.GetAwaiter().GetResult());
+        Assert.True(index.AllItemsPublished);
+        Assert.Null(index.Failure);
+    }
+
     private sealed record ModelContainer(long Start, long End, int Parent, int Depth, long OrdinalInParent, List<long> ChildStarts, byte Kind);
 
     /// <summary>Every container in start order, with its children's starts - a property name's

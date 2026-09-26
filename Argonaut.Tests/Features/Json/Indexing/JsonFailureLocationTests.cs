@@ -17,7 +17,9 @@ namespace Argonaut.Tests.Features.Json.Indexing;
 /// </summary>
 public class JsonFailureLocationTests
 {
-    private static async Task<IndexFailure> FailureFor(string json)
+    /// <summary>The failure the dense token index records, or the sparse index's validation
+    /// pass - the two must send a reader to the same place.</summary>
+    private static async Task<IndexFailure> FailureFor(string json, bool sparse)
     {
         string path = Path.Combine(Path.GetTempPath(), $"bad-{Guid.NewGuid():N}.json");
         File.WriteAllBytes(path, Encoding.UTF8.GetBytes(json));
@@ -26,7 +28,7 @@ public class JsonFailureLocationTests
         try
         {
             file = new MMapFile(path);
-            var index = JsonStructureIndex.StartIndexing(file);
+            IBackgroundIndex index = sparse ? JsonSparseIndex.StartIndexing(file) : JsonStructureIndex.StartIndexing(file);
             try
             {
                 await index.IndexingTask;
@@ -50,8 +52,10 @@ public class JsonFailureLocationTests
     /// The reported case: a multi-line array of objects with a broken element. The offset must be
     /// the first character of the offending line, not the end of the line before it.
     /// </summary>
-    [Fact]
-    public async Task PointsAtTheStartOfTheOffendingLine()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PointsAtTheStartOfTheOffendingLine(bool sparse)
     {
         var json = new StringBuilder();
         json.Append("[\n");
@@ -61,7 +65,7 @@ public class JsonFailureLocationTests
         json.Append("]\n");
 
         string text = json.ToString();
-        var failure = await FailureFor(text);
+        var failure = await FailureFor(text, sparse);
 
         Assert.NotNull(failure.ByteOffset);
 
@@ -76,12 +80,14 @@ public class JsonFailureLocationTests
     /// value itself: the line is the unit a reader is looking for, and the property name is the
     /// thing that identifies which one broke.
     /// </summary>
-    [Fact]
-    public async Task PointsAtTheLineHoldingABadValue()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PointsAtTheLineHoldingABadValue(bool sparse)
     {
         const string text = "{\n  \"a\": 1,\n  \"b\": oops\n}\n";
 
-        var failure = await FailureFor(text);
+        var failure = await FailureFor(text, sparse);
 
         Assert.Equal(text.IndexOf("\"b\"", StringComparison.Ordinal), failure.ByteOffset!.Value);
     }
@@ -91,13 +97,15 @@ public class JsonFailureLocationTests
     /// reader to byte zero of a multi-GB document instead of to the problem. With no line break
     /// nearby, the precise position is kept.
     /// </summary>
-    [Fact]
-    public async Task OnASingleLongLine_KeepsThePrecisePositionRatherThanTheLineStart()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OnASingleLongLine_KeepsThePrecisePositionRatherThanTheLineStart(bool sparse)
     {
         string filler = string.Join(',', Enumerable.Range(0, 2000).Select(i => $"{{\"id\":{i}}}"));
         string text = $"[{filler},{{\"id\":oops}}]";
 
-        var failure = await FailureFor(text);
+        var failure = await FailureFor(text, sparse);
 
         // Nowhere near the start of the document, despite the whole thing being one line.
         Assert.True(failure.ByteOffset!.Value > text.Length - 200,
@@ -108,10 +116,12 @@ public class JsonFailureLocationTests
     /// Nothing valid was read at all, so there is no last good token to reason from and the
     /// document's start is the only honest answer.
     /// </summary>
-    [Fact]
-    public async Task ReportsTheStartWhenNothingParsed()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ReportsTheStartWhenNothingParsed(bool sparse)
     {
-        var failure = await FailureFor("oops");
+        var failure = await FailureFor("oops", sparse);
 
         Assert.Equal(0, failure.ByteOffset!.Value);
     }
@@ -120,10 +130,12 @@ public class JsonFailureLocationTests
     /// The line and column still come from the reader, and are still reported - the derived byte
     /// offset replaces neither.
     /// </summary>
-    [Fact]
-    public async Task StillReportsLineAndColumn()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StillReportsLineAndColumn(bool sparse)
     {
-        var failure = await FailureFor("[\n  1,\n  oops\n]\n");
+        var failure = await FailureFor("[\n  1,\n  oops\n]\n", sparse);
 
         Assert.NotNull(failure.Line);
         Assert.NotNull(failure.Column);

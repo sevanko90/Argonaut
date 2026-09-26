@@ -54,7 +54,7 @@ Argonaut was originally conceived as a viewer for large JSON files (hence the na
 #### Text view
 
 The fallback view - but not the poor relation that sounds like. It's built the same windowed way as
-everything else, so a multi-gigabyte log scrolls smoothly from the moment it opens. The index behind it is deliberately sparse (one anchor per 64 display rows), so unlike the JSON view it costs very little memory no matter how big the file is.
+everything else, so a multi-gigabyte log scrolls smoothly from the moment it opens. The index behind it is deliberately sparse (one anchor per 64 display rows), so it costs very little memory no matter how big the file is.
 
 - Smooth scrolling and immediate display at any file size
 - Force-wraps pathologically long lines (eg several GB of minified JSON) for a useful display
@@ -109,17 +109,17 @@ Argonaut is a .NET application built on [Avalonia](https://avaloniaui.net/), a c
 ... And Claude! Let's not forget the agent that did the work. I'll take the credit for telling it what to do, and how to do it, and knowing what good looks like. But I'm not going to lie, I didn't type a single line of this app myself. We really are living in the future.
 
 ### Memory use
-Argonaut doesn't "load" a file in the traditional sense - that's how it gets it speed. Instead of loading a multi GB file into RAM then trying to display it all (which takes time), Argonaut maintains a small viewable "window" into the larger file.
+Argonaut doesn't load a file into RAM. It memory-maps it and shows a small window onto it, backed by an index built in the background - the file is on screen as soon as there's enough index to drive the view.
 
-To power this view, Argonaut first needs to index the file so it can navigate it (it needs to know where lines start, so it knows where to go when the view wants to display line 5000). The indexing process runs in the background and the file displays as soon as there is enough index to drive the view.
+The indexes are small next to the file. Roughly, per GB of file:
 
-This works well for line-based files like raw text and CSV - the index is a relatively small size compared to the file.
+- **JSON:** under 1 MB
+- **Text:** about 2.5 MB
+- **CSV and NDJSON:** about 16 bytes per line - around 100 MB for typical rows
 
-For JSON though, things get a bit more interesting. The index needs to hold a lot more than just line start, it needs to hold the position of every token (array, property, etc) so the index size is related to the depth and complexity of the JSON rather than the file size. 
+Your OS may show a higher figure for Argonaut: pages of the file it has read count towards its memory, but that's the OS's file cache, and it's given back when something else needs it.
 
-It is possible (even likely) that the index for a complex JSON file could be bigger than the file itself! Argonaut may take more RAM to load a large file than other, slower viewers. This is the tradeoff for fast viewing of large files. I think it's worth it, but YMMV.
- 
-Pasted data is the one exception to the windowing: there's no file on disk to window into, so the pasted bytes are held in memory for as long as the document is open (plus its index, as above). That's the reason for the size ceiling on pasting - and why a genuinely big payload is better saved to a file first.
+Pasted data is the exception: with no file to map, the pasted bytes stay in memory while the document is open. That's why pasting has a size limit - save a big payload to a file first.
 
 ## Running the code
 

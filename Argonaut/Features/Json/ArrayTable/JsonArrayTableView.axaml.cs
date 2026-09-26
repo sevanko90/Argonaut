@@ -13,6 +13,8 @@ using Avalonia.Markup.Xaml.MarkupExtensions;
 using Avalonia.Media;
 using Avalonia.VisualTree;
 
+using Argonaut.Features.Json.Tree;
+
 namespace Argonaut.Features.Json.ArrayTable;
 
 /// <summary>
@@ -70,6 +72,7 @@ public partial class JsonArrayTableView : UserControl
         this.subscribedViewModel.PropertyChanged += OnViewModelPropertyChanged;
         RebuildColumns(this.subscribedViewModel);
         ShowDetail(this.subscribedViewModel.HasCellDetail);
+        DetailTree.Document = this.subscribedViewModel.CellDetail?.Tree;
     }
 
     /// <summary>
@@ -100,18 +103,6 @@ public partial class JsonArrayTableView : UserControl
     }
 
     private void OnCloseDetail(object? sender, RoutedEventArgs e) => this.subscribedViewModel?.CloseCellDetail();
-
-    private void OnDetailToggleExpandClick(object? sender, RoutedEventArgs e)
-    {
-        if (sender is Control { DataContext: JsonRow row })
-            this.subscribedViewModel?.CellDetail?.Rows?.ToggleExpand(row.Position);
-    }
-
-    private void OnDetailRowDoubleTapped(object? sender, TappedEventArgs e)
-    {
-        if ((e.Source as Visual)?.FindAncestorOfType<ListBoxItem>()?.DataContext is JsonRow row)
-            this.subscribedViewModel?.CellDetail?.Rows?.ToggleExpand(row.Position);
-    }
 
     /// <summary>
     /// Opens or closes the pane's grid column. Width lives here rather than in the view model:
@@ -147,6 +138,12 @@ public partial class JsonArrayTableView : UserControl
 
         if (e.PropertyName is null or nameof(JsonArrayTableViewModel.HasCellDetail))
             ShowDetail(vm.HasCellDetail);
+
+        if (e.PropertyName is null or nameof(JsonArrayTableViewModel.CellDetail))
+        {
+            DetailTree.Document = vm.CellDetail?.Tree;
+            JsonTreePalette.Apply(DetailTree, this);
+        }
     }
 
     private void RebuildColumns(JsonArrayTableViewModel vm)

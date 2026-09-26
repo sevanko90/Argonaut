@@ -3,13 +3,11 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:json="clr-namespace:Argonaut.Features.Json"
+             xmlns:tree="clr-namespace:Argonaut.Ui.Tree"
              xmlns:arrayTable="clr-namespace:Argonaut.Features.Json.ArrayTable"
              xmlns:csv="clr-namespace:Argonaut.Features.Csv"
              x:Class="Argonaut.Features.Json.ArrayTable.JsonArrayTableView"
              x:DataType="arrayTable:JsonArrayTableViewModel">
-    <UserControl.Resources>
-        <json:DepthToMarginConverter x:Key="DetailDepthToMargin" />
-    </UserControl.Resources>
 
     <!-- A TableView (Avalonia 12.1) rather than the hand-rolled ListBox grid CsvView still uses:
          it derives from ListBox, so the virtualizing panel and this document's lazily-realized
@@ -147,67 +145,19 @@
                                          FontFamily="{DynamicResource AppContentFontFamily}" />
                 </ScrollViewer>
 
-                <!-- The ordinary tree, rooted at this cell's token, so it virtualizes exactly as
-                     the JSON view does - a 2,199-item array opens instantly. -->
-                <ListBox Grid.Row="1"
-                         x:Name="DetailRows"
-                         IsVisible="{Binding CellDetail.IsTree}"
-                         ItemsSource="{Binding CellDetail.Rows}"
-                         SelectionMode="Single"
-                         DoubleTapped="OnDetailRowDoubleTapped"
-                         Background="Transparent"
-                         BorderThickness="0">
-                    <ListBox.Styles>
-                        <Style Selector="ListBoxItem">
-                            <Setter Property="Padding" Value="0" />
-                            <Setter Property="MinHeight" Value="22" />
-                        </Style>
-                    </ListBox.Styles>
-                    <ListBox.ItemTemplate>
-                        <DataTemplate x:DataType="json:JsonRow">
-                            <StackPanel Orientation="Horizontal"
-                                        Background="Transparent"
-                                        Margin="{Binding Depth, Converter={StaticResource DetailDepthToMargin}}">
-                                <TextBlock Text="{Binding ArrayIndex}"
-                                           IsVisible="{Binding ArrayIndex, Converter={x:Static json:IsNotNullConverter.Instance}}"
-                                           FontSize="9"
-                                           Foreground="{DynamicResource AppMutedTextBrush}"
-                                           FontFamily="{DynamicResource AppContentFontFamily}"
-                                           Width="26"
-                                           TextAlignment="Right"
-                                           Margin="0,0,2,0"
-                                           VerticalAlignment="Center" />
-                                <!-- Vector triangle for the same reason the JSON tree uses one: a
-                                     ▶/▼ character renders at different sizes per platform. -->
-                                <Button Click="OnDetailToggleExpandClick"
-                                        IsVisible="{Binding HasChildren}"
-                                        Background="Transparent"
-                                        BorderThickness="0"
-                                        Padding="0"
-                                        Width="20"
-                                        Height="22"
-                                        HorizontalContentAlignment="Center"
-                                        VerticalContentAlignment="Center">
-                                    <Path Data="{Binding IsExpanded, Converter={x:Static json:ExpandGlyphConverter.Instance}}"
-                                          Fill="{Binding $parent[Button].Foreground}"
-                                          Stretch="Uniform"
-                                          Width="7"
-                                          Height="7" />
-                                </Button>
-                                <TextBlock IsVisible="{Binding !HasChildren}" Width="20" />
-                                <TextBlock Text="{Binding Name, StringFormat='{}{0}: '}"
-                                           IsVisible="{Binding Name, Converter={x:Static json:IsNotNullConverter.Instance}}"
-                                           Foreground="{DynamicResource AppAccentBrush}"
-                                           VerticalAlignment="Center"
-                                           FontFamily="{DynamicResource AppContentFontFamily}" />
-                                <TextBlock Text="{Binding Value}"
-                                           TextWrapping="NoWrap"
-                                           VerticalAlignment="Center"
-                                           FontFamily="{DynamicResource AppContentFontFamily}" />
-                            </StackPanel>
-                        </DataTemplate>
-                    </ListBox.ItemTemplate>
-                </ListBox>
+                <!-- The cell's own tree, drawn by the same surface as the JSON view over just this
+                     cell's bytes, so it holds nothing beyond the rows on screen - a 2,199-item
+                     array opens instantly. -->
+                <tree:TreeSurface Grid.Row="1"
+                                  x:Name="DetailTree"
+                                  IsVisible="{Binding CellDetail.IsTree}"
+                                  Background="{DynamicResource AppWindowBackgroundBrush}"
+                                  FontFamily="{DynamicResource AppContentFontFamily}"
+                                  FontSize="{DynamicResource AppContentFontSize}"
+                                  Foreground="{DynamicResource AppTextBrush}"
+                                  GutterForeground="{DynamicResource AppMutedTextBrush}"
+                                  HighlightBrush="{DynamicResource AppSearchHighlightBrush}"
+                                  SelectionBrush="{DynamicResource AppAccentSurfaceBrush}" />
 
                 <TextBlock Grid.Row="2"
                            Text="Value truncated — open the file in the raw view to see all of it"

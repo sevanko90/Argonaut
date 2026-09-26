@@ -6,6 +6,8 @@ using Argonaut.Tests.Support;
 using Argonaut.Ui.Notifications;
 using Argonaut.Ui.TableGrid;
 
+using Argonaut.Ui.Tree;
+
 namespace Argonaut.Tests.Features.Json.ArrayTable;
 
 /// <summary>
@@ -589,8 +591,26 @@ public class JsonArrayTableViewModelTests
             return Task.CompletedTask;
         });
 
-    private static JsonRow[] DetailRows(JsonArrayCellDetail detail)
-        => Enumerable.Range(0, detail.Rows!.Count).Select(i => (JsonRow)detail.Rows[i]!).ToArray();
+    /// <summary>A row of the pane's tree as these tests read it.</summary>
+    private sealed record DetailRow(int Depth, string? Name, string Value, string? ArrayIndex);
+
+    /// <summary>Every row the pane's tree shows, top to bottom, read through its own cursor and
+    /// painter - exactly what its surface draws.</summary>
+    private static DetailRow[] DetailRows(JsonArrayCellDetail detail)
+    {
+        var rows = new List<DetailRow>();
+        var cursor = detail.Tree!.NewCursor();
+        for (bool more = cursor.MoveToStart(); more; more = cursor.MoveNext())
+        {
+            var runs = new List<TreeRun>();
+            detail.Tree.Painter.AppendRuns(cursor.Current, runs);
+            string? name = runs.FirstOrDefault(r => r.Style == TreeRunStyle.Name).Text is { } n ? n[..^2] : null;
+            string value = runs.First(r => r.Style is not (TreeRunStyle.Name or TreeRunStyle.Hint or TreeRunStyle.Link)).Text;
+            rows.Add(new DetailRow(cursor.Current.Depth, name, value, detail.Tree.Painter.Marker(cursor.Current)));
+        }
+
+        return rows.ToArray();
+    }
 
     [Fact]
     public Task ShowCell_OnAContainer_OpensItsOwnTreeRootedThere()
@@ -604,12 +624,11 @@ public class JsonArrayTableViewModelTests
 
             var rows = DetailRows(detail);
             // Rooted at the cell: the object itself, then its members - and indented from zero,
-            // not from however deep in the file it happens to sit.
+            // not from however deep in the file it happens to sit. The tree is over the cell's own
+            // bytes, so its root row has no name; the title says which cell it is.
             Assert.Equal(0, rows[0].Depth);
             Assert.Equal(1, rows[1].Depth);
-            // The root row keeps its own property name, so the pane says what it is showing
-            // before it shows the members.
-            Assert.Equal(["geometry", "type", "coordinates"], rows.Where(r => r.Name is not null).Select(r => r.Name));
+            Assert.Equal(["type", "coordinates"], rows.Where(r => r.Name is not null).Select(r => r.Name));
             return Task.CompletedTask;
         });
 
@@ -684,13 +703,14 @@ public class JsonArrayTableViewModelTests
             var document = new JsonArrayTableViewModel();
             await document.LoadAsync(path, 0, new FileInfo(path).Length, "$");
             document.ShowCell(0, 0);
-            var rows = document.CellDetail!.Rows!;
-            Assert.NotEmpty(rows);
+            var tree = document.CellDetail!.Tree!;
+            bool closed = false;
+            tree.Closing += (_, _) => closed = true;
 
-            // The pane's tree reads the session's index, so it must go before the session does.
+            // The pane's tree reads the file, so it must let go before the session does.
             document.Dispose();
 
-            Assert.Empty(rows);
+            Assert.True(closed);
         }
         finally
         {

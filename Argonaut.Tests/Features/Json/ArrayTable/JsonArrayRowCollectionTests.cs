@@ -24,7 +24,7 @@ public class JsonArrayRowCollectionTests
             using var session = LoadFromPath.StartArrayTable(path, 0, new FileInfo(path).Length);
             await session.IndexingTask;
 
-            using var rows = new JsonArrayRowCollection(session.Elements, session.Inner.Index, session.Inner.Bytes,
+            using var rows = new JsonArrayRowCollection(session.Elements, session.Reader, session.Text,
                 structure, RoutesFor(structure, mode), mode);
             assert(rows);
         }
@@ -56,7 +56,7 @@ public class JsonArrayRowCollectionTests
             using var session = LoadFromPath.StartArrayTable(path, 0, new FileInfo(path).Length);
             await session.IndexingTask;
 
-            using var rows = new JsonArrayRowCollection(session.Elements, session.Inner.Index, session.Inner.Bytes,
+            using var rows = new JsonArrayRowCollection(session.Elements, session.Reader, session.Text,
                 structure, routes, JsonArrayColumnMode.ByProperty);
             assert(rows);
         }

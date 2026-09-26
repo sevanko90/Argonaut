@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.ComponentModel;
 using Argonaut.Features.Json.Hints;
 using Argonaut.Features.Json.Tree;
@@ -65,30 +64,8 @@ public partial class JsonView : UserControl
 
     private void OnThemeChanged(object? sender, EventArgs e) => ApplyRunBrushes();
 
-    /// <summary>
-    /// The row palette, from the theme: the same brushes the row template used to bind, looked up
-    /// again whenever the theme changes. A run style with no brush here draws in the surface's
-    /// foreground.
-    /// </summary>
-    private void ApplyRunBrushes()
-    {
-        var brushes = new Dictionary<TreeRunStyle, IBrush>();
-        void Add(TreeRunStyle style, string key)
-        {
-            if (this.TryFindResource(key, ActualThemeVariant, out var found) && found is IBrush brush)
-                brushes[style] = brush;
-        }
-
-        Add(TreeRunStyle.Name, "AppAccentBrush");
-        Add(TreeRunStyle.String, "AppJsonStringBrush");
-        Add(TreeRunStyle.Number, "AppJsonNumberBrush");
-        Add(TreeRunStyle.Keyword, "AppJsonBoolBrush");
-        Add(TreeRunStyle.Literal, "AppJsonNullBrush");
-        Add(TreeRunStyle.Hint, "AppMutedTextBrush");
-        Add(TreeRunStyle.Link, "AppMutedTextBrush");
-        Add(TreeRunStyle.Comment, "AppMutedTextBrush");
-        Surface.RunBrushes = brushes;
-    }
+    /// <summary>The row palette, from the theme - again whenever the theme changes.</summary>
+    private void ApplyRunBrushes() => JsonTreePalette.Apply(Surface, this);
 
     private void OnDetachedFromVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
     {

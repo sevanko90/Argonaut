@@ -103,6 +103,33 @@ public sealed class SparseContainerIndex
         return -1;
     }
 
+    /// <summary>
+    /// How many of <paramref name="container"/>'s children are known to be complete: its child
+    /// count once it has closed, and while it is still open the ordinal at its latest checkpoint -
+    /// every child before a checkpoint has ended. What a view that grows with the scan, like a
+    /// table over an array, can safely show.
+    /// </summary>
+    public long KnownChildCount(int container)
+    {
+        var recorded = GetContainer(container);
+        if (!recorded.IsOpen)
+            return recorded.ChildCount;
+
+        // The latest checkpoints in the log are usually this container's own; any after them
+        // belong to the child it is in the middle of, and are passed over.
+        for (int i = checkpoints.Count - 1; i >= 0; i--)
+        {
+            var checkpoint = checkpoints.ItemRef(i);
+            if (checkpoint.Offset <= recorded.Start)
+                break;
+
+            if (checkpoint.Container == container)
+                return checkpoint.Ordinal;
+        }
+
+        return 0;
+    }
+
     /// <summary>The recorded container whose first byte is <paramref name="start"/>, or -1 if
     /// that container is not recorded (yet).</summary>
     public int FindContainerStartingAt(long start)

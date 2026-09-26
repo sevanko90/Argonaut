@@ -190,7 +190,7 @@ public class JsonArrayTableSessionTests
             await session.IndexingTask;
 
             Assert.Equal(3, session.Elements.ElementCount);
-            Assert.Equal(JsonTokenKind.StartArray, session.Inner.Index.GetToken(0).Kind);
+            Assert.Equal(0, session.Elements.Array!.Value.ValueStart);
         }
         finally
         {

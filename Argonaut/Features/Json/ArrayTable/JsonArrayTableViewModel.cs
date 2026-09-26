@@ -5,7 +5,6 @@ using System.Threading.Tasks;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Detection;
 using Argonaut.Engine.Indexing;
-using Argonaut.Features.Json.Indexing;
 using Argonaut.Ui.Documents;
 using Argonaut.Ui.Find;
 using Argonaut.Ui.Notifications;
@@ -42,7 +41,6 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
     private const int InitialElementTarget = 250;
 
     private JsonArrayTableSession? session;
-    private JsonRowFactory? cellText;
     private JsonArrayRowCollection? rows;
     private JsonArrayTableToolbarViewModel? toolbar;
     private TableStructure? structure;
@@ -93,8 +91,8 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
 
     /// <summary>
     /// The cell being shown in full beside the grid, or null when the pane is closed. Replaced by
-    /// each new cell shown and disposed with the document - it holds a tree over the session's
-    /// index, so it must not outlive it.
+    /// each new cell shown and disposed with the document - a container cell holds its own tree
+    /// over the file, so it must not outlive it.
     /// </summary>
     public JsonArrayCellDetail? CellDetail
     {
@@ -129,13 +127,11 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
         if (column >= this.structure.ColumnCount)
             return;
 
-        int token = this.rows.TokenForCell(row, column);
-        if (token < 0)
+        if (this.rows.NodeForCell(row, column) is not { } node)
             return;
 
         string path = column < this.headers.Count ? this.headers[column].Display : this.structure.Columns[column].Name;
-        CellDetail = JsonArrayCellDetail.ForToken(current.Inner.Index, current.Inner.Bytes, token,
-            $"{path} — row {row + 1:N0}");
+        CellDetail = JsonArrayCellDetail.ForNode(current, node, $"{path} — row {row + 1:N0}");
     }
 
     public void CloseCellDetail() => CellDetail = null;
@@ -237,7 +233,7 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
         progress.FinishWhen(session.IndexingTask);
 
         // A small initial batch so the first paint isn't an empty grid, and so there is a real
-        // sample to width the columns from; a short array completes the wait via MarkAllItemsPublished.
+        // sample to width the columns from; a short array completes the wait when its scan does.
         await session.Elements.WaitForElementCountAsync(InitialElementTarget);
         if (IsDisposed)
             return;
@@ -245,15 +241,11 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
         if (session.Failure is { } failure)
             IndexFailure = failure;
 
-        // The same builder the row collection renders cells with, so column widths are measured
-        // from the text that will actually be shown.
-        this.cellText = new JsonRowFactory(session.Inner.Index, session.Inner.Bytes, hintProviders: null);
-
         var discovered = Discover(session);
         Adopt(discovered);
         bool elementsAreObjects = discovered.SawObject;
 
-        this.rows = new JsonArrayRowCollection(session.Elements, session.Inner.Index, session.Inner.Bytes,
+        this.rows = new JsonArrayRowCollection(session.Elements, session.Reader, session.Text,
             discovered.Structure, this.routes, this.mode);
 
         // Built here rather than before the wait because it takes the answer discovery just
@@ -278,8 +270,8 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
         MonitorIndexing();
     }
 
-    /// <summary>The cell pane's tree reads the session's index, so it goes before the session
-    /// does - which is exactly what DisposeCore runs between.</summary>
+    /// <summary>The cell pane's tree reads the file, so it goes before the session releases it -
+    /// which is exactly what DisposeCore runs between.</summary>
     protected override void DisposeCore()
     {
         this.cellDetail?.Dispose();
@@ -340,9 +332,8 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
     }
 
     private DiscoveredColumns Discover(JsonArrayTableSession current)
-        => JsonArrayColumnDiscovery.FromSample(current.Inner.Index, current.Inner.Bytes, current.Elements,
+        => JsonArrayColumnDiscovery.FromSample(current.Reader, current.Text, current.Elements,
             Math.Min(current.Elements.ElementCount, InitialElementTarget),
-            this.cellText ?? throw new InvalidOperationException("The cell-text builder must exist before discovery."),
             this.openColumns, this.arrayColumns);
 
     private void Adopt(DiscoveredColumns discovered)
@@ -394,17 +385,12 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
     }
 
     /// <summary>
-    /// Generic "Column N" labels, widthed from the sampled elements' OWN token lengths bucketed
+    /// Generic "Column N" labels, widthed from the sampled elements' own rendered lengths bucketed
     /// by <c>i % columns</c> - here the element is exactly one cell, so its own length is the
-    /// right measure. No file read and no decoded text: <see cref="JsonTokenInfo.Length"/> is
-    /// unpacked O(1) from the token log, which is why re-widthing for a new N costs a walk over
-    /// the sample and needs no cache. (An array of objects reshaped this way measures 1 per
-    /// element - the brace - and lands on the minimum width, which is the honest result for
-    /// cells that show a container summary.)
+    /// right measure, and re-widthing for a new N costs a walk over the sample and needs no cache.
     /// </summary>
-    private TableStructure BuildReshapeStructure(JsonArrayTableSession current, int columns)
+    private static TableStructure BuildReshapeStructure(JsonArrayTableSession current, int columns)
     {
-        var index = current.Inner.Index;
         int sample = Math.Min(current.Elements.ElementCount, InitialElementTarget);
 
         var names = new string[columns];
@@ -417,26 +403,14 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
 
         for (int e = 0; e < sample; e++)
         {
-            int token = current.Elements.TokenForElement(e);
+            var element = current.Elements.ElementAt(e);
             int column = e % columns;
-            maxChars[column] = Math.Max(maxChars[column], RenderedLength(token, index.GetToken(token)));
+            int length = element.IsContainer
+                ? current.Text.ValueText(element).Length
+                : (int)Math.Min(int.MaxValue, element.ValueEnd - element.ValueStart);
+            maxChars[column] = Math.Max(maxChars[column], length);
         }
 
         return TableStructure.FromMaxChars(names, maxChars);
     }
-
-    /// <summary>
-    /// Characters the cell for this token will actually render. A scalar's raw token length is
-    /// that already (quotes included, which the cell shows), but a container's is the brace
-    /// alone - one character - while the cell shows a summary like <c>{ 6 members }</c>. Widthing
-    /// a column of nested objects from the brace is what left every container column at the
-    /// minimum width, trimmed to "{ 6 mem...", so containers are measured from the summary
-    /// itself. It is built here, for a bounded sample, and thrown away.
-    /// </summary>
-    private int RenderedLength(int tokenIndex, JsonTokenInfo token)
-        => IsContainer(token.Kind) && this.cellText is { } factory
-            ? factory.BuildContainerSummary(tokenIndex, token, expanded: false).Length
-            : token.Length;
-
-    private static bool IsContainer(JsonTokenKind kind) => kind is JsonTokenKind.StartObject or JsonTokenKind.StartArray;
 }

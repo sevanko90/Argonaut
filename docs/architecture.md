@@ -245,8 +245,9 @@ The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLeng
   never joined by disposal, avoiding a wait on the UI thread from the UI thread itself. `RawIndexSession` is the wrap-width-restartable variant, with
   two cancellation sources: `mappingCts` for the document's lifetime and `indexCts` (linked from
   it) for the index `RestartIndex` recycles; `JsonDiffSession` composes two
-  `IndexedSourceSession<JsonStructureIndex>`s; `JsonArrayTableSession` composes one of them with
-  the `JsonArrayElementIndex` derived from its token index. All four implement
+  `IndexedSourceSession<JsonStructureIndex>`s; `JsonArrayTableSession` wraps one
+  `IndexedSourceSession<JsonSparseIndex>` over the array's own byte range, with the readers and
+  `JsonArrayElements` the table reads it through. All four implement
   `IDocumentSession`, which
   `IndexedDocumentViewModel` (below) drives — the teardown pair (`TearingDown` + `RequestStop()`
   + `Dispose()`) plus the two members the status line is driven from, `IndexingTask` and
@@ -263,11 +264,9 @@ The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLeng
 - **A composed session is how a document waits on the right task.** `IndexedDocumentViewModel.IndexingTask`
   is non-virtual and reads `Session.IndexingTask`, so a document whose "still growing" signal is
   not its own file scan's expresses that one layer down. `JsonDiffSession` reports the diff's
-  task rather than either side's; `JsonArrayTableSession` reports the element index's, because
-  the token scan completing is not when the table stops growing — the element index publishes
-  one final stride afterwards. Both also own a teardown ordering their view model would
-  otherwise have to hand-encode: cancel the derived work, join it (after which nothing reads the
-  source index), then dispose the file session and release the mapping.
+  task rather than either side's, and owns a teardown ordering its view model would otherwise
+  have to hand-encode: cancel the diff, join it (after which nothing reads the source indexes),
+  then dispose the file sessions and release the mappings.
 - **A scan's completion signal must be unconditional.** Every index starts its scan through
   `AppendLogIndexBase.StartScan` / `StartStreamingScan`, which deliberately do NOT pass the
   cancellation token to `Task.Run`: a token already cancelled when the pool dequeues the work
@@ -294,8 +293,12 @@ The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLeng
   close start), a painter (`ITreeRowPainter`: styled runs per row, and an optional marker) and
   gutters (`ITreeGutter`). JSON's are `JsonTreeReader`, `JsonTreePainter` and `JsonSchemaGutter`
   (`Features/Json/Tree`); an XML view would add its own three and nothing else.
-- **Still on the token index**: the array table (`JsonArrayTableSession`, whose cell pane uses
-  `JsonVisibleRowCollection`) and the diff (`JsonDiffSession`). Both open their own sessions.
+- **The array table reads the same way.** `JsonArrayTableSession` indexes the array's own
+  range sparsely; `JsonArrayElements` finds element `i` from the nearest resume point, counting
+  only elements known to have ended while the scan runs; rows, column discovery and cells read
+  element children through `JsonTreeReader` and `JsonTreeText`. A container cell's pane
+  (`JsonArrayCellDetail`) is a `TreeDocument` over that cell's bytes on its own `TreeSurface`.
+- **Still on the token index**: the diff (`JsonDiffSession`), which opens its own sessions.
 
 ## Virtualized ItemsSources
 

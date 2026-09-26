@@ -41,6 +41,37 @@ public sealed class JsonTreeText(IByteSource bytes, SparseContainerIndex index, 
     public static bool HasName(in TreeRow row)
         => row.ParentKind == (byte)JsonTokenKind.StartObject && row.Shape != TreeRowShape.Close;
 
+    /// <summary>The raw bytes of a member's name between its quotes, for a node read as a child of
+    /// an object - its row starts at the name. Empty for a node without one.</summary>
+    public ReadOnlySpan<byte> NameBytes(TreeNode member)
+    {
+        if (member.RowStart == member.ValueStart)
+            return ReadOnlySpan<byte>.Empty;
+
+        long start = member.RowStart + 1;
+        return bytes.RequireContiguous(start, (int)(reader.StringEnd(member.RowStart) - 1 - start));
+    }
+
+    /// <summary>A member's name as shown, escapes kept as written, for a node read as a child of
+    /// an object; null for a node without one.</summary>
+    public string? Name(TreeNode member)
+    {
+        if (member.RowStart == member.ValueStart)
+            return null;
+
+        long start = member.RowStart + 1;
+        return DisplayText.Read(bytes, start, (int)(reader.StringEnd(member.RowStart) - 1 - start), out _);
+    }
+
+    /// <summary>What a node's value shows on its own, as a table cell does: a scalar as written
+    /// (a string in its quotes), a container as its collapsed summary.</summary>
+    public string ValueText(TreeNode node)
+    {
+        var row = new TreeRow(node.IsContainer ? TreeRowShape.Open : TreeRowShape.Leaf, node, node.RowStart, 0, 0,
+            JsonTreeReader.Document, -1, IsExpanded: false);
+        return node.IsContainer ? Summary(row) : Scalar(row, out _, out _, out _);
+    }
+
     /// <summary>A member's name as shown, escapes kept as written; null for a row without one.</summary>
     public string? Name(in TreeRow row, out bool truncated, out long fullLength)
     {

@@ -185,7 +185,7 @@ The existing dense index stays available to diff until this is built, so diff is
 Each step lands on its own and leaves the app working. Tick a step when it is merged into the
 branch, and note under it anything the next step needs to know.
 
-Status: steps 7-8 done for the JSON tree and NDJSON; array table, diff and dense-index removal remain. The new tree awaits a manual check. Branch: `plan/json-sparse-index`.
+Status: step 8 done; step 9 (diff) next. The array table awaits a manual check. Branch: `plan/json-sparse-index`.
 
 1. [x] **Benchmarks first.** A BenchmarkDotNet suite over three shapes - a token-dense array, deeply
    nested objects, a large array of small records - measuring index bytes per file byte, build time,
@@ -398,14 +398,24 @@ Status: steps 7-8 done for the JSON tree and NDJSON; array table, diff and dense
    Needs a manual check: rows, colours, arrows, the array-index marker, selection, the schema
    gutter (drag its edge, hover for the tooltip), date-hint and "view as table" links, Alt-click,
    right-click copy, the path bar, find highlights and the pan and vertical scrollbars.
-8. [ ] **Consumers** moved one at a time per the table above: paths and search, then array table and
+8. [x] **Consumers** moved one at a time per the table above: paths and search, then array table and
    samplers.
 
    Done: paths (`JsonTreePaths`), search (`JsonSearchNavigator`, `NdJsonSearchNavigator` reveal an
    offset), the schema root-key sampler and date-scheme inference (sparse overloads), hint
-   overrides keyed by value offset, NDJSON's nested per-line tree. Remaining: the array table -
-   `JsonArrayTableSession`, `JsonArrayElementIndex`, column discovery and the cell pane's
-   `JsonVisibleRowCollection` - which opens its own dense session over the array's range.
+   overrides keyed by value offset, NDJSON's nested per-line tree.
+
+   The array table: `JsonArrayTableSession` is one sparse session over the array's range;
+   `JsonArrayElements` replaces `JsonArrayElementIndex` (no background walk - element `i` comes
+   from `SparseContainerIndex.FindResumePoint`, and while scanning the count is
+   `KnownChildCount`, the ordinal at the array's latest checkpoint); rows, discovery and cell
+   routes read children through `JsonTreeReader`/`JsonTreeText`. The cell pane is a
+   `TreeDocument` over the cell's own bytes on a `TreeSurface` - so its root row no longer shows
+   the member name (the pane title does), and it scrolls by wheel and keys with no scrollbar
+   until step 12's shared scroll host.
+
+   Needs a manual check: open "view as table" on arrays of objects and of scalars, expand and
+   collapse column headers, reshape, click cells (scalar and container) and use the pane's tree.
 9. [ ] **Diff** on its own hash budget.
 10. [ ] **Remove `JsonStructureIndex`'s dense log** once nothing reads it, and the `ChildCap`/"show more"
     machinery with it.
@@ -418,7 +428,7 @@ Status: steps 7-8 done for the JSON tree and NDJSON; array table, diff and dense
     height, for a view that knows its row count - the raw view, whose thumb stays row-accurate)
     and **estimated** (the top row's byte offset as a fraction of the document - the trees).
     The raw view then leaves its `ScrollViewer` too. Per-depth row counts (step 11) would give the
-    tree an exact model under the same interface. Do before the XML view is built; the raw view's
+    tree an exact model under the same interface. The array table's cell pane gets a scrollbar from it too. Do before the XML view is built; the raw view's
     scrolling needs a manual check after it.
 
 ## Later

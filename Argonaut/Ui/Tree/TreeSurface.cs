@@ -654,11 +654,18 @@ public class TreeSurface : RowSurface
     /// whatever the byte estimate says.</summary>
     public bool ShowsEnd { get; private set; }
 
-    /// <summary>Shows the end of the document, its last row at the bottom.</summary>
+    /// <summary>Shows the end of the document, its last row at the bottom - or, while the index
+    /// is still being built, the furthest it has reached.</summary>
     public void ScrollToEnd()
     {
-        if (anchor is null)
+        if (anchor is null || document is null)
             return;
+
+        if (!document.Index.IsComplete)
+        {
+            ScrollToFraction(1);
+            return;
+        }
 
         anchor.MoveToEnd();
         anchorPixel = 0;
@@ -667,17 +674,27 @@ public class TreeSurface : RowSurface
         InvalidateVisual();
     }
 
-    /// <summary>Puts the byte at <paramref name="fraction"/> of the document at the top - what a
-    /// dragged thumb does. At the end, the last row settles at the bottom.</summary>
+    /// <summary>
+    /// Puts the byte at <paramref name="fraction"/> of the document at the top - what a dragged
+    /// thumb does. At the end, the last row settles at the bottom.
+    ///
+    /// Never past what the index covers. Beyond it a seek has no resume point nearer than the
+    /// last one indexed, and would read every sibling in between - gigabytes of them, on the UI
+    /// thread, for each move of the thumb. Until the index gets there, the view stops at its edge.
+    /// </summary>
     public void ScrollToFraction(double fraction)
     {
         if (anchor is null || document is null)
             return;
 
-        if (fraction <= 0)
+        long target = (long)(Math.Clamp(fraction, 0, 1) * document.AvailableLength);
+        if (!document.Index.IsComplete)
+            target = Math.Min(target, document.Index.ScannedTo);
+
+        if (target <= 0)
             anchor.MoveToStart();
         else
-            anchor.SeekTo((long)(Math.Min(fraction, 1) * document.AvailableLength));
+            anchor.SeekTo(target);
 
         anchorPixel = 0;
         Realize();

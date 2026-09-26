@@ -217,12 +217,41 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
             schemaBindings.Remember(documentPath, SchemaSettings.SelectedEntry?.FilePath, SchemaSettings.IsRootExplicitlyChosen ? SchemaSettings.SelectedRootName : null);
     }
 
-    /// <summary>Asks the view to select and show the row holding <paramref name="offset"/>,
-    /// expanding whatever hides it.</summary>
+    /// <summary>
+    /// Asks the view to select and show the row holding <paramref name="offset"/>, expanding
+    /// whatever hides it. An offset the index has not reached yet - a search hit racing ahead of
+    /// a multi-GB scan - waits for it: seeking there sooner would read every sibling from the
+    /// last indexed point to the target on the UI thread.
+    /// </summary>
     public void Reveal(long offset)
     {
         PendingReveal = offset;
-        RevealRequested?.Invoke(this, EventArgs.Empty);
+        if (IsCovered(offset))
+            RevealRequested?.Invoke(this, EventArgs.Empty);
+        else
+            _ = RevealWhenCoveredAsync(offset);
+    }
+
+    private bool IsCovered(long offset)
+        => session is not { } current || current.Index.AllItemsPublished
+           || current.Index.Structure.IsComplete || offset < current.Index.Structure.ScannedTo;
+
+    private async Task RevealWhenCoveredAsync(long offset)
+    {
+        var current = session!;
+        try
+        {
+            while (!IsCovered(offset))
+                await Task.Delay(100, current.TearingDown);
+        }
+        catch (OperationCanceledException)
+        {
+            return; // the document closed while waiting
+        }
+
+        // A later reveal replaced this one while it waited.
+        if (!IsDisposed && PendingReveal == offset)
+            RevealRequested?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>The view has shown <see cref="PendingReveal"/>.</summary>

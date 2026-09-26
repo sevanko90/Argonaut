@@ -24,8 +24,10 @@ namespace Argonaut.Features.Json.Indexing;
 ///
 /// It does not validate: brackets are counted, not matched. Validation runs beside it on its
 /// own thread (<see cref="JsonDocumentValidator"/>), holding no memory, and its failure - with the
-/// reader's message, line and column - is the one reported. A document that does not close fails
-/// the structural scan too, and that failure stands only if validation somehow passed.
+/// reader's message, line and column - is the one reported. The scan itself carries on through
+/// what it cannot make sense of: a truncated document's open containers end where the data does,
+/// and a stray closing bracket is skipped. Either still fails the scan once it is done, and that
+/// failure stands only if validation somehow passed.
 /// </summary>
 public sealed class JsonSparseIndex : IBackgroundIndex
 {
@@ -48,6 +50,7 @@ public sealed class JsonSparseIndex : IBackgroundIndex
     private bool contentSinceMark;
     private bool[] frameHasContent = new bool[64];
     private int depth;
+    private long strayClose = -1;
 
     private JsonSparseIndex(int promotionBytes, int checkpointBytes)
     {
@@ -86,9 +89,13 @@ public sealed class JsonSparseIndex : IBackgroundIndex
         return index;
     }
 
-    /// <summary>The structural scan and validation side by side. A validation failure stops the
-    /// scan - there is no point finishing an index of a document that is not JSON - while a
-    /// structural failure lets validation run on to find the precise error.</summary>
+    /// <summary>
+    /// The structural scan and validation side by side, each running to its own end. A
+    /// validation failure does not stop the scan: the tree reads past a corrupt stretch the way a
+    /// reader of the raw file would, and it can only jump to what the index covers - a scan
+    /// stopped at the first error would leave the rest of a multi-GB file reachable only by
+    /// reading sibling after sibling from the last resume point, on the UI thread.
+    /// </summary>
     private async Task RunBothPasses(IByteSource source, IProgressReporter? progressReporter, CancellationToken cancellationToken)
     {
         using var stopping = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -98,7 +105,6 @@ public sealed class JsonSparseIndex : IBackgroundIndex
             if (JsonDocumentValidator.FindFailure(source, stopping.Token) is { } found)
             {
                 validationFailure = found;
-                stopping.Cancel();
                 throw new JsonDocumentInvalidException(found.Message);
             }
         });
@@ -206,11 +212,20 @@ public sealed class JsonSparseIndex : IBackgroundIndex
             }
         }
 
-        if (depth != 0)
-            throw new InvalidDataException($"The document ends with {depth} container(s) still open.");
+        // A truncated document ends inside containers. They end where the data does - so the index
+        // is complete, and nothing has to scan to the end of the file to find where they stop -
+        // and the scan still fails, so the document is reported as broken.
+        int unclosed = depth;
+        while (depth > 0)
+            builder.Close(offset, isEmpty: !frameHasContent[--depth]);
 
         builder.Complete(offset);
         progressReporter?.Report("Indexing", offset, offset);
+
+        if (unclosed > 0)
+            throw new InvalidDataException($"The document ends with {unclosed} container(s) still open.");
+        if (strayClose >= 0)
+            throw new InvalidDataException($"A closing bracket at byte {strayClose} has nothing to close.");
     }
 
     /// <summary>
@@ -252,7 +267,13 @@ public sealed class JsonSparseIndex : IBackgroundIndex
             else if ((masks.Close & mask) != 0)
             {
                 if (depth == 0)
-                    throw new InvalidDataException($"A closing bracket at byte {position} has nothing to close.");
+                {
+                    // Nothing to close: not JSON, and validation says so. Skip it and carry on, so
+                    // one stray bracket does not end the index for the rest of the file.
+                    if (strayClose < 0)
+                        strayClose = position;
+                    continue;
+                }
 
                 pendingSeparator = -1; // nothing followed it: a trailing comma
                 bool isEmpty = !frameHasContent[--depth];

@@ -165,6 +165,47 @@ public class JsonSparseIndexTests
         Assert.Null(index.Failure);
     }
 
+    [Fact]
+    public void ATruncatedDocumentStillIndexesToTheEndOfItsData()
+    {
+        // The shape of a download cut short: a large root array missing its closing bracket.
+        byte[] json = Encoding.UTF8.GetBytes("[" + string.Join(",\n", Enumerable.Range(0, 3000).Select(i => $"{{\"id\":{i}}}")) + ",\n");
+        var index = JsonSparseIndex.StartIndexing(new MemoryByteSource(json), Promotion, Checkpoint);
+
+        Assert.ThrowsAny<Exception>(() => index.IndexingTask.GetAwaiter().GetResult());
+        Assert.NotNull(index.Failure);
+        Assert.True(index.Structure.IsComplete);
+        Assert.Equal(json.Length, index.Structure.GetContainer(0).End);
+        Assert.Equal(3000, index.Structure.GetContainer(0).ChildCount);
+    }
+
+    [Fact]
+    public void CorruptionDoesNotStopTheIndexShortOfTheRestOfTheFile()
+    {
+        var text = new StringBuilder("[");
+        for (int i = 0; i < 4000; i++)
+            text.Append(i == 0 ? "" : ",\n").Append(i == 100 ? "#CORRUPTED_HERE#" : $"{{\"id\":{i},\"list\":[{i},{i}]}}");
+        byte[] json = Encoding.UTF8.GetBytes(text.Append(']').ToString());
+        var index = JsonSparseIndex.StartIndexing(new MemoryByteSource(json), Promotion, Checkpoint);
+
+        Assert.Throws<JsonDocumentInvalidException>(() => index.IndexingTask.GetAwaiter().GetResult());
+        Assert.StartsWith("'#' is an invalid start of a value", index.Failure!.Message);
+        Assert.True(index.Structure.IsComplete);
+        Assert.Equal(json.Length, index.Structure.ScannedTo);
+        Assert.True(index.Structure.GetCheckpoint(index.Structure.CheckpointCount - 1).Offset > json.Length * 9 / 10);
+    }
+
+    [Fact]
+    public void AStrayClosingBracketIsSkippedNotFatalToTheIndex()
+    {
+        byte[] json = Encoding.UTF8.GetBytes("[1,2]] [" + string.Join(",", Enumerable.Range(0, 400)) + "]");
+        var index = JsonSparseIndex.StartIndexing(new MemoryByteSource(json), promotionBytes: 64, checkpointBytes: 16);
+
+        Assert.ThrowsAny<Exception>(() => index.IndexingTask.GetAwaiter().GetResult());
+        Assert.True(index.Structure.IsComplete);
+        Assert.Equal(json.Length, index.Structure.GetContainer(0).End);
+    }
+
     private sealed record ModelContainer(long Start, long End, int Parent, int Depth, long OrdinalInParent, List<long> ChildStarts, byte Kind);
 
     /// <summary>Every container in start order, with its children's starts - a property name's

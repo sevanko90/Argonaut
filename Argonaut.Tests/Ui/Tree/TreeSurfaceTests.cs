@@ -397,4 +397,41 @@ public sealed class TreeSurfaceTests
         Dispatcher.UIThread.RunJobs();
         Assert.False(ToolTip.GetIsOpen(h.Surface));
     }, gutters: new ITreeGutter[] { new FixedGutter() });
+
+    [Fact]
+    public Task ADraggedThumbStopsAtTheEdgeOfWhatIsIndexed()
+    {
+        var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(TreeSurfaceTests).Assembly);
+        return session.Dispatch(async () =>
+        {
+            byte[] bytes = SExpressionTreeFormat.Generate(new Random(7), topLevelChildren: 200);
+            int indexedTo = bytes.Length / 3;
+            var index = new SparseContainerIndex(promotionBytes: 64, checkpointBytes: 16);
+            SExpressionTreeFormat.Scan(bytes, new SparseContainerIndexBuilder(index), stopAt: indexedTo);
+            var document = new TreeDocument(index, new SExpressionTreeFormat.Reader(bytes), new SExpressionTreeFormat.Painter(bytes),
+                new TreeExpandState(9), () => bytes.Length);
+            var surface = new TreeSurface { Document = document };
+            var window = new Window { Width = 700, Height = WindowHeight, Content = surface };
+            try
+            {
+                window.Show();
+                await PumpAsync();
+
+                // At the edge: the row holding the last indexed byte, or the one just after it.
+                const int OneRow = 200;
+                surface.ScrollToFraction(0.9);
+                Assert.InRange(surface.RealizedRows[0].Start, indexedTo / 2, indexedTo + OneRow);
+
+                surface.ScrollToEnd();
+                Assert.InRange(surface.RealizedRows[0].Start, indexedTo / 2, indexedTo + OneRow);
+                Assert.False(surface.ShowsEnd);
+            }
+            finally
+            {
+                window.Close();
+            }
+
+            return true;
+        }, CancellationToken.None);
+    }
 }

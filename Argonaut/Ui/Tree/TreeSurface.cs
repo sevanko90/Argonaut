@@ -273,6 +273,15 @@ public class TreeSurface : RowSurface
         ExpansionChanged?.Invoke(this, EventArgs.Empty);
     }
 
+    /// <summary>What rows say has changed - a schema bound, a hint setting - though the rows
+    /// themselves have not: lay them out again.</summary>
+    public void InvalidateRows()
+    {
+        DropLayouts();
+        MeasureRealizedRows();
+        InvalidateVisual();
+    }
+
     /// <summary>Re-reads what is on screen after the expansion changed elsewhere - a new default
     /// depth, say. The top row and the selection stay put, or move to the container now hiding
     /// them.</summary>

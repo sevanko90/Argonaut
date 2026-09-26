@@ -195,11 +195,11 @@ public class DateHintRowTests
                 var position = rows.FindVisiblePosition(tsTokenIndex)!.Value;
                 string? defaultHint = ((JsonRow)rows[position]!).Hint;
 
-                settings.SetTokenOverride(tsTokenIndex, DateDecodingScheme.KeepaMinutes);
+                settings.SetValueOverride(index.GetToken(tsTokenIndex).Offset, DateDecodingScheme.KeepaMinutes);
                 string? overriddenHint = ((JsonRow)rows[position]!).Hint;
                 Assert.NotEqual(defaultHint, overriddenHint);
 
-                settings.SetTokenOverride(tsTokenIndex, null);
+                settings.SetValueOverride(index.GetToken(tsTokenIndex).Offset, null);
                 string? restoredHint = ((JsonRow)rows[position]!).Hint;
                 Assert.Equal(defaultHint, restoredHint);
             }
@@ -227,7 +227,7 @@ public class DateHintRowTests
             try
             {
                 int tsTokenIndex = FindTokenIndex(index, t => t.Kind == JsonTokenKind.Number && t.Length == 10);
-                settings.SetTokenOverride(tsTokenIndex, DateDecodingScheme.Off);
+                settings.SetValueOverride(index.GetToken(tsTokenIndex).Offset, DateDecodingScheme.Off);
 
                 var position = rows.FindVisiblePosition(tsTokenIndex)!.Value;
                 Assert.Equal("—", ((JsonRow)rows[position]!).Hint);
@@ -257,7 +257,7 @@ public class DateHintRowTests
             try
             {
                 int tsTokenIndex = FindTokenIndex(index, t => t.Kind == JsonTokenKind.Number);
-                settings.SetTokenOverride(tsTokenIndex, DateDecodingScheme.KeepaMinutes);
+                settings.SetValueOverride(index.GetToken(tsTokenIndex).Offset, DateDecodingScheme.KeepaMinutes);
 
                 var position = rows.FindVisiblePosition(tsTokenIndex)!.Value;
                 Assert.Equal("out of range", ((JsonRow)rows[position]!).Hint);

@@ -18,7 +18,7 @@ public class DateHintSettingsTests
     {
         var settings = new DateHintSettings();
         settings.SetUserDefault(DateDecodingScheme.JsSeconds);
-        settings.SetTokenOverride(5, DateDecodingScheme.KeepaMinutes);
+        settings.SetValueOverride(5, DateDecodingScheme.KeepaMinutes);
 
         Assert.Equal(DateDecodingScheme.KeepaMinutes, settings.GetEffectiveScheme(5));
         Assert.Equal(DateDecodingScheme.JsSeconds, settings.GetEffectiveScheme(6)); // sibling unaffected
@@ -29,8 +29,8 @@ public class DateHintSettingsTests
     {
         var settings = new DateHintSettings();
         settings.SetUserDefault(DateDecodingScheme.JsSeconds);
-        settings.SetTokenOverride(5, DateDecodingScheme.KeepaMinutes);
-        settings.SetTokenOverride(5, null);
+        settings.SetValueOverride(5, DateDecodingScheme.KeepaMinutes);
+        settings.SetValueOverride(5, null);
 
         Assert.Equal(DateDecodingScheme.JsSeconds, settings.GetEffectiveScheme(5));
     }
@@ -83,8 +83,8 @@ public class DateHintSettingsTests
         int fired = 0;
         settings.HintsChanged += (_, _) => fired++;
 
-        settings.SetTokenOverride(1, DateDecodingScheme.KeepaMinutes);
-        settings.SetTokenOverride(1, null);
+        settings.SetValueOverride(1, DateDecodingScheme.KeepaMinutes);
+        settings.SetValueOverride(1, null);
 
         Assert.Equal(2, fired);
     }

@@ -24,6 +24,8 @@ public enum TreeRowShape : byte
 /// <param name="Ordinal">The node's position among its parent's children, from 0.</param>
 /// <param name="ParentKind">The format kind of the container holding the node - the reader's
 /// <see cref="ITreeFormatReader.DocumentKind"/> at the top.</param>
+/// <param name="ParentStart">The value start of the container holding the node, or -1 at the
+/// top - enough to walk up a row's ancestry one seek at a time.</param>
 /// <param name="IsExpanded">For an open row, whether its children are shown.</param>
 public readonly record struct TreeRow(
     TreeRowShape Shape,
@@ -32,6 +34,7 @@ public readonly record struct TreeRow(
     int Depth,
     long Ordinal,
     byte ParentKind,
+    long ParentStart,
     bool IsExpanded)
 {
     /// <summary>The row's identity: the node's value start, and whether it is the closing row.

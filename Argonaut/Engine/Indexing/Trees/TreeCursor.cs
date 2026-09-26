@@ -284,7 +284,7 @@ public sealed class TreeCursor
         int depth = frames.Count - 1;
         bool expanded = node.IsContainer && expandState.IsExpanded(node.ValueStart, depth);
         return new TreeRow(node.IsContainer ? TreeRowShape.Open : TreeRowShape.Leaf, node, node.RowStart, depth, ordinal,
-            parent.Node.FormatKind, expanded);
+            parent.Node.FormatKind, parent.Node.ValueStart, expanded);
     }
 
     /// <summary>The last row a child of the innermost frame shows: its close row when it is an
@@ -305,7 +305,7 @@ public sealed class TreeCursor
         var container = frames[^1];
         frames.RemoveAt(frames.Count - 1);
         Current = new TreeRow(TreeRowShape.Open, container.Node, container.Node.RowStart, container.Depth, container.Ordinal,
-            container.ParentKind, IsExpanded: true);
+            container.ParentKind, frames[^1].Node.ValueStart, IsExpanded: true);
     }
 
     /// <summary>Leaves the innermost container for its close row.</summary>
@@ -315,7 +315,7 @@ public sealed class TreeCursor
         frames.RemoveAt(frames.Count - 1);
         long end = ContainerEnd(container.Node.ValueStart);
         Current = new TreeRow(TreeRowShape.Close, container.Node, reader.CloseStart(container.Node.ValueStart, end),
-            container.Depth, container.Ordinal, container.ParentKind, IsExpanded: true);
+            container.Depth, container.Ordinal, container.ParentKind, frames[^1].Node.ValueStart, IsExpanded: true);
     }
 
     /// <summary>Child <paramref name="ordinal"/> of the frame at <paramref name="frameIndex"/>,

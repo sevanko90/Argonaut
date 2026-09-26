@@ -14,6 +14,9 @@ public enum TreeRunStyle : byte
     String,
     Number,
     Keyword,
+
+    /// <summary>A literal that is neither a string, a number nor a keyword - JSON's null.</summary>
+    Literal,
     Punctuation,
     Summary,
     Comment,

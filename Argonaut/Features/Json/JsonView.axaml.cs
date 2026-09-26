@@ -359,7 +359,7 @@ public partial class JsonView : UserControl
         item.Click += (_, _) =>
         {
             if (DataContext is JsonViewModel vm && hintFlyoutTokenIndex >= 0)
-                vm.HintSettings.SetTokenOverride(hintFlyoutTokenIndex, scheme);
+                vm.HintSettings.SetValueOverride(vm.Index!.GetToken(hintFlyoutTokenIndex).Offset, scheme);
         };
         flyout.Items.Add(item);
     }

@@ -96,7 +96,7 @@ internal sealed class JsonRowFactory
             // real OpenAPI document 83% of documented properties carry a description only. Those
             // rows would otherwise show nothing at all in the gutter - and, since the gutter cell
             // is what carries the tooltip, their description would be unreachable too.
-            schemaLabel = schemaTitle ?? FirstLine(schemaDescription);
+            schemaLabel = schemaTitle ?? JsonSchemaLabel.FirstLine(schemaDescription);
         }
 
         string? truncationHint = valueTruncated
@@ -129,7 +129,7 @@ internal sealed class JsonRowFactory
 
             if (provider.TryClassify(token.Kind, bytes.RequireContiguous(token.Offset, token.Length), out var candidate))
             {
-                string? hint = provider.FormatHint(in candidate, tokenIndex);
+                string? hint = provider.FormatHint(in candidate, token.Offset);
                 if (hint is not null)
                     return hint;
             }
@@ -201,54 +201,6 @@ internal sealed class JsonRowFactory
         < 1024 * 1024 * 1024 => $"{bytes / (1024.0 * 1024.0):0.#} MB",
         _ => $"{bytes / (1024.0 * 1024.0 * 1024.0):0.#} GB"
     };
-
-    /// <summary>
-    /// The first line of a schema description, for use as a gutter label. Descriptions are prose
-    /// and often several paragraphs (frequently with a trailing "Schema link: …"), so only the
-    /// opening line is a candidate; the full text stays on the tooltip.
-    ///
-    /// The hard cap is a measuring guard, not the visible limit - the gutter cell trims to the
-    /// gutter's current width and shows an ellipsis there - so nothing is cut short enough for the
-    /// cap to be what the user sees. Returns the original string when neither applies, so the
-    /// common short description costs no allocation.
-    /// </summary>
-    private const int MaxSchemaLabelLength = 200;
-
-    private static string? FirstLine(string? description)
-    {
-        if (description is null)
-            return null;
-
-        int end = description.IndexOfAny(NewLineChars);
-
-        // Descriptions written for a docs site break paragraphs with a literal line-break tag as
-        // often as with a newline, and everything after the first break is no more wanted on the
-        // row than a second paragraph would be. Both spellings occur - the real OpenAPI document
-        // this was built against uses the (invalid, but common) closing form.
-        int tag = EarliestOf(description, "<br", "</br");
-        if (tag >= 0 && (end < 0 || tag < end))
-            end = tag;
-
-        if (end < 0)
-            end = description.Length;
-        if (end > MaxSchemaLabelLength)
-            end = MaxSchemaLabelLength;
-
-        return end == description.Length ? description : description[..end].TrimEnd();
-    }
-
-    private static readonly char[] NewLineChars = { '\r', '\n' };
-
-    private static int EarliestOf(string text, string a, string b)
-    {
-        int first = text.IndexOf(a, StringComparison.OrdinalIgnoreCase);
-        int second = text.IndexOf(b, StringComparison.OrdinalIgnoreCase);
-
-        if (first < 0)
-            return second;
-
-        return second < 0 ? first : Math.Min(first, second);
-    }
 
     private static bool IsContainer(JsonTokenKind kind) => kind is JsonTokenKind.StartObject or JsonTokenKind.StartArray;
 }

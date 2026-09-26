@@ -428,8 +428,9 @@ Status: step 8 done; step 9 (diff) next. The array table awaits a manual check. 
     height, for a view that knows its row count - the raw view, whose thumb stays row-accurate)
     and **estimated** (the top row's byte offset as a fraction of the document - the trees).
     The raw view then leaves its `ScrollViewer` too. Per-depth row counts (step 11) would give the
-    tree an exact model under the same interface. The array table's cell pane gets a scrollbar from it too. Do before the XML view is built; the raw view's
-    scrolling needs a manual check after it.
+    tree an exact model under the same interface. The array table's cell pane gets a scrollbar
+    from it too. Do before the XML view is built; the raw view's scrolling needs a manual check
+    after it.
 
 ## Later
 

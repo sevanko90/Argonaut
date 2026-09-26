@@ -219,6 +219,10 @@ Detail: [perf-review-2026-07-17.md](perf-review-2026-07-17.md).
 - **Halve the NDJSON line index by storing offsets, not spans.** `FileLineSpan` is 16 bytes;
   lines are contiguous, so a length is derivable from the next line's offset. A `List<long>` of
   line starts is 8 bytes per line. Not `uint` — 4GB files sit exactly at the wraparound.
+- **A sparse JSON index behind a drawn tree surface.** Large containers and child checkpoints
+  only, re-parsing everything between them on demand, so the index is well under 1% of the file
+  for any shape; the tree becomes a `RawTextSurface`-style control driven by a row cursor instead
+  of a `ListBox` over an `IList`. Plan: [json-sparse-index-plan.md](json-sparse-index-plan.md).
 - **Delta + varint encoding for `PackedToken`** (option 4 of
   [index-memory-analysis.md](index-memory-analysis.md), never implemented). Would take the index
   from 24 bytes/token to an estimated 8-12 average. Judged worth pursuing whenever the

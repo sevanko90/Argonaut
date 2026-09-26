@@ -31,7 +31,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="**\Fixtures\**" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Features\**\Fixtures\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

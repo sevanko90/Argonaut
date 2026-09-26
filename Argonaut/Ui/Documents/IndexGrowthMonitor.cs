@@ -6,9 +6,8 @@ using Avalonia.Threading;
 namespace Argonaut.Ui.Documents;
 
 /// <summary>
-/// Drives a UI collection's "the background scan grew, refresh what's visible" cadence,
-/// extracted verbatim from JsonVisibleRowCollection so the diff row collection can run the
-/// identical live-append behaviour against a diff task instead of a token index.
+/// Drives a UI collection's "the background scan grew, refresh what's visible" cadence, shared
+/// by the collections over a growing scan - an index's, or the diff's.
 ///
 /// Two signals feed <paramref name="refresh"/> (which owns deciding whether anything
 /// actually changed - e.g. the settled/last-count checks stay with the caller):

@@ -1,38 +1,14 @@
 using System.Text;
-using Argonaut.Engine.Bytes;
-using Argonaut.Engine.Indexing;
 using Argonaut.Features.Json.Indexing;
-using Argonaut.Features.Json.Paths;
 
-namespace Argonaut.Tests.Features.Json.Paths;
+namespace Argonaut.Tests.Features.Json.Indexing;
 
-public class JsonPathDecodingTests
+/// <summary>
+/// Comparing a name as written against decoded text, the way a path looks a member up: no
+/// allocation however long the name, and a spelling is never mistaken for what it decodes to.
+/// </summary>
+public class JsonUnescapeTests
 {
-    [Theory]
-    [InlineData("\\u0061", "a")]
-    [InlineData("a\\\"b", "a\"b")]
-    [InlineData("a\\\\b", "a\\b")]
-    [InlineData("\\uD83D\\uDE00", "😀")]
-    [InlineData("a\\nb", "a\nb")]
-    [InlineData("\\u00e9", "é")]
-    public async Task DecodedNamesResolveAndSelectedPathsRoundTrip(string serializedName, string decodedName)
-    {
-        string path = Path.GetTempFileName();
-        try
-        {
-            File.WriteAllText(path, "{\"" + serializedName + "\":1}");
-            using var session = IndexedSourceSession<JsonStructureIndex>.Start(new MMapFile(path), JsonStructureIndex.StartIndexing);
-            await session.IndexingTask;
-            string expectedPath = "$['" + decodedName.Replace("\\", "\\\\").Replace("'", "\\'") + "']";
-            var resolved = await JsonPathResolver.ResolveAsync(session.Index, session.Bytes, expectedPath);
-            Assert.Equal(1, resolved.TokenIndex);
-            string selectedPath = JsonPathBuilder.Build(session.Index, session.Bytes, 1);
-            Assert.Equal(decodedName == "a" ? "$.a" : expectedPath, selectedPath);
-            Assert.Equal(1, (await JsonPathResolver.ResolveAsync(session.Index, session.Bytes, selectedPath)).TokenIndex);
-        }
-        finally { File.Delete(path); }
-    }
-
     [Fact]
     public void EscapedComparisonHasNoPerNameAllocationEvenForLargeNames()
     {

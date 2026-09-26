@@ -62,8 +62,8 @@ public sealed class JsonSchemaGutter(JsonSchemaResolver resolver, JsonTreeText t
     }
 
     /// <summary>The schema's words for this row: title and description (an enum member's, for a
-    /// value the schema enumerates), and the label the gutter shows.</summary>
-    private (string? Label, string? Title, string? Description)? Describe(in TreeRow row)
+    /// value the schema enumerates), and the label the gutter shows - null when it says nothing.</summary>
+    internal (string? Label, string? Title, string? Description)? Describe(in TreeRow row)
     {
         if (resolver.Schema is not { } schema || resolver.NodeFor(row) is var node && node < 0)
             return null;

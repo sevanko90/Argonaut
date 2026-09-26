@@ -10,8 +10,8 @@ namespace Argonaut.Features.Json.Indexing;
 /// <summary>
 /// Reads a whole document with <c>Utf8JsonReader</c> - comments skipped, trailing commas allowed,
 /// as the tree reads - and keeps nothing but where it first fails. It is what gives the sparse
-/// index, which counts brackets and never validates, the same failure messages and offsets the
-/// token index reports, at no memory cost.
+/// index, which counts brackets and never validates, the reader's failure messages, lines and
+/// columns, at no memory cost. It can also feed every token to a content-hash recorder.
 /// </summary>
 internal static class JsonDocumentValidator
 {

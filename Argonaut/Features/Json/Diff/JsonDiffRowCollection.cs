@@ -54,13 +54,12 @@ public sealed class JsonDiffRowCollection : VirtualizingItemsSourceBase
 
     private readonly struct DiffVisibleRow
     {
-        public DiffVisibleRow(RowKind kind, int recordIndex, TreeNode node, int depth, int arrayIndex, DiffStatus tint)
+        public DiffVisibleRow(RowKind kind, int recordIndex, TreeNode node, int depth, DiffStatus tint)
         {
             Kind = kind;
             RecordIndex = recordIndex;
             Node = node;
             Depth = depth;
-            ArrayIndex = arrayIndex;
             Tint = tint;
         }
 
@@ -74,7 +73,6 @@ public sealed class JsonDiffRowCollection : VirtualizingItemsSourceBase
         public int RecordIndex { get; }
         public TreeNode Node { get; }     // sub rows: the node on their side; placeholders: the capped container
         public int Depth { get; }
-        public int ArrayIndex { get; }    // sub rows: ordinal among array siblings, or -1
         public DiffStatus Tint { get; }   // sub rows inherit their region's status
     }
 
@@ -287,7 +285,7 @@ public sealed class JsonDiffRowCollection : VirtualizingItemsSourceBase
         else if (!diff.AllItemsPublished && left.Root is { } root)
         {
             // Preview: the left document shows in the left pane while both sides index.
-            WalkNodeSubtree(RowKind.SubLeft, root, 0, -1, DiffStatus.Unchanged, newVisible);
+            WalkNodeSubtree(RowKind.SubLeft, root, 0, DiffStatus.Unchanged, newVisible);
         }
 
         visibleRows = newVisible;
@@ -310,7 +308,7 @@ public sealed class JsonDiffRowCollection : VirtualizingItemsSourceBase
         if (changesOnly && record.Status == DiffStatus.Unchanged)
             return next;
 
-        into.Add(new DiffVisibleRow(RowKind.Record, recordIndex, default, record.Depth, -1, record.Status));
+        into.Add(new DiffVisibleRow(RowKind.Record, recordIndex, default, record.Depth, record.Status));
 
         if (!IsRecordExpanded(record))
             return next;
@@ -324,7 +322,7 @@ public sealed class JsonDiffRowCollection : VirtualizingItemsSourceBase
             {
                 if (shown >= cap)
                 {
-                    into.Add(new DiffVisibleRow(RowKind.Placeholder, recordIndex, default, record.Depth + 1, -1, record.Status));
+                    into.Add(new DiffVisibleRow(RowKind.Placeholder, recordIndex, default, record.Depth + 1, record.Status));
                     break;
                 }
 
@@ -371,9 +369,9 @@ public sealed class JsonDiffRowCollection : VirtualizingItemsSourceBase
     private HashSet<long> Overrides(RowKind kind) => kind == RowKind.SubRight ? rightNodeOverrides : leftNodeOverrides;
 
     /// <summary>Adds one node's sub-row and recurses into it when expanded.</summary>
-    private void WalkNodeSubtree(RowKind kind, TreeNode node, int depth, int arrayIndex, DiffStatus tint, List<DiffVisibleRow> into, int mirrorRecordIndex = -1)
+    private void WalkNodeSubtree(RowKind kind, TreeNode node, int depth, DiffStatus tint, List<DiffVisibleRow> into, int mirrorRecordIndex = -1)
     {
-        into.Add(new DiffVisibleRow(kind, mirrorRecordIndex, node, depth, arrayIndex, tint));
+        into.Add(new DiffVisibleRow(kind, mirrorRecordIndex, node, depth, tint));
 
         if (!node.IsContainer || !IsSubExpanded(Overrides(kind), node.ValueStart, depth))
             return;
@@ -386,18 +384,17 @@ public sealed class JsonDiffRowCollection : VirtualizingItemsSourceBase
     private void WalkChildren(RowKind kind, TreeNode container, int depth, DiffStatus tint, List<DiffVisibleRow> into, int mirrorRecordIndex = -1)
     {
         var document = Document(kind != RowKind.SubRight);
-        bool isArray = container.FormatKind == (byte)JsonTokenKind.StartArray;
         int shown = 0;
         int cap = ChildLimit(kind == RowKind.SubRight ? rightNodeChildLimit : leftNodeChildLimit, container.ValueStart);
         foreach (var child in document.Children(container))
         {
             if (shown >= cap)
             {
-                into.Add(new DiffVisibleRow(RowKind.Placeholder, -1, container, depth + 1, -1, tint));
+                into.Add(new DiffVisibleRow(RowKind.Placeholder, -1, container, depth + 1, tint));
                 return;
             }
 
-            WalkNodeSubtree(kind, child, depth + 1, isArray ? shown : -1, tint, into, mirrorRecordIndex);
+            WalkNodeSubtree(kind, child, depth + 1, tint, into, mirrorRecordIndex);
             shown++;
         }
     }
@@ -822,7 +819,7 @@ public sealed class JsonDiffRowCollection : VirtualizingItemsSourceBase
                 var document = Document(leftSide);
                 bool hasChildren = document.HasChildren(vrow.Node);
                 bool expanded = hasChildren && IsSubExpanded(Overrides(vrow.Kind), vrow.Node.ValueStart, vrow.Depth);
-                var jsonRow = document.BuildRow(position, vrow.Node, vrow.ArrayIndex, vrow.Depth, expanded);
+                var jsonRow = document.BuildRow(vrow.Node, expanded);
 
                 var leftRow = vrow.Kind != RowKind.SubRight ? jsonRow : null;
                 var rightRow = vrow.Kind == RowKind.SubRight ? jsonRow
@@ -853,10 +850,10 @@ public sealed class JsonDiffRowCollection : VirtualizingItemsSourceBase
         // A Moved row's content renders on one side only: the stub keeps the left pane
         // (its old position), the destination the right pane - matching the sub-walks.
         JsonRow? leftRow = RecordRowShowsLeft(record)
-            ? left.BuildRow(position, left.NodeAt(record.Left), record.LeftArrayIndex, record.Depth, expanded)
+            ? left.BuildRow(left.NodeAt(record.Left), expanded)
             : null;
         JsonRow? rightRow = RecordRowShowsRight(record)
-            ? right.BuildRow(position, right.NodeAt(record.Right), record.RightArrayIndex, record.Depth, expanded)
+            ? right.BuildRow(right.NodeAt(record.Right), expanded)
             : null;
 
         // A cross-parent Moved renders at BOTH positions: a stub at the source pointing at

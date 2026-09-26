@@ -3,8 +3,7 @@ namespace Argonaut.Features.Json.Diff;
 /// <summary>
 /// Display model for one visible diff row: both sides' <see cref="JsonRow"/>s (either may
 /// be null when that side is absent), the diff status driving the row tint, and the merged
-/// depth driving the indent (the per-side <see cref="JsonRow.Depth"/> is deliberately NOT
-/// used - alignment is the whole point). Placeholder rows mark a display cap, exactly like
+/// depth driving the indent - one for both panes, since alignment is the whole point. Placeholder rows mark a display cap, exactly like
 /// the JSON view's.
 /// </summary>
 public sealed class JsonDiffRow

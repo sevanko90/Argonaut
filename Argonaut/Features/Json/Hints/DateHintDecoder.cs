@@ -6,7 +6,7 @@ namespace Argonaut.Features.Json.Hints;
 /// <summary>
 /// Converts a classified numeric value to a unix-milliseconds timestamp under a given scheme,
 /// and formats it in local time. Never throws: out-of-range conversions (possible when a
-/// per-token override applies a scheme the value's digit length wasn't meant for) return false.
+/// per-value override applies a scheme the value's digit length wasn't meant for) return false.
 /// </summary>
 public static class DateHintDecoder
 {

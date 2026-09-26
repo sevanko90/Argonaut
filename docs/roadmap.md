@@ -233,19 +233,9 @@ Detail: [perf-review-2026-07-17.md](perf-review-2026-07-17.md).
   only, re-parsing everything between them on demand, so the index is well under 1% of the file
   for any shape; the tree becomes a `RawTextSurface`-style control driven by a row cursor instead
   of a `ListBox` over an `IList`. Plan: [json-sparse-index-plan.md](json-sparse-index-plan.md).
-- **Delta + varint encoding for `PackedToken`** (option 4 of
-  [index-memory-analysis.md](index-memory-analysis.md), never implemented). Would take the index
-  from 24 bytes/token to an estimated 8-12 average. Judged worth pursuing whenever the
-  ~2.24 GiB-per-100M-token baseline needs to shrink further: the added random-access cost is
-  low microseconds and the complexity stays in decode logic rather than threading.
 - **Span-based unescape for quoted CSV fields.** `CsvFieldReader.DecodeField` allocates twice for
   a quoted field (a `Replace("\"\"", "\"")` after the initial decode). Noted from reading the
   code, never measured — a candidate only if CSV load ever profiles as hot.
-
-Retired: dropping `JsonTokenInfo.ParentIndex` (perf review item 7) is no longer available. It was
-proposed when only tests read it; `JsonPathBuilder`, `JsonPathResolver`, `JsonArrayElementIndex`,
-`JsonDiffRowCollection` and `JsonVisibleRowCollection` all walk the parent chain now, so the
-4 bytes per token are earning their keep.
 
 ## UI
 

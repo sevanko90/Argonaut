@@ -295,6 +295,6 @@ public class JsonArrayRowCollectionTests
                 new ColumnRoute([RouteStep.Property("geometry"), RouteStep.Property("type")], "geometry.type"),
             ]),
             // Ragged data, not an error: the route passes through a scalar, so it draws nothing
-            // and the walk moves on rather than reading EndIndex off a scalar token.
+            // and the walk moves on rather than descending into a scalar.
             rows => Assert.Equal([""], TextOf(rows, 0)));
 }

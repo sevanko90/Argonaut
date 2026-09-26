@@ -49,8 +49,8 @@ public sealed class JsonArrayRowCollection : VirtualizingItemsSourceBase, IColum
 {
     private const int CacheCapacity = 1000;
 
-    /// <summary>Matches JsonVisibleRowCollection's cadence rather than CSV's 120ms: rows here
-    /// arrive in stride-sized batches from the element index, not one at a time.</summary>
+    /// <summary>Slower than CSV's 120ms: rows here become addressable a checkpoint's worth at a
+    /// time, not one at a time.</summary>
     private static readonly TimeSpan GrowthPollInterval = TimeSpan.FromMilliseconds(500);
 
     private readonly JsonArrayElements elements;

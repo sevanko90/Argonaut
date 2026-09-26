@@ -57,7 +57,7 @@ public class TreeSurface : RowSurface
 
     /// <summary>Rows an Alt-expand may reveal before it stops: enough to open any sensible
     /// subtree, few enough that one click near the root of a huge file stays quick.</summary>
-    public const int DeepExpandRowBudget = 100_000;
+    public int DeepExpandRowBudget { get; set; } = 100_000;
 
     /// <summary>A row covers this many bytes until rows on screen say otherwise.</summary>
     private const double InitialBytesPerRow = 32;

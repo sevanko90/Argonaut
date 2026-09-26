@@ -2,8 +2,8 @@ using System.Text.Json;
 
 namespace Argonaut.Tests.Benchmarks;
 
-/// <summary>The document shapes the JSON tree benchmarks compare, chosen for how differently
-/// they load a per-token index.</summary>
+/// <summary>The document shapes the JSON tree benchmarks compare: many tiny tokens, deep nesting,
+/// and a large array of small records.</summary>
 public enum JsonShape
 {
     /// <summary>One flat array of short numbers: 2-4 bytes a token, the worst case for any index

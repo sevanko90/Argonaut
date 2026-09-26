@@ -358,6 +358,45 @@ public sealed class TreeSurfaceTests
     });
 
     [Fact]
+    public Task AltExpandLeavesSiblingsAsTheyWere() => WithSurface(defaultDepth: 1, async h =>
+    {
+        var lists = h.Surface.RealizedRows.Where(r => r.Shape == TreeRowShape.Open && r.Depth == 1).Take(2).ToList();
+        Assert.Equal(2, lists.Count);
+
+        h.Surface.ToggleDeep(lists[0]);
+        await PumpAsync();
+
+        Assert.True(h.Document.Expand.IsExpanded(lists[0].Node.ValueStart, 1));
+        Assert.False(h.Document.Expand.IsExpanded(lists[1].Node.ValueStart, 1));
+    });
+
+    [Fact]
+    public Task AltExpandStopsAtItsRowBudgetAndSaysSo() => WithSurface(defaultDepth: 0, async h =>
+    {
+        int limitReached = 0;
+        h.Surface.ExpandLimitReached += (_, _) => limitReached++;
+        h.Surface.DeepExpandRowBudget = 10;
+        var root = h.Surface.RealizedRows[0];
+
+        h.Surface.ToggleDeep(root);
+        await PumpAsync();
+
+        Assert.Equal(1, limitReached);
+        var everything = new TreeCursor(h.Document.Index, h.Document.Reader, new TreeExpandState(99));
+        int opened = 0, containers = 0;
+        for (bool more = everything.MoveToStart(); more; more = everything.MoveNext())
+        {
+            if (everything.Current.Shape != TreeRowShape.Open)
+                continue;
+            containers++;
+            opened += h.Document.Expand.IsExpanded(everything.Current.Node.ValueStart, everything.Current.Depth) ? 1 : 0;
+        }
+
+        Assert.InRange(opened, 1, 10);
+        Assert.True(containers > opened);
+    });
+
+    [Fact]
     public Task DraggingAResizableGutterEdgeResizesIt() => WithSurface(defaultDepth: 9, async h =>
     {
         var gutter = (FixedGutter)h.Document.Gutters[0];

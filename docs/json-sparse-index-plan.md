@@ -185,7 +185,7 @@ The existing dense index stays available to diff until this is built, so diff is
 Each step lands on its own and leaves the app working. Tick a step when it is merged into the
 branch, and note under it anything the next step needs to know.
 
-Status: step 9 done; step 10 (remove the token index) next. The array table and the diff await a manual check. Branch: `plan/json-sparse-index`.
+Status: step 10 done; the token index is gone. Next: step 12 (one scroll interface), then 13 (the diff on the tree surface); step 11 only if the estimated scrollbar disappoints. The array table and the diff await a manual check. Branch: `plan/json-sparse-index`.
 
 1. [x] **Benchmarks first.** A BenchmarkDotNet suite over three shapes - a token-dense array, deeply
    nested objects, a large array of small records - measuring index bytes per file byte, build time,
@@ -444,8 +444,25 @@ Status: step 9 done; step 10 (remove the token index) next. The array table and 
    Needs a manual check: compare two files; changed paths open to the differing leaf; expand
    unchanged, added, removed and moved rows; the context bar's values and paths (including
    under a moved container); next/previous change; "changes only"; find across both files.
-10. [ ] **Remove `JsonStructureIndex`'s dense log** once nothing reads it, and the `ChildCap`/"show more"
+10. [x] **Remove `JsonStructureIndex`'s dense log** once nothing reads it, and the `ChildCap`/"show more"
     machinery with it.
+
+    Removed with it: `JsonVisibleRowCollection`, `JsonRowFactory`, `JsonOffsetTokenResolver`,
+    `JsonIndexOptions`, `JsonTokenInfo` and the token-index halves of the path builder, resolver,
+    key sampler and date-scheme inference. `JsonTokenKind` has its own file; the path grammar is
+    `JsonPathSyntax` (parse and format), which `JsonTreePaths` walks the tree with. `JsonRow` is
+    now just what a diff pane shows. The diff keeps its own display cap until step 13.
+
+    - **A new test oracle.** Tests that held the sparse tree to the dense one now hold it to
+      `Support/JsonModel`, a whole-document `Utf8JsonReader` model sharing no code with the tree:
+      rows and seeks (`JsonTreeReaderTests`), what each row says (`JsonTreePainterTests`) and paths
+      (`JsonTreePathsTests`). `Support/JsonTreeHarness` puts a document on the sparse tree without a
+      view, for the row-level suites that were ported from the dense rows: truncation, Unicode,
+      date hints (painter), schema labels (`JsonSchemaGutterTests`), key sampling, date inference.
+      Alt-expand's sibling and row-budget cases moved to `TreeSurfaceTests`, for which
+      `TreeSurface.DeepExpandRowBudget` became a settable property.
+    - **Behaviour not carried over, deliberately**: expansion overrides do not survive a change of
+      default depth (the view resets them), so that dense test went.
 11. [ ] **Per-depth row counts**, if the estimated scrollbar proves not good enough in use.
 12. [ ] **One scroll interface for every self-drawn view.** Move the tree's scroll API down into
     `RowSurface` - scroll by pixels, go to a fraction, go to the end, `ScrollPositionChanged`,

@@ -9,8 +9,8 @@ namespace Argonaut.Ui.Documents.Navigation;
 /// </summary>
 /// <param name="Path">File the array lives in.</param>
 /// <param name="Offset">Byte offset of the array's opening bracket, relative to the FILE - the
-/// raiser is responsible for converting out of its own mapping's coordinates first (see
-/// JsonTokenInfo.Offset).</param>
+/// raiser is responsible for converting out of its own mapping's coordinates first - a nested
+/// document's offsets are relative to its own sub-range.</param>
 /// <param name="Length">Byte length of the array, opening bracket through closing bracket
 /// inclusive, so [Offset, Offset + Length) is a valid JSON document on its own.</param>
 /// <param name="ArrayPath">JSONPath the array sits at in the source document - the banner's

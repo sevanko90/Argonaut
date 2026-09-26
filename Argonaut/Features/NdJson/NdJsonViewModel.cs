@@ -73,7 +73,7 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel
 
     /// <summary>
     /// Master date-hint settings shared across every line's nested JsonViewModel: the header
-    /// dropdown attaches to this. Only the default scheme is shared - per-token overrides live
+    /// dropdown attaches to this. Only the default scheme is shared - per-value overrides live
     /// on each line's own (disposed-per-selection) JsonViewModel.HintSettings and are never
     /// copied here.
     /// </summary>

@@ -101,11 +101,10 @@ them). Keep this in sync when the ownership chain changes.
   `Engine/Indexing/IndexFailure.cs`) is non-null when a background scan
   stopped because of an error, null on success *and* on cancellation. `AppendLogIndexBase.RunIndexing`
   is the one place that catches a scan's exception, records it (via the overridable
-  `DescribeFailure`, which `JsonStructureIndex` enriches with line/column/byte-offset from a
-  `JsonException`), and rethrows — so `IndexingTask` faults as if nothing had caught it. The JSON
-  tree's `JsonSparseIndex` does not validate as it scans; `JsonDocumentValidator` reads the
-  document beside it and reports the same message, line, column and trouble offset (both go
-  through `JsonFailureLocation`), with `ItemsIndexed` counting the tokens read before the error.
+  `DescribeFailure`), and rethrows — so `IndexingTask` faults as if nothing had caught it. The
+  JSON tree's `JsonSparseIndex` does not validate as it scans; `JsonDocumentValidator` reads the
+  document beside it and reports the reader's message, line, column and trouble offset (through
+  `JsonFailureLocation`), with `ItemsIndexed` counting the tokens read before the error.
 - Forcing an incompatible kind onto a file (via the switcher) is classified in two stages:
   1. **Pre-flight** — `FileTypeDetector.IsPlausibleFor(kind, origin, out reason)` is a cheap header
      check (no indexing) that rejects an obvious mismatch (e.g. CSV content forced to JSON)
@@ -245,7 +244,7 @@ The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLeng
   never joined by disposal, avoiding a wait on the UI thread from the UI thread itself. `RawIndexSession` is the wrap-width-restartable variant, with
   two cancellation sources: `mappingCts` for the document's lifetime and `indexCts` (linked from
   it) for the index `RestartIndex` recycles; `JsonDiffSession` composes two
-  `IndexedSourceSession<JsonStructureIndex>`s; `JsonArrayTableSession` wraps one
+  `IndexedSourceSession<JsonSparseIndex>`s; `JsonArrayTableSession` wraps one
   `IndexedSourceSession<JsonSparseIndex>` over the array's own byte range, with the readers and
   `JsonArrayElements` the table reads it through. All four implement
   `IDocumentSession`, which
@@ -310,11 +309,9 @@ The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLeng
 ## Virtualized ItemsSources
 
 - `VirtualizingItemsSourceBase` (`Ui/Documents/VirtualizingItemsSourceBase.cs`) is the shared
-  base for the list ItemsSources: `JsonVisibleRowCollection`, `NdJsonLineCollection`,
-  `CsvRowCollection`, `JsonArrayRowCollection`, `JsonDiffRowCollection` and `RawRowCollection`.
-  It supplies the read-only `IList` +
-  `INotifyCollectionChanged` surface
-  Avalonia's `VirtualizingStackPanel` needs.
+  base for the list ItemsSources: `NdJsonLineCollection`, `CsvRowCollection`,
+  `JsonArrayRowCollection`, `JsonDiffRowCollection` and `RawRowCollection`. It supplies the
+  read-only `IList` + `INotifyCollectionChanged` surface Avalonia's `VirtualizingStackPanel` needs.
 - **The raw view and the JSON tree are the exceptions, and deliberately so.** Both draw their own
   rows on `RowSurface` (`Ui/Rows`), which owns fixed row height, the appearance properties,
   horizontal pan and the `ILogicalScrollable` plumbing. The JSON tree is `TreeSurface` (`Ui/Tree`)
@@ -387,8 +384,8 @@ The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLeng
 - `OnIndexingCompleted()` takes no argument on purpose: every subclass reports from state it
   already has, so handing it the `IBackgroundIndex` would only widen what a hook can reach into.
 - **A row collection samples "is the scan still running?" BEFORE its first walk, never after.**
-  Every collection with an `IndexGrowthMonitor` (`JsonVisibleRowCollection`,
-  `JsonArrayRowCollection`, `JsonDiffRowCollection`) attaches one only when the scan was
+  Every collection with an `IndexGrowthMonitor` (`JsonArrayRowCollection`,
+  `JsonDiffRowCollection`) attaches one only when the scan was
   unfinished — and a scan that finishes *during* that first walk would, on a check made
   afterwards, read as "already complete, nothing to monitor", leaving the collection frozen on
   what it saw mid-scan with nothing left to rebuild it (for the diff: the pre-diff preview of

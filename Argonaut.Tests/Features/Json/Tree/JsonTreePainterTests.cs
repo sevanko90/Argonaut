@@ -1,177 +1,256 @@
 using System.Text;
-using Argonaut.Engine.Bytes;
+using System.Text.Json;
 using Argonaut.Engine.Indexing.Trees;
-using Argonaut.Features.Json;
+using Argonaut.Engine.Text;
 using Argonaut.Features.Json.Hints;
-using Argonaut.Features.Json.Indexing;
-using Argonaut.Features.Json.Schema;
 using Argonaut.Features.Json.Tree;
 using Argonaut.Tests.Support;
-using Argonaut.Ui.Tree;
 
 namespace Argonaut.Tests.Features.Json.Tree;
 
 /// <summary>
-/// What the sparse tree's rows say, held row for row to what the dense tree's rows say for the
-/// same document - names, values, collapsed summaries, array indices, date hints and schema
-/// labels. The dense tree is the oracle until it is retired.
+/// What a JSON tree row says - names and values as written, collapsed summaries, array indices,
+/// the "view as table" link - checked row for row against a <see cref="JsonModel"/> of the same
+/// document; then the display cap and its notes, and decoded dates.
 /// </summary>
-public sealed class JsonTreePainterTests : IDisposable
+public sealed class JsonTreePainterTests
 {
-    private readonly string path = Path.Combine(Path.GetTempPath(), $"painter-{Guid.NewGuid():N}.json");
-    private MMapFile? file;
-
-    public void Dispose()
+    /// <summary>What the model says each row should say.</summary>
+    private static void AssertRowsSayWhatTheModelSays(byte[] json, int defaultDepth)
     {
-        file?.Dispose();
-        File.Delete(path);
-    }
+        var model = new JsonModel(json);
+        var expand = new TreeExpandState(defaultDepth);
+        var expected = model.Rows(expand);
+        var actual = new JsonTreeHarness(json).Rows(expand);
 
-    private sealed record Pair(JsonRow Dense, TreeRow Sparse, List<TreeRun> Runs, string? Marker);
-
-    /// <summary>Both trees over the same bytes at the same depth, zipped row by row.</summary>
-    private List<Pair> Zip(byte[] json, int defaultDepth, DateHintSettings? hints = null, JsonSchemaDocument? schema = null)
-    {
-        File.WriteAllBytes(path, json);
-        file = new MMapFile(path);
-
-        var providers = hints is null ? null : new IValueHintProvider[] { new DateHintProvider(hints) };
-        var dense = JsonStructureIndex.StartIndexing(file);
-        dense.IndexingTask.GetAwaiter().GetResult();
-        var denseRows = new JsonVisibleRowCollection(dense, file, providers, defaultDepth);
-        if (schema is not null)
-            denseRows.SetSchema(schema);
-
-        var sparse = JsonSparseIndex.StartIndexing(file, promotionBytes: 256, checkpointBytes: 64);
-        sparse.IndexingTask.GetAwaiter().GetResult();
-        var reader = new JsonTreeReader(file);
-        var text = new JsonTreeText(file, sparse.Structure, reader);
-        var painter = new JsonTreePainter(text, providers, offerArrayTable: true);
-        var cursor = new TreeCursor(sparse.Structure, reader, new TreeExpandState(defaultDepth));
-
-        var pairs = new List<Pair>();
-        int i = 0;
-        for (bool more = cursor.MoveToStart(); more; more = cursor.MoveNext(), i++)
+        Assert.Equal(expected.Count, actual.Count);
+        for (int i = 0; i < expected.Count; i++)
         {
-            var runs = new List<TreeRun>();
-            painter.AppendRuns(cursor.Current, runs);
-            pairs.Add(new Pair((JsonRow)denseRows[i]!, cursor.Current, runs, painter.Marker(cursor.Current)));
+            var node = model.Nodes[expected[i].Node];
+            var row = actual[i];
+            bool isArray = node.Kind == JsonTokenType.StartArray;
+            bool parentIsArray = node.Parent >= 0 && model.Nodes[node.Parent].Kind == JsonTokenType.StartArray;
+
+            if (expected[i].IsClose)
+            {
+                Assert.Equal(isArray ? "]" : "}", row.Value);
+                Assert.Null(row.Name);
+                Assert.Null(row.Marker);
+                continue;
+            }
+
+            Assert.Equal(node.RawName, row.Name);
+            Assert.Equal(parentIsArray ? node.Ordinal.ToString() : null, row.Marker);
+
+            if (!node.IsContainer)
+            {
+                Assert.Equal(model.RawValue(expected[i].Node), row.Value);
+                continue;
+            }
+
+            bool expanded = expand.IsExpanded(node.ValueStart, node.Depth);
+            int count = node.Children.Count;
+            string label = isArray ? "item" : "member";
+            string summary = $"{(isArray ? "[" : "{")} {count} {label}{(count == 1 ? "" : "s")} {(isArray ? "]" : "}")}";
+            Assert.Equal(expanded ? (isArray ? "[" : "{") : summary, row.Value);
+            Assert.Equal(isArray && count > 0, row.LinkOf<ViewAsTableLink>() is not null);
         }
-
-        Assert.Equal(denseRows.Count, pairs.Count);
-        return pairs;
     }
-
-    private static string? NameOf(List<TreeRun> runs)
-        => runs.FirstOrDefault(r => r.Style == TreeRunStyle.Name).Text is { } name ? name[..^2] : null;
-
-    private static string ValueOf(List<TreeRun> runs)
-        => runs.First(r => r.Style is not (TreeRunStyle.Name or TreeRunStyle.Hint or TreeRunStyle.Link)).Text;
 
     [Theory]
     [InlineData(1, 1)]
     [InlineData(2, 3)]
     [InlineData(3, 30)]
-    public void NamesValuesSummariesAndIndicesMatchTheDenseTree(int seed, int defaultDepth)
-    {
-        foreach (var pair in Zip(RandomJson.LargeContainers(new Random(seed), elements: 30), defaultDepth))
-        {
-            Assert.Equal(pair.Dense.Name, NameOf(pair.Runs));
-            Assert.Equal(pair.Dense.Value, ValueOf(pair.Runs));
-            Assert.Equal(pair.Dense.ArrayIndex?.ToString(), pair.Marker);
-            Assert.Equal(pair.Dense.CanViewAsTable, pair.Runs.Any(r => r.Link is ViewAsTableLink));
-        }
-    }
+    public void NamesValuesSummariesAndIndicesAreWhatTheFileSays(int seed, int defaultDepth)
+        => AssertRowsSayWhatTheModelSays(RandomJson.LargeContainers(new Random(seed), elements: 30), defaultDepth);
 
+    /// <summary>Names and string values outside ASCII - raw multi-byte UTF-8 in many scripts,
+    /// emoji with ZWJ sequences, flags and skin tones, combining marks, astral-plane letters and
+    /// invisible characters - show as the text in the file. A property name is any JSON string, so
+    /// names get the same coverage as values.</summary>
     [Theory]
     [InlineData(1)]
     [InlineData(16)]
-    public void TheUnicodeFixtureSaysWhatTheDenseTreeSays(int defaultDepth)
-    {
-        foreach (var pair in Zip(File.ReadAllBytes(Fixtures.UnicodeNamesAndValuesJson), defaultDepth))
-        {
-            Assert.Equal(pair.Dense.Name, NameOf(pair.Runs));
-            Assert.Equal(pair.Dense.Value, ValueOf(pair.Runs));
-        }
-    }
+    public void TheUnicodeFixtureShowsAsTheTextInTheFile(int defaultDepth)
+        => AssertRowsSayWhatTheModelSays(File.ReadAllBytes(Fixtures.UnicodeNamesAndValuesJson), defaultDepth);
 
     [Fact]
-    public void AValueTooLongToShowLinksToTheRawViewAtItsContent()
+    public void TheUnicodeFixtureReallyContainsWhatTheTestClaims()
+    {
+        string text = File.ReadAllText(Fixtures.UnicodeNamesAndValuesJson, Encoding.UTF8);
+
+        Assert.Contains("日本語", text);         // raw multi-byte name
+        Assert.Contains("👨‍👩‍👧", text);          // ZWJ sequence
+        Assert.Contains("𝔘𝔫𝔦𝔠𝔬𝔡𝔢", text);        // astral-plane letters in a name
+        Assert.Contains("😀", text);            // an astral-plane emoji
+        Assert.Contains("\"\":", text);          // the empty name
+    }
+
+    // ── The display cap ────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void ALongStringIsCutAndLinksToTheRawViewAtItsContent()
     {
         string payload = new('a', 5000);
-        var pair = Zip(Encoding.UTF8.GetBytes($"{{\"payload\":\"{payload}\"}}"), defaultDepth: 1)[1];
+        var tree = new JsonTreeHarness($"{{\"payload\":\"{payload}\"}}");
+        var row = tree.Member("payload");
 
-        Assert.Equal(pair.Dense.Value, ValueOf(pair.Runs));
-        var link = Assert.Single(pair.Runs, r => r.Link is ViewInRawLink);
-        Assert.Equal(pair.Dense.TruncatedValueOffset, ((ViewInRawLink)link.Link!).Offset);
+        // Opening quote + capped text + ellipsis; no closing quote on a cut string.
+        Assert.Equal(DisplayText.MaxLength + 2, row.Value.Length);
+        Assert.StartsWith("\"", row.Value);
+        Assert.EndsWith("…", row.Value);
+
+        var link = row.LinkOf<ViewInRawLink>()!.Value;
+        Assert.Contains("truncated", link.Text);
         Assert.Contains("4.9 KB", link.Text);
+        Assert.Equal(row.Row.Node.ValueStart + 1, ((ViewInRawLink)link.Link!).Offset);
     }
 
     [Fact]
-    public void DateHintsMatchAndLinkToTheirValue()
+    public void AShortValueIsWholeWithNoNote()
     {
-        var hints = new DateHintSettings();
-        hints.SetUserDefault(DateDecodingScheme.JsSeconds);
-        byte[] json = Encoding.UTF8.GetBytes("{\"at\":1700000000,\"n\":5,\"list\":[1600000000,\"x\"]}");
+        var row = new JsonTreeHarness("{\"payload\":\"short\"}").Member("payload");
 
-        var pairs = Zip(json, defaultDepth: 9, hints);
-        Assert.Contains(pairs, p => p.Dense.Hint is not null);
-        foreach (var pair in pairs)
-        {
-            var hint = pair.Runs.FirstOrDefault(r => r.Link is DateSchemeLink);
-            Assert.Equal(pair.Dense.Hint, hint.Text?.Trim());
-            if (hint.Link is DateSchemeLink link)
-                Assert.Equal(pair.Sparse.Node.ValueStart, link.ValueOffset);
-        }
+        Assert.Equal("\"short\"", row.Value);
+        Assert.Null(row.LinkOf<ViewInRawLink>());
+        Assert.Null(row.Note);
     }
 
     [Fact]
-    public void SchemaLabelsMatchTheDenseTree()
+    public void ACutMidCharacterBacksOffToTheCharacterBoundary()
     {
-        var schema = JsonSchemaLoader.TryParse("""
-            {
-              "title": "Order",
-              "type": "object",
-              "properties": {
-                "id": { "title": "Order id", "type": "integer" },
-                "status": { "description": "Where it is\nsecond line", "enum": ["new", "sent"],
-                            "x-enum-titles": { "sent": "Dispatched" } },
-                "lines": { "title": "Lines", "type": "array",
-                           "items": { "title": "Line", "type": "object",
-                                      "properties": { "sku": { "title": "Stock code" } } } }
-              }
-            }
-            """)!;
-        byte[] json = Encoding.UTF8.GetBytes("{\"id\":1,\"status\":\"sent\",\"lines\":[{\"sku\":\"a\"},{\"sku\":\"b\",\"other\":2}],\"extra\":true}");
+        // 'a' then 1000 two-byte 'é's puts every 'é' at an odd byte offset, so the cap (an even
+        // offset) falls mid-character and must back off rather than decode a split sequence into
+        // a replacement glyph.
+        string payload = "a" + new string('é', 1000);
+        var row = new JsonTreeHarness($"{{\"payload\":\"{payload}\"}}").Member("payload");
 
-        File.WriteAllBytes(path, json);
-        using var mapped = new MMapFile(path);
-        var sparse = JsonSparseIndex.StartIndexing(mapped, promotionBytes: 16, checkpointBytes: 8);
-        sparse.IndexingTask.GetAwaiter().GetResult();
-        var reader = new JsonTreeReader(mapped);
-        var text = new JsonTreeText(mapped, sparse.Structure, reader);
-        var resolver = new JsonSchemaResolver(sparse.Structure, reader, text) { Schema = schema };
-        var gutter = new JsonSchemaGutter(resolver, text);
+        Assert.EndsWith("…", row.Value);
+        Assert.DoesNotContain('�', row.Value);
+    }
 
-        var dense = JsonStructureIndex.StartIndexing(mapped);
-        dense.IndexingTask.GetAwaiter().GetResult();
-        var denseRows = new JsonVisibleRowCollection(dense, mapped, defaultExpandDepth: 9);
-        denseRows.SetSchema(schema);
+    [Fact]
+    public void ALongNameIsCutWithAPlainNote()
+    {
+        string name = new('k', 4000);
+        var row = new JsonTreeHarness($"{{\"{name}\":1}}").Rows()[1];
 
-        var cursor = new TreeCursor(sparse.Structure, reader, new TreeExpandState(9));
-        int i = 0, labelled = 0;
-        for (bool more = cursor.MoveToStart(); more; more = cursor.MoveNext(), i++)
-        {
-            var denseRow = (JsonRow)denseRows[i]!;
-            var tip = gutter.ToolTipFor(cursor.Current);
-            Assert.Equal(denseRow.SchemaLabel is not null, tip is not null);
-            labelled += tip is null ? 0 : 1;
-        }
+        Assert.Equal(DisplayText.MaxLength + 1, row.Name!.Length);
+        Assert.EndsWith("…", row.Name);
 
-        Assert.True(labelled >= 5, $"only {labelled} rows were labelled");
+        // Only the name overflowed, not the value - nothing to jump to, so a plain note rather
+        // than a "view in raw" link.
+        Assert.Contains("name truncated", row.Note);
+        Assert.Null(row.LinkOf<ViewInRawLink>());
+    }
 
-        Assert.True(gutter.Width > 0);
-        resolver.Schema = null;
-        Assert.Equal(0, gutter.Width);
+    [Fact]
+    public void ALongNumberIsCut()
+    {
+        var json = new StringBuilder("{\"n\":1").Append('2', 3000).Append('}').ToString();
+        var row = new JsonTreeHarness(json).Member("n");
+
+        Assert.Equal(DisplayText.MaxLength + 1, row.Value.Length);
+        Assert.EndsWith("…", row.Value);
+        Assert.NotNull(row.LinkOf<ViewInRawLink>());
+    }
+
+    // ── Decoded dates ──────────────────────────────────────────────────────────────────
+
+    private const string DateJson = "{\"name\":\"x\",\"short\":123,\"ts\":1709305509,\"list\":[1600000000,\"y\"]}";
+
+    private static DateHintSettings JsSeconds()
+    {
+        var settings = new DateHintSettings();
+        settings.SetUserDefault(DateDecodingScheme.JsSeconds);
+        return settings;
+    }
+
+    [Fact]
+    public void TheDefaultSchemeDecodesQualifyingNumbersOnly()
+    {
+        var tree = new JsonTreeHarness(DateJson, JsSeconds());
+
+        Assert.NotNull(tree.Member("ts").DateHint);
+        Assert.Null(tree.Member("short").DateHint);
+        Assert.Null(tree.Member("name").DateHint);
+        Assert.NotNull(tree.Rows().Single(r => r.Value == "1600000000").DateHint);
+    }
+
+    [Fact]
+    public void AHintLinksToItsValue()
+    {
+        var row = new JsonTreeHarness(DateJson, JsSeconds()).Member("ts");
+
+        var link = row.LinkOf<DateSchemeLink>()!.Value;
+        Assert.Equal(row.Row.Node.ValueStart, ((DateSchemeLink)link.Link!).ValueOffset);
+    }
+
+    [Fact]
+    public void WithTheSchemeOffThereAreNoHints()
+        => Assert.All(new JsonTreeHarness(DateJson, new DateHintSettings()).Rows(), r => Assert.Null(r.DateHint));
+
+    [Fact]
+    public void ChangingTheTimeZoneModeChangesTheHint()
+    {
+        var settings = JsSeconds(); // local time by default
+        var tree = new JsonTreeHarness(DateJson, settings);
+        string? local = tree.Member("ts").DateHint;
+        Assert.Contains("[local", local);
+
+        settings.SetTimeZoneMode(DateHintTimeZoneMode.Utc);
+
+        string? utc = tree.Member("ts").DateHint;
+        Assert.EndsWith("[UTC]", utc);
+        Assert.NotEqual(local, utc);
+    }
+
+    [Fact]
+    public void ChangingTheSchemeChangesTheHint()
+    {
+        var settings = JsSeconds();
+        var tree = new JsonTreeHarness(DateJson, settings);
+        string? before = tree.Member("ts").DateHint;
+
+        settings.SetUserDefault(DateDecodingScheme.JsMilliseconds);
+
+        Assert.NotEqual(before, tree.Member("ts").DateHint);
+    }
+
+    [Fact]
+    public void AValueOverrideDecodesOnlyThatValue()
+    {
+        var settings = JsSeconds();
+        var tree = new JsonTreeHarness(DateJson, settings);
+        var ts = tree.Member("ts");
+        string? listHint = tree.Rows().Single(r => r.Value == "1600000000").DateHint;
+
+        settings.SetValueOverride(ts.Row.Node.ValueStart, DateDecodingScheme.KeepaMinutes);
+        Assert.NotEqual(ts.DateHint, tree.Member("ts").DateHint);
+        Assert.Equal(listHint, tree.Rows().Single(r => r.Value == "1600000000").DateHint);
+
+        settings.SetValueOverride(ts.Row.Node.ValueStart, null);
+        Assert.Equal(ts.DateHint, tree.Member("ts").DateHint);
+    }
+
+    [Fact]
+    public void AValueTurnedOffShowsADash()
+    {
+        var settings = JsSeconds();
+        var tree = new JsonTreeHarness(DateJson, settings);
+        settings.SetValueOverride(tree.Member("ts").Row.Node.ValueStart, DateDecodingScheme.Off);
+
+        Assert.Equal("—", tree.Member("ts").DateHint);
+    }
+
+    [Fact]
+    public void AnOverrideOutOfRangeSaysSo()
+    {
+        var settings = new DateHintSettings();
+        settings.SetUserDefault(DateDecodingScheme.JsMilliseconds);
+        var tree = new JsonTreeHarness("{\"ts\":1709305509000}", settings);
+        settings.SetValueOverride(tree.Member("ts").Row.Node.ValueStart, DateDecodingScheme.KeepaMinutes);
+
+        Assert.Equal("out of range", tree.Member("ts").DateHint);
     }
 }

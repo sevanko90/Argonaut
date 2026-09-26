@@ -510,7 +510,7 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
     }
 
     /// <summary>
-    /// Reads at most DateHintInference.MaxTokensToScan values in the background for the first
+    /// Reads at most DateHintInference.MaxValuesToScan values in the background for the first
     /// classifiable date, and sets it as the file default if found. Never a full-file scan.
     /// No-ops if the user has already picked a scheme.
     /// </summary>
@@ -521,7 +521,7 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable
             var scheme = await current.StartDependentRead(tearingDown => Task.Run(() =>
             {
                 tearingDown.ThrowIfCancellationRequested();
-                return DateHintInference.FindFirstScheme(current.Index.Structure, currentReader, currentText, DateHintInference.MaxTokensToScan);
+                return DateHintInference.FindFirstScheme(current.Index.Structure, currentReader, currentText, DateHintInference.MaxValuesToScan);
             }));
             if (!IsDisposed && scheme is { } inferred)
                 HintSettings.TrySetInferredDefault(inferred);

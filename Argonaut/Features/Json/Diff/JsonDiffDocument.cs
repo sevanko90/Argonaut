@@ -152,46 +152,21 @@ public sealed class JsonDiffDocument
 
     // ── Display rows ──────────────────────────────────────────────────────────────────────
 
-    /// <summary>The display row for <paramref name="node"/> - its name, its value or summary, and
-    /// a note when either was cut at the display cap.</summary>
-    public JsonRow BuildRow(int position, TreeNode node, int arrayIndexOrMinusOne, int depth, bool expanded)
+    /// <summary>The pane text for <paramref name="node"/>: its name and its value or summary,
+    /// each cut at the display cap.</summary>
+    public JsonRow BuildRow(TreeNode node, bool expanded)
     {
-        bool nameTruncated = false;
         string? name = null;
-        long nameLength = 0;
         if (node.RowStart != node.ValueStart)
         {
             long nameStart = node.RowStart + 1;
-            nameLength = Reader.StringEnd(node.RowStart) - 1 - nameStart;
-            name = DisplayText.Read(Bytes, nameStart, (int)Math.Min(int.MaxValue, nameLength), out nameTruncated);
+            long nameLength = Reader.StringEnd(node.RowStart) - 1 - nameStart;
+            name = DisplayText.Read(Bytes, nameStart, (int)Math.Min(int.MaxValue, nameLength), out _);
         }
 
-        var kind = (JsonTokenKind)node.FormatKind;
-        bool valueTruncated = false;
-        long contentOffset = node.ValueStart;
-        long valueLength = 0;
-        var row = new TreeRow(node.IsContainer ? TreeRowShape.Open : TreeRowShape.Leaf, node, node.RowStart, depth, 0,
+        var row = new TreeRow(node.IsContainer ? TreeRowShape.Open : TreeRowShape.Leaf, node, node.RowStart, 0, 0,
             JsonTreeReader.Document, -1, expanded);
-        string value = node.IsContainer
-            ? Text.Summary(row)
-            : Text.Scalar(row, out valueTruncated, out contentOffset, out valueLength);
-
-        string? truncationHint = valueTruncated
-            ? $"(truncated — full length {FormatByteLength(valueLength)})"
-            : nameTruncated
-                ? $"(name truncated — full length {FormatByteLength(nameLength)})"
-                : null;
-
-        return new JsonRow(position, node.ValueStart, depth, kind, name, value, HasChildren(node), expanded, isPlaceholder: false,
-            truncationHint: truncationHint, truncatedValueOffset: valueTruncated ? contentOffset : null,
-            arrayIndex: arrayIndexOrMinusOne >= 0 ? arrayIndexOrMinusOne : null);
+        string value = node.IsContainer ? Text.Summary(row) : Text.Scalar(row, out _, out _, out _);
+        return new JsonRow(node.ValueStart, (JsonTokenKind)node.FormatKind, name, value);
     }
-
-    private static string FormatByteLength(long bytes) => bytes switch
-    {
-        < 1024 => $"{bytes:N0} bytes",
-        < 1024 * 1024 => $"{bytes / 1024.0:0.#} KB",
-        < 1024 * 1024 * 1024 => $"{bytes / (1024.0 * 1024.0):0.#} MB",
-        _ => $"{bytes / (1024.0 * 1024.0 * 1024.0):0.#} GB"
-    };
 }

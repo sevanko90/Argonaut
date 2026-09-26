@@ -21,13 +21,13 @@ namespace Argonaut.Ui.Tree;
 /// arrows, selection, find highlights, keyboard and pointer handling are here and shared.
 ///
 /// <b>Scrolling is anchored, not indexed.</b> There is no row count and no row numbering: the
-/// surface holds a cursor on its top row (the anchor) and walks from it to fill the viewport. The
-/// scroll position a host sees is an estimate - the anchor's byte position over the average bytes
-/// a row covers on screen - so the scrollbar's thumb is where the view is in the file. A small
-/// change of offset (the wheel, arrow keys, page keys) moves the anchor that many rows; a large
-/// one (dragging the thumb) seeks to the byte it points at. After a relative move the offset is
-/// re-synced to the anchor's estimated position, so the estimate may drift while the rows on
-/// screen never jump.
+/// surface holds a cursor on its top row (the anchor) and walks from it to fill the viewport. Its
+/// position is a fraction of the document - the anchor's byte position - so a scrollbar's thumb
+/// is where the view is in the file. The wheel, a trackpad, arrows and pages move the anchor by
+/// rows (<see cref="ScrollByPixels"/>); dragging a thumb seeks to the byte it points at
+/// (<see cref="ScrollToFraction"/>). The scrollbar is the host's, and only ever follows
+/// (<see cref="ScrollPositionChanged"/>) - it never feeds a correction back, which is what would
+/// make a dragged thumb stutter.
 /// </summary>
 public class TreeSurface : RowSurface
 {
@@ -76,8 +76,6 @@ public class TreeSurface : RowSurface
     private TreeDocument? document;
     private TreeCursor? anchor;
     private double anchorPixel;
-    private double lastOffsetY;
-    private bool syncingOffset;
     private double bytesPerRow = InitialBytesPerRow;
     private TreeCursor? selection;
     private string? highlightTerm;
@@ -273,7 +271,7 @@ public class TreeSurface : RowSurface
 
         DropLayouts();
         Realize();
-        SyncOffset();
+        NotifyScrollPosition();
         SelectionChanged?.Invoke(this, EventArgs.Empty);
         InvalidateVisual();
     }
@@ -309,7 +307,7 @@ public class TreeSurface : RowSurface
             selection.SeekTo(selection.Current.Start);
 
         Realize();
-        SyncOffset();
+        NotifyScrollPosition();
         InvalidateVisual();
     }
 
@@ -331,13 +329,12 @@ public class TreeSurface : RowSurface
             anchor = null;
 
         anchorPixel = 0;
-        lastOffsetY = 0;
         selection = null;
         bytesPerRow = InitialBytesPerRow;
         DropLayouts();
         ResetWidestRowWidth();
         Realize();
-        SyncOffset();
+        NotifyScrollPosition();
         InvalidateVisual();
     }
 
@@ -352,7 +349,7 @@ public class TreeSurface : RowSurface
         }
 
         Realize();
-        RaiseScrollInvalidated(EventArgs.Empty);
+        NotifyScrollPosition();
         InvalidateVisual();
     }
 
@@ -364,14 +361,21 @@ public class TreeSurface : RowSurface
     private void Realize()
     {
         realized.Clear();
+        ShowsEnd = false;
         if (anchor is null || Bounds.Height <= 0)
             return;
 
         int needed = (int)Math.Ceiling((Bounds.Height + anchorPixel) / RowHeight);
         var walker = anchor.Clone();
         realized.Add(walker.Current);
-        while (realized.Count < needed && walker.MoveNext())
+        bool more = true;
+        while (realized.Count < needed && (more = walker.MoveNext()))
             realized.Add(walker.Current);
+
+        // One more step finds out whether the last row realized is the document's last.
+        if (more && realized.Count == needed)
+            more = walker.MoveNext();
+        ShowsEnd = !more && realized.Count * RowHeight - anchorPixel <= Bounds.Height + 0.5;
 
         int fitting = Math.Max(1, (int)(Bounds.Height / RowHeight));
         if (realized.Count < needed && realized.Count < fitting)
@@ -507,7 +511,7 @@ public class TreeSurface : RowSurface
     protected override void OnViewportChanged()
     {
         Realize();
-        RaiseScrollInvalidated(EventArgs.Empty);
+        NotifyScrollPosition();
     }
 
     protected override Size ArrangeOverride(Size finalSize)
@@ -601,51 +605,110 @@ public class TreeSurface : RowSurface
     // ---- scrolling ------------------------------------------------------------------------
 
     /// <summary>
-    /// The document's bytes at the bytes a row covers on screen - but never less than where the
-    /// anchor already is plus a viewport, so the host cannot clamp the current offset against an
-    /// estimate that has fallen short of it.
+    /// Not hosted in a <c>ScrollViewer</c>: the vertical position is the anchor, and the view's own
+    /// scrollbar reads <see cref="ScrollFraction"/> and drives <see cref="ScrollToFraction"/> and
+    /// <see cref="ScrollByPixels"/>. A <c>ScrollViewer</c> shares one offset between the host and
+    /// the surface, and an estimated extent makes those two disagree - which a dragged thumb feels
+    /// as the surface pulling it back under the pointer. So the scroll interface reports no
+    /// vertical range at all.
     /// </summary>
-    protected override double ExtentHeight
-    {
-        get
-        {
-            if (anchor is null || document is null)
-                return 0;
-
-            double estimated = document.AvailableLength / bytesPerRow * RowHeight;
-            return Math.Max(estimated, AnchorPosition() + Bounds.Height);
-        }
-    }
-
-    private double AnchorPosition() => anchor is null ? 0 : anchor.Current.Start / bytesPerRow * RowHeight + anchorPixel;
-
-    /// <summary>More than this is a jump - a thumb drag - rather than a scroll.</summary>
-    private double JumpThreshold => Math.Max(3 * Bounds.Height, 10 * RowHeight);
+    protected override double ExtentHeight => Bounds.Height;
 
     protected override void OnOffsetChanged()
     {
-        if (syncingOffset || anchor is null)
-            return;
+    }
 
-        double y = Offset.Y;
-        double delta = y - lastOffsetY;
-        lastOffsetY = y;
+    /// <summary>Raised whenever the top row moves - a scroll, a reveal, a keyboard move, the
+    /// document growing - so a scrollbar can follow.</summary>
+    public event EventHandler? ScrollPositionChanged;
 
-        if (Math.Abs(delta) <= JumpThreshold)
+    /// <summary>Where the top of the view is in the document, from 0 to 1: the anchor's byte
+    /// position, plus the part of a row scrolled off the top.</summary>
+    public double ScrollFraction
+    {
+        get
         {
-            ScrollBy(delta);
-            SyncOffset();
-            return;
-        }
+            long length = document?.AvailableLength ?? 0;
+            if (anchor is null || length <= 0)
+                return 0;
 
-        // A jump seeks to the byte the offset points at and leaves the host's offset alone, so a
-        // thumb being dragged is not pulled back under the pointer.
-        if (y <= 0)
-            anchor.MoveToStart();
-        else
-            anchor.SeekTo((long)(y / RowHeight * bytesPerRow));
+            double position = anchor.Current.Start + anchorPixel / RowHeight * bytesPerRow;
+            return Math.Clamp(position / length, 0, 1);
+        }
+    }
+
+    /// <summary>How much of the document a screen shows, from 0 to 1, from the average bytes a
+    /// row covers - smoothed, so a scrollbar thumb sized from it does not flicker.</summary>
+    public double ViewportFraction
+    {
+        get
+        {
+            long length = document?.AvailableLength ?? 0;
+            return length <= 0 ? 1 : Math.Clamp(VisibleRowCount() * bytesPerRow / length, 0, 1);
+        }
+    }
+
+    /// <summary>True when the document's last row is on screen in full - the view is at the end,
+    /// whatever the byte estimate says.</summary>
+    public bool ShowsEnd { get; private set; }
+
+    /// <summary>Shows the end of the document, its last row at the bottom.</summary>
+    public void ScrollToEnd()
+    {
+        if (anchor is null)
+            return;
+
+        anchor.MoveToEnd();
         anchorPixel = 0;
         Realize();
+        NotifyScrollPosition();
+        InvalidateVisual();
+    }
+
+    /// <summary>Puts the byte at <paramref name="fraction"/> of the document at the top - what a
+    /// dragged thumb does. At the end, the last row settles at the bottom.</summary>
+    public void ScrollToFraction(double fraction)
+    {
+        if (anchor is null || document is null)
+            return;
+
+        if (fraction <= 0)
+            anchor.MoveToStart();
+        else
+            anchor.SeekTo((long)(Math.Min(fraction, 1) * document.AvailableLength));
+
+        anchorPixel = 0;
+        Realize();
+        NotifyScrollPosition();
+        InvalidateVisual();
+    }
+
+    /// <summary>Moves the view by <paramref name="delta"/> pixels of rows - the wheel, a
+    /// trackpad, a scrollbar's arrows and pages. Positive moves down the document.</summary>
+    public void ScrollByPixels(double delta)
+    {
+        if (anchor is null)
+            return;
+
+        ScrollBy(delta);
+        NotifyScrollPosition();
+        InvalidateVisual();
+    }
+
+    protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
+    {
+        base.OnPointerWheelChanged(e);
+        if (anchor is null)
+            return;
+
+        // One row per unit of wheel delta, the step a ScrollViewer takes with ScrollSize; a
+        // trackpad reports fractions of that, which is what makes it smooth.
+        if (e.Delta.Y != 0)
+            ScrollByPixels(-e.Delta.Y * RowHeight);
+        if (e.Delta.X != 0)
+            RequestPan(Math.Max(0, PanOffset - e.Delta.X * RowHeight));
+
+        e.Handled = true;
     }
 
     /// <summary>Moves the anchor by <paramref name="delta"/> pixels of rows.</summary>
@@ -658,7 +721,10 @@ public class TreeSurface : RowSurface
         for (; rows > 0; rows--)
         {
             if (!anchor!.MoveNext())
+            {
+                anchorPixel = 0;
                 break;
+            }
         }
 
         for (; rows < 0; rows++)
@@ -673,23 +739,7 @@ public class TreeSurface : RowSurface
         Realize();
     }
 
-    /// <summary>Tells the host where the anchor now is, without that counting as a scroll.</summary>
-    private void SyncOffset()
-    {
-        double position = AnchorPosition();
-        syncingOffset = true;
-        try
-        {
-            Offset = new Vector(Offset.X, position);
-        }
-        finally
-        {
-            syncingOffset = false;
-        }
-
-        lastOffsetY = position;
-        RaiseScrollInvalidated(EventArgs.Empty);
-    }
+    private void NotifyScrollPosition() => ScrollPositionChanged?.Invoke(this, EventArgs.Empty);
 
     // ---- selection and input --------------------------------------------------------------
 
@@ -1037,7 +1087,7 @@ public class TreeSurface : RowSurface
             }
 
             Realize();
-            SyncOffset();
+            NotifyScrollPosition();
         }
 
         SelectionChanged?.Invoke(this, EventArgs.Empty);

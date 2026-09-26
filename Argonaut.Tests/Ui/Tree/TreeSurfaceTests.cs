@@ -56,7 +56,7 @@ public sealed class TreeSurfaceTests
                 rows.Add(walker.Current);
 
             var surface = new TreeSurface { Document = document };
-            var window = new Window { Width = 700, Height = WindowHeight, Content = new ScrollViewer { Content = surface } };
+            var window = new Window { Width = 700, Height = WindowHeight, Content = surface };
             try
             {
                 window.Show();
@@ -87,36 +87,88 @@ public sealed class TreeSurfaceTests
     [Fact]
     public Task SmallScrollsMoveByRows() => WithSurface(defaultDepth: 9, async h =>
     {
-        h.Surface.Offset = new Vector(0, h.Surface.Offset.Y + 3 * RowSurface.RowHeight);
+        h.Surface.ScrollByPixels(3 * RowSurface.RowHeight);
         await PumpAsync();
 
         Assert.Equal(h.Rows[3].Key, h.Surface.RealizedRows[0].Key);
 
-        h.Surface.Offset = new Vector(0, h.Surface.Offset.Y + RowSurface.RowHeight / 2);
+        h.Surface.ScrollByPixels(RowSurface.RowHeight / 2);
         await PumpAsync();
 
         Assert.Equal(h.Rows[3].Key, h.Surface.RealizedRows[0].Key);
         Assert.Equal(RowSurface.RowHeight / 2, h.Surface.AnchorPixel, 3);
 
-        h.Surface.Offset = new Vector(0, h.Surface.Offset.Y - 4 * RowSurface.RowHeight);
+        h.Surface.ScrollByPixels(-4 * RowSurface.RowHeight);
         await PumpAsync();
 
         Assert.Equal(h.Rows[0].Key, h.Surface.RealizedRows[0].Key);
+        Assert.Equal(0, h.Surface.AnchorPixel);
+    });
+
+    [Fact]
+    public Task TheWheelScrollsARowPerNotch() => WithSurface(defaultDepth: 9, async h =>
+    {
+        var centre = h.Surface.TranslatePoint(new Point(200, 100), h.Window)!.Value;
+        h.Window.MouseWheel(centre, new Vector(0, -2));
+        await PumpAsync();
+
+        Assert.Equal(h.Rows[2].Key, h.Surface.RealizedRows[0].Key);
     });
 
     [Fact]
     public Task AJumpLandsNearTheSameFractionOfTheFile() => WithSurface(defaultDepth: 9, async h =>
     {
-        double half = (h.Surface.Extent.Height - h.Surface.Viewport.Height) / 2;
-        h.Surface.Offset = new Vector(0, half);
+        h.Surface.ScrollToFraction(0.5);
         await PumpAsync();
 
         long landed = h.Surface.RealizedRows[0].Start;
-        Assert.InRange(landed, h.Bytes.Length * 3 / 10, h.Bytes.Length * 7 / 10);
+        Assert.InRange(landed, h.Bytes.Length * 4 / 10, h.Bytes.Length * 6 / 10);
+        Assert.InRange(h.Surface.ScrollFraction, 0.4, 0.6);
 
         // The rows on screen are contiguous rows of the document, whatever the estimate did.
         int first = h.Rows.FindIndex(r => r.Key == h.Surface.RealizedRows[0].Key);
         Assert.Equal(Keys(h.Rows.Skip(first).Take(h.Surface.RealizedRows.Count)), Keys(h.Surface.RealizedRows));
+    });
+
+    [Fact]
+    public Task DraggingTheThumbMovesSteadilyOneWay() => WithSurface(defaultDepth: 9, async h =>
+    {
+        // A thumb dragged down in small steps: the top row only ever moves down, and the reported
+        // position follows the thumb rather than being pulled back from it.
+        long previous = -1;
+        for (double fraction = 0.1; fraction < 0.9; fraction += 0.005)
+        {
+            h.Surface.ScrollToFraction(fraction);
+            long top = h.Surface.RealizedRows[0].Start;
+            Assert.True(top >= previous, $"at {fraction:0.000} the top went back from {previous} to {top}");
+            Assert.InRange(h.Surface.ScrollFraction, fraction - 0.02, fraction + 0.02);
+            previous = top;
+        }
+
+        await PumpAsync();
+    });
+
+    [Fact]
+    public Task ScrollingUpSlowlyFromTheEndNeverSnapsBack() => WithSurface(defaultDepth: 9, async h =>
+    {
+        h.Surface.ScrollToEnd();
+        await PumpAsync();
+        Assert.True(h.Surface.ShowsEnd);
+        Assert.Equal(h.Rows[^1].Key, h.Surface.RealizedRows[^1].Key);
+
+        // A trackpad's worth of small steps up: the top row climbs and never returns to the end.
+        int previous = h.Rows.FindIndex(r => r.Key == h.Surface.RealizedRows[0].Key);
+        for (int step = 0; step < 200; step++)
+        {
+            h.Surface.ScrollByPixels(-3);
+            int top = h.Rows.FindIndex(r => r.Key == h.Surface.RealizedRows[0].Key);
+            Assert.True(top <= previous, $"step {step}: the top row moved from {previous} down to {top}");
+            previous = top;
+        }
+
+        await PumpAsync();
+        Assert.False(h.Surface.ShowsEnd);
+        Assert.True(previous < h.Rows.Count - FullRows - 20);
     });
 
     [Fact]

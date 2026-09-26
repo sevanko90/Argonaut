@@ -28,6 +28,10 @@ public partial class JsonView : UserControl
     private MenuFlyout? hintFlyout;
     private long hintFlyoutValueOffset = -1;
 
+    /// <summary>True while the vertical thumb is held: the bar is the one moving the view then,
+    /// so it is not told where the view went - that is what would fight the pointer.</summary>
+    private bool draggingThumb;
+
     public JsonView()
     {
         InitializeComponent();
@@ -43,7 +47,9 @@ public partial class JsonView : UserControl
         Surface.WidestRowWidthChanged += OnWidestRowWidthChanged;
         Surface.PanRequested += OnPanRequested;
         Surface.SizeChanged += OnSurfaceSizeChanged;
+        Surface.ScrollPositionChanged += OnScrollPositionChanged;
         PanScrollBar.ValueChanged += OnPanValueChanged;
+        VerticalScrollBar.Scroll += OnVerticalScroll;
 
         // Right-click copies the row's value. The surface has already selected the row on the
         // press, so the release copies what is now selected.
@@ -95,7 +101,9 @@ public partial class JsonView : UserControl
         Surface.WidestRowWidthChanged -= OnWidestRowWidthChanged;
         Surface.PanRequested -= OnPanRequested;
         Surface.SizeChanged -= OnSurfaceSizeChanged;
+        Surface.ScrollPositionChanged -= OnScrollPositionChanged;
         PanScrollBar.ValueChanged -= OnPanValueChanged;
+        VerticalScrollBar.Scroll -= OnVerticalScroll;
         Surface.RemoveHandler(PointerReleasedEvent, OnSurfacePointerReleased);
 
         UnsubscribeViewModel();
@@ -256,6 +264,71 @@ public partial class JsonView : UserControl
 
         await clipboard.SetTextAsync(value);
         ToastService.Show("Value copied to clipboard");
+    }
+
+    // ---- vertical scrolling -------------------------------------------------------------
+
+    /// <summary>
+    /// The user worked the scrollbar. Dragging the thumb puts that fraction of the document at
+    /// the top; the arrows and the track move by a row and a page, as the wheel does.
+    /// </summary>
+    private void OnVerticalScroll(object? sender, ScrollEventArgs e)
+    {
+        switch (e.ScrollEventType)
+        {
+            case ScrollEventType.ThumbTrack:
+                draggingThumb = true;
+                // At the bottom of the track, the end - not wherever the byte estimate lands.
+                if (e.NewValue >= VerticalScrollBar.Maximum)
+                    Surface.ScrollToEnd();
+                else
+                    Surface.ScrollToFraction(e.NewValue);
+                break;
+            case ScrollEventType.EndScroll:
+                draggingThumb = false;
+                UpdateVerticalBar();
+                break;
+            case ScrollEventType.SmallIncrement:
+                Surface.ScrollByPixels(TreeSurface.RowHeight);
+                break;
+            case ScrollEventType.SmallDecrement:
+                Surface.ScrollByPixels(-TreeSurface.RowHeight);
+                break;
+            case ScrollEventType.LargeIncrement:
+                Surface.ScrollByPixels(Math.Max(TreeSurface.RowHeight, Surface.Bounds.Height - TreeSurface.RowHeight));
+                break;
+            case ScrollEventType.LargeDecrement:
+                Surface.ScrollByPixels(-Math.Max(TreeSurface.RowHeight, Surface.Bounds.Height - TreeSurface.RowHeight));
+                break;
+        }
+    }
+
+    private void OnScrollPositionChanged(object? sender, EventArgs e)
+    {
+        if (!draggingThumb)
+            UpdateVerticalBar();
+    }
+
+    /// <summary>
+    /// Shows where the view is: the range is the document as fractions, the thumb a screen's
+    /// share of it. Hidden when a screen shows everything.
+    /// </summary>
+    private void UpdateVerticalBar()
+    {
+        double viewport = Surface.ViewportFraction;
+        if (Surface.Document is null || viewport >= 1)
+        {
+            VerticalScrollBar.IsVisible = false;
+            return;
+        }
+
+        double maximum = 1 - viewport;
+        VerticalScrollBar.Maximum = maximum;
+        VerticalScrollBar.ViewportSize = viewport;
+        VerticalScrollBar.LargeChange = viewport;
+        VerticalScrollBar.SmallChange = viewport / Math.Max(1, Surface.Bounds.Height / TreeSurface.RowHeight);
+        VerticalScrollBar.Value = Surface.ShowsEnd ? maximum : Math.Min(Surface.ScrollFraction, maximum);
+        VerticalScrollBar.IsVisible = true;
     }
 
     // ---- horizontal pan ---------------------------------------------------------------

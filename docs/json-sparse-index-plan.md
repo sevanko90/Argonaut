@@ -369,10 +369,13 @@ Status: steps 7-8 done for the JSON tree and NDJSON; array table, diff and dense
    home/end, left/right collapse, expand and climb), reveal with ancestor expansion, the arrow click,
    and the layout cache staying at a viewport while paging the whole document.
 
-   - **Scroll model**: offset = anchor's byte position / bytes per row on screen (smoothed); a move
-     of more than three viewports is a jump that seeks the byte, anything smaller moves the anchor
-     by rows and re-syncs the offset. The extent is never less than the anchor's position plus a
-     viewport, so the host cannot clamp the current offset.
+   - **Scroll model**: position = the anchor's byte position as a fraction of the document. The
+     surface is not in a `ScrollViewer`: sharing one offset with a host, and re-syncing it after
+     every scroll, made a dragged thumb stutter and scrolling up from the end snap back. The view
+     owns a plain `ScrollBar` and tells input apart by `ScrollEventType`: a dragged thumb calls
+     `ScrollToFraction` (the bottom of the track calls `ScrollToEnd`), arrows and track pages call
+     `ScrollByPixels`, as do the wheel and trackpad in the surface itself. The bar only follows
+     `ScrollPositionChanged`, and not at all while its thumb is held.
    - **Not built**: sticky ancestor headers, indent guides (deferred with the rest of the chrome
      polish), text selection and copy within a row. Worth adding with step 7 or after.
    - **Needs eyes once JSON is on it** (step 7): row drawing, arrows, selection colour,

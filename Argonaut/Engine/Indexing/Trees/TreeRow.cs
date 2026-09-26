@@ -27,6 +27,8 @@ public enum TreeRowShape : byte
 /// <param name="ParentStart">The value start of the container holding the node, or -1 at the
 /// top - enough to walk up a row's ancestry one seek at a time.</param>
 /// <param name="IsExpanded">For an open row, whether its children are shown.</param>
+/// <param name="Detail">What a cursor that is not a walk over one document's bytes attaches to its
+/// rows for its own painter - a comparison's two sides, say. Null from <see cref="TreeCursor"/>.</param>
 public readonly record struct TreeRow(
     TreeRowShape Shape,
     TreeNode Node,
@@ -35,7 +37,8 @@ public readonly record struct TreeRow(
     long Ordinal,
     byte ParentKind,
     long ParentStart,
-    bool IsExpanded)
+    bool IsExpanded,
+    object? Detail = null)
 {
     /// <summary>The row's identity: the node's value start, and whether it is the closing row.
     /// Two rows are the same row exactly when these match.</summary>

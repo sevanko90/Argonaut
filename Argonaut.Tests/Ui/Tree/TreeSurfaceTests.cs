@@ -309,6 +309,111 @@ public sealed class TreeSurfaceTests
         public object? ToolTipFor(in TreeRow row) => $"tip {row.Node.ValueStart}";
     }
 
+    /// <summary>A two-pane painter: lists on both sides, atoms on the left with a link on the
+    /// right - so a list has an arrow in each pane, and an atom's link sits in the right one.</summary>
+    private sealed class TwoPanePainter(byte[] bytes) : ITreeRowPainter
+    {
+        private readonly SExpressionTreeFormat.Painter inner = new(bytes);
+
+        public int PaneCount => 2;
+
+        public void AppendRuns(in TreeRow row, List<TreeRun> runs) => AppendPaneRuns(row, 0, runs);
+
+        public void AppendPaneRuns(in TreeRow row, int pane, List<TreeRun> runs)
+        {
+            if (pane == 0 || row.Shape != TreeRowShape.Leaf)
+                inner.AppendRuns(row, runs);
+            else
+                runs.Add(new TreeRun("[go] " + new string('x', 400), TreeRunStyle.Link, Link: row.Node.ValueStart));
+        }
+
+        public TreeRowTint PaneTint(in TreeRow row, int pane) => pane == 1 ? TreeRowTint.Added : TreeRowTint.None;
+    }
+
+    /// <summary>Where the right pane starts: half the rows' area in, past the left padding.</summary>
+    private static double RightPaneLeft(TreeSurface surface)
+        => RowSurface.ContentPaddingX + (surface.Bounds.Width - 2 * RowSurface.ContentPaddingX) / 2;
+
+    [Fact]
+    public Task TwoPanes_TheRightPanesArrowTogglesToo() => WithSurface(defaultDepth: 1, async h =>
+    {
+        int index = h.Surface.RealizedRows.ToList().FindIndex(r => r.Shape == TreeRowShape.Open && !r.IsExpanded);
+        var closed = h.Surface.RealizedRows[index];
+        double x = RightPaneLeft(h.Surface) + closed.Depth * TreeSurface.IndentWidth + TreeSurface.ToggleWidth / 2;
+        var point = h.Surface.TranslatePoint(new Point(x, index * RowSurface.RowHeight + RowSurface.RowHeight / 2), h.Window)!.Value;
+
+        h.Window.MouseDown(point, MouseButton.Left);
+        h.Window.MouseUp(point, MouseButton.Left);
+        await PumpAsync();
+
+        Assert.True(h.Document.Expand.IsExpanded(closed.Node.ValueStart, closed.Depth));
+    }, painter: bytes => new TwoPanePainter(bytes));
+
+    [Fact]
+    public Task TwoPanes_ALinkInTheRightPaneIsClickable() => WithSurface(defaultDepth: 9, async h =>
+    {
+        int leafIndex = h.Surface.RealizedRows.ToList().FindIndex(r => r.Shape == TreeRowShape.Leaf);
+        var leaf = h.Surface.RealizedRows[leafIndex];
+        TreeLinkClickedEventArgs? clicked = null;
+        h.Surface.LinkClicked += (_, e) => clicked = e;
+
+        var bounds = h.Surface.LinkBounds(leafIndex)!.Value;
+        Assert.True(bounds.X >= RightPaneLeft(h.Surface));
+        var point = h.Surface.TranslatePoint(new Point(bounds.X + 4, bounds.Center.Y), h.Window)!.Value;
+
+        h.Window.MouseDown(point, MouseButton.Left);
+        h.Window.MouseUp(point, MouseButton.Left);
+        await PumpAsync();
+
+        Assert.Equal(leaf.Node.ValueStart, clicked?.Link);
+    }, painter: bytes => new TwoPanePainter(bytes));
+
+    [Fact]
+    public Task TwoPanes_ClipRatherThanPan() => WithSurface(defaultDepth: 9, async h =>
+    {
+        await PumpAsync();
+
+        // Every atom's right pane is far wider than its half, and still nothing asks to pan.
+        Assert.Equal(0, h.Surface.WidestRowWidth);
+    }, painter: bytes => new TwoPanePainter(bytes));
+
+    /// <summary>Marks lists but not atoms, the way JSON marks array elements but not an
+    /// element's members - so a marked row's children are unmarked.</summary>
+    private sealed class MarkedListsPainter(byte[] bytes) : ITreeRowPainter
+    {
+        private readonly SExpressionTreeFormat.Painter inner = new(bytes);
+
+        public void AppendRuns(in TreeRow row, List<TreeRun> runs) => inner.AppendRuns(row, runs);
+
+        public string? Marker(in TreeRow row) => row.Shape == TreeRowShape.Open ? row.Ordinal.ToString() : null;
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(37)]
+    public Task AMarkedRowsChildrenSitRightOfItsArrow(int scrolledRows) => WithSurface(defaultDepth: 9, async h =>
+    {
+        // Scrolled, so the top row's ancestors are off screen and their markers still count.
+        h.Surface.ScrollByPixels(scrolledRows * RowSurface.RowHeight);
+        await PumpAsync();
+
+        var rows = h.Surface.RealizedRows;
+        for (int i = 0; i < rows.Count; i++)
+        {
+            int parent = rows.Take(i).ToList().FindLastIndex(r => r.Depth == rows[i].Depth - 1 && r.Shape == TreeRowShape.Open);
+            if (rows[i].Shape == TreeRowShape.Close)
+            {
+                int opening = rows.Take(i).ToList().FindLastIndex(r => r.Node.ValueStart == rows[i].Node.ValueStart);
+                if (opening >= 0)
+                    Assert.Equal(h.Surface.ArrowX(opening), h.Surface.ArrowX(i), 3);
+            }
+            else if (parent >= 0)
+            {
+                Assert.True(h.Surface.ArrowX(i) > h.Surface.ArrowX(parent), $"row {i} is not right of its parent's arrow");
+            }
+        }
+    }, painter: bytes => new MarkedListsPainter(bytes));
+
     [Fact]
     public Task ClickingALinkRaisesItInsteadOfToggling() => WithSurface(defaultDepth: 9, async h =>
     {

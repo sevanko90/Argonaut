@@ -1,4 +1,5 @@
 using System.Text;
+using Argonaut.Engine.Indexing.Trees;
 using Argonaut.Features.Json.Diff;
 using Argonaut.Tests.Support;
 using Argonaut.Ui.Find;
@@ -31,15 +32,15 @@ public class JsonDiffFindTests
         public string LeftPath { get; init; } = null!;
         public string RightPath { get; init; } = null!;
 
-        public List<JsonDiffRow> Rows()
-        {
-            var list = new List<JsonDiffRow>();
-            for (int i = 0; i < Vm.Rows.Count; i++)
-                list.Add((JsonDiffRow)Vm.Rows[i]!);
-            return list;
-        }
+        public JsonDiffTree Tree => Vm.DiffTree!;
 
-        public JsonDiffRow SelectedRow() => Rows()[Vm.SelectedPosition!.Value];
+        public List<TreeRow> Rows() => JsonDiffRows.All(Tree);
+
+        public TreeRow SelectedRow() => Vm.SelectedRow ?? throw new InvalidOperationException("Nothing selected:\n" + Describe(this));
+
+        public string? Name(TreeRow row) => JsonDiffRows.Name(Tree, row);
+
+        public string? Value(TreeRow row, bool leftSide) => JsonDiffRows.Value(Tree, row, leftSide);
 
         public void Dispose()
         {
@@ -62,7 +63,7 @@ public class JsonDiffFindTests
         // Same wait JsonDiffContextTests uses: the growth monitor's final rebuild resumes on a
         // pool thread with no dispatcher installed, so the scan's own task is not enough to
         // know the rows have settled. See IndexGrowthMonitor.FinalRefreshTask.
-        await vm.Rows.FinalRefreshTask;
+        await vm.FinalRefreshTask;
 
         var statuses = new List<string?>();
         var controller = new FindController(statuses.Add, () => null);
@@ -87,10 +88,9 @@ public class JsonDiffFindTests
 
         await h.Controller.FindAsync("needle", 1);
 
-        Assert.NotNull(h.Vm.SelectedPosition);
         var row = h.SelectedRow();
-        Assert.Equal(DiffStatus.Removed, row.Status);
-        Assert.Equal("onlyleft", row.Left!.Name);
+        Assert.Null(JsonDiffRows.Detail(row).Right);
+        Assert.Equal("onlyleft", h.Name(row));
     }
 
     [Fact]
@@ -104,10 +104,9 @@ public class JsonDiffFindTests
 
         await h.Controller.FindAsync("needle", 1);
 
-        Assert.True(h.Vm.SelectedPosition is not null, Describe(h));
         var row = h.SelectedRow();
-        Assert.Equal(DiffStatus.Added, row.Status);
-        Assert.Equal("onlyright", row.Right!.Name);
+        Assert.Null(JsonDiffRows.Detail(row).Left);
+        Assert.Equal("onlyright", h.Name(row));
     }
 
     [Fact]
@@ -147,20 +146,12 @@ public class JsonDiffFindTests
     /// <summary>What the document actually held, for an assertion that is about to fail on a
     /// timing-dependent state - the row list and every status the find reported.</summary>
     private static string Describe(Harness h)
-    {
-        var rows = h.Rows();
-        var lines = new List<string>();
-        for (int i = 0; i < rows.Count; i++)
-            lines.Add($"  [{i}] {rows[i].Status} left={rows[i].Left?.Name} right={rows[i].Right?.Name}");
-
-        return $"rows={rows.Count} selected={h.Vm.SelectedPosition} status='{h.Vm.StatusText}' "
-            + $"failure='{h.Vm.IndexFailure?.Message}'\n"
-            + string.Join("\n", lines)
+        => $"status='{h.Vm.StatusText}' failure='{h.Vm.IndexFailure?.Message}'\n"
+            + JsonDiffRows.Describe(h.Tree)
             + "\nstatuses=" + string.Join(" | ", h.Statuses);
-    }
 
     /// <summary>The stop's name, whichever side of the row carries it.</summary>
-    private static string Label(JsonDiffRow row) => row.Left?.Name ?? row.Right!.Name!;
+    private static string Label(Harness h, TreeRow row) => h.Name(row)!;
 
     [Fact]
     public async Task Find_BothPanesOfOneRow_AreASingleStop()
@@ -193,7 +184,7 @@ public class JsonDiffFindTests
     public async Task Find_CountsPlacesItWillStop_NotTimesTheBytesOccur()
     {
         // The heart of the stop list: "needle" occurs in BOTH files, but the unchanged "outer"
-        // subtree is rendered from the left document into both panes, so the right file's copy
+        // member is drawn from the left document into both panes, so the right file's copy
         // is not on screen and find will never stop there. The count has to say 1, not 2 -
         // otherwise it advertises a stop that cannot be reached and the numbering skips.
         using var h = await LoadAsync(
@@ -231,7 +222,7 @@ public class JsonDiffFindTests
         for (int i = 0; i < 4; i++)
         {
             await h.Controller.FindAsync("needle", 1);
-            walked.Add(Label(h.SelectedRow()));
+            walked.Add(Label(h, h.SelectedRow()));
         }
 
         // Four steps over three stops, so this also proves the wrap: whichever stop the walk
@@ -246,7 +237,7 @@ public class JsonDiffFindTests
         {
             await h.Controller.FindAsync("needle", -1);
             int expected = ((start + walked.Count - 1 - i) % merged.Length + merged.Length) % merged.Length;
-            Assert.Equal(merged[expected], Label(h.SelectedRow()));
+            Assert.Equal(merged[expected], Label(h, h.SelectedRow()));
         }
     }
 
@@ -257,23 +248,22 @@ public class JsonDiffFindTests
             """{"outer":{"inner":{"deep":"needle"}},"x":1}""",
             """{"outer":{"inner":{"deep":"needle"}},"x":2}""");
 
-        // The whole unchanged "outer" subtree is one undescended record, collapsed - the match
-        // has no row at all until find opens the way to it.
-        Assert.DoesNotContain(h.Rows(), r => r.Left is { Value: "\"needle\"" });
+        // The unchanged "outer" is collapsed in a run - the match has no row at all until find
+        // opens the way to it.
+        Assert.DoesNotContain(h.Rows(), r => h.Value(r, leftSide: true) == "\"needle\"");
 
         await h.Controller.FindAsync("needle", 1);
 
-        Assert.NotNull(h.Vm.SelectedPosition);
         var row = h.SelectedRow();
-        Assert.Equal("deep", row.Left!.Name);
-        Assert.Equal("\"needle\"", row.Left!.Value);
+        Assert.Equal("deep", h.Name(row));
+        Assert.Equal("\"needle\"", h.Value(row, leftSide: true));
     }
 
     [Fact]
     public async Task Find_MirroredRegion_TheRightDocumentCopyIsNotASecondStop()
     {
-        // "outer" is unchanged, so it is one undescended record walked from the LEFT document
-        // into both panes - the right file's bytes there are never rendered. Both files match
+        // "outer" is unchanged, so it is drawn from the LEFT document into both panes - the right
+        // file's bytes there are never rendered. Both files match
         // "needle", but only one of those is on screen, so find must offer exactly one stop.
         // Before suppression the right copy became a second stop that fell back to the record
         // row ABOVE the real one, so find-next appeared to jump backwards.
@@ -282,16 +272,16 @@ public class JsonDiffFindTests
             """{"outer":{"deep":"needle"},"x":2}""");
 
         await h.Controller.FindAsync("needle", 1);
-        int first = h.Vm.SelectedPosition!.Value;
-        Assert.Equal("deep", h.SelectedRow().Left!.Name);
+        long first = h.SelectedRow().Start;
+        Assert.Equal("deep", h.Name(h.SelectedRow()));
 
         // Stepping on wraps straight back to the same single stop - it never lands on the
-        // enclosing "outer" record row.
+        // enclosing "outer" row.
         await h.Controller.FindAsync("needle", 1);
-        Assert.Equal(first, h.Vm.SelectedPosition!.Value);
+        Assert.Equal(first, h.SelectedRow().Start);
 
         await h.Controller.FindAsync("needle", -1);
-        Assert.Equal(first, h.Vm.SelectedPosition!.Value);
+        Assert.Equal(first, h.SelectedRow().Start);
     }
 
     [Fact]
@@ -304,8 +294,7 @@ public class JsonDiffFindTests
 
         await h.Controller.FindAsync("zebra", 1);
 
-        Assert.NotNull(h.Vm.SelectedPosition);
-        Assert.Equal("\"zebra\"", h.SelectedRow().Right!.Value);
+        Assert.Equal("\"zebra\"", h.Value(h.SelectedRow(), leftSide: false));
     }
 
     [Fact]
@@ -317,9 +306,8 @@ public class JsonDiffFindTests
 
         await h.Controller.FindAsync("needle", 1);
 
-        Assert.NotNull(h.Vm.SelectedPosition);
         var row = h.SelectedRow();
-        Assert.Equal("\"needle\"", (row.Left ?? row.Right)!.Value);
+        Assert.Equal("\"needle\"", h.Value(row, leftSide: true) ?? h.Value(row, leftSide: false));
     }
 
     [Fact]
@@ -335,7 +323,7 @@ public class JsonDiffFindTests
         await h.Controller.FindAsync("needle", 1);
 
         await AssertSettlesOnAsync(h, "1 of 2 rows");
-        Assert.Equal("\"needle\"", (h.SelectedRow().Left ?? h.SelectedRow().Right)!.Value);
+        Assert.Equal("\"needle\"", h.Value(h.SelectedRow(), leftSide: true) ?? h.Value(h.SelectedRow(), leftSide: false));
     }
 
     [Fact]
@@ -345,7 +333,7 @@ public class JsonDiffFindTests
 
         await h.Controller.FindAsync("nothinghere", 1);
 
-        Assert.Null(h.Vm.SelectedPosition);
+        Assert.Null(h.Vm.SelectedRow);
         Assert.Contains("No matches", h.Statuses);
     }
 }

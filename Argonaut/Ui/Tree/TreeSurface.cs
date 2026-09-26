@@ -62,11 +62,24 @@ public class TreeSurface : RowSurface
     /// <summary>A row covers this many bytes until rows on screen say otherwise.</summary>
     private const double InitialBytesPerRow = 32;
 
-    /// <summary>One row as laid out: its text, the marker before its arrow, and where its links
-    /// are in the text.</summary>
-    private sealed record RowLayout(TextLayout Layout, string Text, TextLayout? Marker, List<(int Start, int Length, object Link)>? Links);
+    /// <summary>A gap left between two panes, split either side of the line drawn between them.</summary>
+    private const double PaneGap = 8;
+
+    /// <summary>One pane of a row as laid out: its text, the marker before its arrow, and where
+    /// its links are in the text.</summary>
+    private sealed record PaneLayout(TextLayout Layout, string Text, TextLayout? Marker, List<(int Start, int Length, object Link)>? Links);
+
+    /// <summary>One row as laid out: a pane per side the painter draws, one for a plain tree.</summary>
+    private sealed record RowLayout(PaneLayout[] Panes)
+    {
+        public PaneLayout First => Panes[0];
+    }
 
     private readonly List<TreeRow> realized = new();
+
+    // Per realized row and pane, how far its arrow is set in beyond its depth's indent: what the
+    // markers of it and its ancestors add.
+    private readonly List<double[]> insets = new();
     private readonly Dictionary<(long, TreeRowShape, bool), RowLayout> layouts = new();
     private readonly List<TreeRun> runs = new();
     private IResizableTreeGutter? resizing;
@@ -75,17 +88,18 @@ public class TreeSurface : RowSurface
     private object? toolTipShown;
     private DispatcherTimer? toolTipDelay;
 
-    private TreeDocument? document;
-    private TreeCursor? anchor;
+    private ITreeRowSource? document;
+    private ITreeRowCursor? anchor;
     private double anchorPixel;
     private bool showsEnd;
     private double bytesPerRow = InitialBytesPerRow;
-    private TreeCursor? selection;
+    private ITreeRowCursor? selection;
     private string? highlightTerm;
     private IReadOnlyDictionary<TreeRunStyle, IBrush>? runBrushes;
+    private IReadOnlyDictionary<TreeRowTint, IBrush>? tintBrushes;
 
-    /// <summary>The document shown. Setting it resets the view to the top.</summary>
-    public TreeDocument? Document
+    /// <summary>The rows shown. Setting them resets the view to the top.</summary>
+    public ITreeRowSource? Document
     {
         get => document;
         set
@@ -129,6 +143,18 @@ public class TreeSurface : RowSurface
         {
             runBrushes = value;
             DropLayouts();
+            InvalidateVisual();
+        }
+    }
+
+    /// <summary>The wash behind a pane per <see cref="TreeRowTint"/>; a tint with none is not
+    /// drawn.</summary>
+    public IReadOnlyDictionary<TreeRowTint, IBrush>? TintBrushes
+    {
+        get => tintBrushes;
+        set
+        {
+            tintBrushes = value;
             InvalidateVisual();
         }
     }
@@ -193,16 +219,23 @@ public class TreeSurface : RowSurface
     {
         var row = realized[index];
         var laid = LayoutFor(row, new Typeface(FontFamily), FontSize);
-        if (laid.Links is not { Count: > 0 } links)
-            return null;
+        for (int pane = 0; pane < laid.Panes.Length; pane++)
+        {
+            var laidPane = laid.Panes[pane];
+            if (laidPane.Links is not { Count: > 0 } links)
+                continue;
 
-        double textX = ArrowLeft(row, laid) + ToggleWidth;
-        double textTop = CentreInRow(laid.Layout, index * RowHeight - anchorPixel);
-        foreach (var rect in laid.Layout.HitTestTextRange(links[0].Start, links[0].Length))
-            return rect.Translate(new Vector(textX, textTop));
+            double textX = ArrowLeft(index, pane) + ToggleWidth;
+            double textTop = CentreInRow(laidPane.Layout, index * RowHeight - anchorPixel);
+            foreach (var rect in laidPane.Layout.HitTestTextRange(links[0].Start, links[0].Length))
+                return rect.Translate(new Vector(textX, textTop));
+        }
 
         return null;
     }
+
+    /// <summary>Where realized row <paramref name="index"/>'s arrow is drawn in a pane, for tests.</summary>
+    internal double ArrowX(int index, int pane = 0) => ArrowLeft(index, pane);
 
     /// <summary>Pixels of the top row scrolled off the top.</summary>
     internal double AnchorPixel => anchorPixel;
@@ -237,9 +270,92 @@ public class TreeSurface : RowSurface
 
     public override double PanStep => IndentWidth * 2;
 
-    /// <summary>Where a row's arrow sits, panned: after its indent and any marker.</summary>
-    private double ArrowLeft(in TreeRow row, RowLayout layout)
-        => ContentLeft + row.Depth * IndentWidth + (layout.Marker is null ? 0 : MarkerWidth) - PanOffset;
+    private int PaneCount => Math.Max(1, document?.Painter.PaneCount ?? 1);
+
+    /// <summary>How far a pane reaches across the rows' area: all of it for a plain tree, an equal
+    /// share less the gap between panes when there are several.</summary>
+    private double PaneWidth
+    {
+        get
+        {
+            double area = Math.Max(0, Bounds.Width - ContentLeft - ContentPaddingX);
+            int panes = PaneCount;
+            return panes == 1 ? area : Math.Max(0, area / panes - PaneGap);
+        }
+    }
+
+    private double PaneLeft(int pane)
+        => pane == 0 ? ContentLeft : ContentLeft + pane * (PaneWidth + PaneGap);
+
+    /// <summary>Only a single pane pans: side-by-side panes each clip to their own share.</summary>
+    private double Pan => PaneCount == 1 ? PanOffset : 0;
+
+    /// <summary>Where realized row <paramref name="index"/>'s arrow sits in a pane, panned: after
+    /// its indent and the markers of it and its ancestors.</summary>
+    private double ArrowLeft(int index, int pane)
+        => PaneLeft(pane) + realized[index].Depth * IndentWidth + insets[index][pane] - Pan;
+
+    /// <summary>
+    /// Works out each realized row's inset. A marked row steps in from its parent by the marker's
+    /// width rather than the indent - room for the marker before its arrow - and its children
+    /// carry that on, so the members of an array element sit right of the element's arrow rather
+    /// than left of it. Only the difference is carried, so nested arrays step in a marker's width
+    /// a level, not a marker and an indent. A closing row takes its container's. The walk starts
+    /// from the top row's ancestors, since they are not on screen.
+    /// </summary>
+    private void ComputeInsets()
+    {
+        insets.Clear();
+        if (realized.Count == 0 || document is null || anchor is null)
+            return;
+
+        var painter = document.Painter;
+        int panes = PaneCount;
+        var none = new double[panes];
+        var open = new List<(int Depth, double[] Inset)>();
+
+        double[] Inset(double[] parent, in TreeRow row)
+        {
+            var inset = (double[])parent.Clone();
+            for (int pane = 0; pane < panes; pane++)
+            {
+                if (painter.PaneMarker(row, pane) is not null)
+                    inset[pane] += MarkerWidth - IndentWidth;
+            }
+
+            return inset;
+        }
+
+        foreach (var ancestor in anchor.Ancestors)
+            open.Add((ancestor.Depth, Inset(open.Count > 0 ? open[^1].Inset : none, ancestor)));
+
+        foreach (var row in realized)
+        {
+            while (open.Count > 0 && open[^1].Depth >= row.Depth)
+                open.RemoveAt(open.Count - 1);
+
+            var parent = open.Count > 0 ? open[^1].Inset : none;
+            var inset = Inset(parent, row.Shape == TreeRowShape.Close ? row with { Shape = TreeRowShape.Open } : row);
+            insets.Add(inset);
+            if (row is { Shape: TreeRowShape.Open, IsExpanded: true })
+                open.Add((row.Depth, inset));
+        }
+    }
+
+    /// <summary>Whether a pane draws the row's expand arrow: always for a plain tree, and in a
+    /// pane only where the row has something on that side.</summary>
+    private bool DrawsArrow(in TreeRow row, PaneLayout layout)
+        => row.Shape == TreeRowShape.Open && (PaneCount == 1 || layout.Text.Length > 0);
+
+    /// <summary>The pane under a surface x.</summary>
+    private int PaneAt(double x)
+    {
+        int panes = PaneCount;
+        if (panes == 1)
+            return 0;
+
+        return Math.Clamp((int)Math.Floor((x - ContentLeft) / (PaneWidth + PaneGap)), 0, panes - 1);
+    }
 
     // ---- navigation the view model drives -------------------------------------------------
 
@@ -260,10 +376,9 @@ public class TreeSurface : RowSurface
         // A collapsed container that holds the offset past its opening hides it: open it and
         // look again, one level at a time.
         while (expandAncestors && cursor.Current is { Shape: TreeRowShape.Open, IsExpanded: false } hidden
-               && offset >= document.Reader.FirstChildPosition(hidden.Node.ValueStart)
-               && offset < ContainerEndOrMax(hidden.Node.ValueStart))
+               && document.Hides(hidden, offset))
         {
-            document.Expand.SetExpanded(hidden.Node.ValueStart, hidden.Depth, true);
+            document.SetExpanded(hidden, true);
             cursor.SeekTo(offset);
         }
 
@@ -287,7 +402,7 @@ public class TreeSurface : RowSurface
         if (document is null || row.Shape == TreeRowShape.Leaf)
             return;
 
-        document.Expand.Toggle(row.Node.ValueStart);
+        document.Toggle(row);
         Reseat();
         ExpansionChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -314,15 +429,6 @@ public class TreeSurface : RowSurface
         Realize();
         NotifyScrollPosition();
         InvalidateVisual();
-    }
-
-    private long ContainerEndOrMax(long containerStart)
-    {
-        var index = document!.Index;
-        int record = index.FindContainerStartingAt(containerStart);
-        return record >= 0 && index.GetContainer(record).End is var end and >= 0
-            ? end
-            : document.Reader.SkipValue(containerStart);
     }
 
     // ---- rows on screen ---------------------------------------------------------------------
@@ -366,6 +472,7 @@ public class TreeSurface : RowSurface
     private void Realize()
     {
         realized.Clear();
+        insets.Clear();
         showsEnd = false;
         if (anchor is null || Bounds.Height <= 0)
             return;
@@ -390,6 +497,7 @@ public class TreeSurface : RowSurface
                 realized.Insert(0, anchor.Current);
         }
 
+        ComputeInsets();
         EstimateBytesPerRow();
         PruneLayouts();
         MeasureRealizedRows();
@@ -402,7 +510,7 @@ public class TreeSurface : RowSurface
         if (realized.Count < 2)
             return;
 
-        long span = realized[^1].Start - realized[0].Start;
+        long span = document!.ScrollPosition(realized[^1]) - document.ScrollPosition(realized[0]);
         if (span <= 0)
             return;
 
@@ -412,15 +520,20 @@ public class TreeSurface : RowSurface
 
     private int VisibleRowCount() => Math.Max(1, (int)(Bounds.Height / RowHeight));
 
+    /// <summary>Records how wide the rows on screen need the text column to be - for a plain
+    /// tree only, since side-by-side panes clip rather than pan.</summary>
     private void MeasureRealizedRows()
     {
+        if (PaneCount != 1)
+            return;
+
         var typeface = new Typeface(FontFamily);
         double widest = WidestRowWidth;
-        foreach (var row in realized)
+        for (int i = 0; i < realized.Count; i++)
         {
-            var laid = LayoutFor(row, typeface, FontSize);
-            double marker = laid.Marker is null ? 0 : MarkerWidth;
-            widest = Math.Max(widest, row.Depth * IndentWidth + marker + ToggleWidth + laid.Layout.WidthIncludingTrailingWhitespace);
+            var row = realized[i];
+            var laid = LayoutFor(row, typeface, FontSize).First;
+            widest = Math.Max(widest, row.Depth * IndentWidth + insets[i][0] + ToggleWidth + laid.Layout.WidthIncludingTrailingWhitespace);
         }
 
         RecordRowWidth(widest);
@@ -432,10 +545,23 @@ public class TreeSurface : RowSurface
         if (layouts.TryGetValue(key, out var cached))
             return cached;
 
-        var foreground = Foreground ?? Brushes.Black;
-        runs.Clear();
-        document!.Painter.AppendRuns(row, runs);
+        var painter = document!.Painter;
+        var panes = new PaneLayout[PaneCount];
+        for (int pane = 0; pane < panes.Length; pane++)
+        {
+            runs.Clear();
+            painter.AppendPaneRuns(row, pane, runs);
+            panes[pane] = LayOutPane(runs, painter.PaneMarker(row, pane), typeface, fontSize);
+        }
 
+        var entry = new RowLayout(panes);
+        layouts[key] = entry;
+        return entry;
+    }
+
+    private PaneLayout LayOutPane(List<TreeRun> runs, string? markerLabel, Typeface typeface, double fontSize)
+    {
+        var foreground = Foreground ?? Brushes.Black;
         var text = new StringBuilder();
         var overrides = new List<ValueSpan<TextRunProperties>>(runs.Count);
         List<(int, int, object)>? links = null;
@@ -457,21 +583,25 @@ public class TreeSurface : RowSurface
             textStyleOverrides: overrides);
 
         TextLayout? marker = null;
-        if (document.Painter.Marker(row) is { } label)
+        if (markerLabel is { } label)
         {
             var markerBrush = runBrushes is not null && runBrushes.TryGetValue(TreeRunStyle.Hint, out var muted) ? muted : foreground;
             marker = new TextLayout(label, typeface, Math.Max(6, fontSize * 0.75), markerBrush);
         }
 
-        var entry = new RowLayout(layout, content, marker, links);
-        layouts[key] = entry;
-        return entry;
+        return new PaneLayout(layout, content, marker, links);
     }
 
+    /// <summary>What the row says, every pane's text in order.</summary>
     private string RowText(in TreeRow row)
     {
         runs.Clear();
-        document?.Painter.AppendRuns(row, runs);
+        if (document is { } source)
+        {
+            for (int pane = 0; pane < PaneCount; pane++)
+                source.Painter.AppendPaneRuns(row, pane, runs);
+        }
+
         var text = new StringBuilder();
         foreach (var run in runs)
             text.Append(run.Text);
@@ -537,8 +667,8 @@ public class TreeSurface : RowSurface
         var gutterStyle = new TreeGutterStyle(typeface, fontSize, GutterForeground ?? foreground);
         var selectedKey = selection?.Current.Key;
         double contentLeft = ContentLeft;
-        double contentWidth = Math.Max(0, Bounds.Width - contentLeft - ContentPaddingX);
-
+        double paneWidth = PaneWidth;
+        int paneCount = PaneCount;
 
         double gutterWidth = GutterWidth;
         if (gutterWidth > 0)
@@ -568,28 +698,50 @@ public class TreeSurface : RowSurface
                 gutterX += gutter.Width;
             }
 
-            using (context.PushClip(new Rect(contentLeft, y, contentWidth, RowHeight)))
+            var laid = LayoutFor(row, typeface, fontSize);
+            for (int pane = 0; pane < paneCount; pane++)
             {
-                var laid = LayoutFor(row, typeface, fontSize);
-                double arrowX = ArrowLeft(row, laid);
-
-                if (laid.Marker is { } marker)
-                    marker.Draw(context, new Point(arrowX - 2 - marker.WidthIncludingTrailingWhitespace, CentreInRow(marker, y)));
-
-                if (row.Shape == TreeRowShape.Open)
-                {
-                    var shape = row.IsExpanded ? ExpandedArrowShape : CollapsedArrowShape;
-                    var at = Matrix.CreateTranslation(arrowX + (ToggleWidth - ArrowSize) / 2, y + (RowHeight - ArrowSize) / 2);
-                    using (context.PushTransform(at))
-                        context.DrawGeometry(foreground, null, shape);
-                }
-
-                double textTop = CentreInRow(laid.Layout, y);
-                double textX = arrowX + ToggleWidth;
-                DrawHighlights(context, laid.Layout, laid.Text, textX, textTop);
-                laid.Layout.Draw(context, new Point(textX, textTop));
+                double paneLeft = PaneLeft(pane);
+                using (context.PushClip(new Rect(paneLeft, y, paneWidth, RowHeight)))
+                    DrawPane(context, i, laid.Panes[pane], pane, y, paneLeft + paneWidth, foreground);
             }
         }
+
+        // The line between side-by-side panes, down the middle of the gap between them.
+        if (paneCount > 1 && DividerBrush is { } paneDivider)
+        {
+            for (int pane = 1; pane < paneCount; pane++)
+                context.FillRectangle(paneDivider, new Rect(PaneLeft(pane) - PaneGap / 2, 0, 1, Bounds.Height));
+        }
+    }
+
+    /// <summary>One pane of one row: its tint, marker, arrow, highlights and text.</summary>
+    private void DrawPane(DrawingContext context, int index, PaneLayout laid, int pane, double y, double paneRight, IBrush foreground)
+    {
+        var row = realized[index];
+        double arrowX = ArrowLeft(index, pane);
+
+        if (tintBrushes is not null && document!.Painter.PaneTint(row, pane) is var tint and not TreeRowTint.None
+            && tintBrushes.TryGetValue(tint, out var wash))
+        {
+            context.DrawRectangle(wash, null, new RoundedRect(new Rect(arrowX, y + 1, Math.Max(0, paneRight - arrowX), RowHeight - 2), 4));
+        }
+
+        if (laid.Marker is { } marker)
+            marker.Draw(context, new Point(arrowX - 2 - marker.WidthIncludingTrailingWhitespace, CentreInRow(marker, y)));
+
+        if (DrawsArrow(row, laid))
+        {
+            var shape = row.IsExpanded ? ExpandedArrowShape : CollapsedArrowShape;
+            var at = Matrix.CreateTranslation(arrowX + (ToggleWidth - ArrowSize) / 2, y + (RowHeight - ArrowSize) / 2);
+            using (context.PushTransform(at))
+                context.DrawGeometry(foreground, null, shape);
+        }
+
+        double textTop = CentreInRow(laid.Layout, y);
+        double textX = arrowX + ToggleWidth;
+        DrawHighlights(context, laid.Layout, laid.Text, textX, textTop);
+        laid.Layout.Draw(context, new Point(textX, textTop));
     }
 
     private void DrawHighlights(DrawingContext context, TextLayout layout, string text, double x, double y)
@@ -609,44 +761,44 @@ public class TreeSurface : RowSurface
 
     // ---- scrolling ------------------------------------------------------------------------
 
-    // The estimated model (see RowSurface): the position is the anchor's byte position in the
-    // document, since there is no row count to take a fraction of.
+    // The estimated model (see RowSurface): the position is the anchor's scroll position in the
+    // source - for a document, its byte offset - since there is no row count to take a fraction of.
 
-    /// <summary>The anchor's byte position as a fraction of the document, plus the part of a row
+    /// <summary>The anchor's scroll position as a fraction of the source's, plus the part of a row
     /// scrolled off the top.</summary>
     public override double ScrollFraction
     {
         get
         {
-            long length = document?.AvailableLength ?? 0;
+            long length = document?.ScrollLength ?? 0;
             if (anchor is null || length <= 0)
                 return 0;
 
-            double position = anchor.Current.Start + anchorPixel / RowHeight * bytesPerRow;
+            double position = document!.ScrollPosition(anchor.Current) + anchorPixel / RowHeight * bytesPerRow;
             return Math.Clamp(position / length, 0, 1);
         }
     }
 
-    /// <summary>From the average bytes a row covers - smoothed, so a scrollbar thumb sized from it
-    /// does not flicker.</summary>
+    /// <summary>From the average scroll range a row covers - smoothed, so a scrollbar thumb sized
+    /// from it does not flicker.</summary>
     public override double ViewportFraction
     {
         get
         {
-            long length = document?.AvailableLength ?? 0;
+            long length = document?.ScrollLength ?? 0;
             return length <= 0 ? 1 : Math.Clamp(VisibleRowCount() * bytesPerRow / length, 0, 1);
         }
     }
 
     public override bool ShowsEnd => showsEnd;
 
-    /// <summary>While the index is still being built, the furthest it has reached.</summary>
+    /// <summary>While the rows are still being worked out, the furthest they have reached.</summary>
     public override void ScrollToEnd()
     {
         if (anchor is null || document is null)
             return;
 
-        if (!document.Index.IsComplete)
+        if (!document.IsComplete)
         {
             ScrollToFraction(1);
             return;
@@ -660,26 +812,17 @@ public class TreeSurface : RowSurface
     }
 
     /// <summary>
-    /// Puts the byte at <paramref name="fraction"/> of the document at the top - what a dragged
-    /// thumb does. At the end, the last row settles at the bottom.
-    ///
-    /// Never past what the index covers. Beyond it a seek has no resume point nearer than the
-    /// last one indexed, and would read every sibling in between - gigabytes of them, on the UI
-    /// thread, for each move of the thumb. Until the index gets there, the view stops at its edge.
+    /// Puts the row at <paramref name="fraction"/> of the scroll range at the top - what a dragged
+    /// thumb does. At the end, the last row settles at the bottom. How far a seek may reach while
+    /// the rows are still being worked out is the source's to say
+    /// (<see cref="ITreeRowSource.SeekScrollPosition"/>).
     /// </summary>
     public override void ScrollToFraction(double fraction)
     {
         if (anchor is null || document is null)
             return;
 
-        long target = (long)(Math.Clamp(fraction, 0, 1) * document.AvailableLength);
-        if (!document.Index.IsComplete)
-            target = Math.Min(target, document.Index.ScannedTo);
-
-        if (target <= 0)
-            anchor.MoveToStart();
-        else
-            anchor.SeekTo(target);
+        document.SeekScrollPosition(anchor, (long)(Math.Clamp(fraction, 0, 1) * document.ScrollLength));
 
         anchorPixel = 0;
         Realize();
@@ -753,8 +896,9 @@ public class TreeSurface : RowSurface
             return;
 
         var row = realized[index];
-        var laid = LayoutFor(row, new Typeface(FontFamily), FontSize);
-        double arrowX = ArrowLeft(row, laid);
+        int pane = PaneAt(point.X);
+        var laid = LayoutFor(row, new Typeface(FontFamily), FontSize).Panes[pane];
+        double arrowX = ArrowLeft(index, pane);
 
         if (LinkAt(laid, point.X - arrowX - ToggleWidth, point.Y - CentreInRow(laid.Layout, index * RowHeight - anchorPixel)) is { } link)
         {
@@ -766,7 +910,7 @@ public class TreeSurface : RowSurface
 
         Select(row);
 
-        bool onArrow = point.X >= arrowX && point.X < arrowX + ToggleWidth;
+        bool onArrow = DrawsArrow(row, laid) && point.X >= arrowX && point.X < arrowX + ToggleWidth;
         if (row.Shape == TreeRowShape.Open && (onArrow || e.ClickCount == 2))
         {
             if ((e.KeyModifiers & KeyModifiers.Alt) != 0)
@@ -791,9 +935,10 @@ public class TreeSurface : RowSurface
         }
 
         bool overEdge = GutterEdgeAt(point.X) is not null;
+        int pane = PaneAt(point.X);
         bool overLink = !overEdge && RowAt(point.Y) is { } hovered
-            && LayoutFor(hovered.Row, new Typeface(FontFamily), FontSize) is var laid
-            && LinkAt(laid, point.X - ArrowLeft(hovered.Row, laid) - ToggleWidth,
+            && LayoutFor(hovered.Row, new Typeface(FontFamily), FontSize).Panes[pane] is var laid
+            && LinkAt(laid, point.X - ArrowLeft(hovered.Index, pane) - ToggleWidth,
                 point.Y - CentreInRow(laid.Layout, hovered.Index * RowHeight - anchorPixel)) is not null;
         Cursor = overEdge ? new Cursor(StandardCursorType.SizeWestEast)
             : overLink ? new Cursor(StandardCursorType.Hand)
@@ -847,7 +992,7 @@ public class TreeSurface : RowSurface
     }
 
     /// <summary>The link under a point given in the row text's own coordinates.</summary>
-    private static object? LinkAt(RowLayout laid, double x, double y)
+    private static object? LinkAt(PaneLayout laid, double x, double y)
     {
         if (laid.Links is null || x < 0 || x > laid.Layout.WidthIncludingTrailingWhitespace)
             return null;
@@ -932,29 +1077,10 @@ public class TreeSurface : RowSurface
         if (document is null || row.Shape == TreeRowShape.Leaf)
             return;
 
-        long start = row.Node.ValueStart;
         if (row.IsExpanded || row.Shape == TreeRowShape.Close)
-        {
-            document.Expand.SetExpanded(start, row.Depth, false);
-            document.Expand.ResetWithin(start, ContainerEndOrMax(start));
-        }
-        else
-        {
-            // Walk the subtree as if everything were open, opening each container for real.
-            var everything = new TreeCursor(document.Index, document.Reader, new TreeExpandState(int.MaxValue));
-            everything.SeekTo(row.Start);
-            document.Expand.SetExpanded(start, row.Depth, true);
-
-            int budget = DeepExpandRowBudget;
-            while (budget-- > 0 && everything.MoveNext() && everything.Current.Depth > row.Depth)
-            {
-                if (everything.Current is { Shape: TreeRowShape.Open } open)
-                    document.Expand.SetExpanded(open.Node.ValueStart, open.Depth, true);
-            }
-
-            if (budget < 0)
-                ExpandLimitReached?.Invoke(this, EventArgs.Empty);
-        }
+            document.CollapseDeep(row);
+        else if (!document.ExpandDeep(row, DeepExpandRowBudget))
+            ExpandLimitReached?.Invoke(this, EventArgs.Empty);
 
         Reseat();
         ExpansionChanged?.Invoke(this, EventArgs.Empty);
@@ -1054,21 +1180,21 @@ public class TreeSurface : RowSurface
     private void SelectParent()
     {
         var current = selection!.Current;
-        TreeNode? parent = null;
+        long? parent = null;
         if (current.Shape == TreeRowShape.Close)
         {
-            parent = current.Node;
+            parent = current.Node.RowStart;
         }
         else
         {
             foreach (var ancestor in selection.Ancestors)
-                parent = ancestor.Node;
+                parent = ancestor.Start;
         }
 
-        if (parent is not { } container)
+        if (parent is not { } parentStart)
             return;
 
-        selection.SeekTo(container.RowStart);
+        selection.SeekTo(parentStart);
         AfterSelectionMoved(downward: false);
     }
 

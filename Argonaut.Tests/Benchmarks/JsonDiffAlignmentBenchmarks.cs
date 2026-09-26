@@ -11,8 +11,9 @@ namespace Argonaut.Tests.Benchmarks;
 /// <summary>
 /// End-to-end allocation/time coverage for the widest array level JsonDiffIndex will align.
 /// Index construction happens in setup, so the measured operation is only reading the elements,
-/// hashing them from their bytes, alignment and record emission. The three shapes exercise the unique-anchor fast path, the capped Myers
-/// fallback, and a large out-of-order anchor set respectively.
+/// hashing them from their bytes, alignment and record emission. Every shape differs at both ends,
+/// so trimming leaves the whole array as the middle to align. The three exercise the unique-anchor
+/// fast path, the capped Myers fallback, and a large out-of-order anchor set respectively.
 /// </summary>
 [MemoryDiagnoser]
 [ShortRunJob]
@@ -20,7 +21,7 @@ public class JsonDiffAlignmentBenchmarks
 {
     private const int ElementCount = JsonDiffIndex.MaxAlignableArrayElements;
 
-    [Params(AlignmentShape.OneChanged, AlignmentShape.AllChanged, AlignmentShape.Reordered)]
+    [Params(AlignmentShape.EndsChanged, AlignmentShape.AllChanged, AlignmentShape.Reordered)]
     public AlignmentShape Shape { get; set; }
 
     private string leftPath = null!;
@@ -30,7 +31,7 @@ public class JsonDiffAlignmentBenchmarks
 
     public enum AlignmentShape
     {
-        OneChanged,
+        EndsChanged,
         AllChanged,
         Reordered
     }
@@ -44,7 +45,7 @@ public class JsonDiffAlignmentBenchmarks
         WriteArray(leftPath, i => i);
         WriteArray(rightPath, Shape switch
         {
-            AlignmentShape.OneChanged => i => i == ElementCount - 1 ? -1 : i,
+            AlignmentShape.EndsChanged => i => i == 0 ? -2 : i == ElementCount - 1 ? -1 : i,
             AlignmentShape.AllChanged => i => i + ElementCount,
             AlignmentShape.Reordered => i => ElementCount - 1 - i,
             _ => throw new ArgumentOutOfRangeException()

@@ -79,10 +79,9 @@ public sealed class JsonArrayRowCollection : VirtualizingItemsSourceBase, IColum
         this.structure = structure;
         this.routes = routes;
         this.mode = mode;
-        // Sampled before the count snapshot, for the reason JsonDiffRowCollection's constructor
-        // states: a walk that finishes in the window between the snapshot and a check made
-        // after it would leave this collection with no monitor, permanently reporting the
-        // element count it happened to see here.
+        // Sampled before the count snapshot: a walk that finishes in the window between the
+        // snapshot and a check made after it would leave this collection with no monitor,
+        // permanently reporting the element count it happened to see here.
         bool walkWasRunning = !elements.AllItemsPublished;
 
         this.notifiedCount = GetCount();

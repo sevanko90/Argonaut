@@ -1,21 +1,7 @@
 <Styles xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <!-- Row-content styles shared by JsonView and JsonDiffView (diff plan stage 0.3):
-         per-type value colouring, the link-styled buttons, and the schema gutter's
-         container-heading weight. Moved verbatim out of JsonView.axaml. -->
-
-    <Style Selector="TextBlock.jsonString">
-        <Setter Property="Foreground" Value="{DynamicResource AppJsonStringBrush}" />
-    </Style>
-    <Style Selector="TextBlock.jsonNumber">
-        <Setter Property="Foreground" Value="{DynamicResource AppJsonNumberBrush}" />
-    </Style>
-    <Style Selector="TextBlock.jsonBool">
-        <Setter Property="Foreground" Value="{DynamicResource AppJsonBoolBrush}" />
-    </Style>
-    <Style Selector="TextBlock.jsonNull">
-        <Setter Property="Foreground" Value="{DynamicResource AppJsonNullBrush}" />
-    </Style>
+    <!-- The link-styled buttons of the JSON view's path bar and the diff's context bar, and
+         the schema gutter's container-heading weight. -->
 
     <Style Selector="Button.pathlink">
         <Setter Property="Background" Value="Transparent" />

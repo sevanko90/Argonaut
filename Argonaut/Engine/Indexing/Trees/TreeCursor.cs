@@ -25,7 +25,7 @@ namespace Argonaut.Engine.Indexing.Trees;
 ///
 /// Single-threaded, like the view that drives it; the index it reads may still be growing.
 /// </summary>
-public sealed class TreeCursor
+public sealed class TreeCursor : ITreeRowCursor
 {
     private struct Frame
     {
@@ -78,6 +78,8 @@ public sealed class TreeCursor
         clone.frames.AddRange(frames);
         return clone;
     }
+
+    ITreeRowCursor ITreeRowCursor.Clone() => Clone();
 
     /// <summary>The row the cursor stands on. Meaningful once a move or seek has returned
     /// true.</summary>

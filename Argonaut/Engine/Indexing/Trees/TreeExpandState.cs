@@ -11,9 +11,25 @@ namespace Argonaut.Engine.Indexing.Trees;
 /// </summary>
 public sealed class TreeExpandState
 {
-    private readonly HashSet<long> overrides = new();
+    private readonly HashSet<long> overrides;
 
-    public TreeExpandState(int defaultDepth) => DefaultDepth = defaultDepth;
+    public TreeExpandState(int defaultDepth) : this(defaultDepth, new HashSet<long>())
+    {
+    }
+
+    private TreeExpandState(int defaultDepth, HashSet<long> overrides)
+    {
+        DefaultDepth = defaultDepth;
+        this.overrides = overrides;
+    }
+
+    /// <summary>
+    /// Another default over the same toggles: a toggle through either shows in both. What a walk
+    /// of one region of a document uses to open everything above the region - a default as deep
+    /// as the region - while below it showing only what the user opened, which is a toggle away
+    /// from collapsed as long as every region's default collapses its own contents.
+    /// </summary>
+    public TreeExpandState WithDefaultDepth(int defaultDepth) => new(defaultDepth, overrides);
 
     /// <summary>Containers at a depth below this are expanded unless overridden; 0 collapses
     /// everything.</summary>

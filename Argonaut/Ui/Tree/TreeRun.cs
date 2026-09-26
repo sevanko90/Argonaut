@@ -27,6 +27,9 @@ public enum TreeRunStyle : byte
 
     /// <summary>Text that acts when clicked; see <see cref="TreeRun.Link"/>.</summary>
     Link,
+
+    /// <summary>A mark a comparison puts where a difference lies below.</summary>
+    Change,
 }
 
 /// <summary>One stretch of a row's text in one style.</summary>

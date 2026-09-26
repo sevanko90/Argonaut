@@ -1,5 +1,9 @@
 # Semantic JSON diff — implementation plan
 
+> **Superseded in part (2026-09-26):** the record log, array trimming, identity keys, similarity
+> pairing and the view are now `json-diff-merged-tree-plan.md`. The content hashes, object and
+> array matching, moves and session lifecycle below still hold.
+
 > **Code names have moved on since this was written (checked 2026-09-17):** `IndexedFileSession` is now `IndexedSourceSession` (over an `IByteSource`, not a path), `MemoryMappedCollectionBase` is `VirtualizingItemsSourceBase`, `IsComplete` is `AllItemsPublished`, and `MMapFile.GetSpan` is `ByteSourceReading.RequireContiguous`. The reasoning is unaffected; read the old names as the new ones.
 
 > **Implementation status (2026-08-18, branch `json-diff`):** stages 0–5 implemented

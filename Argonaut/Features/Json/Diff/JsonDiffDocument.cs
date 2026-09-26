@@ -86,16 +86,80 @@ public sealed class JsonDiffDocument
     public bool HasChildren(TreeNode node) => node.IsContainer && Text.HasChildren(node.ValueStart, node.FormatKind);
 
     /// <summary>A container's children in order, as far as they have arrived.</summary>
-    public IEnumerable<TreeNode> Children(TreeNode container)
+    public IEnumerable<TreeNode> Children(TreeNode container) => ChildrenFrom(container, 0);
+
+    /// <summary>A container's children from ordinal <paramref name="first"/> on, reached from the
+    /// nearest checkpoint before it rather than by reading every child ahead of it.</summary>
+    public IEnumerable<TreeNode> ChildrenFrom(TreeNode container, long first)
     {
-        long position = Reader.FirstChildPosition(container.ValueStart);
+        var (position, at) = ResumeAt(container, first);
         while (Reader.TryReadChild(container.FormatKind, ref position, out var child, out _))
         {
-            yield return child;
+            if (at >= first)
+                yield return child;
+
             position = End(child);
             if (position == long.MaxValue)
                 yield break;
+            at++;
         }
+    }
+
+    /// <summary>
+    /// A container's children before ordinal <paramref name="before"/>, last first. A large
+    /// container is read back one checkpoint span at a time - each span forward into a buffer,
+    /// then handed out in reverse - so only one span's nodes are ever held; a small one, which the
+    /// index does not record, is read once.
+    /// </summary>
+    public IEnumerable<TreeNode> ChildrenBackward(TreeNode container, long before)
+    {
+        var span = new List<TreeNode>();
+        long end = before;
+        while (end > 0)
+        {
+            var (position, at) = ResumeAt(container, end - 1);
+            long spanFirst = at;
+            span.Clear();
+            while (at < end && Reader.TryReadChild(container.FormatKind, ref position, out var child, out _))
+            {
+                span.Add(child);
+                position = End(child);
+                at++;
+            }
+
+            for (int i = span.Count - 1; i >= 0; i--)
+                yield return span[i];
+
+            end = spanFirst;
+        }
+    }
+
+    /// <summary>How many children a container has: the index's count for a large one, read for a
+    /// small one. The document must have finished indexing.</summary>
+    public long ChildCount(TreeNode container)
+    {
+        var structure = Index.Structure;
+        int record = structure.FindContainerStartingAt(container.ValueStart);
+        if (record >= 0 && structure.GetContainer(record) is { IsOpen: false } recorded)
+            return recorded.ChildCount;
+
+        long count = 0;
+        foreach (var _ in Children(container))
+            count++;
+        return count;
+    }
+
+    /// <summary>Where to start reading a container's children to reach child
+    /// <paramref name="ordinal"/>, and the ordinal of the child found there.</summary>
+    private (long Position, long Ordinal) ResumeAt(TreeNode container, long ordinal)
+    {
+        var structure = Index.Structure;
+        int record = structure.FindContainerStartingAt(container.ValueStart);
+        if (record < 0 || ordinal == 0)
+            return (Reader.FirstChildPosition(container.ValueStart), 0);
+
+        var resume = structure.FindResumePoint(record, ordinal);
+        return resume.AtOpen ? (Reader.FirstChildPosition(container.ValueStart), 0) : (resume.Offset, resume.Ordinal);
     }
 
     /// <summary>The content hash of <paramref name="node"/>'s value; the index must have been
@@ -148,25 +212,5 @@ public sealed class JsonDiffDocument
         if (!locator.SeekTo(valueStart))
             return Array.Empty<JsonTreePathSegment>();
         return JsonTreePaths.Segments(locator, Text);
-    }
-
-    // ── Display rows ──────────────────────────────────────────────────────────────────────
-
-    /// <summary>The pane text for <paramref name="node"/>: its name and its value or summary,
-    /// each cut at the display cap.</summary>
-    public JsonRow BuildRow(TreeNode node, bool expanded)
-    {
-        string? name = null;
-        if (node.RowStart != node.ValueStart)
-        {
-            long nameStart = node.RowStart + 1;
-            long nameLength = Reader.StringEnd(node.RowStart) - 1 - nameStart;
-            name = DisplayText.Read(Bytes, nameStart, (int)Math.Min(int.MaxValue, nameLength), out _);
-        }
-
-        var row = new TreeRow(node.IsContainer ? TreeRowShape.Open : TreeRowShape.Leaf, node, node.RowStart, 0, 0,
-            JsonTreeReader.Document, -1, expanded);
-        string value = node.IsContainer ? Text.Summary(row) : Text.Scalar(row, out _, out _, out _);
-        return new JsonRow(node.ValueStart, (JsonTokenKind)node.FormatKind, name, value);
     }
 }

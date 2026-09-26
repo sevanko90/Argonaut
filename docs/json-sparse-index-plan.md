@@ -185,7 +185,7 @@ The existing dense index stays available to diff until this is built, so diff is
 Each step lands on its own and leaves the app working. Tick a step when it is merged into the
 branch, and note under it anything the next step needs to know.
 
-Status: step 12 done. Next: step 13 (the diff on the tree surface); step 11 only if the estimated scrollbar disappoints. The array table and the diff await a manual check. Branch: `plan/json-sparse-index`.
+Status: step 13 done (as `json-diff-merged-tree-plan.md`); step 11 only if the estimated scrollbar disappoints. The array table and the diff await a manual check. Branch: `plan/json-sparse-index`.
 
 1. [x] **Benchmarks first.** A BenchmarkDotNet suite over three shapes - a token-dense array, deeply
    nested objects, a large array of small records - measuring index bytes per file byte, build time,
@@ -489,7 +489,8 @@ Status: step 12 done. Next: step 13 (the diff on the tree surface); step 11 only
 
     Checked by hand: scrolling in the raw view, the JSON tree and the cell pane.
 
-13. [ ] **The diff on the tree surface**, so every tree view works one way. Today the diff is a
+13. [x] **The diff on the tree surface**, so every tree view works one way. Done as
+    `json-diff-merged-tree-plan.md`, which also changes the record log - see there. Today the diff is a
     `ListBox` over a materialised list of visible rows: it holds no dense index, but it keeps
     what the old JSON list had besides - a list growing with what is expanded (nesting
     multiplies the 10K-per-container cap), a full re-walk on every toggle, and children past the

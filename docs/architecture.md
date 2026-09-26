@@ -145,9 +145,9 @@ them). Keep this in sync when the ownership chain changes.
   document (closed/switched away mid-wait) surfaces as a catchable `ObjectDisposedException`
   from the now-unmapped file, not a crash - `JumpToByteOffsetAsync` swallows it, since there is
   nothing left to reveal.
-- A JSON row whose value was display-truncated (see `MaxDisplayTextLength` above) carries the
-  overflowing value's file offset (`JsonRow.TruncatedValueOffset`); its truncation hint renders
-  as a "view in raw" link (`JsonView.axaml`) that calls `RawJumpService.Request(byteOffset)` -
+- A JSON row whose value was display-truncated (see `MaxDisplayTextLength` above) ends in a
+  "view in raw" link run carrying the value's file offset (`ViewInRawLink`, from
+  `JsonTreePainter`); `JsonView` handles the click by calling `RawJumpService.Request(byteOffset)` -
   the same view-to-shell decoupling `ToastService` uses, so `JsonView` never needs a reference
   back to `MainWindowViewModel`. `MainWindow` is the sole subscriber and forwards straight into
   `JumpToRawOffsetAsync`.
@@ -301,22 +301,36 @@ The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLeng
   files with `JsonSparseIndex.StartIndexingWithContentHashes`: the validation pass, which reads
   every token anyway, records the hash of each container of 64 KB or more (`JsonContentHashes`,
   by `JsonContentHasher`'s rules), and anything smaller is hashed from its bytes when the diff
-  asks. `JsonDiffIndex` records nodes by offset (`JsonDiffNode`: row start and value start) and
-  reads children through `JsonDiffDocument`; the worker and the view each hold their own
-  `JsonDiffDocument`, since the readers are not shared across threads. The diff's rows stay a
-  `ListBox` over the record log, with a display cap for an expanded unchanged subtree.
+  asks. `JsonDiffIndex` records differences, not nodes: a run of consecutive unchanged sibling
+  pairs is one record, so the log grows with the number of changes rather than the width of a
+  changed level. A changed level is trimmed first - its common prefix and suffix streamed as
+  runs, backward through the sparse index's checkpoints for the suffix - and only the middle is
+  aligned (objects by name, arrays by identity key or histogram anchors); an array middle past
+  `MaxAlignableArrayElements` is compared in place with a bounded look-ahead, and past a record
+  budget ends in one range record. Records hold nodes by offset (`JsonDiffNode`: row start and
+  value start) and read children through `JsonDiffDocument`; the worker and the view each hold
+  their own `JsonDiffDocument`, since the readers are not shared across threads. See
+  docs/json-diff-merged-tree-plan.md.
+- **The diff draws on the tree surface.** `JsonDiffTree` is an `ITreeRowSource` whose cursor
+  (`JsonDiffCursor`) walks the record log in merged order and, inside a record's regions - a
+  run's pairs, a removed or added node's children, a range's sides - hands over to a
+  `TreeCursor` on that side. `JsonDiffPainter` draws each row two panes wide. A row's key (its
+  `Start`) is `record << 39`, plus the region and the row's offset within it, so keys follow
+  merged order and find orders its stops by them. The scrollbar is estimated over the left
+  document: each record carries a left anchor, and anchors never decrease along the log.
 
 ## Virtualized ItemsSources
 
 - `VirtualizingItemsSourceBase` (`Ui/Documents/VirtualizingItemsSourceBase.cs`) is the shared
   base for the list ItemsSources: `NdJsonLineCollection`, `CsvRowCollection`,
-  `JsonArrayRowCollection`, `JsonDiffRowCollection` and `RawRowCollection`. It supplies the
+  `JsonArrayRowCollection` and `RawRowCollection`. It supplies the
   read-only `IList` + `INotifyCollectionChanged` surface Avalonia's `VirtualizingStackPanel` needs.
-- **The raw view and the JSON tree are the exceptions, and deliberately so.** Both draw their own
+- **The raw view and the trees are the exceptions, and deliberately so.** They draw their own
   rows on `RowSurface` (`Ui/Rows`), which owns fixed row height, the appearance properties,
   horizontal pan, the wheel and one scroll interface. The JSON tree is `TreeSurface` (`Ui/Tree`)
-  over a `TreeDocument`: it holds a `TreeCursor` on its top row and walks from it, so there is no
-  row collection and no row count at all - see "The JSON tree" above. `RawTextSurface`
+  over an `ITreeRowSource` - a `TreeDocument`, or the diff's `JsonDiffTree`: it holds a cursor on
+  its top row and walks from it, so there is no row collection and no row count at all - see
+  "The JSON tree" above. `RawTextSurface`
   (`Features/Raw/RawTextSurface.cs`) draws every visible row itself rather than templating a
   control per row, because a caret needs the text layout and a ListBox does not give it up: its
   selection is whole rows, and moving a caret between rows would mean coordinating dozens of
@@ -392,11 +406,11 @@ The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLeng
 - `OnIndexingCompleted()` takes no argument on purpose: every subclass reports from state it
   already has, so handing it the `IBackgroundIndex` would only widen what a hook can reach into.
 - **A row collection samples "is the scan still running?" BEFORE its first walk, never after.**
-  Every collection with an `IndexGrowthMonitor` (`JsonArrayRowCollection`,
-  `JsonDiffRowCollection`) attaches one only when the scan was
+  Everything with an `IndexGrowthMonitor` (`JsonArrayRowCollection`, `JsonDiffViewModel`)
+  attaches one only when the scan was
   unfinished — and a scan that finishes *during* that first walk would, on a check made
-  afterwards, read as "already complete, nothing to monitor", leaving the collection frozen on
-  what it saw mid-scan with nothing left to rebuild it (for the diff: the pre-diff preview of
+  afterwards, read as "already complete, nothing to monitor", leaving the rows frozen on
+  what they showed mid-scan with nothing left to rebuild them (for the diff: the preview of
   the left document, permanently). Monitoring an already-finished task costs one immediate
   final refresh, which is exactly what that window loses. `IndexGrowthMonitor.FinalRefreshTask`
   completes once that refresh has run: dispatcher-free tests await it, because with no

@@ -386,6 +386,13 @@ Status: step 7 next. Branch: `plan/json-sparse-index`.
     machinery with it.
 11. [ ] **Per-depth row counts**, if the estimated scrollbar proves not good enough in use.
 
+## Later
+
+- **JSONC comments as rows.** Settings files lean on them, and today `JsonTreeReader` skips them as
+  trivia. They would be leaf rows in `TreeRunStyle.Comment`, which exists for this and for XML.
+  Needs the reader to report a comment as a child (and ordinals to skip it, so array indices and
+  paths are unchanged), and the sparse index's separator logic to treat a comment as trivia still.
+
 ## Open questions
 
 - Default `T` and `B`, and whether they scale with file size or a memory budget. Settle from the

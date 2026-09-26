@@ -103,6 +103,14 @@ public sealed class SparseContainerIndex
         return -1;
     }
 
+    /// <summary>The recorded container whose first byte is <paramref name="start"/>, or -1 if
+    /// that container is not recorded (yet).</summary>
+    public int FindContainerStartingAt(long start)
+    {
+        int candidate = LastContainerStartingAtOrBefore(start);
+        return candidate >= 0 && containers.ItemRef(candidate).Start == start ? candidate : -1;
+    }
+
     /// <summary>
     /// Where to start parsing to reach <paramref name="offset"/>: in the innermost recorded
     /// container enclosing it, at the latest known child start at or before it. That is its own

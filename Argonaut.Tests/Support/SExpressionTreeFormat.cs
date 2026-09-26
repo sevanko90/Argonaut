@@ -165,4 +165,54 @@ internal static class SExpressionTreeFormat
     };
 
     private static bool IsWhitespace(byte b) => b is (byte)' ' or (byte)'\n' or (byte)'\t' or (byte)'\r';
+
+    public const byte DocumentKind = 0;
+    public const byte AtomKind = 2;
+
+    /// <summary>The format's reader for <see cref="TreeCursor"/>.</summary>
+    public sealed class Reader(byte[] document) : ITreeFormatReader
+    {
+        public byte DocumentKind => SExpressionTreeFormat.DocumentKind;
+
+        public bool TryReadChild(byte containerKind, ref long position, out TreeNode child, out long closeStart)
+        {
+            while (position < document.Length && IsWhitespace(document[position]))
+                position++;
+
+            child = default;
+            closeStart = position;
+            if (position >= document.Length || document[position] == (byte)')')
+                return false;
+
+            if (document[position] == (byte)'(')
+            {
+                child = new TreeNode(position, position, -1, IsContainer: true, ListKind);
+                return true;
+            }
+
+            long end = position;
+            while (end < document.Length && !IsWhitespace(document[end]) && document[end] is not ((byte)'(' or (byte)')'))
+                end++;
+            child = new TreeNode(position, position, end, IsContainer: false, AtomKind);
+            return true;
+        }
+
+        public long FirstChildPosition(long containerStart) => containerStart + 1;
+
+        public long SkipValue(long containerStart)
+        {
+            int depth = 0;
+            for (long i = containerStart; i < document.Length; i++)
+            {
+                if (document[i] == (byte)'(')
+                    depth++;
+                else if (document[i] == (byte)')' && --depth == 0)
+                    return i + 1;
+            }
+
+            return document.Length;
+        }
+
+        public long CloseStart(long containerStart, long containerEnd) => containerEnd - 1;
+    }
 }

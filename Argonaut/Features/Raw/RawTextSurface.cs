@@ -17,6 +17,7 @@ using Argonaut.Features.Raw.Editing;
 using Argonaut.Features.Raw.Rows;
 using Argonaut.Ui.Find;
 using Argonaut.Ui.Notifications;
+using Argonaut.Ui.Rows;
 using Argonaut.Ui.ViewModels;
 
 namespace Argonaut.Features.Raw;
@@ -34,23 +35,16 @@ namespace Argonaut.Features.Raw;
 ///
 /// Virtualization survives the change intact and is the property most worth protecting: rows are
 /// a fixed <see cref="RowHeight"/> and byte-capped, so the visible range is arithmetic on the
-/// scroll offset and nothing outside it is ever materialized. <see cref="ILogicalScrollable"/>
-/// means the hosting <c>ScrollViewer</c> still supplies the wheel, the scrollbar, page keys and
-/// bring-into-view - this supplies the viewport arithmetic, not a scroll engine.
+/// scroll offset and nothing outside it is ever materialized. Its scrolling is
+/// <see cref="RowSurface"/>'s exact model: the row count is known, so the offset is pixels over
+/// rows x height and a dragged thumb lands on the row it points at.
 ///
 /// Horizontal movement is deliberately NOT scrolling: rows are laid out at their natural width
 /// and panned by <see cref="PanOffset"/>, which keeps both gutters pinned while the text slides
 /// under them. That is the behaviour the ListBox version had, driven by a render transform.
 /// </summary>
-public class RawTextSurface : Control, ILogicalScrollable
+public class RawTextSurface : RowSurface
 {
-    /// <summary>
-    /// Row height, in device-independent pixels. Was a hard-coded <c>Height</c> on the ListBoxItem
-    /// style in XAML, where code could not see it; the caret's vertical position needs it, so it
-    /// lives here now and the view has no say.
-    /// </summary>
-    public const double RowHeight = 22;
-
     /// <summary>Width of the line-number gutter, including <see cref="LineNumberGap"/>.</summary>
     public const double LineNumberColumnWidth = 100;
 
@@ -59,9 +53,6 @@ public class RawTextSurface : Control, ILogicalScrollable
 
     /// <summary>Width of the right-hand gutter holding the soft-wrap marker.</summary>
     public const double WrapGutterWidth = 18;
-
-    /// <summary>Padding inside the surface, matching the ListBox padding it replaces.</summary>
-    public const double ContentPaddingX = 8;
 
     private const string WrapMarker = "⏎";
 
@@ -102,131 +93,25 @@ public class RawTextSurface : Control, ILogicalScrollable
     /// column the user started in.
     /// </summary>
     private double? stickyX;
-    private Vector offset;
     private int? pendingRevealRow;
-    private double panOffset;
-    private EventHandler? scrollInvalidated;
-
-    /// <summary>Widest row laid out since the last <see cref="DropLayouts"/>, in pixels.</summary>
-    private double widestRowWidth;
+    private double scrollTop;
 
     /// <summary>The realized range <see cref="widestRowWidth"/> was last measured over.</summary>
     private (int First, int Last) measuredRange = (0, -1);
 
     static RawTextSurface()
     {
-        FocusableProperty.OverrideDefaultValue<RawTextSurface>(true);
-
-        // Transparent rather than null, so the surface is hit-testable even if the brush resource
-        // it is bound to fails to resolve. A caret that silently stops responding to clicks
-        // because of a missing theme key is not a failure anyone would look for here.
-        BackgroundProperty.OverrideDefaultValue<RawTextSurface>(Brushes.Transparent);
-        AffectsRender<RawTextSurface>(
-            ForegroundProperty,
-            GutterForegroundProperty,
-            HighlightBrushProperty,
-            SelectionBrushProperty,
-            CaretBrushProperty,
-            BackgroundProperty);
+        AffectsRender<RawTextSurface>(CaretBrushProperty);
     }
-
-    public static readonly StyledProperty<FontFamily> FontFamilyProperty =
-        TextElement.FontFamilyProperty.AddOwner<RawTextSurface>();
-
-    public static readonly StyledProperty<double> FontSizeProperty =
-        TextElement.FontSizeProperty.AddOwner<RawTextSurface>();
-
-    public static readonly StyledProperty<IBrush?> ForegroundProperty =
-        TextElement.ForegroundProperty.AddOwner<RawTextSurface>();
-
-    /// <summary>Brush for the line-number and wrap-marker gutters.</summary>
-    public static readonly StyledProperty<IBrush?> GutterForegroundProperty =
-        AvaloniaProperty.Register<RawTextSurface, IBrush?>(nameof(GutterForeground));
-
-    /// <summary>Brush behind occurrences of the find term.</summary>
-    public static readonly StyledProperty<IBrush?> HighlightBrushProperty =
-        AvaloniaProperty.Register<RawTextSurface, IBrush?>(nameof(HighlightBrush));
-
-    /// <summary>Brush behind selected text.</summary>
-    public static readonly StyledProperty<IBrush?> SelectionBrushProperty =
-        AvaloniaProperty.Register<RawTextSurface, IBrush?>(nameof(SelectionBrush));
 
     /// <summary>Brush for the caret itself.</summary>
     public static readonly StyledProperty<IBrush?> CaretBrushProperty =
         AvaloniaProperty.Register<RawTextSurface, IBrush?>(nameof(CaretBrush));
 
-    /// <summary>
-    /// The surface's own background. Not decoration: a control with nothing painted behind it is
-    /// not reliably hit-testable, so without this a click passes straight through and the caret
-    /// never moves.
-    /// </summary>
-    public static readonly StyledProperty<IBrush?> BackgroundProperty =
-        Panel.BackgroundProperty.AddOwner<RawTextSurface>();
-
-    public FontFamily FontFamily
-    {
-        get => GetValue(FontFamilyProperty);
-        set => SetValue(FontFamilyProperty, value);
-    }
-
-    public double FontSize
-    {
-        get => GetValue(FontSizeProperty);
-        set => SetValue(FontSizeProperty, value);
-    }
-
-    public IBrush? Foreground
-    {
-        get => GetValue(ForegroundProperty);
-        set => SetValue(ForegroundProperty, value);
-    }
-
-    public IBrush? GutterForeground
-    {
-        get => GetValue(GutterForegroundProperty);
-        set => SetValue(GutterForegroundProperty, value);
-    }
-
-    public IBrush? HighlightBrush
-    {
-        get => GetValue(HighlightBrushProperty);
-        set => SetValue(HighlightBrushProperty, value);
-    }
-
-    public IBrush? SelectionBrush
-    {
-        get => GetValue(SelectionBrushProperty);
-        set => SetValue(SelectionBrushProperty, value);
-    }
-
     public IBrush? CaretBrush
     {
         get => GetValue(CaretBrushProperty);
         set => SetValue(CaretBrushProperty, value);
-    }
-
-    public IBrush? Background
-    {
-        get => GetValue(BackgroundProperty);
-        set => SetValue(BackgroundProperty, value);
-    }
-
-    /// <summary>
-    /// How far the text is panned left, in pixels. Not scrolling: the gutters stay put and only
-    /// the text column moves, which is what keeps a line number aligned with its row at any
-    /// horizontal position.
-    /// </summary>
-    public double PanOffset
-    {
-        get => this.panOffset;
-        set
-        {
-            if (Math.Abs(this.panOffset - value) < 0.01)
-                return;
-
-            this.panOffset = value;
-            InvalidateVisual();
-        }
     }
 
     /// <summary>
@@ -246,20 +131,6 @@ public class RawTextSurface : Control, ILogicalScrollable
     /// </summary>
     internal int CachedLayoutCount => this.layouts.Count;
 
-    /// <summary>
-    /// How wide the text column has actually needed to be, in pixels: the widest row measured
-    /// since the last time the layouts were dropped. This is what the pan range is sized from.
-    ///
-    /// It is a high-water mark rather than the widest row on screen, because a range measured
-    /// from the current viewport would shrink and grow as the user scrolled, moving the thumb
-    /// under their hand. It resets whenever the layouts do - a new document, a new wrap width, a
-    /// new font - which is exactly when the old measurement stops meaning anything.
-    /// </summary>
-    public double WidestRowWidth => this.widestRowWidth;
-
-    /// <summary>Raised when <see cref="WidestRowWidth"/> grows, so the host can resize the pan range.</summary>
-    public event EventHandler? WidestRowWidthChanged;
-
     private int RowCount => this.viewModel?.RowCount ?? 0;
 
     /// <summary>Left edge of the text column.</summary>
@@ -268,6 +139,12 @@ public class RawTextSurface : Control, ILogicalScrollable
     /// <summary>Width available to text before the wrap-marker gutter.</summary>
     private double TextViewportWidth
         => Math.Max(0, Bounds.Width - TextOriginX - WrapGutterWidth - ContentPaddingX);
+
+    public override double PanViewportWidth => TextViewportWidth;
+
+    /// <summary>Four characters of the content font.</summary>
+    public override double PanStep
+        => new TextLayout("W", new Typeface(FontFamily), FontSize, Brushes.Black).WidthIncludingTrailingWhitespace * 4;
 
     protected override void OnDataContextChanged(EventArgs e)
     {
@@ -412,30 +289,12 @@ public class RawTextSurface : Control, ILogicalScrollable
     private void DropLayouts()
     {
         DropRowCaches();
-
-        if (this.widestRowWidth == 0)
-            return;
-
-        this.widestRowWidth = 0;
-        NotifyWidestRowWidthChanged();
+        ResetWidestRowWidth();
     }
 
-    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
-    {
-        base.OnPropertyChanged(change);
+    protected override void OnTextStyleChanged() => DropLayouts();
 
-        if (change.Property == FontFamilyProperty || change.Property == FontSizeProperty)
-        {
-            DropLayouts();
-            InvalidateVisual();
-        }
-        else if (change.Property == BoundsProperty)
-        {
-            InvalidateScrollable();
-        }
-    }
-
-    protected override Size MeasureOverride(Size availableSize) => availableSize;
+    protected override void OnViewportChanged() => InvalidateScrollable();
 
     protected override Size ArrangeOverride(Size finalSize)
     {
@@ -471,8 +330,8 @@ public class RawTextSurface : Control, ILogicalScrollable
         // Ceiling-minus-one rather than a plain truncation: a row whose top sits exactly on the
         // viewport's bottom edge shows nothing at all, and realizing it is a row of work for no
         // pixels.
-        int firstRow = Math.Clamp((int)(this.offset.Y / RowHeight), 0, rowCount - 1);
-        int lastRow = Math.Clamp((int)Math.Ceiling((this.offset.Y + height) / RowHeight) - 1, firstRow, rowCount - 1);
+        int firstRow = Math.Clamp((int)(scrollTop / RowHeight), 0, rowCount - 1);
+        int lastRow = Math.Clamp((int)Math.Ceiling((scrollTop + height) / RowHeight) - 1, firstRow, rowCount - 1);
         RealizedRowRange = (firstRow, lastRow);
         this.viewModel.ViewportRows = RealizedRowRange;
 
@@ -507,41 +366,19 @@ public class RawTextSurface : Control, ILogicalScrollable
         double fontSize = FontSize;
         var foreground = Foreground ?? Brushes.Black;
 
-        double widest = this.widestRowWidth;
+        double widest = WidestRowWidth;
         foreach (var (rowIndex, row) in this.realized)
         {
             var layout = LayoutFor(rowIndex, row, typeface, fontSize, foreground);
             widest = Math.Max(widest, layout.WidthIncludingTrailingWhitespace);
         }
 
-        if (widest <= this.widestRowWidth)
-            return;
-
-        this.widestRowWidth = widest;
-        NotifyWidestRowWidthChanged();
-    }
-
-    /// <summary>
-    /// Raises <see cref="WidestRowWidthChanged"/> a dispatcher turn later. One of the call sites
-    /// is the render pass, and the host reacts by resizing the pan scrollbar - a visual change,
-    /// which Avalonia refuses mid-render ("Visual was invalidated during the render pass"). The
-    /// deferral is the same re-entrancy tool the selection setters use (see CLAUDE.md), for the
-    /// same reason: decide synchronously, act after the pass that asked has unwound.
-    /// </summary>
-    private void NotifyWidestRowWidthChanged()
-    {
-        if (WidestRowWidthChanged is null)
-            return;
-
-        UiDeferral.AfterCurrentInput(() => WidestRowWidthChanged?.Invoke(this, EventArgs.Empty));
+        RecordRowWidth(widest);
     }
 
     public override void Render(DrawingContext context)
     {
         base.Render(context);
-
-        if (Background is { } background)
-            context.FillRectangle(background, new Rect(Bounds.Size));
 
         if (this.viewModel is null || this.realized.Count == 0)
             return;
@@ -555,7 +392,7 @@ public class RawTextSurface : Control, ILogicalScrollable
 
         foreach (var (rowIndex, row) in this.realized)
         {
-            double y = rowIndex * RowHeight - this.offset.Y;
+            double y = rowIndex * RowHeight - scrollTop;
 
             DrawLineNumber(context, row, typeface, fontSize, gutter, y);
 
@@ -570,7 +407,7 @@ public class RawTextSurface : Control, ILogicalScrollable
 
                 DrawSelection(context, layout, row, rowIndex, textTop);
                 DrawHighlights(context, layout, rowIndex, textTop);
-                layout.Draw(context, new Point(TextOriginX - this.panOffset, textTop));
+                layout.Draw(context, new Point(TextOriginX - PanOffset, textTop));
                 DrawCaret(context, layout, rowIndex, textTop);
             }
 
@@ -578,14 +415,6 @@ public class RawTextSurface : Control, ILogicalScrollable
                 DrawWrapMarker(context, typeface, fontSize, gutter, y);
         }
     }
-
-    /// <summary>
-    /// Top of a line of text within its row band. Rows are a fixed 22px while the text is however
-    /// tall the content font makes it, so the difference is split above and below rather than
-    /// left at the bottom - which is what the ListBox item template used to do for free.
-    /// </summary>
-    private static double CentreInRow(TextLayout layout, double rowTop)
-        => rowTop + Math.Max(0, (RowHeight - layout.Height) / 2);
 
     private void DrawLineNumber(DrawingContext context, RawVisibleRow row, Typeface typeface, double fontSize, IBrush brush, double y)
     {
@@ -617,7 +446,7 @@ public class RawTextSurface : Control, ILogicalScrollable
         if (HighlightBrush is not { } brush)
             return;
 
-        var origin = new Vector(TextOriginX - this.panOffset, y);
+        var origin = new Vector(TextOriginX - PanOffset, y);
         foreach (var rect in HighlightRectsFor(rowIndex, layout))
             context.FillRectangle(brush, rect.Translate(origin));
     }
@@ -725,10 +554,6 @@ public class RawTextSurface : Control, ILogicalScrollable
 
     // ---- caret and selection ------------------------------------------------------------
 
-    /// <summary>Asks the host to pan so a given surface x is visible. The pan scrollbar belongs
-    /// to the view, so the surface requests rather than sets.</summary>
-    public event EventHandler<double>? PanRequested;
-
     /// <summary>The bytes on screen - the file, or the piece table over it once editing has
     /// begun. Never <see cref="RawViewModel.Bytes"/>, which is the file as it is on disk.</summary>
     private IByteSource? Source => this.viewModel?.Document;
@@ -747,12 +572,8 @@ public class RawTextSurface : Control, ILogicalScrollable
         long offset = this.caret.Caret.Offset;
         int rowIndex = index.RowForOffset(offset) ?? index.RowCount - 1;
 
-        if (this.caret.Caret.Affinity == CaretAffinity.Upstream
-            && rowIndex > 0
-            && index.GetRowInfo(rowIndex).Start == offset)
-        {
+        if (this.caret.Caret.Affinity == CaretAffinity.Upstream && RawCaretController.IsWrapBoundary(index, rowIndex, offset))
             rowIndex--;
-        }
 
         return rowIndex;
     }
@@ -805,7 +626,7 @@ public class RawTextSurface : Control, ILogicalScrollable
         if (endChar <= startChar)
             return;
 
-        var origin = new Vector(TextOriginX - this.panOffset, y);
+        var origin = new Vector(TextOriginX - PanOffset, y);
         foreach (var rect in layout.HitTestTextRange(startChar, endChar - startChar))
             context.FillRectangle(brush, rect.Translate(origin));
     }
@@ -829,7 +650,7 @@ public class RawTextSurface : Control, ILogicalScrollable
         if (this.caret is null || CaretRowIndex() != rowIndex)
             return null;
 
-        double x = TextOriginX - this.panOffset + XForOffset(rowIndex, layout, this.caret.Caret.Offset);
+        double x = TextOriginX - PanOffset + XForOffset(rowIndex, layout, this.caret.Caret.Offset);
         return new Rect(Math.Floor(x), textTop, CaretWidth, layout.Height);
     }
 
@@ -845,13 +666,13 @@ public class RawTextSurface : Control, ILogicalScrollable
 
         var typeface = new Typeface(FontFamily);
         var layout = LayoutFor(rowIndex, typeface, FontSize, Foreground ?? Brushes.Black, row.Text);
-        double y = rowIndex * RowHeight - this.offset.Y;
+        double y = rowIndex * RowHeight - scrollTop;
         return CaretRectFor(rowIndex, layout, CentreInRow(layout, y));
     }
 
     /// <summary>Top of the row band the caret sits in, for tests.</summary>
     internal double? CaretRowTop()
-        => CaretRowIndex() is int rowIndex ? rowIndex * RowHeight - this.offset.Y : null;
+        => CaretRowIndex() is int rowIndex ? rowIndex * RowHeight - scrollTop : null;
 
     /// <summary>Byte offset under a point, for click and drag.</summary>
     private long? OffsetAt(Point point)
@@ -859,7 +680,7 @@ public class RawTextSurface : Control, ILogicalScrollable
         if (RowIndex is not { } index || index.RowCount == 0)
             return null;
 
-        int rowIndex = Math.Clamp((int)((point.Y + this.offset.Y) / RowHeight), 0, index.RowCount - 1);
+        int rowIndex = Math.Clamp((int)((point.Y + scrollTop) / RowHeight), 0, index.RowCount - 1);
         if (DecodedRow(rowIndex) is not { } row)
             return null;
 
@@ -868,7 +689,7 @@ public class RawTextSurface : Control, ILogicalScrollable
         var typeface = new Typeface(FontFamily);
         var layout = LayoutFor(rowIndex, typeface, FontSize, Foreground ?? Brushes.Black, row.Text);
 
-        double x = point.X - TextOriginX + this.panOffset;
+        double x = point.X - TextOriginX + PanOffset;
         var hit = layout.HitTestPoint(new Point(Math.Max(0, x), 0));
 
         // Clicking past the end of the glyphs means the end of the row's text, not the end of its
@@ -904,12 +725,12 @@ public class RawTextSurface : Control, ILogicalScrollable
         var layout = LayoutFor(rowIndex, typeface, FontSize, Foreground ?? Brushes.Black, row.Text);
         double x = XForOffset(rowIndex, layout, this.caret.Caret.Offset);
 
-        double visibleLeft = this.panOffset;
-        double visibleRight = this.panOffset + TextViewportWidth;
+        double visibleLeft = PanOffset;
+        double visibleRight = PanOffset + TextViewportWidth;
         if (x < visibleLeft)
-            PanRequested?.Invoke(this, Math.Max(0, x - TextViewportWidth / 4));
+            RequestPan(Math.Max(0, x - TextViewportWidth / 4));
         else if (x > visibleRight)
-            PanRequested?.Invoke(this, x - TextViewportWidth + TextViewportWidth / 4);
+            RequestPan(x - TextViewportWidth + TextViewportWidth / 4);
     }
 
     /// <summary>
@@ -1295,72 +1116,73 @@ public class RawTextSurface : Control, ILogicalScrollable
         InvalidateVisual();
     }
 
-    // ---- ILogicalScrollable -------------------------------------------------------------
-    //
-    // Vertical only. Horizontal movement is PanOffset, driven by the view's own pan scrollbar,
-    // because scrolling horizontally would take the gutters with it.
+    // ---- scrolling ---------------------------------------------------------------------
 
     /// <summary>
-    /// Computed live rather than cached. A cached extent goes stale between the row count
-    /// growing and whatever refreshes it running, and the host clamps any offset it is given
-    /// against that stale value - which silently turns a reveal deep in a large file into a
-    /// scroll that stops short. During a full-speed scan one 120ms growth tick is over a million
-    /// rows of staleness, so "stale by one tick" is not a rounding error, it is a mile.
+    /// How tall the rows are altogether. Computed live rather than cached: a cached extent goes
+    /// stale between the row count growing and whatever refreshes it running, and a clamp against
+    /// that stale value silently turns a reveal deep in a large file into a scroll that stops
+    /// short. During a full-speed scan one 120ms growth tick is over a million rows of staleness,
+    /// so "stale by one tick" is not a rounding error, it is a mile.
     /// </summary>
-    public Size Extent => new(Bounds.Width, Math.Max(RowCount * RowHeight, Bounds.Height));
+    private double ExtentHeight => RowCount * RowHeight;
 
-    public Size Viewport => Bounds.Size;
+    private double MaxScrollTop => Math.Max(0, ExtentHeight - Bounds.Height);
 
-    public Vector Offset
+    /// <summary>How far down the rows the top of the view is, in pixels.</summary>
+    public double VerticalOffset => scrollTop;
+
+    public override double ScrollFraction => ExtentHeight <= 0 ? 0 : scrollTop / ExtentHeight;
+
+    public override double ViewportFraction => ExtentHeight <= 0 ? 1 : Math.Min(1, Bounds.Height / ExtentHeight);
+
+    public override bool ShowsEnd => scrollTop >= MaxScrollTop - 0.5;
+
+    // The public moves are the user's - the wheel, a trackpad, the scrollbar - so each abandons a
+    // reveal still waiting, as a click or a key does.
+
+    public override void ScrollByPixels(double delta)
     {
-        get => this.offset;
-        set
-        {
-            if (this.offset == value)
-                return;
+        AbandonPendingReveal();
+        SetVerticalOffset(scrollTop + delta);
+    }
 
-            this.offset = value;
+    public override void ScrollToFraction(double fraction)
+    {
+        AbandonPendingReveal();
+        SetVerticalOffset(Math.Clamp(fraction, 0, 1) * ExtentHeight);
+    }
+
+    public override void ScrollToEnd()
+    {
+        AbandonPendingReveal();
+        SetVerticalOffset(MaxScrollTop);
+    }
+
+    /// <summary>Back to the top, for rows about to be replaced wholesale - not the user's move, so
+    /// a reveal waiting for the new rows survives it.</summary>
+    public void ResetScroll() => SetVerticalOffset(0);
+
+    /// <summary>Moves the top of the view to <paramref name="y"/>, clamped to the rows, and tells
+    /// the host - also when only the extent under it changed.</summary>
+    private void SetVerticalOffset(double y)
+    {
+        double clamped = Math.Clamp(y, 0, MaxScrollTop);
+        if (clamped != scrollTop)
+        {
+            scrollTop = clamped;
             UpdateRealizedRows(Bounds.Height);
             InvalidateVisual();
         }
+
+        NotifyScrollPosition();
     }
-
-    public bool CanHorizontallyScroll
-    {
-        get => false;
-        set { }
-    }
-
-    public bool CanVerticallyScroll
-    {
-        get => true;
-        set { }
-    }
-
-    public bool IsLogicalScrollEnabled => true;
-
-    /// <summary>One wheel notch, and the arrow-key step the ScrollViewer applies.</summary>
-    public Size ScrollSize => new(1, RowHeight);
-
-    public Size PageScrollSize => new(Viewport.Width, Math.Max(RowHeight, Viewport.Height - RowHeight));
-
-    public event EventHandler? ScrollInvalidated
-    {
-        add => this.scrollInvalidated += value;
-        remove => this.scrollInvalidated -= value;
-    }
-
-    public void RaiseScrollInvalidated(EventArgs e) => this.scrollInvalidated?.Invoke(this, e);
-
-    public bool BringIntoView(Control target, Rect targetRect) => false;
-
-    public Control? GetControlInDirection(NavigationDirection direction, Control? from) => null;
 
     /// <summary>Tells the host the extent moved, and re-tries a reveal that is still waiting.</summary>
     private void InvalidateScrollable()
     {
         UpdateRealizedRows(Bounds.Height);
-        RaiseScrollInvalidated(EventArgs.Empty);
+        SetVerticalOffset(scrollTop); // the rows may have grown or shrunk under the view
         ApplyPendingReveal();
     }
 
@@ -1376,9 +1198,9 @@ public class RawTextSurface : Control, ILogicalScrollable
         double top = rowIndex * RowHeight;
         double bottom = top + RowHeight;
 
-        if (top < this.offset.Y)
+        if (top < scrollTop)
             SetVerticalOffset(top);
-        else if (bottom > this.offset.Y + Bounds.Height)
+        else if (bottom > scrollTop + Bounds.Height)
             SetVerticalOffset(bottom - Bounds.Height);
     }
 
@@ -1412,7 +1234,7 @@ public class RawTextSurface : Control, ILogicalScrollable
             return; // the scan has not reached it yet; a later growth tick will re-try
 
         double top = rowIndex * RowHeight;
-        if (top >= this.offset.Y && top + RowHeight <= this.offset.Y + Bounds.Height)
+        if (top >= scrollTop && top + RowHeight <= scrollTop + Bounds.Height)
         {
             this.pendingRevealRow = null; // already on screen
             return;
@@ -1424,13 +1246,6 @@ public class RawTextSurface : Control, ILogicalScrollable
         // this stays pending and the next growth tick tries again against a larger extent.
         if (RealizedRowRange.First <= rowIndex && rowIndex <= RealizedRowRange.Last)
             this.pendingRevealRow = null;
-    }
-
-    private void SetVerticalOffset(double y)
-    {
-        double limit = Math.Max(0, Extent.Height - Bounds.Height);
-        Offset = new Vector(this.offset.X, Math.Clamp(y, 0, limit));
-        RaiseScrollInvalidated(EventArgs.Empty);
     }
 
     /// <summary>A reveal in flight belongs to the app, not the user; their first input ends it.</summary>

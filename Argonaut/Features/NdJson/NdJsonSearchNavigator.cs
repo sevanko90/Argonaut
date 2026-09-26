@@ -3,7 +3,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Engine.Indexing.Lines;
 using Argonaut.Engine.Search;
-using Argonaut.Features.Json.Indexing;
 using Argonaut.Ui.Find;
 
 namespace Argonaut.Features.NdJson;
@@ -63,15 +62,14 @@ public sealed class NdJsonSearchNavigator : ISearchNavigator
         if (relativeOffset < 0 || relativeOffset >= nested.Bytes!.AvailableLength)
             return; // hit landed on the line's trailing newline bytes - the line selection is enough
 
-        var tokenIndex = await JsonOffsetTokenResolver.ResolveWhenCoveredAsync(nested.Index!, relativeOffset, ct);
         ct.ThrowIfCancellationRequested();
 
         // Re-check once more: the nested VM is disposed if the selection moved on.
         if (viewModel.SelectedLineJsonViewModel != nested)
             return;
 
-        if (tokenIndex is int t)
-            nested.SelectToken(t);
+        // The line's tree reads its bytes directly, so the offset can be shown straight away.
+        nested.Reveal(relativeOffset);
     }
 
     /// <summary>

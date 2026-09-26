@@ -2,22 +2,22 @@ using System;
 using System.ComponentModel;
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Controls.Primitives;
-using Avalonia.Media;
 using Avalonia.Reactive;
+using Argonaut.Ui.Rows;
 
 namespace Argonaut.Features.Raw;
 
 /// <summary>
-/// Host for <see cref="RawTextSurface"/>. Everything about how a row looks lives in the surface;
-/// what remains here is the chrome around it - the pan scrollbar, the edit overview strip, the
-/// reveal a search hit needs, and the scroll reset a wrap-width change needs.
+/// Host for <see cref="RawTextSurface"/>. Everything about how a row looks lives in the surface,
+/// and its scrollbars are driven by <see cref="RowScrollBars"/>; what remains here is the chrome
+/// around it - the edit overview strip, the reveal a search hit needs, and the scroll reset a
+/// wrap-width change needs.
 /// </summary>
 public partial class RawView : UserControl
 {
     private readonly IDisposable fontResourceSubscription;
+    private readonly RowScrollBars scrollBars;
     private RawViewModel? subscribedViewModel;
-    private FontFamily? contentFontFamily;
 
     public RawView()
     {
@@ -26,10 +26,7 @@ public partial class RawView : UserControl
         Loaded += OnLoaded;
         DataContextChanged += OnDataContextChanged;
         DetachedFromVisualTree += OnDetachedFromVisualTree;
-        Surface.SizeChanged += OnSurfaceSizeChanged;
-        Surface.PanRequested += OnPanRequested;
-        Surface.WidestRowWidthChanged += OnWidestRowWidthChanged;
-        PanScrollBar.ValueChanged += OnPanValueChanged;
+        scrollBars = new RowScrollBars(Surface, VerticalScrollBar, PanScrollBar);
         EditOverview.EditChosen += OnEditChosen;
         fontResourceSubscription = this.GetResourceObservable("AppContentFontFamily")
             .Subscribe(new AnonymousObserver<object?>(OnContentFontChanged));
@@ -40,7 +37,7 @@ public partial class RawView : UserControl
         if (DataContext is RawViewModel vm)
             RevealSelectedRow(vm);
 
-        UpdatePanRange();
+        scrollBars.Refresh();
 
         // The surface is the document, so it takes focus when the document is shown. Without
         // this the caret is invisible (it is hidden while unfocused) and arrow keys never reach
@@ -64,7 +61,7 @@ public partial class RawView : UserControl
             vm.PropertyChanged += OnViewModelPropertyChanged;
         }
 
-        UpdatePanRange();
+        scrollBars.Refresh();
         UpdateEditOverview();
     }
 
@@ -93,17 +90,10 @@ public partial class RawView : UserControl
             // new rows - and leaving it in place would have the surface draw a viewport far past
             // the end of a row set that starts near-empty and then grows by millions of rows a
             // second. A save's reopen puts the caret back with a reveal once the scan reaches it.
-            ResetScroll();
-            UpdatePanRange();
+            Surface.ResetScroll();
+            scrollBars.ResetPan();
+            scrollBars.Refresh();
         }
-    }
-
-    private void ResetScroll()
-    {
-        if (RowsScroller.Offset != default)
-            RowsScroller.Offset = default;
-
-        PanScrollBar.Value = 0;
     }
 
     /// <summary>
@@ -119,10 +109,7 @@ public partial class RawView : UserControl
 
     private void OnDetachedFromVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
     {
-        Surface.SizeChanged -= OnSurfaceSizeChanged;
-        Surface.PanRequested -= OnPanRequested;
-        Surface.WidestRowWidthChanged -= OnWidestRowWidthChanged;
-        PanScrollBar.ValueChanged -= OnPanValueChanged;
+        scrollBars.Dispose();
         EditOverview.EditChosen -= OnEditChosen;
         DataContextChanged -= OnDataContextChanged;
         fontResourceSubscription.Dispose();
@@ -162,90 +149,7 @@ public partial class RawView : UserControl
         Surface.Focus();
     }
 
-    private void OnSurfaceSizeChanged(object? sender, SizeChangedEventArgs e) => UpdatePanRange();
-
-    /// <summary>
-    /// A row wider than anything measured so far came into view. Raised from the surface's layout
-    /// pass, so the pan range is only ever resized by rows that have actually been laid out.
-    /// </summary>
-    private void OnWidestRowWidthChanged(object? sender, EventArgs e) => UpdatePanRange();
-
-    private void OnContentFontChanged(object? value)
-    {
-        contentFontFamily = value as FontFamily;
-        UpdatePanRange();
-    }
-
-    private void OnPanValueChanged(object? sender, RangeBaseValueChangedEventArgs e)
-        => Surface.PanOffset = e.NewValue;
-
-    /// <summary>
-    /// The caret moved somewhere the current pan does not show. The surface asks rather than
-    /// setting its own offset, because the pan scrollbar is the thing that owns that value and
-    /// has to stay in step with it.
-    /// </summary>
-    private void OnPanRequested(object? sender, double desiredOffset)
-    {
-        if (!PanScrollBar.IsVisible)
-            return;
-
-        PanScrollBar.Value = Math.Clamp(desiredOffset, PanScrollBar.Minimum, PanScrollBar.Maximum);
-    }
-
-    /// <summary>
-    /// Sizes the pan scrollbar from the widest row the surface has actually laid out
-    /// (<see cref="RawTextSurface.WidestRowWidth"/>), which is a high-water mark and so never
-    /// shrinks under the user mid-scroll.
-    ///
-    /// It used to be an estimate - wrap-width bytes x the advance of "W" - and that was wrong by
-    /// a large factor in the common case, which is what this replaced. Two overestimates
-    /// compounded: a row's text has far fewer characters than bytes wherever the content is not
-    /// ASCII (multi-byte characters collapse, and an invalid run collapses to one U+FFFD), and
-    /// "W" is the widest glyph in a proportional font while real text averages closer to half of
-    /// it. At wrap 160 the bar therefore claimed roughly twice the width the text ever occupied,
-    /// and panning right ran into empty space.
-    /// </summary>
-    private void UpdatePanRange()
-    {
-        double viewWidth = Surface.Bounds.Width;
-        if (DataContext is not RawViewModel || viewWidth <= 0)
-        {
-            HidePanBar();
-            return;
-        }
-
-        double charWidth = MeasureCharWidth();
-        double textViewport = Math.Max(
-            0,
-            viewWidth - (2 * RawTextSurface.ContentPaddingX) - RawTextSurface.LineNumberColumnWidth - RawTextSurface.WrapGutterWidth);
-
-        double maximum = Math.Max(0, Surface.WidestRowWidth - textViewport);
-        if (maximum <= 0 || textViewport <= 0)
-        {
-            HidePanBar();
-            return;
-        }
-
-        PanScrollBar.Maximum = maximum;
-        PanScrollBar.ViewportSize = textViewport;
-        PanScrollBar.LargeChange = textViewport;
-        PanScrollBar.SmallChange = charWidth * 4;
-        if (PanScrollBar.Value > maximum)
-            PanScrollBar.Value = maximum;
-        PanScrollBar.IsVisible = true;
-    }
-
-    private void HidePanBar()
-    {
-        PanScrollBar.IsVisible = false;
-        PanScrollBar.Value = 0;
-        Surface.PanOffset = 0;
-    }
-
-    private double MeasureCharWidth()
-    {
-        var typeface = new Typeface(contentFontFamily ?? FontFamily.Default);
-        var layout = new Avalonia.Media.TextFormatting.TextLayout("W", typeface, Surface.FontSize, Brushes.Black);
-        return layout.WidthIncludingTrailingWhitespace;
-    }
+    /// <summary>The content font changed: the pan step, and the widths already measured with
+    /// the old font, are stale.</summary>
+    private void OnContentFontChanged(object? value) => scrollBars.Refresh();
 }

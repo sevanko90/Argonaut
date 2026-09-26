@@ -44,7 +44,7 @@ public readonly record struct DocumentSaveResult(DocumentSaveOutcome Outcome, st
 /// member of <see cref="IDocumentViewModel"/>.
 ///
 /// The document owns the whole save, because only it knows what it reads through and so what has
-/// to be let go of before the swap (see docs/save-plan.md). The shell owns the parts either side:
+/// to be let go of before the swap (see "Saving" in docs/architecture.md). The shell owns the parts either side:
 /// choosing the destination, stopping anything else reading the file, and adopting the new origin.
 /// </summary>
 public interface ISaveableDocument

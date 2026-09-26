@@ -264,4 +264,117 @@ public class FileOffsetIndexTests
                 Assert.Equal(lines[i], LineReader.ReadLine(file, index.GetLineSpan(i)));
         });
     }
+
+    // ---- the sparse anchors ---------------------------------------------------------------
+
+    /// <summary>Lines of every length from empty to several anchor spacings, in a random mix, so
+    /// anchors land by bytes and by line count alike.</summary>
+    private static byte[] MixedLines(int seed, int lines)
+    {
+        var random = new Random(seed);
+        var text = new StringBuilder();
+        for (int i = 0; i < lines; i++)
+        {
+            int length = random.Next(10) switch
+            {
+                0 => 0,
+                < 7 => random.Next(1, 120),
+                < 9 => random.Next(120, 4000),
+                _ => random.Next(FileOffsetIndex.AnchorBytes / 2, FileOffsetIndex.AnchorBytes * 3),
+            };
+            text.Append('x', length).Append(random.Next(4) == 0 ? "\r\n" : "\n");
+        }
+
+        return Encoding.ASCII.GetBytes(text.ToString());
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public void RandomAccess_MatchesTheNaiveScan(int seed)
+    {
+        byte[] content = MixedLines(seed, 6000);
+        WithIndex(content, (index, _) =>
+        {
+            var expected = NaiveScan(content);
+            Assert.Equal(expected.Count, index.LineCount);
+            var random = new Random(seed);
+            for (int n = 0; n < 3000; n++)
+            {
+                int line = random.Next(expected.Count);
+                Assert.Equal(expected[line], index.GetLineSpan(line));
+            }
+        });
+    }
+
+    [Theory]
+    [InlineData(4)]
+    [InlineData(5)]
+    public void LineAt_MatchesTheNaiveScan(int seed)
+    {
+        byte[] content = MixedLines(seed, 3000);
+        WithIndex(content, (index, _) =>
+        {
+            var expected = NaiveScan(content);
+            var random = new Random(seed);
+            for (int n = 0; n < 3000; n++)
+            {
+                int line = random.Next(expected.Count);
+                var span = expected[line];
+                Assert.Equal(line, index.LineAt(span.Offset));
+                Assert.Equal(line, index.LineAt(span.Offset + span.Length - 1));
+            }
+
+            Assert.Null(index.LineAt(content.Length));
+            Assert.Null(index.LineAt(-1));
+        });
+    }
+
+    /// <summary>The point of it: records per anchor, not per line.</summary>
+    [Fact]
+    public void ShortLines_AreAnchoredEveryFewHundredNotEveryOne()
+    {
+        var text = new StringBuilder();
+        for (int i = 0; i < 200_000; i++)
+            text.Append("{\"id\":").Append(i).Append("}\n");
+        byte[] content = Encoding.ASCII.GetBytes(text.ToString());
+
+        WithIndex(content, (index, _) =>
+        {
+            Assert.Equal(200_000, index.LineCount);
+            int anchors = (int)(content.Length / FileOffsetIndex.AnchorBytes) + (200_000 / FileOffsetIndex.AnchorLines) + 1;
+            Assert.Equal(200_000, index.ItemCount); // ItemCount is the published line count
+            Assert.InRange(AnchorCount(index), 1, anchors);
+        });
+    }
+
+    private static int AnchorCount(FileOffsetIndex index) => index.DetachAnchors()!.Log.Count;
+
+    [Fact]
+    public void Reopen_OverTheSameBytes_IsCompleteAndAnswersTheSame()
+    {
+        byte[] content = MixedLines(6, 2000);
+        WithIndex(content, (index, file) =>
+        {
+            var reopened = FileOffsetIndex.Reopen(file, index.DetachAnchors()!);
+
+            Assert.True(reopened.AllItemsPublished);
+            Assert.True(reopened.IndexingTask.IsCompletedSuccessfully);
+            Assert.Equal(index.LineCount, reopened.LineCount);
+            for (int line = 0; line < index.LineCount; line += 7)
+                Assert.Equal(index.GetLineSpan(line), reopened.GetLineSpan(line));
+        });
+    }
+
+    [Fact]
+    public void Reopen_OverBytesOfAnotherLength_Throws()
+    {
+        byte[] content = MixedLines(7, 100);
+        WithIndex(content, (index, _) =>
+        {
+            var anchors = index.DetachAnchors()!;
+            Assert.Throws<ArgumentException>(() => FileOffsetIndex.Reopen(new MemoryByteSource(content[..^1]), anchors));
+        });
+    }
 }

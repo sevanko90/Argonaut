@@ -59,22 +59,24 @@ public class CollectionDisposedEmptyTests
     }
 
     [Fact]
-    public async Task JsonRowCollection_AfterDispose_IsEmpty()
+    public async Task JsonTree_AfterDispose_IsLetGoOfBySurfaces()
     {
+        // The JSON tree has no row collection to empty: the surface drawing it reads the bytes
+        // itself. So disposal has to make every surface drop the document before the mapping is
+        // released - drawing one more row afterwards would read an unmapped file.
         string path = WriteTempFile("{\"a\":1,\"b\":[1,2,3],\"c\":{\"d\":4}}");
         try
         {
             var vm = new JsonViewModel(new JsonViewSettings(), new SchemaBindings(), TestSchemas.Catalog());
             await vm.LoadAsync(path);
             await vm.IndexingTask;
-            var rows = vm.Rows;
-            Assert.True(rows.Count > 0);
+            var tree = vm.Tree!;
+            bool closed = false;
+            tree.Closing += (_, _) => closed = true;
 
             vm.Dispose();
 
-            Assert.Empty(rows);
-            Assert.Equal(0, CountViaEnumerator(rows));
-            Assert.Null(rows[0]);
+            Assert.True(closed);
         }
         finally
         {

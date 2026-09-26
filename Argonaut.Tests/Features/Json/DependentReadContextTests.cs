@@ -4,7 +4,7 @@ using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Indexing;
 using Argonaut.Features.Json;
 using Argonaut.Features.Json.Indexing;
-using Argonaut.Features.Json.Paths;
+using Argonaut.Features.Json.Tree;
 using Argonaut.Tests.Support;
 
 namespace Argonaut.Tests.Features.Json;
@@ -20,13 +20,13 @@ public class DependentReadContextTests
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var completed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        Task<int>? reading = null;
+        Task<long>? reading = null;
         var thread = new Thread(() =>
         {
             SynchronizationContext.SetSynchronizationContext(uiContext);
             try
             {
-                using var session = IndexedSourceSession<JsonStructureIndex>.Start(new MMapFile(path), JsonStructureIndex.StartIndexing);
+                using var session = IndexedSourceSession<JsonSparseIndex>.Start(new MMapFile(path), JsonSparseIndex.StartIndexing);
                 session.IndexingTask.GetAwaiter().GetResult();
                 reading = session.StartDependentRead(async tearingDown =>
                 {
@@ -36,7 +36,9 @@ public class DependentReadContextTests
                     await session.IndexingTask;
                     // Resolving after an await must still run away from the UI thread.
                     Assert.Null(SynchronizationContext.Current);
-                    return (await JsonPathResolver.ResolveAsync(session.Index, session.Bytes, "$[0]")).TokenIndex!.Value;
+                    var reader = new JsonTreeReader(session.Bytes);
+                    var text = new JsonTreeText(session.Bytes, session.Index.Structure, reader);
+                    return JsonTreePaths.Resolve(session.Index.Structure, reader, text, "$[0]").Target!.Value;
                 });
                 // Model a UI-originated flow awaiting the reader separately.
                 _ = ApplyOnUiAsync(reading);
@@ -103,7 +105,7 @@ public class DependentReadContextTests
         }
     }
 
-    private static async Task ApplyOnUiAsync(Task<int> reading) => _ = await reading;
+    private static async Task ApplyOnUiAsync(Task<long> reading) => _ = await reading;
 
     private sealed class QueuedContext : SynchronizationContext
     {

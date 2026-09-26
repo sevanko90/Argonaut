@@ -50,7 +50,7 @@ public sealed class ProgressCadenceTests
 
         Task indexing = scanner switch
         {
-            "json" => JsonStructureIndex.StartIndexing(source, reporter).IndexingTask,
+            "json" => JsonSparseIndex.StartIndexing(source, reporter).IndexingTask,
             "raw" => RawSegmentIndex.StartIndexing(source, 160, reporter).IndexingTask,
             _ => FileOffsetIndex.StartIndexing(source, reporter).IndexingTask,
         };

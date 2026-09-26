@@ -1,8 +1,9 @@
 using System;
 using System.Collections.Specialized;
-using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Collections;
+using Argonaut.Engine.Indexing.Trees;
 using Argonaut.Features.Json.Indexing;
+using Argonaut.Features.Json.Tree;
 using Argonaut.Ui.Documents;
 using Argonaut.Ui.TableGrid;
 
@@ -32,8 +33,8 @@ public enum JsonArrayColumnMode
 /// so the CSV grid's presentation layer renders them unchanged.
 ///
 /// It keeps no walk state of its own. <see cref="VirtualizingItemsSourceBase.Count"/> derives from
-/// <see cref="JsonArrayElementIndex.ElementCount"/>, and realizing a row is a
-/// <see cref="JsonArrayElementIndex.TokenForElement"/> lookup per element the row covers - one in
+/// <see cref="JsonArrayElements.ElementCount"/>, and realizing a row is a
+/// <see cref="JsonArrayElements.ElementAt"/> lookup per element the row covers - one in
 /// <see cref="JsonArrayColumnMode.ByProperty"/> mode (plus a bounded read of that element's
 /// direct children, and of the children of whatever has been expanded inside it), N in
 /// <see cref="JsonArrayColumnMode.Reshape"/> mode - and nothing else.
@@ -48,14 +49,13 @@ public sealed class JsonArrayRowCollection : VirtualizingItemsSourceBase, IColum
 {
     private const int CacheCapacity = 1000;
 
-    /// <summary>Matches JsonVisibleRowCollection's cadence rather than CSV's 120ms: rows here
-    /// arrive in stride-sized batches from the element index, not one at a time.</summary>
+    /// <summary>Slower than CSV's 120ms: rows here become addressable a checkpoint's worth at a
+    /// time, not one at a time.</summary>
     private static readonly TimeSpan GrowthPollInterval = TimeSpan.FromMilliseconds(500);
 
-    private readonly JsonArrayElementIndex elements;
-    private readonly JsonStructureIndex index;
-    private readonly IByteSource bytes;
-    private readonly JsonRowFactory rowFactory;
+    private readonly JsonArrayElements elements;
+    private readonly JsonTreeReader reader;
+    private readonly JsonTreeText text;
     private readonly LruCache<int, TableRow> cache = new(CacheCapacity);
 
     private TableStructure structure;
@@ -70,20 +70,18 @@ public sealed class JsonArrayRowCollection : VirtualizingItemsSourceBase, IColum
     private IndexGrowthMonitor? growthMonitor;
     private int notifiedCount;
 
-    public JsonArrayRowCollection(JsonArrayElementIndex elements, JsonStructureIndex index, IByteSource bytes,
+    public JsonArrayRowCollection(JsonArrayElements elements, JsonTreeReader reader, JsonTreeText text,
         TableStructure structure, ExpandedRoutes routes, JsonArrayColumnMode mode)
     {
         this.elements = elements;
-        this.index = index;
-        this.bytes = bytes;
-        this.rowFactory = new JsonRowFactory(index, bytes, hintProviders: null);
+        this.reader = reader;
+        this.text = text;
         this.structure = structure;
         this.routes = routes;
         this.mode = mode;
-        // Sampled before the count snapshot, for the reason JsonDiffRowCollection's constructor
-        // states: a walk that finishes in the window between the snapshot and a check made
-        // after it would leave this collection with no monitor, permanently reporting the
-        // element count it happened to see here.
+        // Sampled before the count snapshot: a walk that finishes in the window between the
+        // snapshot and a check made after it would leave this collection with no monitor,
+        // permanently reporting the element count it happened to see here.
         bool walkWasRunning = !elements.AllItemsPublished;
 
         this.notifiedCount = GetCount();
@@ -164,80 +162,72 @@ public sealed class JsonArrayRowCollection : VirtualizingItemsSourceBase, IColum
     }
 
     /// <summary>
+    /// The value one cell came from, or null when the cell is empty - an element missing that
+    /// property, or a position past the end of a short row.
+    ///
+    /// Reads the element again rather than remembering a value per realized cell: a click is one
+    /// bounded read, whereas the cache holds a thousand rows and would carry a node per column of
+    /// every one of them for a lookup almost none of them are ever asked for.
+    /// </summary>
+    public TreeNode? NodeForCell(int rowIndex, int column)
+    {
+        if (column < 0 || rowIndex < 0 || rowIndex >= Count)
+            return null;
+
+        if (mode == JsonArrayColumnMode.Reshape)
+        {
+            int first = rowIndex * Math.Max(1, structure.ColumnCount) + column;
+            return first < elements.ElementCount ? elements.ElementAt(first) : null;
+        }
+
+        var element = elements.ElementAt(rowIndex);
+        if (element.FormatKind != (byte)JsonTokenKind.StartObject)
+            return column == 0 ? element : null;
+
+        return NodeIn(routes, element, column);
+    }
+
+    /// <summary>The same descent <see cref="FillFrom"/> makes, stopping at one column.</summary>
+    private TreeNode? NodeIn(ExpandedRoutes level, TreeNode container, int wanted)
+    {
+        long position = reader.FirstChildPosition(container.ValueStart);
+        for (int ordinal = 0; reader.TryReadChild(container.FormatKind, ref position, out var child, out _); ordinal++)
+        {
+            if (Match(level, container, child, ordinal, out int column, out var inner))
+            {
+                if (column == wanted)
+                    return child;
+
+                if (inner is not null && child.IsContainer && NodeIn(inner, child, wanted) is { } found)
+                    return found;
+            }
+
+            position = text.End(child);
+            if (position == long.MaxValue)
+                break;
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// One element across the property columns. A non-object element (a scalar, a nested array -
     /// a ragged array is data, not an error) has no properties to distribute, so it renders as a
     /// single cell in the first column; that is also the shape a whole array of scalars takes,
     /// where discovery produced one "value" column to begin with.
     /// </summary>
-    /// <summary>
-    /// The token one cell's value came from, or -1 when the cell is empty - an element missing
-    /// that property, or a position past the end of a short row.
-    ///
-    /// Walks the element again rather than remembering a token per realized cell: a click is one
-    /// bounded walk, whereas the cache holds a thousand rows and would carry an int per column
-    /// of every one of them for a lookup almost none of them are ever asked for.
-    /// </summary>
-    public int TokenForCell(int rowIndex, int column)
-    {
-        if (column < 0 || rowIndex < 0 || rowIndex >= Count)
-            return -1;
-
-        if (mode == JsonArrayColumnMode.Reshape)
-        {
-            int first = rowIndex * Math.Max(1, structure.ColumnCount) + column;
-            return first < elements.ElementCount ? elements.TokenForElement(first) : -1;
-        }
-
-        int token = elements.TokenForElement(rowIndex);
-        var element = index.GetToken(token);
-
-        if (element.Kind != JsonTokenKind.StartObject)
-            return column == 0 ? token : -1;
-
-        return TokenIn(routes, token, element, column);
-    }
-
-    /// <summary>The same descent <see cref="FillFrom"/> makes, stopping at one column.</summary>
-    private int TokenIn(ExpandedRoutes level, int containerToken, JsonTokenInfo container, int wanted)
-    {
-        int ordinal = 0;
-        for (int child = containerToken + 1; child < container.EndIndex; ordinal++)
-        {
-            var info = index.GetToken(child);
-            bool isContainer = IsContainer(info.Kind);
-
-            bool matched = info.NameLength >= 0
-                ? level.TryMatchName(bytes.RequireContiguous(info.NameOffset, info.NameLength), out int column, out var inner)
-                : level.TryMatchIndex(ordinal, out column, out inner);
-
-            if (matched)
-            {
-                if (column == wanted)
-                    return child;
-
-                if (inner is not null && isContainer && TokenIn(inner, child, info, wanted) is var found and >= 0)
-                    return found;
-            }
-
-            child = isContainer ? info.EndIndex + 1 : child + 1;
-        }
-
-        return -1;
-    }
-
     private TableCell[] ByPropertyCells(int rowIndex)
     {
-        int token = elements.TokenForElement(rowIndex);
-        var element = index.GetToken(token);
+        var element = elements.ElementAt(rowIndex);
 
-        if (element.Kind != JsonTokenKind.StartObject)
-            return [new TableCell(TextFor(token, element))];
+        if (element.FormatKind != (byte)JsonTokenKind.StartObject)
+            return [new TableCell(text.ValueText(element))];
 
         var cells = new TableCell[structure.ColumnCount];
         for (int c = 0; c < cells.Length; c++)
             cells[c] = new TableCell(string.Empty);
 
-        FillFrom(cells, routes, token, element);
+        FillFrom(cells, routes, element);
         return cells;
     }
 
@@ -245,37 +235,36 @@ public sealed class JsonArrayRowCollection : VirtualizingItemsSourceBase, IColum
     /// Draws one container's children into the cells the given level of the routes asks for, and
     /// descends into exactly those children something is expanded inside of.
     ///
-    /// Everything else is skipped whole via <c>EndIndex + 1</c>, which is why an unexpanded grid
-    /// costs precisely what it did before columns became routes: the element's direct children,
-    /// once. Recursion depth is the depth someone expanded to, not the document's.
-    ///
-    /// Safe to read EndIndex here without a wait: every element the element index published has
-    /// closed, so its whole subtree has too.
+    /// Everything else is stepped over whole, which is why an unexpanded grid costs the element's
+    /// direct children, once. Recursion depth is the depth someone expanded to, not the
+    /// document's.
     /// </summary>
-    private void FillFrom(TableCell[] cells, ExpandedRoutes level, int containerToken, JsonTokenInfo container)
+    private void FillFrom(TableCell[] cells, ExpandedRoutes level, TreeNode container)
     {
-        int ordinal = 0;
-        for (int child = containerToken + 1; child < container.EndIndex; ordinal++)
+        long position = reader.FirstChildPosition(container.ValueStart);
+        for (int ordinal = 0; reader.TryReadChild(container.FormatKind, ref position, out var child, out _); ordinal++)
         {
-            var info = index.GetToken(child);
-            bool isContainer = IsContainer(info.Kind);
-
-            bool matched = info.NameLength >= 0
-                ? level.TryMatchName(bytes.RequireContiguous(info.NameOffset, info.NameLength), out int column, out var inner)
-                : level.TryMatchIndex(ordinal, out column, out inner);
-
-            if (matched)
+            if (Match(level, container, child, ordinal, out int column, out var inner))
             {
                 if (column >= 0 && column < cells.Length)
-                    cells[column] = new TableCell(TextFor(child, info));
+                    cells[column] = new TableCell(text.ValueText(child));
 
-                if (inner is not null && isContainer)
-                    FillFrom(cells, inner, child, info);
+                if (inner is not null && child.IsContainer)
+                    FillFrom(cells, inner, child);
             }
 
-            child = isContainer ? info.EndIndex + 1 : child + 1;
+            position = text.End(child);
+            if (position == long.MaxValue)
+                break;
         }
     }
+
+    /// <summary>Asks a level of the routes about one child: by its raw name in an object, by its
+    /// position in an array.</summary>
+    private bool Match(ExpandedRoutes level, TreeNode container, TreeNode child, int ordinal, out int column, out ExpandedRoutes? inner)
+        => container.FormatKind == (byte)JsonTokenKind.StartObject
+            ? level.TryMatchName(text.NameBytes(child), out column, out inner)
+            : level.TryMatchIndex(ordinal, out column, out inner);
 
     /// <summary>
     /// N consecutive elements across N columns, row-major - the same walk order as the array
@@ -292,22 +281,10 @@ public sealed class JsonArrayRowCollection : VirtualizingItemsSourceBase, IColum
 
         var cells = new TableCell[available];
         for (int c = 0; c < available; c++)
-        {
-            int token = elements.TokenForElement(first + c);
-            cells[c] = new TableCell(TextFor(token, index.GetToken(token)));
-        }
+            cells[c] = new TableCell(text.ValueText(elements.ElementAt(first + c)));
 
         return cells;
     }
-
-    /// <summary>
-    /// The same text the tree shows for the same token, quotes included: <c>"5"</c> and <c>5</c>
-    /// are different data, and a table that hides the difference is lying about the document.
-    /// </summary>
-    private string TextFor(int tokenIndex, JsonTokenInfo token)
-        => IsContainer(token.Kind)
-            ? rowFactory.BuildContainerSummary(tokenIndex, token, expanded: false)
-            : rowFactory.BuildScalarText(token, out _);
 
     private void StartGrowthMonitor()
     {
@@ -341,6 +318,4 @@ public sealed class JsonArrayRowCollection : VirtualizingItemsSourceBase, IColum
         growthMonitor = null;
         cache.Clear();
     }
-
-    private static bool IsContainer(JsonTokenKind kind) => kind is JsonTokenKind.StartObject or JsonTokenKind.StartArray;
 }

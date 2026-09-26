@@ -11,32 +11,35 @@
             CornerRadius="8"
             Background="{DynamicResource AppWindowBackgroundBrush}"
             ClipToBounds="True">
-        <Grid RowDefinitions="*,Auto,Auto" ColumnDefinitions="*,Auto">
-            <!-- The surface draws every visible row itself and implements ILogicalScrollable, so
-                 the ScrollViewer supplies the wheel, the scrollbar and page keys while the
-                 surface supplies only the viewport arithmetic. Horizontal scrolling stays
-                 disabled on purpose: sideways movement is the pan scrollbar below driving
-                 RawTextSurface.PanOffset, which moves the text and leaves both gutters pinned. -->
-            <ScrollViewer x:Name="RowsScroller"
-                          Grid.Row="0"
-                          HorizontalScrollBarVisibility="Disabled"
-                          VerticalScrollBarVisibility="Auto">
-                <raw:RawTextSurface x:Name="Surface"
-                                    Background="{DynamicResource AppWindowBackgroundBrush}"
-                                    FontFamily="{DynamicResource AppContentFontFamily}"
-                                    FontSize="{DynamicResource AppContentFontSize}"
-                                    Foreground="{DynamicResource AppTextBrush}"
-                                    GutterForeground="{DynamicResource AppMutedTextBrush}"
-                                    HighlightBrush="{DynamicResource AppSearchHighlightBrush}"
-                                    SelectionBrush="{DynamicResource AppAccentSurfaceBrush}"
-                                    CaretBrush="{DynamicResource AppTextBrush}" />
-            </ScrollViewer>
+        <Grid RowDefinitions="*,Auto,Auto" ColumnDefinitions="*,Auto,Auto">
+            <!-- The surface draws every visible row itself. The two scrollbars drive it through
+                 RowScrollBars, as every self-drawn view's do: the vertical one over its rows, the
+                 pan one over RawTextSurface.PanOffset, which moves the text and leaves both
+                 gutters pinned. -->
+            <raw:RawTextSurface x:Name="Surface"
+                                Grid.Row="0"
+                                Grid.Column="0"
+                                Background="{DynamicResource AppWindowBackgroundBrush}"
+                                FontFamily="{DynamicResource AppContentFontFamily}"
+                                FontSize="{DynamicResource AppContentFontSize}"
+                                Foreground="{DynamicResource AppTextBrush}"
+                                GutterForeground="{DynamicResource AppMutedTextBrush}"
+                                HighlightBrush="{DynamicResource AppSearchHighlightBrush}"
+                                SelectionBrush="{DynamicResource AppAccentSurfaceBrush}"
+                                CaretBrush="{DynamicResource AppTextBrush}" />
+
+            <ScrollBar x:Name="VerticalScrollBar"
+                       Grid.Row="0"
+                       Grid.Column="1"
+                       Orientation="Vertical"
+                       IsVisible="False"
+                       Minimum="0" />
 
             <!-- Where the edits are, on the scrollbar's scale: the inspector's piece-table bar
                  turned on its side. Shown only once there is an editor. -->
             <editing:RawEditOverview x:Name="EditOverview"
                                  Grid.Row="0"
-                                 Grid.Column="1"
+                                 Grid.Column="2"
                                  Width="8"
                                  IsVisible="False"
                                  MarkBrush="{DynamicResource AppEditMarkBrush}" />
@@ -53,7 +56,7 @@
                  panel-coloured strip under a top border - so a reader recognises it as the view
                  talking about its selection rather than as part of the document. -->
             <Border Grid.Row="2"
-                    Grid.ColumnSpan="2"
+                    Grid.ColumnSpan="3"
                     BorderBrush="{DynamicResource AppBorderBrush}"
                     BorderThickness="0,1,0,0"
                     Background="{DynamicResource AppPanelBackgroundBrush}"

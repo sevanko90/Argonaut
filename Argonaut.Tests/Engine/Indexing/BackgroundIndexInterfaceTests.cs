@@ -46,16 +46,17 @@ public class BackgroundIndexInterfaceTests
     }
 
     [Fact]
-    public void JsonStructureIndex_InterfaceMirrorsTokenCount()
+    public void JsonSparseIndex_InterfaceMirrorsContainerCount()
     {
         WithFile("""{"a":1,"b":[true,null]}""", file =>
         {
-            var index = JsonStructureIndex.StartIndexing(file);
+            var index = JsonSparseIndex.StartIndexing(file, promotionBytes: 4, checkpointBytes: 2);
             IBackgroundIndex indexer = index;
             indexer.IndexingTask.GetAwaiter().GetResult();
 
             Assert.True(indexer.AllItemsPublished);
-            Assert.Equal(index.TokenCount, indexer.ItemCount);
+            Assert.Equal(2, indexer.ItemCount);
+            Assert.Equal(index.Structure.ContainerCount, indexer.ItemCount);
             Assert.Same(index.IndexingTask, indexer.IndexingTask);
         });
     }
@@ -77,28 +78,28 @@ public class BackgroundIndexInterfaceTests
     }
 
     [Fact]
-    public void JsonStructureIndex_InterfaceTaskFaultsOnInvalidJson()
+    public void JsonSparseIndex_InterfaceTaskFaultsOnInvalidJson()
     {
         WithFile("{ not json", file =>
         {
-            IBackgroundIndex indexer = JsonStructureIndex.StartIndexing(file);
+            IBackgroundIndex indexer = JsonSparseIndex.StartIndexing(file);
             Assert.ThrowsAnyAsync<Exception>(() => indexer.IndexingTask).GetAwaiter().GetResult();
             Assert.True(indexer.AllItemsPublished);
 
-            var failure = Assert.IsType<JsonStructureIndex>(indexer).Failure;
+            var failure = Assert.IsType<JsonSparseIndex>(indexer).Failure;
             Assert.NotNull(failure);
             Assert.NotNull(failure!.Line);
             Assert.NotNull(failure.Column);
-            Assert.Equal(1, failure.ItemsIndexed); // the leading '{' already published as StartObject
+            Assert.Equal(1, failure.ItemsIndexed); // the leading '{' was read before the failure
         });
     }
 
     [Fact]
-    public void JsonStructureIndex_Failure_IsNullOnSuccess()
+    public void JsonSparseIndex_Failure_IsNullOnSuccess()
     {
         WithFile("""{"a":1}""", file =>
         {
-            var index = JsonStructureIndex.StartIndexing(file);
+            var index = JsonSparseIndex.StartIndexing(file);
             index.IndexingTask.GetAwaiter().GetResult();
 
             Assert.Null(index.Failure);

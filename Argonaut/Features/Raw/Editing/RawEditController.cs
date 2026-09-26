@@ -38,7 +38,7 @@ public enum RawEditOutcome
 ///
 /// <b>Nothing here touches the file on disk.</b> The document reads as the edited bytes; the
 /// original mapping is never written. Saving is a separate, streaming rewrite
-/// (<see cref="RawViewModel.SaveAsync"/>, docs/save-plan.md) that retires this controller; until
+/// (<see cref="RawViewModel.SaveAsync"/>, "Saving" in docs/architecture.md) that retires this controller; until
 /// then an edited document is an in-memory difference from what is on disk, which is what
 /// <see cref="IsDirty"/> says.
 ///

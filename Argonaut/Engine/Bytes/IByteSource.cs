@@ -44,7 +44,7 @@ public interface IByteSource
     /// the pair rather than trusting this to deliver what it asked for.
     ///
     /// Blocking, not async, and deliberately: the callers are the background scan bodies
-    /// (<c>FileOffsetIndex</c>, <c>JsonStructureIndex</c>, <c>RawSegmentIndex</c>,
+    /// (<c>FileOffsetIndex</c>, <c>JsonSparseIndex</c>, <c>RawSegmentIndex</c>,
     /// <c>SearchSession</c>), which already run inside a <see cref="System.Threading.Tasks.Task"/>
     /// body off the UI thread. Waiting there is legitimate and keeps those parse loops
     /// synchronous. Never call it from the UI thread.

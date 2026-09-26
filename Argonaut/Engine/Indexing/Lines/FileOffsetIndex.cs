@@ -2,33 +2,98 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Collections;
 using Argonaut.Engine.Progress;
 
 namespace Argonaut.Engine.Indexing.Lines;
 
 /// <summary>
-/// Record used to hold data for the index of a large memory-mapped file to allow fast seeking and loading of arbitrary lines
+/// One line's bytes, its newline included.
 /// </summary>
 /// <param name="Offset">Byte offset into the file</param>
 /// <param name="Length">Number of bytes to index</param>
 public readonly record struct FileLineSpan(long Offset, int Length);
 
+/// <summary>Where a line starts, and its number from 0 - one of <see cref="FileOffsetIndex"/>'s
+/// sparse records.</summary>
+public readonly record struct FileLineAnchor(long Offset, int Line);
+
 /// <summary>
-/// A class that scans, calculates, and holds line offset and length values
-/// for a large memory-mapped file to allow fast seeking and loading of arbitrary lines
+/// A finished scan's anchors, detached from the index that built them so they can be kept past
+/// that session (see <see cref="KeptIndexes"/>) and bound again to a source over the same bytes
+/// with <see cref="FileOffsetIndex.Reopen"/>. Holds no source.
 /// </summary>
-public sealed class FileOffsetIndex : AppendLogIndexBase<FileLineSpan>, IBackgroundIndex
+public sealed class FileLineAnchors
 {
+    internal FileLineAnchors(SegmentedAppendLog<FileLineAnchor> log, int lineCount, long length)
+    {
+        Log = log;
+        LineCount = lineCount;
+        Length = length;
+    }
+
+    /// <summary>The key a document's line anchors are kept under.</summary>
+    public static object Key { get; } = typeof(FileLineAnchors);
+
+    internal SegmentedAppendLog<FileLineAnchor> Log { get; }
+
+    public int LineCount { get; }
+
+    /// <summary>The length of the bytes they were built over.</summary>
+    public long Length { get; }
+}
+
+/// <summary>
+/// The lines of a file (NDJSON, CSV), addressed by number or by byte offset. Sparse: it stores
+/// where a line starts only once <see cref="AnchorBytes"/> bytes or <see cref="AnchorLines"/>
+/// lines have passed since the last one, and finds the lines between by searching forward for
+/// newlines - so a lookup reads at most about that much, and the index is 16 bytes per anchor
+/// (a quarter of a MB per GB of typical rows) rather than 16 bytes per line. Bounding by bytes as
+/// well as lines is what keeps a file of very long lines cheap to look into.
+///
+/// The line count is published separately from the anchors, never ahead of them, and the base's
+/// waits follow it (see <see cref="AppendLogIndexBase{T}.PublishedCount"/>). The source is held
+/// for the lookups, so it must outlive the index - the session that owns both sees to that.
+/// </summary>
+public sealed class FileOffsetIndex : AppendLogIndexBase<FileLineAnchor>, IBackgroundIndex
+{
+    /// <summary>Bytes after which the next line start gets an anchor.</summary>
+    internal const int AnchorBytes = 64 * 1024;
+
+    /// <summary>Lines after which the next line start gets an anchor - bounds the walk through
+    /// a run of very short lines.</summary>
+    internal const int AnchorLines = 1024;
+
     // Size of the chunk scanned per outer-loop pass. Scanning is zero-copy (spans over the
-    // mapped file), so this only bounds progress-reporting granularity and span length —
-    // nothing is allocated per chunk.
+    // mapped file), so this only bounds progress-reporting granularity, how often the line count
+    // is published, and span length - nothing is allocated per chunk.
     private const int ScanChunkSize = 4 * 1024 * 1024;
 
-    /// <summary>
-    /// Hidden constructor - use <see cref="FileOffsetIndex.StartIndexing"/>
-    /// </summary>
-    private FileOffsetIndex()
+    // Bytes asked of the source per step of a lookup's newline search.
+    private const int WalkChunkSize = 64 * 1024;
+
+    private readonly IByteSource source;
+
+    // Lines whose end is known, and one past the last byte of the last of them - published
+    // together, once per scan chunk, so a reader never pairs one chunk's count with another's end.
+    private Coverage published = Coverage.None;
+
+    // The last line a lookup reached: a screen of consecutive rows walks on from the previous
+    // row instead of from its anchor. Lookups come from the UI and from background readers alike.
+    private readonly Lock walkSync = new();
+    private int walkLine = -1;
+    private long walkOffset;
+
+    private FileOffsetIndex(IByteSource source)
     {
+        this.source = source;
+    }
+
+    private FileOffsetIndex(IByteSource source, FileLineAnchors anchors)
+        : base(anchors.Log)
+    {
+        this.source = source;
+        this.published = new Coverage(anchors.LineCount, anchors.Length);
     }
 
     public Task IndexingTask { get; private set; } = Task.CompletedTask;
@@ -36,16 +101,71 @@ public sealed class FileOffsetIndex : AppendLogIndexBase<FileLineSpan>, IBackgro
     /// <summary>
     /// Returns the number of lines in the index (may be less than the actual number of lines until <see cref="AppendLogIndexBase{T}.AllItemsPublished"/> is true).
     /// </summary>
-    public int LineCount => this.ItemCount;
+    public int LineCount => Volatile.Read(ref this.published).Lines;
+
+    /// <summary>One past the last byte of the last line counted - how far a byte offset can be
+    /// resolved to a line so far.</summary>
+    public long CoveredLength => Volatile.Read(ref this.published).End;
+
+    protected override int PublishedCount => LineCount;
 
     /// <summary>
-    /// Return the index for a specified line number
+    /// An index over <paramref name="source"/> built from anchors a finished scan of the same
+    /// bytes left behind: complete at once, no scan. The caller vouches that the bytes are the
+    /// same (a <see cref="ByteOriginVersion"/> match); the length is checked here as well, because
+    /// a line walk past the end of a shorter source would read out of bounds.
     /// </summary>
-    /// <param name="lineIndex">Line number for which to return the index data</param>
-    /// <returns>Index data for the specified line number</returns>
+    public static FileOffsetIndex Reopen(IByteSource source, FileLineAnchors anchors)
+    {
+        if (source.AvailableLength != anchors.Length || !source.LengthSettled)
+            throw new ArgumentException("The anchors were built over different bytes.", nameof(anchors));
+
+        return new FileOffsetIndex(source, anchors);
+    }
+
+    /// <summary>
+    /// This index's anchors, detached from its source so they can be kept past this session - or
+    /// null unless the scan ran to the end. A cancelled or failed scan covers only part of the
+    /// bytes, and anchors for part of a file would reopen as the whole of it.
+    /// </summary>
+    public FileLineAnchors? DetachAnchors() =>
+        IndexingTask.IsCompletedSuccessfully && Failure is null && this.source.LengthSettled
+            ? new FileLineAnchors(this.items, LineCount, this.source.AvailableLength)
+            : null;
+
+    /// <summary>
+    /// The bytes of line <paramref name="lineIndex"/>, which must be below <see cref="LineCount"/>:
+    /// found from the nearest anchor (or the last line looked up) before it.
+    /// </summary>
     public FileLineSpan GetLineSpan(int lineIndex)
     {
-        return this.items.ItemRef(lineIndex);
+        var coverage = Volatile.Read(ref this.published);
+        if ((uint)lineIndex >= (uint)coverage.Lines)
+            throw new ArgumentOutOfRangeException(nameof(lineIndex));
+
+        long start = LineStart(lineIndex, coverage.End);
+        long end = LineEnd(start, coverage.End);
+        return new FileLineSpan(start, checked((int)(end - start)));
+    }
+
+    /// <summary>The line holding <paramref name="offset"/>, or null when the lines counted so far
+    /// do not reach it.</summary>
+    public int? LineAt(long offset)
+    {
+        long covered = Volatile.Read(ref this.published).End;
+        if (offset < 0 || offset >= covered)
+            return null;
+
+        var anchor = AnchorAtOrBeforeOffset(offset);
+        long position = anchor.Offset;
+        for (int line = anchor.Line; ; line++)
+        {
+            long end = LineEnd(position, covered);
+            if (offset < end)
+                return line;
+
+            position = end;
+        }
     }
 
     /// <summary>
@@ -58,26 +178,117 @@ public sealed class FileOffsetIndex : AppendLogIndexBase<FileLineSpan>, IBackgro
     /// <summary>
     /// Start the process of indexing the file and returns a container object containing the background indexer
     /// </summary>
-    /// <param name="file">Memory mapped file to index</param>
+    /// <param name="file">Bytes to index; must outlive the index, whose lookups read them</param>
     /// <param name="progressReporter">Progress reporter</param>
     /// <returns>The index class, initially running in the background</returns>
     public static FileOffsetIndex StartIndexing(IByteSource file, IProgressReporter? progressReporter = null, CancellationToken cancellationToken = default)
     {
-        var index = new FileOffsetIndex();
-        index.IndexingTask = index.StartScan(() => index.ProduceOffsets(file, progressReporter, cancellationToken));
+        var index = new FileOffsetIndex(file);
+        index.IndexingTask = index.StartScan(() => index.ProduceAnchors(file, progressReporter, cancellationToken));
         return index;
     }
 
     /// <summary>
-    /// Read the file and find byte offset and length of each line, appending directly into
-    /// the base's append log as they're found.
-    ///
-    /// This used to hand each span to a second task via a bounded BlockingCollection, on the
-    /// assumption that consuming while producing would help. It doesn't: the log is what
-    /// WaitForLineCountAsync/GetLineSpan actually observe, so routing through a queue first
-    /// added no visibility earlier than appending directly does, and benchmarking showed the
-    /// bounded queue's blocking/signaling overhead made indexing 15% (long lines) to ~7x (short
-    /// lines) slower than just appending from this one thread.
+    /// <see cref="Reopen"/> on <paramref name="kept"/> anchors when there are some, else a fresh
+    /// scan - the factory a view hands its session.
+    /// </summary>
+    public static FileOffsetIndex StartIndexing(IByteSource file, FileLineAnchors? kept, IProgressReporter? progressReporter = null,
+        CancellationToken cancellationToken = default)
+        => kept is null ? StartIndexing(file, progressReporter, cancellationToken) : Reopen(file, kept);
+
+    private long LineStart(int lineIndex, long covered)
+    {
+        var anchor = AnchorAtOrBeforeLine(lineIndex);
+        int line = anchor.Line;
+        long position = anchor.Offset;
+
+        lock (this.walkSync)
+        {
+            if (this.walkLine <= lineIndex && this.walkLine > line)
+                (line, position) = (this.walkLine, this.walkOffset);
+        }
+
+        while (line < lineIndex)
+        {
+            position = LineEnd(position, covered);
+            line++;
+        }
+
+        lock (this.walkSync)
+            (this.walkLine, this.walkOffset) = (lineIndex, position);
+
+        return position;
+    }
+
+    /// <summary>One past the newline ending the line that starts at <paramref name="start"/>, or
+    /// <paramref name="limit"/> for the last line of a file that does not end in one.</summary>
+    private long LineEnd(long start, long limit)
+    {
+        long position = start;
+        while (position < limit)
+        {
+            var chunk = this.source.GetContiguousSpan(position, (int)Math.Min(WalkChunkSize, limit - position));
+            if (chunk.IsEmpty)
+                break;
+
+            int newline = chunk.IndexOf((byte)'\n');
+            if (newline >= 0)
+                return position + newline + 1;
+
+            position += chunk.Length;
+        }
+
+        return limit;
+    }
+
+    /// <summary>The last anchor for a line at or before <paramref name="line"/>. Anchors are in
+    /// line order, and the first is line 0.</summary>
+    private FileLineAnchor AnchorAtOrBeforeLine(int line)
+    {
+        int low = 0, high = this.items.Count - 1, found = 0;
+        while (low <= high)
+        {
+            int middle = low + ((high - low) >> 1);
+            if (this.items.ItemRef(middle).Line <= line)
+            {
+                found = middle;
+                low = middle + 1;
+            }
+            else
+            {
+                high = middle - 1;
+            }
+        }
+
+        return this.items.ItemRef(found);
+    }
+
+    /// <summary>The last anchor starting at or before <paramref name="offset"/>.</summary>
+    private FileLineAnchor AnchorAtOrBeforeOffset(long offset)
+    {
+        int low = 0, high = this.items.Count - 1, found = 0;
+        while (low <= high)
+        {
+            int middle = low + ((high - low) >> 1);
+            if (this.items.ItemRef(middle).Offset <= offset)
+            {
+                found = middle;
+                low = middle + 1;
+            }
+            else
+            {
+                high = middle - 1;
+            }
+        }
+
+        return this.items.ItemRef(found);
+    }
+
+    /// <summary>
+    /// Reads the file, anchoring a line start whenever <see cref="AnchorBytes"/> or
+    /// <see cref="AnchorLines"/> have passed, and publishing the line count once per chunk.
+    /// Anchors go into the base's append log as they are found, ahead of the count that relies
+    /// on them.
     /// </summary>
     /// <param name="file">Memory-mapped file to index</param>
     /// <param name="progressReporter">Allows callers to be notified of progress</param>
@@ -88,10 +299,15 @@ public sealed class FileOffsetIndex : AppendLogIndexBase<FileLineSpan>, IBackgro
     /// native use-after-free, not a catchable .NET exception.
     /// </param>
     /// <remarks>Invoked in the background via a task</remarks>
-    private void ProduceOffsets(IByteSource file, IProgressReporter? progressReporter, CancellationToken cancellationToken)
+    private void ProduceAnchors(IByteSource file, IProgressReporter? progressReporter, CancellationToken cancellationToken)
     {
         long offset = 0;
         long currentLineStart = 0;
+        int lines = 0;
+        long anchorOffset = 0;
+        int anchorLine = 0;
+        this.items.Add(new FileLineAnchor(0, 0));
+
         try
         {
             // Chunked-scan loop deliberately duplicated (see also SearchSession.Scan,
@@ -133,13 +349,20 @@ public sealed class FileOffsetIndex : AppendLogIndexBase<FileLineSpan>, IBackgro
                         break;
 
                     long lineEndExclusive = offset + pos + newlineIndex + 1;
-                    int lineLength = checked((int)(lineEndExclusive - currentLineStart));
-                    this.AddLineSpan(new FileLineSpan(currentLineStart, lineLength));
+                    _ = checked((int)(lineEndExclusive - currentLineStart)); // a line's length is an int
                     currentLineStart = lineEndExclusive;
+                    lines++;
                     pos += newlineIndex + 1;
+
+                    if (currentLineStart - anchorOffset >= AnchorBytes || lines - anchorLine >= AnchorLines)
+                    {
+                        this.items.Add(new FileLineAnchor(currentLineStart, lines));
+                        (anchorOffset, anchorLine) = (currentLineStart, lines);
+                    }
                 }
 
                 offset += size;
+                Publish(lines, currentLineStart);
                 progressReporter?.Report("Indexing", offset, available);
             }
         }
@@ -153,16 +376,22 @@ public sealed class FileOffsetIndex : AppendLogIndexBase<FileLineSpan>, IBackgro
             // checked cast. Skip it in both cases.
             if (!cancellationToken.IsCancellationRequested && file.LengthSettled && currentLineStart < offset)
             {
-                this.AddLineSpan(new FileLineSpan(currentLineStart, checked((int)(offset - currentLineStart))));
+                _ = checked((int)(offset - currentLineStart));
+                Publish(lines + 1, offset);
             }
 
             progressReporter?.Report("Indexing", offset, offset);
         }
     }
 
-    private void AddLineSpan(FileLineSpan lineSpan)
+    private void Publish(int lineCount, long end)
     {
-        int newCount = this.items.Add(lineSpan) + 1;
-        this.OnItemsPublished(newCount);
+        Volatile.Write(ref this.published, new Coverage(lineCount, end));
+        this.OnItemsPublished(lineCount);
+    }
+
+    private sealed record Coverage(int Lines, long End)
+    {
+        public static readonly Coverage None = new(0, 0);
     }
 }

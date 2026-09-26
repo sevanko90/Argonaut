@@ -3,8 +3,7 @@ using System.Collections.Generic;
 namespace Argonaut.Engine.Collections;
 
 /// <summary>
-/// Small bounded LRU map, extracted verbatim from JsonVisibleRowCollection's realized-row
-/// cache so the diff row collection (and the child-count cache) can share it. Reads touch;
+/// Small bounded LRU map, for caches of realized rows and child counts. Reads touch;
 /// <see cref="Set"/> evicts the least-recently-used entry once <c>capacity</c> is exceeded.
 /// Values must be safe to drop at any time - both users cache derivations that can always
 /// be recomputed from the index/mapping (a realized row, a container's child count).

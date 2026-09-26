@@ -30,4 +30,8 @@
     <ProjectReference Include="..\Argonaut\Argonaut.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="Features\**\Fixtures\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

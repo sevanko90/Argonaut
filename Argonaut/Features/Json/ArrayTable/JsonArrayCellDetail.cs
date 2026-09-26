@@ -1,7 +1,11 @@
 using System;
-using Argonaut.Engine.Bytes;
+using System.Threading.Tasks;
+using Argonaut.Engine.Indexing;
+using Argonaut.Engine.Indexing.Trees;
 using Argonaut.Engine.Text;
 using Argonaut.Features.Json.Indexing;
+using Argonaut.Features.Json.Tree;
+using Argonaut.Ui.Tree;
 
 namespace Argonaut.Features.Json.ArrayTable;
 
@@ -12,15 +16,14 @@ namespace Argonaut.Features.Json.ArrayTable;
 /// CELL rather than a row: a row's tree beside the grid would just be the JSON view with the
 /// element collapsed, which is where the reader came from.
 ///
-///   * a long scalar - the grid caps a column at <see cref="Argonaut.Ui.TableGrid.TableStructure"/>'s discovered
-///     width and a cell's text at <see cref="JsonRowFactory.MaxDisplayTextLength"/>, so a long
-///     string is only ever readable here;
-///   * a container - rendered by the ordinary tree machinery
-///     (<see cref="JsonVisibleRowCollection"/>) rooted at that cell's token, so it virtualizes
-///     exactly as the JSON view does and a 2,199-element <c>offerCSV</c> opens instantly.
+///   * a long scalar - the grid caps a column at <see cref="Argonaut.Ui.TableGrid.TableStructure"/>'s
+///     discovered width and a cell's text at the display cap, so a long string is only ever
+///     readable here;
+///   * a container - its own tree, over just that cell's bytes: the same sparse index and
+///     <see cref="TreeDocument"/> the JSON view uses, so a 2,199-element <c>offerCSV</c> opens
+///     instantly and nothing beyond the rows on screen is held.
 ///
-/// Cost is bounded by the one subtree on screen, whatever the file's size - which is what makes
-/// this affordable where widening a column or expanding thousands of positions is not.
+/// Cost is bounded by the one subtree on screen, whatever the file's size.
 /// </summary>
 public sealed class JsonArrayCellDetail : IDisposable
 {
@@ -31,12 +34,20 @@ public sealed class JsonArrayCellDetail : IDisposable
     /// </summary>
     public const int MaxScalarBytes = 256 * 1024;
 
-    private JsonArrayCellDetail(string title, string? text, bool truncated, JsonVisibleRowCollection? rows)
+    /// <summary>Levels of a container cell opened on the click - enough to see its shape without
+    /// reading a large subtree.</summary>
+    private const int TreeExpandDepth = 2;
+
+    private readonly IndexedSourceSession<JsonSparseIndex>? session;
+
+    private JsonArrayCellDetail(string title, string? text, bool truncated, TreeDocument? tree,
+        IndexedSourceSession<JsonSparseIndex>? session)
     {
         Title = title;
         Text = text;
         Truncated = truncated;
-        Rows = rows;
+        Tree = tree;
+        this.session = session;
     }
 
     /// <summary>Which cell this is: the column's route, and the row it came from.</summary>
@@ -49,34 +60,62 @@ public sealed class JsonArrayCellDetail : IDisposable
     public bool Truncated { get; }
 
     /// <summary>The container's tree, or null when this cell holds a scalar.</summary>
-    public JsonVisibleRowCollection? Rows { get; }
+    public TreeDocument? Tree { get; }
 
-    public bool IsTree => Rows is not null;
+    public bool IsTree => Tree is not null;
 
-    public bool IsText => Rows is null;
+    public bool IsText => Tree is null;
 
     /// <summary>
-    /// Builds the detail for one token of <paramref name="index"/>. A container gets a tree opened
-    /// two levels deep - enough to see the shape without walking a large subtree on the click -
-    /// and a scalar gets its text.
+    /// Builds the detail for one value of the table's array. A container gets a tree over its own
+    /// byte range, opened <see cref="TreeExpandDepth"/> levels deep; a scalar gets its text.
     /// </summary>
-    public static JsonArrayCellDetail ForToken(JsonStructureIndex index, IByteSource file, int tokenIndex, string title)
+    public static JsonArrayCellDetail ForNode(JsonArrayTableSession table, TreeNode node, string title)
     {
-        var token = index.GetToken(tokenIndex);
-
-        if (token.Kind is JsonTokenKind.StartObject or JsonTokenKind.StartArray)
+        if (node.IsContainer)
         {
-            return new JsonArrayCellDetail(title, text: null, truncated: false,
-                new JsonVisibleRowCollection(index, file, hintProviders: null, defaultExpandDepth: 2,
-                    rootTokenIndex: tokenIndex));
+            long end = table.Text.End(node);
+            var session = IndexedSourceSession<JsonSparseIndex>.Start(
+                table.Origin.OpenRange(table.ArrayOffset + node.ValueStart, end - node.ValueStart), JsonSparseIndex.StartIndexing);
+            var reader = new JsonTreeReader(session.Bytes);
+            var text = new JsonTreeText(session.Bytes, session.Index.Structure, reader);
+            var bytes = session.Bytes;
+            var tree = new TreeDocument(session.Index.Structure, reader, new JsonTreePainter(text, hintProviders: null, offerArrayTable: false),
+                new TreeExpandState(TreeExpandDepth), () => bytes.AvailableLength);
+            _ = TellTreeWhenIndexedAsync(session, tree);
+            return new JsonArrayCellDetail(title, text: null, truncated: false, tree, session);
         }
 
         // Unquoted, unlike the cell: the pane is where a value is read and copied, and the
         // quoting that tells "5" from 5 has already done its job in the grid.
-        string text = DisplayText.Read(file, token.Offset, token.Length, out bool truncated, MaxScalarBytes);
+        bool isString = node.FormatKind == (byte)JsonTokenKind.String;
+        long start = isString ? node.ValueStart + 1 : node.ValueStart;
+        long length = (isString ? node.ValueEnd - 1 : node.ValueEnd) - start;
+        string value = DisplayText.Read(table.Inner.Bytes, start, (int)Math.Min(int.MaxValue, length), out bool truncated, MaxScalarBytes);
 
-        return new JsonArrayCellDetail(title, text, truncated, rows: null);
+        return new JsonArrayCellDetail(title, value, truncated, tree: null, session: null);
     }
 
-    public void Dispose() => Rows?.Dispose();
+    /// <summary>The tree draws from the bytes at once; once its index is done, jumps inside it
+    /// are fast too, and the surface is told so it can size its scroll range.</summary>
+    private static async Task TellTreeWhenIndexedAsync(IndexedSourceSession<JsonSparseIndex> session, TreeDocument tree)
+    {
+        try
+        {
+            await session.IndexingTask;
+        }
+        catch
+        {
+            // A malformed cell still shows what can be read; the table reports the file's failure.
+        }
+
+        tree.NotifyGrew();
+    }
+
+    public void Dispose()
+    {
+        // Every surface lets go of the tree before the bytes it reads are released.
+        Tree?.Close();
+        session?.Dispose();
+    }
 }

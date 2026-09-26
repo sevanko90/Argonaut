@@ -62,7 +62,7 @@ public sealed class IndexedSourceSession<TIndex> : IDocumentSession where TIndex
     /// <param name="bytes">The bytes to index; owned by the returned session from this point on.</param>
     /// <param name="startIndexing">
     /// Indexer factory - both real indexers' StartIndexing methods match this shape, so
-    /// call sites pass a method group (e.g. <c>JsonStructureIndex.StartIndexing</c>).
+    /// call sites pass a method group (e.g. <c>JsonSparseIndex.StartIndexing</c>).
     /// </param>
     /// <param name="progressReporter">Optional progress reporter forwarded to the factory.</param>
     public static IndexedSourceSession<TIndex> Start(

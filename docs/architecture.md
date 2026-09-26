@@ -102,8 +102,10 @@ them). Keep this in sync when the ownership chain changes.
   `Engine/Indexing/IndexFailure.cs`) is non-null when a background scan
   stopped because of an error, null on success *and* on cancellation. `AppendLogIndexBase.RunIndexing`
   is the one place that catches a scan's exception, records it (via the overridable
-  `DescribeFailure`, which `JsonStructureIndex` enriches with line/column/byte-offset from a
-  `JsonException`), and rethrows — so `IndexingTask` faults as if nothing had caught it.
+  `DescribeFailure`), and rethrows — so `IndexingTask` faults as if nothing had caught it. The
+  JSON tree's `JsonSparseIndex` does not validate as it scans; `JsonDocumentValidator` reads the
+  document beside it and reports the reader's message, line, column and trouble offset (through
+  `JsonFailureLocation`), with `ItemsIndexed` counting the tokens read before the error.
 - Forcing an incompatible kind onto a file (via the switcher) is classified in two stages:
   1. **Pre-flight** — `FileTypeDetector.IsPlausibleFor(kind, origin, out reason)` is a cheap header
      check (no indexing) that rejects an obvious mismatch (e.g. CSV content forced to JSON)
@@ -131,36 +133,34 @@ them). Keep this in sync when the ownership chain changes.
   from the actual problem. `SetCurrentDocument` and `OnDocumentPropertyChanged` both call
   `NotifyFailurePropertiesChanged()` to raise change notification for the three whenever
   `CurrentDocument` (or its `IndexFailure`) changes.
-- Where a failure carries a byte offset (`JsonStructureIndex`'s enriched `DescribeFailure` always
-  sets one; a pre-flight rejection never does, since it never got as far as reading a token),
+- Where a failure carries a byte offset (a JSON parse failure always sets one; a pre-flight rejection never does, since it never got as far as reading a token),
   its "Line N" location is a clickable link — in the banner (`MainWindow.axaml`'s
   `JumpToFailureLineButton`) and in `IncompatibleView`'s location panel alike — that calls
   `MainWindowViewModel.JumpToRawOffsetAsync(byteOffset)`: switches to the raw viewer (if
   not already showing it) and reveals that offset there, through the view switch below.
-- **A view switch carries the position across.** `SwitchViewAsync` asks the outgoing document
-  for the `IByteRangeNavigable` capability — a query, not a type test — and reads its
-  `SelectedByteRange`: the JSON view's selected node (a string with its quotes, a container
-  bracket to bracket, never the property name), NDJSON's nested node or selected line, the raw
-  view's selection or caret. File offsets are the one coordinate every view of the same input
-  shares. Once the incoming document is published it is asked to `RevealByteRangeAsync` that
-  range: the raw view selects it with the caret at its start (waiting for its scan to cover the
-  whole range first, since a caret snaps against indexed rows); the JSON view selects the node
-  the range starts in via `JsonOffsetTokenResolver`, mapping a closing bracket to the container
-  it closes (`OpeningTokenOf`); NDJSON reveals it exactly as a search hit. Nothing is carried
-  while unsaved edits the user chose to discard are still on screen — their offsets describe text
-  the new view never shows. A resolve that outlives the document surfaces as a catchable
-  `ObjectDisposedException` (raw) or a `TearingDown` cancellation (JSON), both swallowed.
-- **The text-view hop** is that switch with a destination picked for the user.
-  `ToggleTextViewAsync` (the status bar's "Show in text" / "Show in JSON" button, and Ctrl+T or
-  Cmd+T) goes to the raw view, or back from it to the last non-raw view published over the same
-  input (`structuredKind`, forgotten by `AdoptOrigins` when the input changes - a file detected
-  as plain text has nowhere to go back to). From one specific node, `JsonView`'s "show in text"
-  footer button and the "view in raw" link on a display-truncated value (see
-  `MaxDisplayTextLength` above; the row carries `JsonRow.TruncatedValueOffset`) raise
-  `RawJumpService.Request(range)` - the same view-to-shell decoupling `ToastService` uses, so
-  `JsonView` never needs a reference back to `MainWindowViewModel`. `MainWindow` is the sole
-  subscriber and forwards straight into `RevealInTextViewAsync`, which switches with that range
-  in place of the carried selection.
+- **A view switch carries the position across.** `SwitchViewAsync` - what the view switcher
+  calls - asks the outgoing document for the `IByteRangeNavigable` capability (a query, not a
+  type test) and reads its `SelectedByteRange`: the JSON view's selected node (a string with its
+  quotes, a container bracket to bracket, never the property name; a closing row stands for its
+  container), NDJSON's nested node or selected line, the raw view's selection or caret. File
+  offsets are the one coordinate every view of the same input shares, so a nested NDJSON line's
+  tree adds its `ScanTarget.Offset` going out and subtracts it coming in. Once the incoming
+  document is published it is asked to `RevealByteRangeAsync` that range: the raw view selects it
+  with the caret at its start (waiting for its scan to cover the whole range first, since a caret
+  snaps against indexed rows); the JSON view reveals the range's start exactly as a search hit;
+  NDJSON reveals it as a search hit too. A JSON container whose end is not cheap to know - still
+  open, or not yet reached by the index, so possibly gigabytes long - goes out as a position
+  only, never a scan on the UI thread. Nothing is carried while unsaved edits the user chose to
+  discard are still on screen - their offsets describe text the new view never shows. A resolve
+  that outlives the document surfaces as a catchable `ObjectDisposedException` (raw) or a
+  `TearingDown` cancellation (JSON), both swallowed.
+- **Showing one node in the text view** is that switch with the range picked for the user.  The
+  JSON view's node menu (right-click) has "Show in text view", and a display-truncated value (see
+  `MaxDisplayTextLength` above) ends in a "view in raw" link (`ViewInRawLink`, from
+  `JsonTreePainter`); both raise `RawJumpService.Request(range)` - the same view-to-shell
+  decoupling `ToastService` uses, so `JsonView` never needs a reference back to
+  `MainWindowViewModel`. `MainWindow` is the sole subscriber and forwards straight into
+  `RevealInTextViewAsync`, which switches with that range in place of the carried selection.
 
 ## Views ↔ view models
 
@@ -236,17 +236,37 @@ The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLeng
   handle; every `Open` is a new `MMapFile`) and `MemoryByteOrigin` (a paste). It lives as long as
   the open input and is owned by the shell (above).
 - **An origin also keeps finished indexes that are cheap to hold** (`IByteOrigin.KeptIndexes`,
-  cleared on dispose), so a view closed and reopened over the same input - the hop to the text
-  view and back, a wrap width tried and undone - skips its scan. Today that is only the raw
-  view's row anchors (`RawRowAnchors`, about 16 bytes per 64 rows, one entry per wrap width):
-  `RawViewModel` keeps them when a scan runs to the end, and `RawIndexSession` builds the next
-  index from them with `RawSegmentIndex.Reopen`, sharing the finished log rather than copying it.
-  What is kept holds no source - the session that built it releases its source as usual, and the
-  next one binds the records to its own. Every entry is stamped with the `ByteOriginVersion` it
-  was built at (length, plus last-write time for a file) and is dropped rather than returned once
-  that no longer matches: a file edited by another program or replaced by a save is scanned
-  again. The JSON structure index is deliberately not kept - tens of bytes per token is the
-  memory the app exists to avoid holding while that view is closed.
+  cleared on dispose), so a view closed and reopened over the same input - a switch to the text
+  view and back, a wrap width tried and undone - skips its scan. Every document index is sparse,
+  so every one is kept:
+  - the raw view's row anchors (`RawRowAnchors`, about 16 bytes per 64 rows, one entry per wrap
+    width): `RawViewModel` keeps them when a scan runs to the end, and `RawIndexSession` builds
+    the next index from them with `RawSegmentIndex.Reopen`;
+  - the line anchors (`FileLineAnchors`, about 0.3 MB per GB), shared by CSV and NDJSON since
+    both read the same lines - a switch between the two scans once - and reopened with
+    `FileOffsetIndex.Reopen`;
+  - the JSON view's sparse structure (`JsonKeptStructure`, under 1 MB per GB), reopened with
+    `JsonSparseIndex.Reopen`. An invalid document is scanned again, since a reopened index would
+    not report its failure, and an NDJSON line's document is never kept - its structure covers
+    only its line.
+
+  CSV, NDJSON and JSON reach the store through `IndexBasis` (`Engine/Bytes`): the origin at the
+  version it had when the view opened it, whose `FindKept` feeds the session's factory
+  (`StartIndexing(source, kept, …)` reopens when there is something kept) and whose `Keep`
+  takes the detached index on completion. A reopened index shares the finished log rather than
+  copying it. What is kept holds no source - the session that built it releases its source as
+  usual, and the next one binds the records to its own. Every entry is stamped with the
+  `ByteOriginVersion` it was built at (length, plus last-write time for a file) and is dropped
+  rather than returned once that no longer matches: a file edited by another program or replaced
+  by a save - the text view's included - is scanned again. Edits discarded in the text view never
+  reach the file, so they leave what is kept valid.
+- **The line index is sparse like the others** (`FileOffsetIndex`, `Engine/Indexing/Lines`). It
+  anchors a line start once 64 KB or 1024 lines have passed since the last anchor, and finds the
+  lines between by searching forward for newlines, so a lookup reads at most about that much
+  however long the lines are, and remembers the last line it reached so a screen of consecutive
+  rows walks on from the previous one. The line count is published per scan chunk, never ahead of
+  the anchors it relies on, and `AppendLogIndexBase`'s waits follow it (`PublishedCount`) rather
+  than the anchor count.
 - **`IByteSource` (`Engine/Bytes/IByteSource.cs`) is one session's reader.** Every consumer is
   typed to it. Implemented by `MMapFile`, `RawPieceTable` (a piece table over (mapping,
   scratch), which is why a span can come back short) and `MemoryByteSource`, the in-memory
@@ -266,8 +286,9 @@ The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLeng
   never joined by disposal, avoiding a wait on the UI thread from the UI thread itself. `RawIndexSession` is the wrap-width-restartable variant, with
   two cancellation sources: `mappingCts` for the document's lifetime and `indexCts` (linked from
   it) for the index `RestartIndex` recycles; `JsonDiffSession` composes two
-  `IndexedSourceSession<JsonStructureIndex>`s; `JsonArrayTableSession` composes one of them with
-  the `JsonArrayElementIndex` derived from its token index. All four implement
+  `IndexedSourceSession<JsonSparseIndex>`s; `JsonArrayTableSession` wraps one
+  `IndexedSourceSession<JsonSparseIndex>` over the array's own byte range, with the readers and
+  `JsonArrayElements` the table reads it through. All four implement
   `IDocumentSession`, which
   `IndexedDocumentViewModel` (below) drives — the teardown pair (`TearingDown` + `RequestStop()`
   + `Dispose()`) plus the two members the status line is driven from, `IndexingTask` and
@@ -284,11 +305,9 @@ The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLeng
 - **A composed session is how a document waits on the right task.** `IndexedDocumentViewModel.IndexingTask`
   is non-virtual and reads `Session.IndexingTask`, so a document whose "still growing" signal is
   not its own file scan's expresses that one layer down. `JsonDiffSession` reports the diff's
-  task rather than either side's; `JsonArrayTableSession` reports the element index's, because
-  the token scan completing is not when the table stops growing — the element index publishes
-  one final stride afterwards. Both also own a teardown ordering their view model would
-  otherwise have to hand-encode: cancel the derived work, join it (after which nothing reads the
-  source index), then dispose the file session and release the mapping.
+  task rather than either side's, and owns a teardown ordering its view model would otherwise
+  have to hand-encode: cancel the diff, join it (after which nothing reads the source indexes),
+  then dispose the file sessions and release the mappings.
 - **A scan's completion signal must be unconditional.** Every index starts its scan through
   `AppendLogIndexBase.StartScan` / `StartStreamingScan`, which deliberately do NOT pass the
   cancellation token to `Task.Run`: a token already cancelled when the pool dequeues the work
@@ -296,30 +315,89 @@ The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLeng
   `AllItemsPublished` would stay false forever, and every waiter would hang for the life of the process. The body observes
   cancellation itself and still reaches the `finally`.
 
+## The JSON tree
+
+- **Sparse index, re-parse on demand.** `JsonSparseIndex` (`Features/Json/Indexing`) records only
+  containers that reach 64 KB and a resume point per 64 KB of a recorded container's children,
+  in the format-agnostic `SparseContainerIndex` (`Engine/Indexing/Trees`). Its size follows the
+  file's size, not its token count. Everything between records is read from the bytes when a row
+  is shown, by `JsonTreeReader` and the vectorised `JsonStructuralScanner`.
+- **Rows are a cursor, not a list.** `TreeCursor` steps forward, backward and to an offset over
+  the expanded tree through a format's `ITreeFormatReader`; `TreeExpandState` is a default depth
+  plus offset-keyed overrides. A row's identity is its value's byte offset (`TreeRow.Key`), and so
+  is everything that points at one: selection, reveals, path segments, date-hint overrides.
+- **The view needs no index to draw.** The tree is shown as soon as the file is open; the index
+  only makes jumps fast and grows underneath, and the view model tells the surface when it has
+  grown. Before the view model releases the mapping, `TreeDocument.Close` makes every surface
+  drawing it let go.
+- **What a format supplies is small.** A reader (next child, first-child position, value end,
+  close start), a painter (`ITreeRowPainter`: styled runs per row, and an optional marker) and
+  gutters (`ITreeGutter`). JSON's are `JsonTreeReader`, `JsonTreePainter` and `JsonSchemaGutter`
+  (`Features/Json/Tree`); an XML view would add its own three and nothing else.
+- **The array table reads the same way.** `JsonArrayTableSession` indexes the array's own
+  range sparsely; `JsonArrayElements` finds element `i` from the nearest resume point, counting
+  only elements known to have ended while the scan runs; rows, column discovery and cells read
+  element children through `JsonTreeReader` and `JsonTreeText`. A container cell's pane
+  (`JsonArrayCellDetail`) is a `TreeDocument` over that cell's bytes on its own `TreeSurface`.
+- **The diff compares by content hash on the same budget.** `JsonDiffSession` indexes both
+  files with `JsonSparseIndex.StartIndexingWithContentHashes`: the validation pass, which reads
+  every token anyway, records the hash of each container of 64 KB or more (`JsonContentHashes`,
+  by `JsonContentHasher`'s rules), and anything smaller is hashed from its bytes when the diff
+  asks. `JsonDiffIndex` records differences, not nodes: a run of consecutive unchanged sibling
+  pairs is one record, so the log grows with the number of changes rather than the width of a
+  changed level. A changed level is trimmed first - its common prefix and suffix streamed as
+  runs, backward through the sparse index's checkpoints for the suffix - and only the middle is
+  aligned (objects by name, arrays by identity key or histogram anchors); an array middle past
+  `MaxAlignableArrayElements` is compared in place with a bounded look-ahead, and past a record
+  budget ends in one range record. Records hold nodes by offset (`JsonDiffNode`: row start and
+  value start) and read children through `JsonDiffDocument`; the worker and the view each hold
+  their own `JsonDiffDocument`, since the readers are not shared across threads. A move whose
+  content changed is paired by similarity after the descent and descended then, so its children
+  sit after the descent's records in the log (`FirstChild`/`ChildrenEnd`), anchored where it is;
+  `MainRecordCount` marks where the descent's own records end.
+- **The diff draws on the tree surface.** `JsonDiffTree` is an `ITreeRowSource` whose cursor
+  (`JsonDiffCursor`) walks the record log in merged order and, inside a record's regions - a
+  run's pairs, a removed or added node's children, a range's sides - hands over to a
+  `TreeCursor` on that side. `JsonDiffPainter` draws each row two panes wide. A row's key (its
+  `Start`) is `record << 39`, plus the region and the row's offset within it, so keys follow
+  merged order and find orders its stops by them. The scrollbar is estimated over the left
+  document: each record carries a left anchor, and anchors never decrease along the log.
+
 ## Virtualized ItemsSources
 
 - `VirtualizingItemsSourceBase` (`Ui/Documents/VirtualizingItemsSourceBase.cs`) is the shared
-  base for the list ItemsSources: `JsonVisibleRowCollection`, `NdJsonLineCollection`,
-  `CsvRowCollection`, `JsonArrayRowCollection`, `JsonDiffRowCollection` and `RawRowCollection`.
-  It supplies the read-only `IList` +
-  `INotifyCollectionChanged` surface
-  Avalonia's `VirtualizingStackPanel` needs.
-- **The raw view is the exception, and deliberately so.** `RawTextSurface`
+  base for the list ItemsSources: `NdJsonLineCollection`, `CsvRowCollection`,
+  `JsonArrayRowCollection` and `RawRowCollection`. It supplies the
+  read-only `IList` + `INotifyCollectionChanged` surface Avalonia's `VirtualizingStackPanel` needs.
+- **The raw view and the trees are the exceptions, and deliberately so.** They draw their own
+  rows on `RowSurface` (`Ui/Rows`), which owns fixed row height, the appearance properties,
+  horizontal pan, the wheel and one scroll interface. The JSON tree is `TreeSurface` (`Ui/Tree`)
+  over an `ITreeRowSource` - a `TreeDocument`, or the diff's `JsonDiffTree`: it holds a cursor on
+  its top row and walks from it, so there is no row collection and no row count at all - see
+  "The JSON tree" above. `RawTextSurface`
   (`Features/Raw/RawTextSurface.cs`) draws every visible row itself rather than templating a
   control per row, because a caret needs the text layout and a ListBox does not give it up: its
   selection is whole rows, and moving a caret between rows would mean coordinating dozens of
-  recycled containers around one piece of state. It implements `ILogicalScrollable`, so the
-  hosting `ScrollViewer` still supplies the wheel, scrollbar, page keys and bring-into-view while
-  the surface supplies the viewport arithmetic. `RawRowCollection` survives as the row cache it
+  recycled containers around one piece of state. `RawRowCollection` survives as the row cache it
   reads by index and whose growth notifications it follows, but nothing binds it as an
   `ItemsSource`.
+- **One scroll interface, two position models, no `ScrollViewer`.** A surface's position is a
+  fraction of its document (`ScrollFraction`, `ViewportFraction`, `ShowsEnd`), moved by
+  `ScrollByPixels`, `ScrollToFraction` and `ScrollToEnd`, and announced by
+  `ScrollPositionChanged`. `RowScrollBars` (`Ui/Rows`) wires any surface to a view's vertical and
+  pan scrollbars the same way - the JSON tree, the raw view and the array table's cell pane - and
+  the bars only drive and follow: a held thumb is not told where the view went, which is what
+  made one stutter when a `ScrollViewer` shared an offset with the surface. The raw view uses the
+  **exact** model (it knows its row count, so the fraction is its pixel offset over rows x height
+  and a dragged thumb is row-accurate); the trees use the **estimated** one (the top row's byte
+  position, since they have no row count).
 - **The surface decides its visible range during layout, never during rendering.** Beyond being
   the more honest place for it, headless has no renderer - so choosing the range inside `Render`
   would make virtualization, the one guarantee most worth testing, untestable. `RawViewVirtualizationTests`
   asserts on the surface's realized row range, which says *which* rows are held rather than merely
   how many.
 - **Scroll extents are computed live, never cached.** A cached extent is stale by however long it
-  has been since the last refresh, and the host clamps any offset it is handed against it. During
+  has been since the last refresh, and the surface clamps every move against it. During
   a full-speed scan one 120ms growth tick is over a million rows, so a reveal deep in a large file
   clamps short and stays there.
 - Subclasses implement only `GetCount()`, `GetItem(int)` and, if they hold anything, `DisposeCore()`. The base owns the
@@ -372,11 +450,11 @@ The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLeng
 - `OnIndexingCompleted()` takes no argument on purpose: every subclass reports from state it
   already has, so handing it the `IBackgroundIndex` would only widen what a hook can reach into.
 - **A row collection samples "is the scan still running?" BEFORE its first walk, never after.**
-  Every collection with an `IndexGrowthMonitor` (`JsonVisibleRowCollection`,
-  `JsonArrayRowCollection`, `JsonDiffRowCollection`) attaches one only when the scan was
+  Everything with an `IndexGrowthMonitor` (`JsonArrayRowCollection`, `JsonDiffViewModel`)
+  attaches one only when the scan was
   unfinished — and a scan that finishes *during* that first walk would, on a check made
-  afterwards, read as "already complete, nothing to monitor", leaving the collection frozen on
-  what it saw mid-scan with nothing left to rebuild it (for the diff: the pre-diff preview of
+  afterwards, read as "already complete, nothing to monitor", leaving the rows frozen on
+  what they showed mid-scan with nothing left to rebuild them (for the diff: the preview of
   the left document, permanently). Monitoring an already-finished task costs one immediate
   final refresh, which is exactly what that window loses. `IndexGrowthMonitor.FinalRefreshTask`
   completes once that refresh has run: dispatcher-free tests await it, because with no
@@ -444,9 +522,22 @@ The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLeng
 - Only code physically on a background thread marshals back, via `Dispatcher.UIThread.Post`
   (fire-and-forget), never `InvokeAsync`.
 
-## Known open item
+## Saving
 
-- Closing a multi-GB file has a small lag: `MMapFile.Dispose` unmaps a fully-resident view
-  (~43ms/480MB, so ~400ms at 4.5GB) synchronously on the UI thread. Not yet moved off-thread;
-  doing so needs a synchronous "release visible items" phase before the swap plus a background
-  unmap, and making the shell the sole disposal owner to avoid a race with the view's detach.
+The raw view's save (`RawViewModel.SaveAsync`) copies the document into a stage on the
+background, then on the UI thread unmaps, swaps through an `IFileReplacer` and reopens - see
+CLAUDE.md for why every reader of the file is let go of first. `WindowsFileReplacer`,
+`UnixFileReplacer` and `MacFileReplacer` implement the swap over the shared `SiblingFileReplacer`,
+which stages beside the file, and every implementation must:
+
+- **Stage on the destination's volume**, beside it or in a directory the OS guarantees is on it -
+  never `Path.GetTempPath()`, or the swap is not atomic.
+- **Be durable before the swap.** `Seal()` flushes to stable storage - on macOS `F_FULLFSYNC`, not
+  plain `fsync` - on the background copy, so `Commit()` is only the swap.
+- **Leave the destination untouched unless the commit succeeded.** `RawViewModel` depends on it:
+  a failed commit remaps the original and the edits carry on over it.
+- **Replace a symlink's target, not the link.** Hard links are broken by any rename-based save;
+  accepted.
+- **Fail before writing** when the volume lacks room for the whole new file.
+- **Never delete a stage that may be the only copy.** `KeepStagedContent()` is called when a
+  failed commit also left the original unreadable.

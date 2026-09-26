@@ -29,11 +29,17 @@ public sealed class JsonDiffSession : IDocumentSession
     private readonly Task hashReleaseTask;
     private bool disposed;
 
-    public IndexedSourceSession<JsonStructureIndex> Left { get; }
+    public IndexedSourceSession<JsonSparseIndex> Left { get; }
 
-    public IndexedSourceSession<JsonStructureIndex> Right { get; }
+    public IndexedSourceSession<JsonSparseIndex> Right { get; }
 
     public JsonDiffIndex Diff { get; }
+
+    /// <summary>The left document as the view reads it, on the UI thread.</summary>
+    public JsonDiffDocument LeftDocument { get; }
+
+    /// <summary>The right document as the view reads it, on the UI thread.</summary>
+    public JsonDiffDocument RightDocument { get; }
 
     public IByteOrigin LeftOrigin { get; }
 
@@ -67,7 +73,7 @@ public sealed class JsonDiffSession : IDocumentSession
     public IndexFailure? Failure => null;
 
     private JsonDiffSession(IByteOrigin leftOrigin, IByteOrigin rightOrigin,
-        IndexedSourceSession<JsonStructureIndex> left, IndexedSourceSession<JsonStructureIndex> right,
+        IndexedSourceSession<JsonSparseIndex> left, IndexedSourceSession<JsonSparseIndex> right,
         JsonDiffIndex diff, CancellationTokenSource diffCts)
     {
         this.LeftOrigin = leftOrigin;
@@ -75,12 +81,14 @@ public sealed class JsonDiffSession : IDocumentSession
         this.Left = left;
         this.Right = right;
         this.Diff = diff;
+        this.LeftDocument = new JsonDiffDocument(left);
+        this.RightDocument = new JsonDiffDocument(right);
         this.diffCts = diffCts;
         this.hashReleaseTask = ReleaseContentHashesWhenFinishedAsync(left, right, diff);
     }
 
     /// <summary>Completes after both index writers and the diff reader have stopped and their
-    /// now-unused content-hash logs have been released. Internal for deterministic tests.</summary>
+    /// now-unused recorded content hashes have been released. Internal for deterministic tests.</summary>
     internal Task HashReleaseTask => this.hashReleaseTask;
 
     /// <summary>
@@ -93,18 +101,14 @@ public sealed class JsonDiffSession : IDocumentSession
         IProgressReporter? leftProgress = null, IProgressReporter? rightProgress = null,
         IProgressReporter? diffProgress = null)
     {
-        var options = new JsonIndexOptions { ComputeContentHashes = true };
+        var left = IndexedSourceSession<JsonSparseIndex>.Start(
+            leftOrigin.Open(), JsonSparseIndex.StartIndexingWithContentHashes, leftProgress);
 
-        // The lambda (not a method group) closes over the options - see the StartIndexing
-        // overload remarks for why the original signature had to stay intact.
-        var left = IndexedSourceSession<JsonStructureIndex>.Start(
-            leftOrigin.Open(), (f, r, ct) => JsonStructureIndex.StartIndexing(f, options, r, ct), leftProgress);
-
-        IndexedSourceSession<JsonStructureIndex> right;
+        IndexedSourceSession<JsonSparseIndex> right;
         try
         {
-            right = IndexedSourceSession<JsonStructureIndex>.Start(
-                rightOrigin.Open(), (f, r, ct) => JsonStructureIndex.StartIndexing(f, options, r, ct), rightProgress);
+            right = IndexedSourceSession<JsonSparseIndex>.Start(
+                rightOrigin.Open(), JsonSparseIndex.StartIndexingWithContentHashes, rightProgress);
         }
         catch
         {
@@ -115,7 +119,7 @@ public sealed class JsonDiffSession : IDocumentSession
         var diffCts = CancellationTokenSource.CreateLinkedTokenSource(left.TearingDown, right.TearingDown);
         try
         {
-            var diff = JsonDiffIndex.Start(left.Index, left.Bytes, right.Index, right.Bytes, diffProgress, diffCts.Token);
+            var diff = JsonDiffIndex.Start(left, right, diffProgress, diffCts.Token);
             return new JsonDiffSession(leftOrigin, rightOrigin, left, right, diff, diffCts);
         }
         catch
@@ -128,8 +132,8 @@ public sealed class JsonDiffSession : IDocumentSession
     }
 
     private static async Task ReleaseContentHashesWhenFinishedAsync(
-        IndexedSourceSession<JsonStructureIndex> left,
-        IndexedSourceSession<JsonStructureIndex> right,
+        IndexedSourceSession<JsonSparseIndex> left,
+        IndexedSourceSession<JsonSparseIndex> right,
         JsonDiffIndex diff)
     {
         try
@@ -142,8 +146,8 @@ public sealed class JsonDiffSession : IDocumentSession
         }
         finally
         {
-            left.Index.ReleaseContentHashes();
-            right.Index.ReleaseContentHashes();
+            left.Index.ContentHashes?.Release();
+            right.Index.ContentHashes?.Release();
         }
     }
 

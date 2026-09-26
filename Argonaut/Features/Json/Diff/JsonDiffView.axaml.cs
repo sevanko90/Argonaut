@@ -1,29 +1,93 @@
 using System;
-using System.Collections.Specialized;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Threading.Tasks;
+using Argonaut.Features.Json.Tree;
 using Argonaut.Ui.Notifications;
+using Argonaut.Ui.Rows;
+using Argonaut.Ui.Tree;
+using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Input;
 using Avalonia.Input.Platform;
-using Avalonia.Threading;
-using Avalonia.VisualTree;
+using Avalonia.Interactivity;
+using Avalonia.Media;
+using Avalonia.Media.Immutable;
 
 namespace Argonaut.Features.Json.Diff;
 
+/// <summary>
+/// The diff: a <see cref="TreeSurface"/> over the view model's <see cref="JsonDiffViewModel.Tree"/>
+/// - the left document at first, then the merged tree drawn two panes wide - with its scrollbar,
+/// and the source/target context bar under it.
+/// </summary>
 public partial class JsonDiffView : UserControl
 {
-    private bool suppressSelectionEvents;
+    /// <summary>The washes behind a pane: low-alpha overlays that read on light and dark themes
+    /// alike, painted per pane so an added row tints only where its content is.</summary>
+    private static readonly IReadOnlyDictionary<TreeRowTint, IBrush> Tints = new Dictionary<TreeRowTint, IBrush>
+    {
+        [TreeRowTint.Added] = new ImmutableSolidColorBrush(Color.Parse("#2E4CAF50")),
+        [TreeRowTint.Removed] = new ImmutableSolidColorBrush(Color.Parse("#2EF44336")),
+        [TreeRowTint.Changed] = new ImmutableSolidColorBrush(Color.Parse("#2EFFC107")),
+        [TreeRowTint.Moved] = new ImmutableSolidColorBrush(Color.Parse("#2E2196F3")),
+    };
+
+    /// <summary>The mark before a pair on the way to a change.</summary>
+    private static readonly IBrush ChangeMark = new ImmutableSolidColorBrush(Color.Parse("#FFC107"));
+
+    private readonly RowScrollBars scrollBars;
     private JsonDiffViewModel? subscribedViewModel;
-    private JsonDiffRowCollection? subscribedRows;
 
     public JsonDiffView()
     {
         InitializeComponent();
 
+        Loaded += OnLoaded;
         DataContextChanged += OnDataContextChanged;
         DetachedFromVisualTree += OnDetachedFromVisualTree;
-        RowsListBox.SelectionChanged += OnSelectionChanged;
+        ActualThemeVariantChanged += OnThemeChanged;
+
+        Surface.SelectionChanged += OnSurfaceSelectionChanged;
+        Surface.SizeChanged += OnSurfaceSizeChanged;
+        Surface.TintBrushes = Tints;
+        scrollBars = new RowScrollBars(Surface, VerticalScrollBar, pan: null);
+    }
+
+    private void OnLoaded(object? sender, RoutedEventArgs e)
+    {
+        ApplyRunBrushes();
+        scrollBars.Refresh();
+        ApplyPendingReveal();
+    }
+
+    private void OnThemeChanged(object? sender, EventArgs e) => ApplyRunBrushes();
+
+    /// <summary>The JSON tree's palette, plus the change mark.</summary>
+    private void ApplyRunBrushes()
+    {
+        JsonTreePalette.Apply(Surface, this);
+        var brushes = new Dictionary<TreeRunStyle, IBrush>(Surface.RunBrushes ?? new Dictionary<TreeRunStyle, IBrush>())
+        {
+            [TreeRunStyle.Change] = ChangeMark,
+        };
+        Surface.RunBrushes = brushes;
+    }
+
+    private void OnDetachedFromVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
+    {
+        Loaded -= OnLoaded;
+        DataContextChanged -= OnDataContextChanged;
+        ActualThemeVariantChanged -= OnThemeChanged;
+        Surface.SelectionChanged -= OnSurfaceSelectionChanged;
+        Surface.SizeChanged -= OnSurfaceSizeChanged;
+        scrollBars.Dispose();
+        Unsubscribe();
+
+        // Let go of the rows before the view model releases the bytes they read. Disposed here,
+        // like the JSON view, as well as by the shell; idempotent.
+        Surface.Document = null;
+        if (DataContext is IDisposable d)
+            d.Dispose();
     }
 
     private void OnDataContextChanged(object? sender, EventArgs e)
@@ -34,128 +98,83 @@ public partial class JsonDiffView : UserControl
         {
             subscribedViewModel = vm;
             vm.PropertyChanged += OnViewModelPropertyChanged;
-
-            subscribedRows = vm.Rows;
-            subscribedRows.CollectionChanged += OnRowsCollectionChanged;
+            vm.RevealRequested += OnRevealRequested;
+            vm.ChangesOnlyChanged += OnChangesOnlyChanged;
+            Surface.Document = vm.Tree;
+            Surface.HighlightTerm = vm.HighlightTerm;
+            ApplyPendingReveal();
         }
+        else
+        {
+            Surface.Document = null;
+        }
+
+        scrollBars.Refresh();
     }
 
     private void Unsubscribe()
     {
-        if (subscribedViewModel is not null)
-        {
-            subscribedViewModel.PropertyChanged -= OnViewModelPropertyChanged;
-            subscribedViewModel = null;
-        }
+        if (subscribedViewModel is null)
+            return;
 
-        if (subscribedRows is not null)
-        {
-            subscribedRows.CollectionChanged -= OnRowsCollectionChanged;
-            subscribedRows = null;
-        }
+        subscribedViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+        subscribedViewModel.RevealRequested -= OnRevealRequested;
+        subscribedViewModel.ChangesOnlyChanged -= OnChangesOnlyChanged;
+        subscribedViewModel = null;
     }
 
-    private void OnDetachedFromVisualTree(object? sender, Avalonia.VisualTreeAttachmentEventArgs e)
-    {
-        RowsListBox.SelectionChanged -= OnSelectionChanged;
-        DataContextChanged -= OnDataContextChanged;
-        Unsubscribe();
-
-        // Disposed synchronously here (before the content swap's trailing ItemsSource
-        // walk), same as JsonView: the collection reports empty once disposed, so that
-        // walk reads nothing. Idempotent alongside the shell's own dispose.
-        if (DataContext is IDisposable d)
-            d.Dispose();
-    }
-
-    /// <summary>The model drives the visual selection (next/previous-diff buttons land
-    /// here); the guard stops the resulting SelectionChanged echoing back into the model.</summary>
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is not (null or nameof(JsonDiffViewModel.SelectedPosition)))
+        if (sender is not JsonDiffViewModel vm)
             return;
 
-        SyncVisualSelection();
-    }
+        if (e.PropertyName is null or nameof(JsonDiffViewModel.HighlightTerm))
+            Surface.HighlightTerm = vm.HighlightTerm;
 
-    private void SyncVisualSelection()
-    {
-        if (subscribedViewModel is not { } vm)
-            return;
-
-        int index = vm.SelectedPosition is { } p && p >= 0 && p < (subscribedRows?.Count ?? 0) ? p : -1;
-        if (RowsListBox.SelectedIndex == index)
-            return;
-
-        // Deliberately NO ScrollIntoView: AutoScrollToSelectedItem (on by default) already
-        // brings the new selection into view, which is all the JSON view does. Calling it as
-        // well made every find press walk the virtualizing panel to the target index, and the
-        // walk materializes rows as it goes - each one decoding text from the mapping. Once
-        // find had expanded the list to six figures that cost tens of seconds per press, while
-        // the same search in the JSON view stayed instant.
-        suppressSelectionEvents = true;
-        try
+        if (e.PropertyName is null or nameof(JsonDiffViewModel.Tree))
         {
-            RowsListBox.SelectedIndex = index;
-        }
-        finally
-        {
-            suppressSelectionEvents = false;
+            Surface.Document = vm.Tree;
+            scrollBars.Refresh();
+            ApplyPendingReveal();
         }
     }
 
-    private void OnRowsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    private void OnRevealRequested(object? sender, EventArgs e) => ApplyPendingReveal();
+
+    private void OnChangesOnlyChanged(object? sender, EventArgs e) => Surface.Reseat();
+
+    /// <summary>Shows the view model's pending reveal once the surface can: it needs the merged
+    /// tree and a height to centre the row in.</summary>
+    private void ApplyPendingReveal()
     {
-        // Every rebuild fires a Reset, which clears the ListBox's selection; restore it
-        // from the model a dispatcher turn later, after all subscribers have consumed the
-        // Reset (same deferral - and reasoning - as JsonView.OnRowsCollectionChanged).
-        Dispatcher.UIThread.Post(SyncVisualSelection);
+        if (subscribedViewModel is not { PendingReveal: { } key } vm
+            || !ReferenceEquals(Surface.Document, vm.DiffTree) || Surface.Bounds.Height <= 0)
+        {
+            return;
+        }
+
+        vm.ClearPendingReveal();
+        Surface.Reveal(key, expandAncestors: true);
     }
 
-    private void OnSelectionChanged(object? sender, SelectionChangedEventArgs e)
-    {
-        if (suppressSelectionEvents)
-            return;
+    private void OnSurfaceSelectionChanged(object? sender, EventArgs e)
+        => subscribedViewModel?.OnRowSelected(Surface.SelectedRow);
 
-        if (subscribedViewModel is not { } vm)
-            return;
+    private void OnSurfaceSizeChanged(object? sender, SizeChangedEventArgs e) => ApplyPendingReveal();
 
-        vm.SelectedPosition = RowsListBox.SelectedIndex >= 0 ? RowsListBox.SelectedIndex : null;
-    }
-
-    private void OnToggleExpandClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
-    {
-        if (sender is not Control { DataContext: JsonDiffRow row })
-            return;
-
-        if (DataContext is not JsonDiffViewModel vm)
-            return;
-
-        vm.Rows.ToggleExpand(row.Position);
-    }
-
-    private void OnRowDoubleTapped(object? sender, TappedEventArgs e)
-    {
-        // The expander button already handled its own two clicks; don't triple-toggle.
-        if (e.Source is Avalonia.Visual visual && visual.FindAncestorOfType<Button>() is not null)
-            return;
-
-        OnToggleExpandClick(sender, e);
-    }
-
-    private void OnToggleSourceMode(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    private void OnToggleSourceMode(object? sender, RoutedEventArgs e)
     {
         if (DataContext is JsonDiffViewModel vm)
             vm.ToggleSourceMode();
     }
 
-    private void OnToggleTargetMode(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    private void OnToggleTargetMode(object? sender, RoutedEventArgs e)
     {
         if (DataContext is JsonDiffViewModel vm)
             vm.ToggleTargetMode();
     }
 
-    private async void OnCopySourceClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    private async void OnCopySourceClick(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not JsonDiffViewModel vm)
             return;
@@ -163,7 +182,7 @@ public partial class JsonDiffView : UserControl
         await CopyToClipboardAsync(vm.SourcePrefix + vm.SourceChanged + vm.SourceSuffix);
     }
 
-    private async void OnCopyTargetClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    private async void OnCopyTargetClick(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not JsonDiffViewModel vm)
             return;

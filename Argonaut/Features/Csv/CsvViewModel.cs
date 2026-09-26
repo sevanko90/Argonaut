@@ -18,6 +18,10 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
     private const int InitialIndexedRowTarget = 250;
 
     private IndexedSourceSession<FileOffsetIndex>? session;
+
+    // What the line index was built over, so a finished one is kept for the next view of the
+    // same bytes - this one reopened, or NDJSON's, which shares it (see KeptIndexes).
+    private IndexBasis? indexBasis;
     private CsvRowCollection? rows;
     private TableStructure? structure;
     private string[] headerFields = [];
@@ -115,7 +119,10 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
         this.FilePath = origin.Path ?? origin.DisplayName;
         this.delimiter = delimiter;
 
-        var session = IndexedSourceSession<FileOffsetIndex>.Start(origin.Open(), FileOffsetIndex.StartIndexing, progressReporter);
+        this.indexBasis = IndexBasis.Of(origin);
+        var kept = this.indexBasis?.FindKept<FileLineAnchors>(FileLineAnchors.Key);
+        var session = IndexedSourceSession<FileOffsetIndex>.Start(origin.Open(),
+            (bytes, progress, stopping) => FileOffsetIndex.StartIndexing(bytes, kept, progress, stopping), progressReporter);
         this.session = session;
 
         // Await a small initial batch so the first paint isn't a totally empty grid, and so
@@ -159,7 +166,10 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
 
     /// <summary>Indexing finished: reports <see cref="RowCount"/> under its real total.</summary>
     protected override void OnIndexingCompleted()
-        => StatusText = $"{FilePath} — {RowCount:N0} rows";
+    {
+        this.indexBasis?.Keep(FileLineAnchors.Key, this.session?.Index.DetachAnchors());
+        StatusText = $"{FilePath} — {RowCount:N0} rows";
+    }
 
     /// <summary>Indexing stopped early (failure, or cancellation on <paramref name="failure"/> null).</summary>
     protected override void OnIndexingFailed(IndexFailure? failure)

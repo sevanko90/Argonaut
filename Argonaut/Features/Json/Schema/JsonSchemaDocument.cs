@@ -18,8 +18,8 @@ public readonly record struct SchemaRoot(string Name, int NodeId);
 /// "given the schema node for this container, what's the schema node for this child?".
 ///
 /// The whole point of the flattening is that resolving a document row against the schema
-/// happens *top-down, in lockstep with the tree walk* (see
-/// <see cref="JsonVisibleRowCollection"/>'s AppendSubtree): each row inherits its parent's
+/// happens *top-down, in lockstep with the tree walk* (see <c>JsonSchemaResolver</c>): each
+/// row inherits its parent's
 /// schema node id and does one member/element lookup. Nothing ever builds a JSON path, and
 /// nothing recurses into the schema at walk time - which is what makes schema hints affordable
 /// on a document the app never holds in memory.

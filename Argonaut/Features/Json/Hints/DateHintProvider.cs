@@ -32,12 +32,12 @@ public sealed class DateHintProvider : IValueHintProvider
         return true;
     }
 
-    public string? FormatHint(in ValueHintCandidate candidate, int tokenIndex)
+    public string? FormatHint(in ValueHintCandidate candidate, long valueOffset)
     {
         if (settings.FileDefaultScheme == DateDecodingScheme.Off)
             return null;
 
-        var effective = settings.GetEffectiveScheme(tokenIndex);
+        var effective = settings.GetEffectiveScheme(valueOffset);
         if (effective == DateDecodingScheme.Off)
             return "—"; // em dash - a clickable placeholder so the flyout stays reachable
 

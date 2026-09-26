@@ -52,7 +52,7 @@ everywhere data bounds matter (indexing loops, readers, length reported to calle
 Only use the accessor/view capacity for the mechanics of the mapping itself, never as a stand-in for "how much real
 data is here."
 
-This has caused a real bug before: `JsonStructureIndex.Build` read past the real end of file on Windows (using
+This has caused a real bug before: the JSON indexer read past the real end of file on Windows (using
 `MMapFile.Length` which returned `_accessor.Capacity`), fed trailing `0x00` padding into `Utf8JsonReader`, and
 threw `JsonReaderException: '0x00' is invalid after a single JSON value`. It did not repro on macOS because the
 padding rounding happened to align differently there. Fixed by storing `Length` from `FileInfo(path).Length` in
@@ -78,7 +78,7 @@ over a growing source stops at whatever had arrived and then publishes a *comple
 partial document. So:
 
 - **Scan loops advance by the length returned, not the length requested**, and treat an empty
-  return as the termination signal (`FileOffsetIndex.ProduceOffsets`, `FileTypeDetector`'s three
+  return as the termination signal (`FileOffsetIndex.ProduceAnchors`, `FileTypeDetector`'s three
   finders, `SearchSession.Scan`). A loop that assumes it got its whole chunk silently skips
   bytes over a split source.
 - **Never snapshot `AvailableLength`.** Re-read it each turn, and when the scan reaches it, ask
@@ -106,8 +106,8 @@ partial document. So:
   search own their own sources and release those; nobody releases a source handed to them.
 
 Where the parser already holds the bytes, take them from it rather than re-reading the source by
-absolute offset - `JsonStructureIndex` hashes `reader.ValueSpan`, and only falls back to the
-source when `HasValueSequence` says the token straddles a parse window.
+absolute offset - `JsonContentHashRecorder` hashes `reader.ValueSpan` from the validation
+pass's reader rather than reading each token again.
 
 ## Origins own where bytes came from; sources own reading them
 

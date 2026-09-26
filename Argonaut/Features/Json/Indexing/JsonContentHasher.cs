@@ -6,8 +6,8 @@ using System.Text.Json;
 namespace Argonaut.Features.Json.Indexing;
 
 /// <summary>
-/// The pure hashing rules behind <see cref="JsonStructureIndex"/>'s optional per-token
-/// content hashes (see <see cref="JsonIndexOptions.ComputeContentHashes"/>). A node's hash
+/// The pure hashing rules behind <see cref="JsonContentHashes"/>, which the diff compares by. A
+/// node's hash
 /// covers its content and nothing else - not its own key, not its path, not its parent -
 /// so a subtree's hash is invariant under relocation; see the diff plan for why that
 /// invariant is load-bearing.

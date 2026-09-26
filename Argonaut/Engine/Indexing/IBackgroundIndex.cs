@@ -5,8 +5,8 @@ namespace Argonaut.Engine.Indexing;
 /// <summary>
 /// An index built in the background, started via a StartIndexing(IByteSource,
 /// IProgressReporter?, CancellationToken) factory: it scans the whole source once and publishes
-/// fixed-size records as it goes. Implemented by FileOffsetIndex (lines), JsonStructureIndex
-/// (tokens) and RawSegmentIndex (display rows). Lets generic consumers - the completion monitor,
+/// records as it goes. Implemented by FileOffsetIndex (lines), JsonSparseIndex (large
+/// containers) and RawSegmentIndex (display rows). Lets generic consumers - the completion monitor,
 /// IndexedSourceSession - work with any of them without knowing which one they have.
 ///
 /// SearchSession shares the same publishing machinery (AppendLogIndexBase) but is intentionally

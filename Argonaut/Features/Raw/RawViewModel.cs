@@ -763,7 +763,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
 
     // ---- saving -------------------------------------------------------------------------
     //
-    // docs/save-plan.md. The order is fixed by Windows, which cannot replace a file while any
+    // "Saving" in docs/architecture.md. The order is fixed by Windows, which cannot replace a file while any
     // mapping of it is open - yet the copy reads the original through exactly that mapping:
     //
     //   stage -> copy the document into it and flush (background) -> unmap -> commit -> reopen

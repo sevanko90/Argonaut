@@ -1,36 +1,27 @@
 using System.Text;
-using Argonaut.Engine.Bytes;
-using Argonaut.Features.Json.Indexing;
 using Argonaut.Features.Json.Schema;
+using Argonaut.Tests.Support;
 
 namespace Argonaut.Tests.Features.Json.Schema;
 
 /// <summary>
-/// Covers reading the outermost object's property names off the token index - the evidence
+/// Covers reading the outermost object's property names - the evidence
 /// <see cref="JsonSchemaRootMatcher"/> scores schema types against.
 /// </summary>
 public class JsonDocumentKeySamplerTests
 {
-    /// <summary>Indexes a temp file fully. The mapping is disposed before the file is deleted,
-    /// since indexing keeps it mapped (see JsonStructureIndexTests for the same contract).</summary>
-    private static async Task WithIndexedAsync(string json, Action<JsonStructureIndex, MMapFile> body)
+    private static Task WithIndexedAsync(string json, Action<JsonTreeHarness, JsonTreeHarness> body)
     {
-        string path = Path.GetTempFileName();
-        File.WriteAllText(path, json);
-
-        var file = new MMapFile(path);
-        try
-        {
-            var index = JsonStructureIndex.StartIndexing(file);
-            await index.IndexingTask;
-            body(index, file);
-        }
-        finally
-        {
-            file.Dispose();
-            try { File.Delete(path); } catch { /* best-effort test cleanup */ }
-        }
+        var tree = new JsonTreeHarness(json);
+        body(tree, tree);
+        return Task.CompletedTask;
     }
+
+    private static IReadOnlyList<byte[]> RootKeys(JsonTreeHarness tree, out bool fromArray)
+        => JsonDocumentKeySampler.ReadRootKeys(tree.Reader, tree.Text, out fromArray);
+
+    private static IReadOnlyList<byte[]> MemberNames(JsonTreeHarness tree, string member)
+        => JsonDocumentKeySampler.ReadMemberNames(tree.Reader, tree.Text, tree.Member(member).Row.Node);
 
     private static string[] Decode(IReadOnlyList<byte[]> keys)
         => keys.Select(k => Encoding.UTF8.GetString(k)).ToArray();
@@ -42,7 +33,7 @@ public class JsonDocumentKeySamplerTests
             """,
             (index, file) =>
             {
-                var keys = JsonDocumentKeySampler.ReadRootKeys(index, file, out bool fromArray);
+                var keys = RootKeys(index, out bool fromArray);
 
                 // Direct members only - `number` is a grandchild and must not appear.
                 Assert.Equal(new[] { "reference", "passengers", "flight" }, Decode(keys));
@@ -56,7 +47,7 @@ public class JsonDocumentKeySamplerTests
             """,
             (index, file) =>
             {
-                var keys = JsonDocumentKeySampler.ReadRootKeys(index, file, out bool fromArray);
+                var keys = RootKeys(index, out bool fromArray);
 
                 Assert.Equal(new[] { "line1", "city" }, Decode(keys));
                 Assert.True(fromArray);
@@ -66,21 +57,21 @@ public class JsonDocumentKeySamplerTests
     public Task ArrayOfScalars_YieldsNothing()
         => WithIndexedAsync("[1, 2, 3]", (index, file) =>
         {
-            Assert.Empty(JsonDocumentKeySampler.ReadRootKeys(index, file, out _));
+            Assert.Empty(RootKeys(index, out _));
         });
 
     [Fact]
     public Task ScalarRoot_YieldsNothing()
         => WithIndexedAsync("42", (index, file) =>
         {
-            Assert.Empty(JsonDocumentKeySampler.ReadRootKeys(index, file, out _));
+            Assert.Empty(RootKeys(index, out _));
         });
 
     [Fact]
     public Task EmptyObject_YieldsNothing()
         => WithIndexedAsync("{}", (index, file) =>
         {
-            Assert.Empty(JsonDocumentKeySampler.ReadRootKeys(index, file, out _));
+            Assert.Empty(RootKeys(index, out _));
         });
 
     [Fact]
@@ -100,7 +91,7 @@ public class JsonDocumentKeySamplerTests
         {
             // The cost of looking has to stay bounded, and past the cap nothing further
             // discriminates between candidate types.
-            Assert.Equal(JsonDocumentKeySampler.MaxKeys, JsonDocumentKeySampler.ReadRootKeys(index, file, out _).Count);
+            Assert.Equal(JsonDocumentKeySampler.MaxKeys, RootKeys(index, out _).Count);
         });
     }
 
@@ -113,15 +104,14 @@ public class JsonDocumentKeySamplerTests
             {
                 // The wrapper root offers nothing to match on; the payload one level down does.
                 // This is the entry point the per-node match affordance will use.
-                Assert.Equal(new[] { "data", "meta" }, Decode(JsonDocumentKeySampler.ReadRootKeys(index, file, out _)));
-                Assert.Equal(new[] { "line1", "city" }, Decode(JsonDocumentKeySampler.ReadMemberNames(index, file, 1)));
+                Assert.Equal(new[] { "data", "meta" }, Decode(RootKeys(index, out _)));
+                Assert.Equal(new[] { "line1", "city" }, Decode(MemberNames(index, "data")));
             });
 
     [Fact]
     public Task ReadMemberNames_OnANonObject_YieldsNothing()
         => WithIndexedAsync("""{ "items": [1, 2] }""", (index, file) =>
         {
-            Assert.Empty(JsonDocumentKeySampler.ReadMemberNames(index, file, 1));
-            Assert.Empty(JsonDocumentKeySampler.ReadMemberNames(index, file, 9999));
+            Assert.Empty(MemberNames(index, "items"));
         });
 }

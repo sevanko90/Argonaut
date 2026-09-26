@@ -2,8 +2,11 @@ using Argonaut.Features.Json.Schema;
 using System.Text;
 using Argonaut.Features.Json;
 using Argonaut.Features.Json.ArrayTable;
+using Argonaut.Engine.Indexing.Trees;
+using Argonaut.Features.Json.Tree;
 using Argonaut.Tests.Support;
 using Argonaut.Ui.Documents.Navigation;
+using Argonaut.Ui.Tree;
 
 namespace Argonaut.Tests.Features.Json.ArrayTable;
 
@@ -28,11 +31,11 @@ public class JsonArrayTableEntryPointTests
         return path;
     }
 
-    /// <summary>Loads <paramref name="json"/>, clicks "view as table" on the row at
-    /// <paramref name="tokenIndex"/>, and hands the request that reached the shell to
+    /// <summary>Loads <paramref name="json"/>, clicks "view as table" on the array starting at
+    /// <paramref name="arrayStart"/>, and hands the request that reached the shell to
     /// <paramref name="assert"/> - which runs while the file still exists, since every
     /// assertion here is about bytes that have to be read back off it.</summary>
-    private static async Task WithRequestForAsync(string json, int tokenIndex, Func<ArrayTableRequest?, Task> assert)
+    private static async Task WithRequestForAsync(string json, long arrayStart, Func<ArrayTableRequest?, Task> assert)
     {
         string path = WriteTempJson(json);
         var vm = new JsonViewModel(new JsonViewSettings(), new SchemaBindings(), TestSchemas.Catalog());
@@ -44,7 +47,7 @@ public class JsonArrayTableEntryPointTests
         {
             await vm.LoadAsync(path);
             await vm.IndexingTask;
-            await vm.RequestArrayTableAsync(tokenIndex);
+            vm.RequestArrayTable(arrayStart);
             await assert(captured);
         }
         finally
@@ -66,7 +69,11 @@ public class JsonArrayTableEntryPointTests
         return session.Elements.ElementCount;
     }
 
-    private static async Task<List<JsonRow>> RowsOfAsync(string json)
+    /// <summary>A tree row as these tests look at it: its name, whether it offers the table,
+    /// and where its value starts.</summary>
+    private sealed record Row(string? Name, bool CanViewAsTable, long ValueStart);
+
+    private static async Task<List<Row>> RowsOfAsync(string json)
     {
         string path = WriteTempJson(json);
         var vm = new JsonViewModel(new JsonViewSettings(), new SchemaBindings(), TestSchemas.Catalog());
@@ -76,9 +83,19 @@ public class JsonArrayTableEntryPointTests
             await vm.IndexingTask;
             vm.SetDefaultExpandDepth(10);
 
-            var rows = new List<JsonRow>();
-            for (int i = 0; i < vm.Rows.Count; i++)
-                rows.Add((JsonRow)vm.Rows[i]!);
+            var rows = new List<Row>();
+            var cursor = vm.Tree!.NewCursor();
+            for (bool more = cursor.MoveToStart(); more; more = cursor.MoveNext())
+            {
+                if (cursor.Current.Shape == TreeRowShape.Close)
+                    continue;
+
+                var runs = new List<TreeRun>();
+                vm.Tree.Painter.AppendRuns(cursor.Current, runs);
+                string? name = runs.FirstOrDefault(r => r.Style == TreeRunStyle.Name).Text is { } n ? n[..^2] : null;
+                rows.Add(new Row(name, runs.Any(r => r.Link is ViewAsTableLink), cursor.Current.Node.ValueStart));
+            }
+
             return rows;
         }
         finally
@@ -111,7 +128,7 @@ public class JsonArrayTableEntryPointTests
 
     [Fact]
     public Task RootArray_ResolvesARangeThatIndexesAsAWholeArray()
-        => WithRequestForAsync("""[{"id":1},{"id":2},{"id":3}]""", tokenIndex: 0, async request =>
+        => WithRequestForAsync("""[{"id":1},{"id":2},{"id":3}]""", arrayStart: 0, async request =>
         {
             Assert.NotNull(request);
             Assert.Equal(0, request!.Value.Offset);
@@ -121,13 +138,13 @@ public class JsonArrayTableEntryPointTests
     [Fact]
     public async Task NestedArray_ResolvesOnlyItsOwnBytes()
     {
-        // Token 0 is the root object, 1 is the "before" array, and the array under "items"
-        // follows it - the range must cover that one and nothing around it.
+        // The array under "items" follows the "before" array - the range must cover that one and
+        // nothing around it.
         string json = """{"before":[9,9,9,9,9],"items":[{"id":1},{"id":2}]}""";
         var rows = await RowsOfAsync(json);
-        int itemsToken = Assert.Single(rows, r => r.Name == "items").TokenIndex;
+        long itemsStart = Assert.Single(rows, r => r.Name == "items").ValueStart;
 
-        await WithRequestForAsync(json, itemsToken, async request =>
+        await WithRequestForAsync(json, itemsStart, async request =>
         {
             Assert.NotNull(request);
             Assert.Equal(2, await ElementsInRangeAsync(request!.Value));
@@ -142,9 +159,9 @@ public class JsonArrayTableEntryPointTests
         // JsonReaderException out of the table's own indexer rather than as anything legible.
         string json = """{"items":[1,2,3]}""";
         var rows = await RowsOfAsync(json);
-        int itemsToken = Assert.Single(rows, r => r.Name == "items").TokenIndex;
+        long itemsStart = Assert.Single(rows, r => r.Name == "items").ValueStart;
 
-        await WithRequestForAsync(json, itemsToken, request =>
+        await WithRequestForAsync(json, itemsStart, request =>
         {
             Assert.NotNull(request);
             string bytes = File.ReadAllText(request!.Value.Origin.Path!)
@@ -155,11 +172,10 @@ public class JsonArrayTableEntryPointTests
     }
 
     [Fact]
-    public async Task LargeStillIndexingArray_WaitsForTheArrayToCloseBeforeResolving()
+    public async Task LargeStillIndexingArray_ResolvesItsExactRange()
     {
-        // EndIndex is -1 until the container closes, so on a file still being scanned the
-        // array's length is not yet known. "Enabled once it has an element" is not a
-        // sufficient guard - the request must wait, and then be exact.
+        // While the file is still being indexed the index has no end for the array yet; the
+        // tree finds it from the bytes instead, and the range must still be exact.
         var sb = new StringBuilder("[");
         for (int i = 0; i < 200_000; i++)
         {
@@ -180,7 +196,7 @@ public class JsonArrayTableEntryPointTests
             await vm.LoadAsync(path);
             Assert.False(vm.IndexingTask.IsCompleted); // sanity: the scan is genuinely still running
 
-            await vm.RequestArrayTableAsync(0);
+            vm.RequestArrayTable(0);
 
             Assert.NotNull(captured);
             Assert.Equal(new FileInfo(path).Length, captured!.Value.Length);
@@ -196,7 +212,7 @@ public class JsonArrayTableEntryPointTests
     [Fact]
     public async Task SubRangeDocument_DoesNotOfferTheTableAtAll()
     {
-        // A per-line NDJSON sub-document's token offsets are mapping-relative, so they are not
+        // A per-line NDJSON sub-document's offsets are relative to the line, so they are not
         // file offsets and the table would map the wrong bytes. The link is hidden rather than
         // the conversion skipped - see JsonViewModel.SupportsArrayTable.
         string json = "{\"a\":1}\n{\"items\":[1,2,3]}\n";
@@ -216,7 +232,7 @@ public class JsonArrayTableEntryPointTests
 
             Assert.False(vm.SupportsArrayTable);
 
-            await vm.RequestArrayTableAsync(1); // the "items" array within the line
+            vm.RequestArrayTable("{\"items\":".Length); // the "items" array within the line
             Assert.Null(captured);
         }
         finally

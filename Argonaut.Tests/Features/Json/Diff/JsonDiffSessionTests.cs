@@ -63,7 +63,7 @@ public class JsonDiffSessionTests
     }
 
     [Fact]
-    public async Task CompletedDiff_ReleasesBothContentHashLogs()
+    public async Task CompletedDiff_ReleasesBothSidesRecordedHashes()
     {
         string leftPath = WriteTempJson("""{"a":[1,2,3]}""");
         string rightPath = WriteTempJson("""{"a":[1,2,4]}""");
@@ -73,10 +73,8 @@ public class JsonDiffSessionTests
             await session.HashReleaseTask;
 
             Assert.True(session.Diff.AllItemsPublished);
-            Assert.False(session.Left.Index.HasContentHashes);
-            Assert.False(session.Right.Index.HasContentHashes);
-            Assert.Throws<InvalidOperationException>(() => session.Left.Index.GetContentHash(0));
-            Assert.Throws<InvalidOperationException>(() => session.Right.Index.GetContentHash(0));
+            Assert.Throws<InvalidOperationException>(() => session.Left.Index.ContentHashes!.Hash(0, 1));
+            Assert.Throws<InvalidOperationException>(() => session.Right.Index.ContentHashes!.Hash(0, 1));
             Assert.True(session.Diff.RecordCount > 0); // the finished diff remains usable
         }
         finally
@@ -103,8 +101,8 @@ public class JsonDiffSessionTests
             Assert.True(diffTask.IsCompleted);
             Assert.True(session.Left.IndexingTask.IsCompleted);
             Assert.True(session.Right.IndexingTask.IsCompleted);
-            Assert.False(session.Left.Index.HasContentHashes);
-            Assert.False(session.Right.Index.HasContentHashes);
+            Assert.Throws<InvalidOperationException>(() => session.Left.Index.ContentHashes!.Hash(0, 1));
+            Assert.Throws<InvalidOperationException>(() => session.Right.Index.ContentHashes!.Hash(0, 1));
             Assert.Throws<ObjectDisposedException>(() => session.Left.Bytes.RequireContiguous(0, 1));
             Assert.Throws<ObjectDisposedException>(() => session.Right.Bytes.RequireContiguous(0, 1));
         }
@@ -175,8 +173,8 @@ public class JsonDiffSessionTests
             Assert.NotNull(session.Right.Index.Failure);
             Assert.Equal(0, session.Diff.RecordCount);
             Assert.True(session.Diff.AllItemsPublished);
-            Assert.False(session.Left.Index.HasContentHashes);
-            Assert.False(session.Right.Index.HasContentHashes);
+            Assert.Throws<InvalidOperationException>(() => session.Left.Index.ContentHashes!.Hash(0, 1));
+            Assert.Throws<InvalidOperationException>(() => session.Right.Index.ContentHashes!.Hash(0, 1));
 
             var leftFile = session.Left.Bytes;
             session.Dispose();
@@ -234,40 +232,6 @@ public class JsonDiffSessionTests
         {
             File.Delete(leftPath);
             File.Delete(rightPath);
-        }
-    }
-
-    [Fact]
-    public async Task CancellationMidBuild_LeavesNoPartiallyFinalContainerHash()
-    {
-        string path = WriteLargeTempJson();
-        try
-        {
-            var file = new MMapFile(path);
-            var cts = new CancellationTokenSource();
-            var index = JsonStructureIndex.StartIndexing(file, new JsonIndexOptions { ComputeContentHashes = true }, cancellationToken: cts.Token);
-
-            cts.Cancel();
-            try { await index.IndexingTask; } catch { /* cancellation observed */ }
-
-            // If the scan was stopped mid-file, the root array never closed - its hash slot
-            // must still hold the sentinel 0, never a partial value. (If the scan happened
-            // to win the race and complete, the root hash is final and non-zero.)
-            if (index.TokenCount > 0)
-            {
-                long rootHash = index.GetContentHash(0);
-                if (index.GetToken(0).EndIndex < 0)
-                    Assert.Equal(0, rootHash);
-                else
-                    Assert.NotEqual(0, rootHash);
-            }
-
-            file.Dispose();
-            cts.Dispose();
-        }
-        finally
-        {
-            File.Delete(path);
         }
     }
 }

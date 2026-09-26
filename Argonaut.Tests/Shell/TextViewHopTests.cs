@@ -17,10 +17,9 @@ using Argonaut.Ui.ViewModels;
 namespace Argonaut.Tests.Shell;
 
 /// <summary>
-/// The hop between the text view and the view it was reached from: the toggle's availability
-/// and destination, and the position carried across as a byte range - the outgoing document's
-/// selection is what the incoming one is asked to reveal. Documents are fakes recording what
-/// they were asked to reveal, so no real indexing is involved.
+/// A view switch carries the position across as a byte range - the outgoing document's selection
+/// is what the incoming one is asked to reveal. Documents are fakes recording what they were asked
+/// to reveal, so no real indexing is involved.
 /// </summary>
 public sealed class TextViewHopTests : IDisposable
 {
@@ -125,44 +124,41 @@ public sealed class TextViewHopTests : IDisposable
     }
 
     [Fact]
-    public async Task Toggle_FromJson_OpensTheTextView_OnTheSelectedNode()
+    public async Task SwitchToText_FromJson_RevealsTheSelectedNode()
     {
         var harness = new Harness();
         await harness.Shell.OpenPathAsync(WriteFile("doc.json", "{\"a\":[1,2]}"));
         harness.Current.SelectedByteRange = new ByteRange(5, 5);
 
-        await harness.Shell.ToggleTextViewAsync();
+        await harness.Shell.SwitchViewAsync(FileTypeDetector.FileKind.Unidentified);
 
         Assert.Equal(FileTypeDetector.FileKind.Unidentified, harness.Current.Kind);
         Assert.Equal([new ByteRange(5, 5)], harness.Current.Revealed);
     }
 
     [Fact]
-    public async Task Toggle_FromText_ReturnsToJson_AtTheCaret()
+    public async Task SwitchBackToJson_FromText_RevealsTheCaret()
     {
         var harness = new Harness();
         await harness.Shell.OpenPathAsync(WriteFile("doc.json", "{\"a\":[1,2]}"));
-        await harness.Shell.ToggleTextViewAsync();
-        Assert.Equal("Show in JSON", harness.Shell.TextViewToggleText);
+        await harness.Shell.SwitchViewAsync(FileTypeDetector.FileKind.Unidentified);
         harness.Current.SelectedByteRange = ByteRange.At(7);
 
-        await harness.Shell.ToggleTextViewAsync();
+        await harness.Shell.SwitchViewAsync(FileTypeDetector.FileKind.Json);
 
         Assert.Equal(FileTypeDetector.FileKind.Json, harness.Current.Kind);
         Assert.Equal([ByteRange.At(7)], harness.Current.Revealed);
-        Assert.Equal("Show in text", harness.Shell.TextViewToggleText);
     }
 
     [Fact]
-    public async Task SwitcherPick_CarriesThePositionToo()
+    public async Task Switch_WithNothingSelected_RevealsNothing()
     {
         var harness = new Harness();
         await harness.Shell.OpenPathAsync(WriteFile("doc.json", "{\"a\":[1,2]}"));
-        harness.Current.SelectedByteRange = new ByteRange(1, 3);
 
         await harness.Shell.SwitchViewAsync(FileTypeDetector.FileKind.Unidentified);
 
-        Assert.Equal([new ByteRange(1, 3)], harness.Current.Revealed);
+        Assert.Empty(harness.Current.Revealed);
     }
 
     /// <summary>Discarded edits are still on screen when the switch happens, and their offsets
@@ -172,11 +168,11 @@ public sealed class TextViewHopTests : IDisposable
     {
         var harness = new Harness { Choice = UnsavedChangesChoice.Discard };
         await harness.Shell.OpenPathAsync(WriteFile("doc.json", "{\"a\":[1,2]}"));
-        await harness.Shell.ToggleTextViewAsync();
+        await harness.Shell.SwitchViewAsync(FileTypeDetector.FileKind.Unidentified);
         harness.Current.SelectedByteRange = ByteRange.At(7);
         harness.Current.HasUnsavedChanges = true;
 
-        await harness.Shell.ToggleTextViewAsync();
+        await harness.Shell.SwitchViewAsync(FileTypeDetector.FileKind.Json);
 
         Assert.Equal(FileTypeDetector.FileKind.Json, harness.Current.Kind);
         Assert.Empty(harness.Current.Revealed);
@@ -187,7 +183,7 @@ public sealed class TextViewHopTests : IDisposable
     {
         var harness = new Harness();
         await harness.Shell.OpenPathAsync(WriteFile("doc.json", "{\"a\":[1,2]}"));
-        await harness.Shell.ToggleTextViewAsync();
+        await harness.Shell.SwitchViewAsync(FileTypeDetector.FileKind.Unidentified);
         var text = harness.Current;
 
         await harness.Shell.RevealInTextViewAsync(new ByteRange(2, 4));
@@ -197,25 +193,15 @@ public sealed class TextViewHopTests : IDisposable
     }
 
     [Fact]
-    public async Task PlainTextFile_HasNoViewToReturnTo()
-    {
-        var harness = new Harness();
-        await harness.Shell.OpenPathAsync(WriteFile("notes.txt", "hello world\nno structure here\n"));
-
-        Assert.Equal(FileTypeDetector.FileKind.Unidentified, harness.Current.Kind);
-        Assert.False(harness.Shell.CanToggleTextView);
-    }
-
-    [Fact]
-    public async Task OpeningAnotherFile_ForgetsTheViewToReturnTo()
+    public async Task RevealInTextView_FromJson_SwitchesAndRevealsTheRangeAsked()
     {
         var harness = new Harness();
         await harness.Shell.OpenPathAsync(WriteFile("doc.json", "{\"a\":[1,2]}"));
-        await harness.Shell.ToggleTextViewAsync();
-        Assert.True(harness.Shell.CanToggleTextView);
+        harness.Current.SelectedByteRange = new ByteRange(1, 3);
 
-        await harness.Shell.OpenPathAsync(WriteFile("notes.txt", "hello world\nno structure here\n"));
+        await harness.Shell.RevealInTextViewAsync(new ByteRange(5, 5));
 
-        Assert.False(harness.Shell.CanToggleTextView);
+        Assert.Equal(FileTypeDetector.FileKind.Unidentified, harness.Current.Kind);
+        Assert.Equal([new ByteRange(5, 5)], harness.Current.Revealed);
     }
 }

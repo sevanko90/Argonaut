@@ -7,9 +7,9 @@ namespace Argonaut.Ui.Documents;
 
 /// <summary>
 /// Shared base for the virtualizing-list ItemsSources that project an index over an
-/// <see cref="IByteSource"/> - JSON rows (<c>JsonVisibleRowCollection</c>), NDJSON lines
-/// (<c>NdJsonLineCollection</c>), CSV rows (<c>CsvRowCollection</c>) and raw rows
-/// (<c>RawRowCollection</c>). It supplies the read-only, fixed-size
+/// <see cref="IByteSource"/> - NDJSON lines (<c>NdJsonLineCollection</c>), CSV rows
+/// (<c>CsvRowCollection</c>), raw rows (<c>RawRowCollection</c>) and array-table rows
+/// (<c>JsonArrayRowCollection</c>). It supplies the read-only, fixed-size
 /// <see cref="IList"/> + <see cref="INotifyCollectionChanged"/> surface that Avalonia's
 /// VirtualizingStackPanel consumes (Count + indexer for realized rows, plus growth
 /// notifications), so subclasses only implement <see cref="GetCount"/> and <see cref="GetItem"/>.

@@ -3,6 +3,7 @@ using Argonaut.Features.Raw;
 using Argonaut.Tests.Support;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Headless;
 using Avalonia.Themes.Fluent;
 using Avalonia.Threading;
@@ -204,6 +205,60 @@ public sealed class RawViewVirtualizationTests : IDisposable
         }, CancellationToken.None);
     }
     /// <summary>
+    /// The raw view scrolls by the exact model: it knows its row count, so a fraction is pixels
+    /// over rows x height and lands on the row it names, and the end is the last row at the
+    /// bottom. The vertical bar follows.
+    /// </summary>
+    [Fact]
+    public Task ScrollingIsExactAndTheBarFollows()
+    {
+        var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(RawViewVirtualizationTests).Assembly);
+        return session.Dispatch(async () =>
+        {
+            var vm = new RawViewModel(new RawViewSettings());
+            Window? window = null;
+            try
+            {
+                await vm.LoadAsync(WriteBigFile());
+                await vm.IndexingTask;
+
+                var view = new RawView { DataContext = vm };
+                window = new Window { Width = 900, Height = 600, Content = view };
+                window.Show();
+                await PumpAsync();
+                window.UpdateLayout();
+
+                var surface = SurfaceOf(window);
+                var bar = window.GetVisualDescendants().OfType<ScrollBar>().First(b => b.Orientation == Avalonia.Layout.Orientation.Vertical);
+                Assert.True(bar.IsVisible);
+
+                int half = vm.RowCount / 2;
+                surface.ScrollToFraction((double)half / vm.RowCount);
+                window.UpdateLayout();
+                Assert.Equal(half * RawTextSurface.RowHeight, surface.VerticalOffset, 3);
+                Assert.Equal(half, surface.RealizedRowRange.First);
+                Assert.Equal(surface.ScrollFraction, bar.Value, 9);
+
+                surface.ScrollByPixels(3 * RawTextSurface.RowHeight);
+                window.UpdateLayout();
+                Assert.Equal(half + 3, surface.RealizedRowRange.First);
+
+                surface.ScrollToEnd();
+                window.UpdateLayout();
+                Assert.True(surface.ShowsEnd);
+                Assert.Equal(vm.RowCount - 1, surface.RealizedRowRange.Last);
+                Assert.Equal(bar.Maximum, bar.Value, 9);
+                return true;
+            }
+            finally
+            {
+                window?.Close();
+                vm.Dispose();
+            }
+        }, CancellationToken.None);
+    }
+
+    /// <summary>
     /// The extent must follow the row count the instant it changes, not when something next
     /// happens to refresh a cached copy.
     ///
@@ -233,11 +288,11 @@ public sealed class RawViewVirtualizationTests : IDisposable
 
                 var surface = SurfaceOf(window);
 
-                // Let the scan finish, then read the extent with NO pump and NO layout pass in
-                // between: nothing has had a chance to refresh anything.
+                // Let the scan finish, then read the scroll range with NO pump and NO layout pass
+                // in between: nothing has had a chance to refresh anything.
                 await vm.IndexingTask;
 
-                Assert.Equal(vm.RowCount * RawTextSurface.RowHeight, surface.Extent.Height);
+                Assert.Equal(surface.Bounds.Height / (vm.RowCount * RawTextSurface.RowHeight), surface.ViewportFraction, 12);
                 return true;
             }
             finally
@@ -439,12 +494,11 @@ public sealed class RawViewVirtualizationTests : IDisposable
                 window.UpdateLayout();
 
                 var surface = SurfaceOf(window);
-                var scroller = window.GetVisualDescendants().OfType<ScrollViewer>().First();
                 int rowCount = vm.RowCount;
 
                 void Visit(int row)
                 {
-                    scroller.Offset = new Vector(0, row * RawTextSurface.RowHeight);
+                    surface.ScrollByPixels(row * RawTextSurface.RowHeight - surface.VerticalOffset);
                     window.UpdateLayout();
 
                     // What the gutter does on every caret move: read the document around the caret

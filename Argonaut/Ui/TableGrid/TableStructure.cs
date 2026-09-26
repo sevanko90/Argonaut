@@ -28,7 +28,7 @@ public readonly record struct TableColumn(string Name, int MaxChars)
 /// line, the property names a JSON array's elements share, or "Column 1..N" placeholders a
 /// dropdown chose. All three end up as names plus a per-column maximum character count, which
 /// is the whole input <see cref="FromMaxChars"/> takes - so each caller measures in whatever
-/// currency is cheapest for its own data (a CsvFieldSpan's byte length; a JsonTokenInfo's) and
+/// currency is cheapest for its own data (a CsvFieldSpan's byte length; a JSON value's) and
 /// nothing in here ever sees text.
 ///
 /// Widths are a character COUNT rather than a text measurement, per CLAUDE.md's low-allocation

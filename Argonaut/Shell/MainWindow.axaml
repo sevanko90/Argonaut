@@ -298,18 +298,6 @@
                            VerticalAlignment="Center"
                            Foreground="{DynamicResource AppMutedTextBrush}" />
                 <StackPanel Grid.Column="1" Orientation="Horizontal">
-                    <!-- Hops into the text view and back, keeping the position: see
-                         MainWindowViewModel.ToggleTextViewAsync. -->
-                    <Button x:Name="TextViewToggleButton"
-                            Content="{Binding TextViewToggleText}"
-                            IsVisible="{Binding CanToggleTextView}"
-                            Click="OnToggleTextView"
-                            FontSize="12"
-                            Padding="8,2"
-                            MinHeight="0"
-                            Margin="0,0,8,0"
-                            VerticalAlignment="Stretch"
-                            ToolTip.Tip="Switch views, staying on the same place in the file (Ctrl+T or Cmd+T)" />
                     <ComboBox x:Name="ViewSwitcherComboBox"
                               IsVisible="{Binding IsFileOpen}"
                               ItemsSource="{Binding AvailableViews}"

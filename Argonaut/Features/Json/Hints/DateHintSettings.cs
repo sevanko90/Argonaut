@@ -6,13 +6,13 @@ namespace Argonaut.Features.Json.Hints;
 
 /// <summary>
 /// Per-document session state for date hints: the file-level default decoding scheme (either
-/// inferred or user-picked) plus per-token overrides. Not persisted - lives and dies with the
+/// inferred or user-picked) plus per-value overrides, keyed by the value's byte offset. Not persisted - lives and dies with the
 /// owning JsonViewModel/NdJsonViewModel. UI-thread only; background code must marshal through
 /// Dispatcher.UIThread before touching this.
 /// </summary>
 public sealed class DateHintSettings : ObservableObject
 {
-    private readonly Dictionary<int, DateDecodingScheme> tokenOverrides = new();
+    private readonly Dictionary<long, DateDecodingScheme> valueOverrides = new();
     private DateDecodingScheme fileDefaultScheme = DateDecodingScheme.Off;
     private bool isUserSelected;
     private DateHintTimeZoneMode timeZoneMode = DateHintTimeZoneMode.Local;
@@ -40,7 +40,7 @@ public sealed class DateHintSettings : ObservableObject
     }
 
     /// <summary>Raised whenever a change could affect a previously rendered hint: a default
-    /// scheme change or a per-token override change. Never raised for no-op changes.</summary>
+    /// scheme change or a per-value override change. Never raised for no-op changes.</summary>
     public event EventHandler? HintsChanged;
 
     public void SetUserDefault(DateDecodingScheme scheme)
@@ -65,26 +65,27 @@ public sealed class DateHintSettings : ObservableObject
         return true;
     }
 
-    /// <summary>Sets or clears (scheme: null) a per-token override for the current session.</summary>
-    public void SetTokenOverride(int tokenIndex, DateDecodingScheme? scheme)
+    /// <summary>Sets or clears (scheme: null) the override for the value starting at
+    /// <paramref name="valueOffset"/>, for the current session.</summary>
+    public void SetValueOverride(long valueOffset, DateDecodingScheme? scheme)
     {
         bool changed;
         if (scheme is { } s)
         {
-            changed = !tokenOverrides.TryGetValue(tokenIndex, out var existing) || existing != s;
-            tokenOverrides[tokenIndex] = s;
+            changed = !valueOverrides.TryGetValue(valueOffset, out var existing) || existing != s;
+            valueOverrides[valueOffset] = s;
         }
         else
         {
-            changed = tokenOverrides.Remove(tokenIndex);
+            changed = valueOverrides.Remove(valueOffset);
         }
 
         if (changed)
             HintsChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    public DateDecodingScheme GetEffectiveScheme(int tokenIndex)
-        => tokenOverrides.TryGetValue(tokenIndex, out var scheme) ? scheme : FileDefaultScheme;
+    public DateDecodingScheme GetEffectiveScheme(long valueOffset)
+        => valueOverrides.TryGetValue(valueOffset, out var scheme) ? scheme : FileDefaultScheme;
 
     public void SetTimeZoneMode(DateHintTimeZoneMode mode)
     {

@@ -164,6 +164,36 @@ public class RawCaretControllerTests
         Assert.Equal(CaretAffinity.Upstream, caret.Caret.Affinity);
     }
 
+    [Theory]
+    [InlineData("ab\n{cd")]
+    [InlineData("ab\r\n[cd")]
+    [InlineData("ab\nxcd")]
+    public void MovingLeftOntoALinesFirstCharacter_StaysOnThatLine(string text)
+    {
+        // A line's start after a line ending is not a wrap boundary: the caret must stay before
+        // its first character, not be drawn at the end of the line above.
+        var (caret, _, _) = Over(text);
+        int lineStart = text.IndexOf('\n') + 1;
+        caret.PlaceAt(lineStart + 1);
+
+        caret.MoveLeft(extend: false);
+
+        Assert.Equal(lineStart, caret.Caret.Offset);
+        Assert.Equal(CaretAffinity.Downstream, caret.Caret.Affinity);
+    }
+
+    [Fact]
+    public void EndOnAnEmptyLine_StaysOnThatLine()
+    {
+        var (caret, index, _) = Over("ab\n\ncd");
+        caret.PlaceAt(3);
+
+        caret.MoveToRowEnd(extend: false);
+
+        Assert.Equal(3, caret.Caret.Offset);
+        Assert.False(RawCaretController.IsWrapBoundary(index, index.RowForOffset(3)!.Value, 3));
+    }
+
     [Fact]
     public void ACaretNeverLandsInsideALineEnding()
     {

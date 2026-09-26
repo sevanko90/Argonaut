@@ -1,6 +1,6 @@
 # Windows Store & Mac App Store distribution: what's needed, vs. Velopack/GitHub
 
-Companion to [velopack-auto-update-plan.md](velopack-auto-update-plan.md). That plan
+Companion to the Velopack auto-update, which is built (`Shell/Updates/UpdateService.cs`). That design
 assumes GitHub tags/Releases stay the **source of truth** for every build — this doc
 keeps that constraint: the Microsoft Store and Mac App Store are evaluated purely as
 *additional distribution channels* built from the same tagged source, not as a
@@ -94,7 +94,7 @@ for this codebase:
 - **Saving needs a sandbox-specific implementation.** A picker grant covers the chosen file, not
   its folder, so the shipped save (`SiblingFileReplacer`, a temp file beside the original) is
   denied. The save path is built behind `IFileReplacer` for this reason - see
-  [save-plan.md](save-plan.md) for the replacement - and needs the
+  [roadmap.md](roadmap.md) for the replacement - and needs the
   `com.apple.security.files.user-selected.read-write` entitlement plus read-write (not read-only)
   security-scoped bookmarks for recent files that should stay saveable.
 - `MMapFile`/`Utf8JsonReader` etc. operate on whatever `SafeFileHandle`/stream the

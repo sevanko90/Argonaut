@@ -29,7 +29,7 @@ namespace Argonaut.Engine.Collections;
 ///  - Items below the published Count are immutable, with one escape hatch: the writer may
 ///    mutate designated fields of an already-published item through <see cref="ItemRef"/>,
 ///    but any such field MUST be accessed with Volatile.Read/Volatile.Write by BOTH sides
-///    (see PackedToken.EndIndex in JsonStructureIndex). A plain read of a concurrently
+///    (see a container's End in SparseContainerIndex). A plain read of a concurrently
 ///    mutated field can be stale or - as part of a wider struct copy - torn.
 /// </summary>
 public sealed class SegmentedAppendLog<T> where T : struct

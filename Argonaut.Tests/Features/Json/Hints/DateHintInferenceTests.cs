@@ -1,72 +1,34 @@
-using Argonaut.Engine.Bytes;
 using Argonaut.Features.Json.Hints;
-using Argonaut.Features.Json.Indexing;
+using Argonaut.Tests.Support;
 
 namespace Argonaut.Tests.Features.Json.Hints;
 
+/// <summary>The scheme a document's first date-like number suggests, looking only so far.</summary>
 public class DateHintInferenceTests
 {
-    private static (JsonStructureIndex Index, MMapFile Mmap, string Path) BuildIndex(string json)
+    private static DateDecodingScheme? FirstScheme(string json, int maxValues = DateHintInference.MaxValuesToScan)
     {
-        string path = Path.GetTempFileName();
-        File.WriteAllText(path, json);
-
-        var mmap = new MMapFile(path);
-        var index = JsonStructureIndex.StartIndexing(mmap);
-        index.IndexingTask.GetAwaiter().GetResult();
-        return (index, mmap, path);
+        var tree = new JsonTreeHarness(json);
+        return DateHintInference.FindFirstScheme(tree.Index.Structure, tree.Reader, tree.Text, maxValues);
     }
 
     [Fact]
     public void FindsFirstClassifiedNumber_InDocumentOrder()
     {
         // "b":123 is a Number too short to classify; "c" is the first classifiable one.
-        const string json = "{\"a\":\"x\",\"b\":123,\"c\":1709305509,\"d\":1709305509000}";
-        var (index, mmap, path) = BuildIndex(json);
-        try
-        {
-            var scheme = DateHintInference.FindFirstScheme(index, mmap, DateHintInference.MaxTokensToScan);
-            Assert.Equal(DateDecodingScheme.JsSeconds, scheme);
-        }
-        finally
-        {
-            mmap.Dispose();
-            File.Delete(path);
-        }
+        Assert.Equal(DateDecodingScheme.JsSeconds, FirstScheme("{\"a\":\"x\",\"b\":123,\"c\":1709305509,\"d\":1709305509000}"));
     }
 
     [Fact]
     public void NoCandidates_ReturnsNull()
-    {
-        const string json = "{\"a\":\"x\",\"b\":123,\"c\":true}";
-        var (index, mmap, path) = BuildIndex(json);
-        try
-        {
-            var scheme = DateHintInference.FindFirstScheme(index, mmap, DateHintInference.MaxTokensToScan);
-            Assert.Null(scheme);
-        }
-        finally
-        {
-            mmap.Dispose();
-            File.Delete(path);
-        }
-    }
+        => Assert.Null(FirstScheme("{\"a\":\"x\",\"b\":123,\"c\":true}"));
 
     [Fact]
-    public void MaxTokensCap_IsRespected()
+    public void TheValueCapIsRespected()
     {
-        // The classifiable value sits well past a small cap, so it must not be found.
+        // The classifiable value is the fifth row (the root, then a, b, c), past a cap of four.
         const string json = "{\"a\":1,\"b\":2,\"c\":3,\"d\":1709305509}";
-        var (index, mmap, path) = BuildIndex(json);
-        try
-        {
-            var scheme = DateHintInference.FindFirstScheme(index, mmap, maxTokens: 4);
-            Assert.Null(scheme);
-        }
-        finally
-        {
-            mmap.Dispose();
-            File.Delete(path);
-        }
+        Assert.Null(FirstScheme(json, maxValues: 4));
+        Assert.Equal(DateDecodingScheme.JsSeconds, FirstScheme(json, maxValues: 5));
     }
 }

@@ -1,5 +1,4 @@
 using System.Text;
-using System.Text.Json;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Indexing.Lines;
 using Argonaut.Features.Json.Indexing;
@@ -93,52 +92,54 @@ public class GrowingSourceIndexingTests
         Assert.Equal(new FileLineSpan(2, 1), index.GetLineSpan(1));
     }
 
-    // ---- JSON structure index ----------------------------------------------------------
+    // ---- JSON sparse index -------------------------------------------------------------
 
     [Fact]
-    public async Task JsonStructureIndex_IndexesEveryTokenThatArrivesAfterTheScanStarted()
+    public async Task JsonSparseIndex_IndexesEverythingThatArrivesAfterTheScanStarted()
     {
         byte[] payload = Encoding.UTF8.GetBytes(
             "{\"items\":[" + string.Join(',', Enumerable.Range(0, 60).Select(i => $"{{\"id\":{i},\"name\":\"row {i}\"}}")) + "]}");
         var source = new GrowingByteSource(payload, initiallyAvailable: 5);
 
-        var index = JsonStructureIndex.StartIndexing(source);
+        var index = JsonSparseIndex.StartIndexing(source, promotionBytes: 16, checkpointBytes: 8);
         await DripAsync(source, payload.Length / 10, 10);
         await index.IndexingTask;
 
-        var settled = JsonStructureIndex.StartIndexing(new MemoryByteSource(payload));
+        var settled = JsonSparseIndex.StartIndexing(new MemoryByteSource(payload), promotionBytes: 16, checkpointBytes: 8);
         await settled.IndexingTask;
 
         Assert.Null(index.Failure);
         Assert.True(source.Waits > 0, "the scan never actually waited for more bytes");
-        Assert.Equal(settled.TokenCount, index.TokenCount);
-        for (int i = 0; i < settled.TokenCount; i++)
-            Assert.Equal(settled.GetToken(i), index.GetToken(i));
+        Assert.True(settled.Structure.ContainerCount > 2);
+        Assert.Equal(settled.Structure.ContainerCount, index.Structure.ContainerCount);
+        for (int i = 0; i < settled.Structure.ContainerCount; i++)
+            Assert.Equal(settled.Structure.GetContainer(i), index.Structure.GetContainer(i));
+        Assert.Equal(settled.Structure.CheckpointCount, index.Structure.CheckpointCount);
+        for (int i = 0; i < settled.Structure.CheckpointCount; i++)
+            Assert.Equal(settled.Structure.GetCheckpoint(i), index.Structure.GetCheckpoint(i));
     }
 
     [Fact]
-    public async Task JsonStructureIndex_WaitsWhenAWindowEndsPartwayThroughAToken()
+    public async Task JsonSparseIndex_WaitsWhenAWindowEndsPartwayThroughAToken()
     {
         // Cut inside the number 123456789 so the reader consumes nothing from the first window
         // and has to wait for the rest rather than treating it as a token too large to parse.
         byte[] payload = Encoding.UTF8.GetBytes("{\"value\":123456789}");
         var source = new GrowingByteSource(payload, initiallyAvailable: 13);
 
-        var index = JsonStructureIndex.StartIndexing(source);
+        var index = JsonSparseIndex.StartIndexing(source);
         await Task.Delay(Settle);
         Assert.False(index.IndexingTask.IsCompleted);
 
         source.Seal();
         await index.IndexingTask;
 
+        // Not a token too large to parse, nor a truncated document: it waited for the rest.
         Assert.Null(index.Failure);
-        var number = index.GetToken(1);
-        Assert.Equal(JsonTokenKind.Number, number.Kind);
-        Assert.Equal("123456789", source.GetUtf8String(number.Offset, number.Length));
     }
 
     [Fact]
-    public async Task JsonStructureIndex_ATruncatedDownloadFailsRatherThanReportingAPartialIndex()
+    public async Task JsonSparseIndex_ATruncatedDownloadFailsRatherThanReportingAPartialIndex()
     {
         byte[] payload = Encoding.UTF8.GetBytes("{\"a\":1,\"b\":2}");
         var source = new GrowingByteSource(payload, initiallyAvailable: 6);
@@ -147,14 +148,15 @@ public class GrowingSourceIndexingTests
         // byte 6" rather than a race between the seal and the first window.
         source.SealWhereItIs();
 
-        var index = JsonStructureIndex.StartIndexing(source);
+        var index = JsonSparseIndex.StartIndexing(source);
         try
         {
             await index.IndexingTask;
         }
-        catch (JsonException)
+        catch (Exception)
         {
-            // Malformed input faults the task and records the failure - see JsonFailureLocationTests.
+            // Malformed input faults the task - from whichever pass stops first - and records the
+            // failure; see JsonFailureLocationTests.
         }
 
         Assert.NotNull(index.Failure);

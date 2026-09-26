@@ -1,5 +1,6 @@
 using System.Text;
 using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Indexing;
 using Argonaut.Features.Json.Diff;
 using Argonaut.Features.Json.Indexing;
 using BenchmarkDotNet.Attributes;
@@ -9,9 +10,10 @@ namespace Argonaut.Tests.Benchmarks;
 
 /// <summary>
 /// End-to-end allocation/time coverage for the widest array level JsonDiffIndex will align.
-/// Index construction happens in setup, so the measured operation is only diff alignment and
-/// record emission. The three shapes exercise the unique-anchor fast path, the capped Myers
-/// fallback, and a large out-of-order anchor set respectively.
+/// Index construction happens in setup, so the measured operation is only reading the elements,
+/// hashing them from their bytes, alignment and record emission. Every shape differs at both ends,
+/// so trimming leaves the whole array as the middle to align. The three exercise the unique-anchor
+/// fast path, the capped Myers fallback, and a large out-of-order anchor set respectively.
 /// </summary>
 [MemoryDiagnoser]
 [ShortRunJob]
@@ -19,19 +21,17 @@ public class JsonDiffAlignmentBenchmarks
 {
     private const int ElementCount = JsonDiffIndex.MaxAlignableArrayElements;
 
-    [Params(AlignmentShape.OneChanged, AlignmentShape.AllChanged, AlignmentShape.Reordered)]
+    [Params(AlignmentShape.EndsChanged, AlignmentShape.AllChanged, AlignmentShape.Reordered)]
     public AlignmentShape Shape { get; set; }
 
     private string leftPath = null!;
     private string rightPath = null!;
-    private MMapFile leftFile = null!;
-    private MMapFile rightFile = null!;
-    private JsonStructureIndex leftIndex = null!;
-    private JsonStructureIndex rightIndex = null!;
+    private IndexedSourceSession<JsonSparseIndex> left = null!;
+    private IndexedSourceSession<JsonSparseIndex> right = null!;
 
     public enum AlignmentShape
     {
-        OneChanged,
+        EndsChanged,
         AllChanged,
         Reordered
     }
@@ -45,24 +45,21 @@ public class JsonDiffAlignmentBenchmarks
         WriteArray(leftPath, i => i);
         WriteArray(rightPath, Shape switch
         {
-            AlignmentShape.OneChanged => i => i == ElementCount - 1 ? -1 : i,
+            AlignmentShape.EndsChanged => i => i == 0 ? -2 : i == ElementCount - 1 ? -1 : i,
             AlignmentShape.AllChanged => i => i + ElementCount,
             AlignmentShape.Reordered => i => ElementCount - 1 - i,
             _ => throw new ArgumentOutOfRangeException()
         });
 
-        leftFile = new MMapFile(leftPath);
-        rightFile = new MMapFile(rightPath);
-        var options = new JsonIndexOptions { ComputeContentHashes = true };
-        leftIndex = JsonStructureIndex.StartIndexing(leftFile, options);
-        rightIndex = JsonStructureIndex.StartIndexing(rightFile, options);
-        Task.WaitAll(leftIndex.IndexingTask, rightIndex.IndexingTask);
+        left = IndexedSourceSession<JsonSparseIndex>.Start(new MMapFile(leftPath), JsonSparseIndex.StartIndexingWithContentHashes);
+        right = IndexedSourceSession<JsonSparseIndex>.Start(new MMapFile(rightPath), JsonSparseIndex.StartIndexingWithContentHashes);
+        Task.WaitAll(left.IndexingTask, right.IndexingTask);
     }
 
     [Benchmark]
     public int AlignMaximumArray()
     {
-        var diff = JsonDiffIndex.Start(leftIndex, leftFile, rightIndex, rightFile);
+        var diff = JsonDiffIndex.Start(left, right);
         diff.IndexingTask.GetAwaiter().GetResult();
         return diff.RecordCount;
     }
@@ -70,8 +67,8 @@ public class JsonDiffAlignmentBenchmarks
     [GlobalCleanup]
     public void Cleanup()
     {
-        leftFile.Dispose();
-        rightFile.Dispose();
+        left.Dispose();
+        right.Dispose();
         File.Delete(leftPath);
         File.Delete(rightPath);
     }

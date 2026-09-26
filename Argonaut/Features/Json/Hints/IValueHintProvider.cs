@@ -19,8 +19,8 @@ public interface IValueHintProvider
     bool TryClassify(JsonTokenKind kind, ReadOnlySpan<byte> rawValue, out ValueHintCandidate candidate);
 
     /// <summary>Formats the display hint for a classified candidate under current settings
-    /// (a per-token override wins over the file default). Null means no hint should render.</summary>
-    string? FormatHint(in ValueHintCandidate candidate, int tokenIndex);
+    /// (an override for this value wins over the file default). Null means no hint should render.</summary>
+    string? FormatHint(in ValueHintCandidate candidate, long valueOffset);
 
     /// <summary>Raised (UI thread) when settings changed such that previously formatted hints
     /// are stale and realized rows should be re-rendered.</summary>

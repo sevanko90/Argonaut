@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
-using Argonaut.Engine.Bytes;
-using Argonaut.Engine.Text;
+using Argonaut.Engine.Indexing.Trees;
 using Argonaut.Features.Json.Indexing;
+using Argonaut.Features.Json.Tree;
 using Argonaut.Ui.TableGrid;
 
 namespace Argonaut.Features.Json.ArrayTable;
@@ -81,8 +81,8 @@ public sealed class OpenColumns
 /// <see cref="ExpandedRoutes"/> that say where each of them lives inside an element, the headers
 /// that let the user open and close containers, and what the sample saw nested in each column.
 ///
-/// The walk is the one the table has always done - the sampled elements' direct children, each
-/// nested container skipped whole - with one addition: a container whose key is in
+/// The walk reads the sampled elements' direct children, each nested container stepped over
+/// whole, with one addition: a container whose key is in
 /// <see cref="OpenColumns"/> is walked into instead of drawn, and its children become columns. So
 /// the cost of discovery tracks what has been opened, and an untouched table costs exactly what
 /// it did before.
@@ -123,24 +123,22 @@ public static class JsonArrayColumnDiscovery
 
     /// <summary>
     /// Walks <paramref name="sample"/> elements of <paramref name="elements"/> and builds the
-    /// whole shape. <paramref name="cellText"/> is the same builder the cells are rendered with,
-    /// so a container column is widthed from the summary it will actually show rather than from
-    /// its one-byte brace token.
+    /// whole shape. <paramref name="text"/> is what the cells are rendered with, so a container
+    /// column is widthed from the summary it will actually show rather than from its brace.
     /// </summary>
-    internal static DiscoveredColumns FromSample(JsonStructureIndex index, IByteSource file,
-        JsonArrayElementIndex elements, int sample, JsonRowFactory cellText, OpenColumns open, int arrayColumns)
+    internal static DiscoveredColumns FromSample(JsonTreeReader reader, JsonTreeText text,
+        JsonArrayElements elements, int sample, OpenColumns open, int arrayColumns)
     {
-        var walk = new Walk(index, file, cellText, open, Math.Clamp(arrayColumns, 1, MaxArrayColumns));
+        var walk = new Walk(reader, text, open, Math.Clamp(arrayColumns, 1, MaxArrayColumns));
 
         for (int e = 0; e < sample; e++)
         {
-            int token = elements.TokenForElement(e);
-            var element = index.GetToken(token);
+            var element = elements.ElementAt(e);
 
-            if (element.Kind == JsonTokenKind.StartObject)
-                walk.Object(token, element, keyPrefix: string.Empty, displayPrefix: string.Empty, ancestors: []);
+            if (element.FormatKind == (byte)JsonTokenKind.StartObject)
+                walk.Object(element, keyPrefix: string.Empty, displayPrefix: string.Empty, ancestors: []);
             else
-                walk.Element(token, element);
+                walk.Element(element);
         }
 
         return walk.Finish();
@@ -152,9 +150,8 @@ public static class JsonArrayColumnDiscovery
     /// </summary>
     private sealed class Walk
     {
-        private readonly JsonStructureIndex index;
-        private readonly IByteSource file;
-        private readonly JsonRowFactory cellText;
+        private readonly JsonTreeReader reader;
+        private readonly JsonTreeText text;
         private readonly OpenColumns open;
         private readonly int arrayColumns;
 
@@ -175,41 +172,41 @@ public static class JsonArrayColumnDiscovery
         private bool truncated;
         private int valueChars;
 
-        public Walk(JsonStructureIndex index, IByteSource file, JsonRowFactory cellText, OpenColumns open, int arrayColumns)
+        public Walk(JsonTreeReader reader, JsonTreeText text, OpenColumns open, int arrayColumns)
         {
-            this.index = index;
-            this.file = file;
-            this.cellText = cellText;
+            this.reader = reader;
+            this.text = text;
             this.open = open;
             this.arrayColumns = arrayColumns;
         }
 
         /// <summary>A sampled element that is not an object: it has no properties to distribute,
         /// so it only ever widths the single "value" column.</summary>
-        public void Element(int token, JsonTokenInfo element)
-            => this.valueChars = Math.Max(this.valueChars, RenderedLength(token, element));
+        public void Element(TreeNode element)
+            => this.valueChars = Math.Max(this.valueChars, RenderedLength(element));
 
         /// <summary>An object's direct children, each one either drawn as a column or - when it
         /// is an open container - walked into.</summary>
-        public void Object(int token, JsonTokenInfo container, string keyPrefix, string displayPrefix,
+        public void Object(TreeNode container, string keyPrefix, string displayPrefix,
             IReadOnlyList<JsonArrayColumnHeaderSegment> ancestors)
         {
             this.sawObject = true;
 
-            for (int child = token + 1; child < container.EndIndex;)
+            long position = this.reader.FirstChildPosition(container.ValueStart);
+            while (this.reader.TryReadChild(container.FormatKind, ref position, out var child, out _))
             {
-                var info = this.index.GetToken(child);
-                if (info.NameLength >= 0)
+                if (this.text.Name(child) is { } name)
                 {
-                    string name = DisplayText.Read(this.file, info.NameOffset, info.NameLength, out _);
-                    Draw(child, info, parent: keyPrefix,
+                    Draw(child, parent: keyPrefix,
                         key: keyPrefix + NameMarker + name,
                         display: displayPrefix.Length == 0 ? name : displayPrefix + "." + name,
                         segment: displayPrefix.Length == 0 ? name : "." + name,
                         ancestors);
                 }
 
-                child = IsContainer(info.Kind) ? info.EndIndex + 1 : child + 1;
+                position = this.text.End(child);
+                if (position == long.MaxValue)
+                    break;
             }
         }
 
@@ -218,24 +215,33 @@ public static class JsonArrayColumnDiscovery
         /// remainder's route is the ARRAY's own, so its cell shows the same summary the collapsed
         /// column did - the reader sees the positions drawn AND how many there really are.
         /// </summary>
-        private void Array(int token, JsonTokenInfo container, string key, string display,
+        private void Array(TreeNode container, string key, string display,
             IReadOnlyList<JsonArrayColumnHeaderSegment> ancestors)
         {
-            int position = 0;
-            int child = token + 1;
-            for (; child < container.EndIndex && position < this.arrayColumns; position++)
+            long position = this.reader.FirstChildPosition(container.ValueStart);
+            int drawn = 0;
+            bool more = false;
+            while (this.reader.TryReadChild(container.FormatKind, ref position, out var child, out _))
             {
-                var info = this.index.GetToken(child);
-                Draw(child, info, parent: key,
-                    key: key + IndexMarker + position,
-                    display: display + "[" + position + "]",
-                    segment: "[" + position + "]",
-                    ancestors);
+                if (drawn == this.arrayColumns)
+                {
+                    more = true;
+                    break;
+                }
 
-                child = IsContainer(info.Kind) ? info.EndIndex + 1 : child + 1;
+                Draw(child, parent: key,
+                    key: key + IndexMarker + drawn,
+                    display: display + "[" + drawn + "]",
+                    segment: "[" + drawn + "]",
+                    ancestors);
+                drawn++;
+
+                position = this.text.End(child);
+                if (position == long.MaxValue)
+                    break;
             }
 
-            if (child >= container.EndIndex)
+            if (!more)
                 return;
 
             // More positions than were drawn. Registered against the ARRAY - same route, so the
@@ -245,16 +251,16 @@ public static class JsonArrayColumnDiscovery
             if (column < 0)
                 return;
 
-            this.maxChars[column] = Math.Max(this.maxChars[column], RenderedLength(token, container));
-            this.nesting[column] = Nested(this.nesting[column], token, container);
+            this.maxChars[column] = Math.Max(this.maxChars[column], RenderedLength(container));
+            this.nesting[column] = Nested(this.nesting[column], container);
         }
 
         /// <summary>One child: walked into when it is an open container, drawn as a column
         /// otherwise.</summary>
-        private void Draw(int token, JsonTokenInfo info, string parent, string key, string display, string segment,
+        private void Draw(TreeNode node, string parent, string key, string display, string segment,
             IReadOnlyList<JsonArrayColumnHeaderSegment> ancestors)
         {
-            bool isContainer = IsContainer(info.Kind) && info.EndIndex >= 0;
+            bool isContainer = node.IsContainer && this.text.End(node) != long.MaxValue;
             if (isContainer && this.open.IsOpen(key))
             {
                 // An open container draws no column of its own, but it still holds a place among
@@ -262,10 +268,10 @@ public static class JsonArrayColumnDiscovery
                 Place(parent, key);
 
                 var inside = Append(ancestors, new JsonArrayColumnHeaderSegment(segment, key));
-                if (info.Kind == JsonTokenKind.StartObject)
-                    Object(token, info, key, display, inside);
+                if (node.FormatKind == (byte)JsonTokenKind.StartObject)
+                    Object(node, key, display, inside);
                 else
-                    Array(token, info, key, display, inside);
+                    Array(node, key, display, inside);
 
                 return;
             }
@@ -276,8 +282,8 @@ public static class JsonArrayColumnDiscovery
             if (column < 0)
                 return;
 
-            this.maxChars[column] = Math.Max(this.maxChars[column], RenderedLength(token, info));
-            this.nesting[column] = Nested(this.nesting[column], token, info);
+            this.maxChars[column] = Math.Max(this.maxChars[column], RenderedLength(node));
+            this.nesting[column] = Nested(this.nesting[column], node);
         }
 
         private int Register(string parent, string key, string display, string segment,
@@ -408,47 +414,44 @@ public static class JsonArrayColumnDiscovery
                 System.Runtime.InteropServices.CollectionsMarshal.AsSpan(this.maxChars));
 
         /// <summary>
-        /// Characters the cell for this token will actually render. A scalar's raw token length
-        /// is that already (quotes included, which the cell shows), but a container's is the
-        /// brace alone - one character - while the cell shows a summary like <c>{ 6 members }</c>.
-        /// Widthing a column of nested objects from the brace is what left every container column
-        /// at the minimum width, trimmed to "{ 6 mem...", so containers are measured from the
-        /// summary itself. It is built here, for a bounded sample, and thrown away.
+        /// Characters the cell for this value will actually render: a scalar as written, quotes
+        /// included, and a container as its summary (<c>{ 6 members }</c>) rather than its brace -
+        /// widthing from the brace is what left every container column trimmed to "{ 6 mem...".
+        /// Built for a bounded sample and thrown away.
         /// </summary>
-        private int RenderedLength(int tokenIndex, JsonTokenInfo token)
-            => IsContainer(token.Kind)
-                ? this.cellText.BuildContainerSummary(tokenIndex, token, expanded: false).Length
-                : token.Length;
+        private int RenderedLength(TreeNode node)
+            => node.IsContainer ? this.text.ValueText(node).Length : (int)Math.Min(int.MaxValue, node.ValueEnd - node.ValueStart);
 
         /// <summary>Folds one sampled value into what its column has been seen to hold. Scalars
         /// leave it alone; a container contributes its byte span, and an array its arity.</summary>
-        private ColumnNesting Nested(ColumnNesting seen, int tokenIndex, JsonTokenInfo token)
+        private ColumnNesting Nested(ColumnNesting seen, TreeNode node)
         {
-            if (!IsContainer(token.Kind) || token.EndIndex < 0)
+            if (!node.IsContainer)
                 return seen;
 
-            var end = this.index.GetToken(token.EndIndex);
-            long bytes = end.Offset + end.Length - token.Offset;
+            long end = this.text.End(node);
+            if (end == long.MaxValue)
+                return seen;
 
-            return token.Kind == JsonTokenKind.StartObject
+            long bytes = end - node.ValueStart;
+            return node.FormatKind == (byte)JsonTokenKind.StartObject
                 ? seen.WithObject(bytes)
-                : seen.WithArray(CountChildren(tokenIndex, token, ColumnNesting.ArityCap), bytes);
+                : seen.WithArray(CountChildren(node, ColumnNesting.ArityCap), bytes);
         }
 
-        /// <summary>
-        /// Direct children of a container, counting no further than <paramref name="cap"/> - the
-        /// same subtree-skipping hop the row walk uses, stopped early because the answer is only
-        /// ever compared against how many columns an expansion would draw. O(cap) per sampled
-        /// container, no file read.
-        /// </summary>
-        private int CountChildren(int containerTokenIndex, JsonTokenInfo container, int cap)
+        /// <summary>Direct children of a container, counting no further than
+        /// <paramref name="cap"/> - the answer is only ever compared against how many columns an
+        /// expansion would draw.</summary>
+        private int CountChildren(TreeNode container, int cap)
         {
             int count = 0;
-            for (int child = containerTokenIndex + 1; child < container.EndIndex && count < cap;)
+            long position = this.reader.FirstChildPosition(container.ValueStart);
+            while (count < cap && this.reader.TryReadChild(container.FormatKind, ref position, out var child, out _))
             {
-                var info = this.index.GetToken(child);
                 count++;
-                child = IsContainer(info.Kind) ? info.EndIndex + 1 : child + 1;
+                position = this.text.End(child);
+                if (position == long.MaxValue)
+                    break;
             }
 
             return count;
@@ -487,6 +490,4 @@ public static class JsonArrayColumnDiscovery
 
         return steps.ToArray();
     }
-
-    private static bool IsContainer(JsonTokenKind kind) => kind is JsonTokenKind.StartObject or JsonTokenKind.StartArray;
 }

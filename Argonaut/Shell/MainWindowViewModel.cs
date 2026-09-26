@@ -94,10 +94,6 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private string? currentFilePath;
     private FileTypeDetector.FileKind currentKind;
-
-    // The view "Show in …" returns to from the text view: the last non-text view published over
-    // the current input. Unknown when there is none - a file detected as plain text, or a diff.
-    private FileTypeDetector.FileKind structuredKind;
     private string statusText = "No file loaded";
     private string title = DefaultTitle;
     private string fileName = string.Empty;
@@ -289,7 +285,7 @@ public sealed class MainWindowViewModel : ObservableObject
     /// <summary>
     /// Switches to the raw viewer (if not already showing it) and reveals
     /// <paramref name="range"/> there - behind <see cref="RawJumpService"/> requests (JsonView's
-    /// "show in text" for the selected node, and its "view in raw" link on a truncated value).
+    /// "Show in text view" on a node's menu, and its "view in raw" link on a truncated value).
     /// Asks the current document for the CAPABILITY (<see cref="IByteRangeNavigable"/>) rather
     /// than matching its concrete type, so the shell holds no concrete-type match on a document
     /// at all (see docs/architecture.md).
@@ -304,31 +300,6 @@ public sealed class MainWindowViewModel : ObservableObject
 
         if (CurrentDocument is IByteRangeNavigable navigable)
             await navigable.RevealByteRangeAsync(range);
-    }
-
-    /// <summary>Whether <see cref="ToggleTextViewAsync"/> has somewhere to go: into the text view
-    /// from any other, or back out of it to the view it was reached from.</summary>
-    public bool CanToggleTextView => IsFileOpen &&
-        (currentKind != FileTypeDetector.FileKind.Unidentified || structuredKind != FileTypeDetector.FileKind.Unknown);
-
-    /// <summary>What <see cref="ToggleTextViewAsync"/> will do, for its button.</summary>
-    public string TextViewToggleText => currentKind == FileTypeDetector.FileKind.Unidentified
-        ? $"Show in {DisplayNameFor(structuredKind)}"
-        : "Show in text";
-
-    /// <summary>
-    /// Hops between the text view and the view it was reached from, carrying the position across
-    /// (see <see cref="SwitchViewAsync"/>): the JSON view's selected node becomes the text view's
-    /// selection, and the text view's caret becomes the selected node on the way back.
-    /// </summary>
-    public Task ToggleTextViewAsync()
-    {
-        if (!CanToggleTextView)
-            return Task.CompletedTask;
-
-        return SwitchViewAsync(currentKind == FileTypeDetector.FileKind.Unidentified
-            ? structuredKind
-            : FileTypeDetector.FileKind.Unidentified);
     }
 
     public IReadOnlyList<RecentFileItem> RecentFiles
@@ -923,10 +894,6 @@ public sealed class MainWindowViewModel : ObservableObject
         // sources - a temp-file-backed origin cannot be deleted while a mapping over it is open.
         AdoptOrigins(origins);
 
-        if (kind is not (FileTypeDetector.FileKind.Unknown or FileTypeDetector.FileKind.Unidentified))
-            structuredKind = kind;
-        NotifyTextViewToggleChanged();
-
         findController.Attach(navigator);
         IsFindAvailable = navigator is not null;
 
@@ -965,13 +932,6 @@ public sealed class MainWindowViewModel : ObservableObject
     /// </summary>
     private void AdoptOrigins(params IByteOrigin[] origins)
     {
-        // A different input has no view to return to yet; PublishDocument records one.
-        if (this.ownedOrigins.FirstOrDefault() != origins.FirstOrDefault())
-        {
-            structuredKind = FileTypeDetector.FileKind.Unknown;
-            NotifyTextViewToggleChanged();
-        }
-
         foreach (var owned in this.ownedOrigins)
         {
             if (Array.IndexOf(origins, owned) >= 0)
@@ -1023,15 +983,8 @@ public sealed class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(IsFileOpen));
         OnPropertyChanged(nameof(FilePath));
         OnPropertyChanged(nameof(CanCompare));
-        NotifyTextViewToggleChanged();
         NotifyFailurePropertiesChanged();
         NotifySavePropertiesChanged();
-    }
-
-    private void NotifyTextViewToggleChanged()
-    {
-        OnPropertyChanged(nameof(CanToggleTextView));
-        OnPropertyChanged(nameof(TextViewToggleText));
     }
 
     private void NotifyFailurePropertiesChanged()
@@ -1097,7 +1050,7 @@ public sealed class MainWindowViewModel : ObservableObject
     //
     // The document owns the save itself (ISaveableDocument); the shell owns what surrounds it -
     // where it goes, stopping search before the file is swapped, adopting a new origin after a
-    // Save As, and asking before anything would drop unsaved edits. See docs/save-plan.md.
+    // Save As, and asking before anything would drop unsaved edits. See "Saving" in docs/architecture.md.
 
     /// <summary>True when the current document is one that can be saved at all; drives whether the
     /// toolbar shows a Save button.</summary>

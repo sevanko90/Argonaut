@@ -24,7 +24,7 @@ public class JsonArrayRowCollectionTests
             using var session = LoadFromPath.StartArrayTable(path, 0, new FileInfo(path).Length);
             await session.IndexingTask;
 
-            using var rows = new JsonArrayRowCollection(session.Elements, session.Inner.Index, session.Inner.Bytes,
+            using var rows = new JsonArrayRowCollection(session.Elements, session.Reader, session.Text,
                 structure, RoutesFor(structure, mode), mode);
             assert(rows);
         }
@@ -56,7 +56,7 @@ public class JsonArrayRowCollectionTests
             using var session = LoadFromPath.StartArrayTable(path, 0, new FileInfo(path).Length);
             await session.IndexingTask;
 
-            using var rows = new JsonArrayRowCollection(session.Elements, session.Inner.Index, session.Inner.Bytes,
+            using var rows = new JsonArrayRowCollection(session.Elements, session.Reader, session.Text,
                 structure, routes, JsonArrayColumnMode.ByProperty);
             assert(rows);
         }
@@ -295,6 +295,6 @@ public class JsonArrayRowCollectionTests
                 new ColumnRoute([RouteStep.Property("geometry"), RouteStep.Property("type")], "geometry.type"),
             ]),
             // Ragged data, not an error: the route passes through a scalar, so it draws nothing
-            // and the walk moves on rather than reading EndIndex off a scalar token.
+            // and the walk moves on rather than descending into a scalar.
             rows => Assert.Equal([""], TextOf(rows, 0)));
 }

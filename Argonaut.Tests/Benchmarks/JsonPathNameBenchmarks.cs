@@ -1,6 +1,8 @@
 using System.Text;
 using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Indexing.Trees;
 using Argonaut.Features.Json.Indexing;
+using Argonaut.Features.Json.Tree;
 using BenchmarkDotNet.Attributes;
 
 namespace Argonaut.Tests.Benchmarks;
@@ -14,7 +16,8 @@ public class JsonPathNameBenchmarks
     [Params(false, true)] public bool Escaped { get; set; }
     private string path = null!;
     private MMapFile mmap = null!;
-    private JsonStructureIndex index = null!;
+    private JsonTreeReader reader = null!;
+    private JsonTreeText text = null!;
     private string serializedTarget = null!;
     private byte[] decodedTarget = null!;
 
@@ -31,30 +34,34 @@ public class JsonPathNameBenchmarks
         }
         File.WriteAllText(path, json.Append('}').ToString());
         mmap = new MMapFile(path);
-        index = JsonStructureIndex.StartIndexing(mmap);
+        var index = JsonSparseIndex.StartIndexing(mmap);
         index.IndexingTask.GetAwaiter().GetResult();
+        reader = new JsonTreeReader(mmap);
+        text = new JsonTreeText(mmap, index.Structure, reader);
         serializedTarget = prefix + "9999";
         decodedTarget = Encoding.UTF8.GetBytes("key9999");
     }
 
     [Benchmark(Baseline = true)]
-    public int PreviousSerializedLookup()
+    public long SerializedLookup()
     {
-        for (int i = 1; i < index.TokenCount - 1; i++)
+        long position = reader.FirstChildPosition(0);
+        while (reader.TryReadChild((byte)JsonTokenKind.StartObject, ref position, out var member, out _))
         {
-            var child = index.GetToken(i);
-            if (mmap.GetUtf8String(child.NameOffset, child.NameLength) == serializedTarget) return i;
+            if (Encoding.UTF8.GetString(text.NameBytes(member)) == serializedTarget) return member.RowStart;
+            position = member.ValueEnd;
         }
         return -1;
     }
 
     [Benchmark]
-    public int DecodedLookup()
+    public long DecodedLookup()
     {
-        for (int i = 1; i < index.TokenCount - 1; i++)
+        long position = reader.FirstChildPosition(0);
+        while (reader.TryReadChild((byte)JsonTokenKind.StartObject, ref position, out var member, out _))
         {
-            var child = index.GetToken(i);
-            if (JsonUnescape.EqualsDecodedUtf8(mmap.RequireContiguous(child.NameOffset, child.NameLength), decodedTarget)) return i;
+            if (JsonUnescape.EqualsDecodedUtf8(text.NameBytes(member), decodedTarget)) return member.RowStart;
+            position = member.ValueEnd;
         }
         return -1;
     }

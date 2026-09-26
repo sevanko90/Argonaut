@@ -17,6 +17,7 @@ namespace Argonaut.Tests.Features.Json.Indexing;
 /// </summary>
 public class JsonFailureLocationTests
 {
+    /// <summary>The failure the index's validation pass records.</summary>
     private static async Task<IndexFailure> FailureFor(string json)
     {
         string path = Path.Combine(Path.GetTempPath(), $"bad-{Guid.NewGuid():N}.json");
@@ -26,7 +27,7 @@ public class JsonFailureLocationTests
         try
         {
             file = new MMapFile(path);
-            var index = JsonStructureIndex.StartIndexing(file);
+            var index = JsonSparseIndex.StartIndexing(file);
             try
             {
                 await index.IndexingTask;

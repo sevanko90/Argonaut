@@ -45,8 +45,8 @@ public sealed record ColumnRoute(IReadOnlyList<RouteStep> Steps, string Display)
 /// This is what keeps a realized row bounded. Realizing a row walks an element's direct children
 /// exactly as it always did and asks the node it is standing on about each one:
 ///
-///   * no match, or a match with no <c>inner</c> - the child is skipped whole via
-///     <c>EndIndex + 1</c>, which is the cost the table has always paid;
+///   * no match, or a match with no <c>inner</c> - the child is skipped whole, from the
+///     index's record for a large one or by skipping its bytes for a small one;
 ///   * a match with an <c>inner</c> node - the walk descends into that child, and only that
 ///     child.
 ///

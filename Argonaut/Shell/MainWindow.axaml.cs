@@ -232,17 +232,6 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (e.Key == Key.T && cmdOrCtrl)
-        {
-            if (viewModel.CanToggleTextView)
-            {
-                _ = viewModel.ToggleTextViewAsync();
-                e.Handled = true;
-            }
-
-            return;
-        }
-
         if (e.Key == Key.F && cmdOrCtrl)
         {
             if (viewModel.IsFileOpen)
@@ -553,11 +542,6 @@ public partial class MainWindow : Window
             // Velopack ends the process without the app's Exit, which is where settings are saved.
             settings.Save();
             updateService.ApplyUpdatesAndRestart(info);
-    }
-
-    private void OnToggleTextView(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
-    {
-        _ = viewModel.ToggleTextViewAsync();
     }
 
     private void OnOpenLogFolder(object? sender, Avalonia.Interactivity.RoutedEventArgs e)

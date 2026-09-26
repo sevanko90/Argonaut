@@ -1,7 +1,8 @@
 using System;
 using System.Collections.Generic;
-using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Indexing.Trees;
 using Argonaut.Features.Json.Indexing;
+using Argonaut.Features.Json.Tree;
 
 namespace Argonaut.Features.Json.Schema;
 
@@ -9,11 +10,10 @@ namespace Argonaut.Features.Json.Schema;
 /// Reads the property names on the document's outermost object - the evidence
 /// <see cref="JsonSchemaRootMatcher"/> scores schema types against.
 ///
-/// A bounded structural walk in the same shape as <see cref="Hints.DateHintInference"/>: it hops
-/// direct children by <c>EndIndex</c> (the idiom
-/// <c>JsonVisibleRowCollection.AppendSubtree</c> already uses) and stops at
-/// <see cref="MaxKeys"/>, so it never scans a subtree and never depends on indexing having
-/// finished. Safe on a background thread - index reads and mapping spans are both read-only.
+/// A bounded walk in the same shape as <see cref="Hints.DateHintInference"/>: it hops from member
+/// to member - reading at most a small container through, since a large one's end is recorded -
+/// and stops at <see cref="MaxKeys"/>, so it never reads a subtree and never depends on indexing
+/// having finished. Safe on a background thread with its own reader and text.
 ///
 /// Keys are copied out of the mapping rather than handed back as spans, because the result
 /// outlives the call and the mapping must stay free to be unmapped.
@@ -33,92 +33,50 @@ public static class JsonDocumentKeySampler
 
     /// <summary>
     /// The outermost object's property names, or empty when there is no object to read them from
-    /// (a scalar document, an array of scalars, or indexing not yet far enough in).
+    /// (a scalar document, an array of scalars, or nothing arrived yet).
     ///
     /// An array document is sampled from its first element: a file that is a list of bookings is
     /// described by the booking schema, and matching its first element is what identifies that.
     /// The caller is responsible for knowing the match then applies to the array's items rather
     /// than to its root - see <paramref name="matchedElementOfArray"/>.
     /// </summary>
-    public static IReadOnlyList<byte[]> ReadRootKeys(JsonStructureIndex index, IByteSource bytes, out bool matchedElementOfArray)
+    public static IReadOnlyList<byte[]> ReadRootKeys(JsonTreeReader reader, JsonTreeText text, out bool matchedElementOfArray)
     {
-        ArgumentNullException.ThrowIfNull(index);
-        ArgumentNullException.ThrowIfNull(bytes);
-
         matchedElementOfArray = false;
-
-        if (index.TokenCount == 0)
+        long position = 0;
+        if (!reader.TryReadChild(JsonTreeReader.Document, ref position, out var root, out _))
             return Array.Empty<byte[]>();
 
-        var root = index.GetToken(0);
-        int containerIndex = 0;
+        if (root.FormatKind != (byte)JsonTokenKind.StartArray)
+            return ReadMemberNames(reader, text, root);
 
-        if (root.Kind == JsonTokenKind.StartArray)
-        {
-            // The first element is the array's own first child token, if it has been indexed.
-            if (index.TokenCount < 2)
-                return Array.Empty<byte[]>();
-
-            var first = index.GetToken(1);
-            if (first.Kind != JsonTokenKind.StartObject)
-                return Array.Empty<byte[]>();
-
-            containerIndex = 1;
-            matchedElementOfArray = true;
-        }
-        else if (root.Kind != JsonTokenKind.StartObject)
-        {
+        long first = reader.FirstChildPosition(root.ValueStart);
+        if (!reader.TryReadChild(root.FormatKind, ref first, out var element, out _) || element.FormatKind != (byte)JsonTokenKind.StartObject)
             return Array.Empty<byte[]>();
-        }
 
-        return ReadMemberNames(index, bytes, containerIndex);
+        matchedElementOfArray = true;
+        return ReadMemberNames(reader, text, element);
     }
 
     /// <summary>
-    /// The direct member names of the object starting at <paramref name="containerIndex"/>.
-    /// Public so the per-node match affordance can score any container the user points at, not
-    /// only the document root.
+    /// The direct member names of <paramref name="container"/>, up to <see cref="MaxKeys"/>; empty
+    /// for anything but an object. Public so a per-node match can score any object the user points
+    /// at, not only the document root. A member still arriving ends the sample.
     /// </summary>
-    public static IReadOnlyList<byte[]> ReadMemberNames(JsonStructureIndex index, IByteSource bytes, int containerIndex)
+    public static IReadOnlyList<byte[]> ReadMemberNames(JsonTreeReader reader, JsonTreeText text, TreeNode container)
     {
-        ArgumentNullException.ThrowIfNull(index);
-        ArgumentNullException.ThrowIfNull(bytes);
-
-        if ((uint)containerIndex >= (uint)index.TokenCount)
-            return Array.Empty<byte[]>();
-
-        var container = index.GetToken(containerIndex);
-        if (container.Kind != JsonTokenKind.StartObject)
+        if (container.FormatKind != (byte)JsonTokenKind.StartObject)
             return Array.Empty<byte[]>();
 
         var keys = new List<byte[]>();
-        int containerEnd = container.EndIndex;
-        int childIndex = containerIndex + 1;
-
-        while (keys.Count < MaxKeys)
+        long at = reader.FirstChildPosition(container.ValueStart);
+        while (keys.Count < MaxKeys && reader.TryReadChild((byte)JsonTokenKind.StartObject, ref at, out var member, out _))
         {
-            // A container still being indexed has EndIndex < 0; stopping at TokenCount samples
-            // whatever is there so far, which is the right answer for a partially-read file.
-            if (containerEnd >= 0 && childIndex >= containerEnd)
+            keys.Add(text.NameBytes(member).ToArray());
+
+            at = text.End(member);
+            if (at == long.MaxValue)
                 break;
-            if (childIndex >= index.TokenCount)
-                break;
-
-            var child = index.GetToken(childIndex);
-            if (child.NameLength > 0)
-                keys.Add(bytes.RequireContiguous(child.NameOffset, child.NameLength).ToArray());
-
-            if (child.Kind is JsonTokenKind.StartObject or JsonTokenKind.StartArray)
-            {
-                if (child.EndIndex < 0)
-                    break; // its sibling can't be located until it closes
-
-                childIndex = child.EndIndex + 1;
-            }
-            else
-            {
-                childIndex++;
-            }
         }
 
         return keys;

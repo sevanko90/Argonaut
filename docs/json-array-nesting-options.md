@@ -254,13 +254,5 @@ budget the whole feature has to live inside.
   A glyph would have to be paid for out of the column's discovered width, and the thing it would
   mark is already the only underlined, accent-coloured text in the header.
 
-## 6. Open questions
-
-- **Does an expansion survive Back and re-entry?** The table document is rebuilt from scratch on
-  every entry, so expansions are lost unless they are carried in the `ArrayTableRequest`. Cheap
-  to add later; not obviously wanted.
-- **Sort/filter by an expanded column** is a full scan, and therefore a separate feature with its
-  own budget. Expansion must not quietly become the thing that makes people expect it.
-- **Remainder column gesture.** Option B (open that array as its own table) is the natural
-  destination for a click on `coordinates[…]`, and would need the breadcrumb stack B was rejected
-  for lacking. Deferred until the pane proves insufficient.
+What is still open - keeping expansions across Back, sorting by an expanded column, opening a
+remainder column as its own table - is in [roadmap.md](roadmap.md).

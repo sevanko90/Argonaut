@@ -9,7 +9,7 @@ namespace Argonaut.Shell.Updates;
 
 /// <summary>
 /// Thin wrapper around Velopack's <see cref="UpdateManager"/>, sourcing releases straight from
-/// GitHub Releases (see docs/velopack-auto-update-plan.md). All members are safe to call from
+/// GitHub Releases. All members are safe to call from
 /// UI-originated async flows without explicit dispatching; the one exception is
 /// <see cref="DownloadUpdatesAsync"/>'s progress callback, which Velopack may invoke from a
 /// background thread, so it marshals via <c>Dispatcher.UIThread.Post</c> per the app's

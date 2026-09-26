@@ -8,8 +8,8 @@ namespace Argonaut.Tests.Benchmarks;
 /// What it costs to index a document for the JSON tree, per <see cref="JsonShape"/>: a full build
 /// (whose allocation is the index, reported against the file by
 /// <see cref="IndexBytesPerFileByteColumn"/>), and the wait before the first screen of rows can
-/// be shown. The baseline for the sparse index in docs/json-sparse-index-plan.md; the sparse
-/// index's build joins this class so both are measured over the same files.
+/// be shown - for the dense index and for the sparse one in docs/json-sparse-index-plan.md, over
+/// the same files.
 /// </summary>
 [MemoryDiagnoser]
 [SimpleJob(warmupCount: 2, iterationCount: 8)]
@@ -50,6 +50,14 @@ public class JsonTreeIndexBuildBenchmarks
         var index = JsonStructureIndex.StartIndexing(file);
         index.IndexingTask.GetAwaiter().GetResult();
         return index.TokenCount;
+    }
+
+    [Benchmark]
+    public int SparseIndex_FullBuild()
+    {
+        var index = JsonSparseIndex.StartIndexing(file);
+        index.IndexingTask.GetAwaiter().GetResult();
+        return index.Structure.ContainerCount + index.Structure.CheckpointCount;
     }
 
     [Benchmark]

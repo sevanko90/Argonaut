@@ -76,7 +76,11 @@ public sealed class SparseContainerIndexBuilder
         ref var frame = ref frames[depth - 1];
         frame.Ordinal++;
 
-        if (frame.Record >= 0 && resumeOffset - frame.LastCheckpoint >= index.CheckpointBytes)
+        // Eligibility is by position - past the promotion size - rather than by whether the
+        // container happens to be recorded yet, which depends on how often the scan called
+        // Advance and so on the source's buffer boundaries. The same bytes give the same index.
+        if (resumeOffset - frame.Start >= index.PromotionBytes
+            && resumeOffset - frame.LastCheckpoint >= index.CheckpointBytes)
         {
             index.checkpoints.Add(new TreeCheckpoint(resumeOffset, frame.Ordinal, frame.Record));
             frame.LastCheckpoint = resumeOffset;

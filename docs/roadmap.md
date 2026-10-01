@@ -37,8 +37,12 @@ it in (see "Saving" in architecture.md).
   `IFileReplacer`; `Stage` already takes the destination `IByteOrigin` so a security-scoped grant
   can travel with it, but Save As builds a `FileByteOrigin` from the picked path and would have to
   carry the picker's grant instead. It must meet the rules in architecture.md.
-- **IME and dead-key composition.** `Avalonia.Headless` posts finished text rather than
-  composition events, so it cannot be tested here.
+- **IME composition.** Deferred; not needed by current users. The raw editor takes committed text
+  only, through `RawTextSurface.OnTextInput`. Inline preedit and candidate-popup placement would
+  need a `TextInputMethodClient` on the surface and the preedit drawn as an overlay at the caret,
+  outside the piece table. Dead keys and committed IME text have not been checked with a real
+  input method, and `Avalonia.Headless` posts finished text rather than composition events, so
+  none of it can be tested here.
 - **In-memory rebuild when `NeedsRebuild` fires.** Past 524,288 line records (about half a
   million separate places edited) edits in new places are refused with a toast. A save clears this
   more cheaply, so only worth building if that proves not enough.

@@ -7,6 +7,7 @@ using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform.Storage;
+using Argonaut.Engine.Locations;
 using Argonaut.Engine.Logging;
 using Argonaut.Engine.Settings;
 using Argonaut.Features.Json.Schema;
@@ -51,7 +52,8 @@ public partial class App : Application
             var schemaCatalog = new JsonSchemaCatalog(JsonSchemaCatalog.BundledDirectoryBesideApp, AppDataPaths.SchemasDirectory,
                 revealDirectory: RevealDirectory);
 
-            var window = new MainWindow(settings, schemaCatalog, log, OpenLogFolderAction());
+            var window = new MainWindow(settings, schemaCatalog, log, OpenLogFolderAction(),
+                ConfigLocationSource.ForCurrentPlatform());
             mainWindow = window;
             desktop.MainWindow = window;
 

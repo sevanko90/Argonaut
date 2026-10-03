@@ -306,6 +306,7 @@ public sealed class FileOffsetIndex : AppendLogIndexBase<FileLineAnchor>, IBackg
         int lines = 0;
         long anchorOffset = 0;
         int anchorLine = 0;
+        var readAhead = new ReadAhead();
         this.items.Add(new FileLineAnchor(0, 0));
 
         try
@@ -335,6 +336,7 @@ public sealed class FileOffsetIndex : AppendLogIndexBase<FileLineAnchor>, IBackg
                 // Whatever length comes back is what this iteration covers: a single-buffer
                 // source always serves the whole chunk, and a split one just makes the loop take
                 // an extra turn (see IByteSource.GetContiguousSpan).
+                readAhead.Reached(file, offset);
                 var chunk = file.GetContiguousSpan(offset, (int)Math.Min(ScanChunkSize, available - offset));
                 if (chunk.IsEmpty)
                     continue;

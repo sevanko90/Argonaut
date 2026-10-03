@@ -223,6 +223,7 @@ public sealed class JsonSparseIndex : IBackgroundIndex
         var classifier = default(JsonBlockClassifier);
         Span<byte> gathered = stackalloc byte[JsonBlockClassifier.BlockSize];
         long nextReport = ProgressReportStride;
+        var readAhead = new ReadAhead();
 
         while (true)
         {
@@ -241,6 +242,7 @@ public sealed class JsonSparseIndex : IBackgroundIndex
                 continue;
             }
 
+            readAhead.Reached(source, offset);
             var span = source.GetContiguousSpan(offset, (int)Math.Min(ReadStride, available - offset));
             int whole = span.Length - (span.Length % JsonBlockClassifier.BlockSize);
             for (int i = 0; i < whole; i += JsonBlockClassifier.BlockSize)

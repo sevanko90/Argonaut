@@ -277,6 +277,13 @@ The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLeng
   never the accessor capacity (see CLAUDE.md), and a mapping never grows. `GetContiguousSpan`
   throws `ObjectDisposedException` after `Dispose` — a use-after-free is a catchable managed
   error, never a silent access violation.
+- **Sequential scans hint ahead of themselves.** A cold file read through a mapping is one page
+  fault at a time, each waiting on its own read - about a quarter of what the disk can deliver.
+  So the background scans (`RawSegmentIndex`, `FileOffsetIndex`, `JsonSparseIndex`) carry a
+  `ReadAhead` (`Engine/Bytes`) that keeps one to two 64 MB windows hinted ahead of their
+  position through `IByteSource.Prefetch` - `madvise(MADV_WILLNEED)` or
+  `PrefetchVirtualMemory` on a mapping, a no-op on everything else - and search hints each chunk
+  as it opens it. Cold raw indexing runs 1.7-2.3x faster for it; warm reads are unchanged.
 - `IndexedSourceSession<TIndex>` (`Engine/Indexing/IndexedSourceSession.cs`) owns the trio
   {source, background index, CancellationTokenSource} and encodes teardown ordering:
   cancel → join indexing task → join dependent tasks → release source. It owns the source once

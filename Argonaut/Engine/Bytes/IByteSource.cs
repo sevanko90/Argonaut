@@ -65,6 +65,14 @@ public interface IByteSource
     ReadOnlySpan<byte> GetContiguousSpan(long offset, int maxLength);
 
     /// <summary>
+    /// A hint that [<paramref name="offset"/>, + <paramref name="length"/>) is about to be read
+    /// in order, so the OS may start fetching it now. Returns immediately and promises nothing;
+    /// a no-op for a source whose bytes are already in memory, which is every source but a
+    /// mapping. See <see cref="ReadAhead"/>, which is how a scan calls it.
+    /// </summary>
+    void Prefetch(long offset, long length) { }
+
+    /// <summary>
     /// Copies up to <paramref name="destination"/>.Length bytes from <paramref name="offset"/>,
     /// crossing internal boundaries as needed. Returns the number copied, which is short only at
     /// the end of what is currently available.

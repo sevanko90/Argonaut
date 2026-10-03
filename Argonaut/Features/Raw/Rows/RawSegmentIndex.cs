@@ -474,6 +474,9 @@ public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IBackgro
         int rows = 0;
         long nextProgressReport = ProgressReportStride;
 
+        // Per row, but almost always one comparison: see ReadAhead.
+        var readAhead = new ReadAhead();
+
         // Cached, not snapshotted: this loop runs once per row rather than once per chunk, so
         // asking the source how much has arrived on every row would add two interface calls per
         // row to a scan that does tens of millions of them. Instead the pair is cached and
@@ -502,6 +505,8 @@ public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IBackgro
                         continue;
                     }
                 }
+
+                readAhead.Reached(this.source, cursor.Start);
 
                 // Advanced on a copy: a step abandoned below to wait for more data must leave the
                 // cursor where it was.

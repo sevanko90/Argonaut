@@ -158,6 +158,10 @@ public sealed class SearchSession : AppendLogIndexBase<SearchMatch>, IMatchSourc
                 var view = target.Origin.OpenRange(target.Offset + chunkStart, size);
                 try
                 {
+                    // The chunk is a mapping of its own, so it cannot be hinted before it exists;
+                    // hinting it whole as it opens still has its reads in flight together rather
+                    // than one page fault at a time (see MMapFile.Prefetch).
+                    view.Prefetch(0, size);
                     var chunk = view.RequireContiguous(0, size);
 
                     int from = (int)(searchFrom - chunkStart);

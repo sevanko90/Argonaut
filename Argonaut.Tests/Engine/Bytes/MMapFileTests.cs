@@ -120,4 +120,38 @@ public class MMapFileTests
             File.Delete(path);
         }
     }
+
+    [Theory]
+    [InlineData(0, 10)]
+    [InlineData(3, 5)]               // unaligned start: widened down to its page
+    [InlineData(5, long.MaxValue)]   // past the end: clamped to the file
+    [InlineData(19, 1)]
+    [InlineData(20, 10)]             // at the end: nothing to hint
+    [InlineData(-1, 10)]
+    [InlineData(0, 0)]
+    public void Prefetch_IsAHintThatNeverThrowsOrChangesTheBytes(long offset, long length)
+        => WithFile(Encoding.UTF8.GetBytes("hello, mapped world!"), file =>
+        {
+            file.Prefetch(offset, length);
+            Assert.Equal("hello, mapped world!", Encoding.UTF8.GetString(file.GetContiguousSpan(0, 64)));
+        });
+
+    [Fact]
+    public void Prefetch_OnAnEmptyOrDisposedFile_IsANoOp()
+    {
+        WithFile([], file => file.Prefetch(0, 4096));
+
+        string path = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllBytes(path, Encoding.UTF8.GetBytes("bytes"));
+            var file = new MMapFile(path);
+            file.Dispose();
+            file.Prefetch(0, 5);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }

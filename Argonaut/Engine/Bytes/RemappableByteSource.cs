@@ -43,6 +43,8 @@ public sealed class RemappableByteSource : IByteSource, IDisposable
 
     public int CopyTo(long offset, Span<byte> destination) => Current.CopyTo(offset, destination);
 
+    public void Prefetch(long offset, long length) => Current.Prefetch(offset, length);
+
     /// <summary>Releases the source underneath. Every read fails until <see cref="Remap"/>.</summary>
     public void Unmap()
     {

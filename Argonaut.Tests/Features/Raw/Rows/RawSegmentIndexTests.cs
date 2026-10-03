@@ -1,3 +1,4 @@
+using Argonaut.Tests.Support;
 using System.Text;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Progress;
@@ -569,5 +570,15 @@ public class RawSegmentIndexTests
 
             Assert.Throws<ArgumentException>(() => RawSegmentIndex.Reopen(shorter, anchors));
         });
+    }
+
+    [Fact]
+    public void TheScan_HintsTheBytesAheadOfIt()
+    {
+        var source = new PrefetchRecordingSource(System.Text.Encoding.UTF8.GetBytes(string.Concat(Enumerable.Repeat("a row\n", 1000))));
+        var index = RawSegmentIndex.StartIndexing(source, 160);
+        index.IndexingTask.GetAwaiter().GetResult();
+
+        Assert.Equal(0, source.Hints[0].Offset);
     }
 }

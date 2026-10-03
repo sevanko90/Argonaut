@@ -269,4 +269,14 @@ public class JsonSparseIndexTests
         Recorded(index.Structure).Select(c => c.ToString())
             .Concat(Enumerable.Range(0, index.Structure.CheckpointCount).Select(i => index.Structure.GetCheckpoint(i).ToString()))
             .ToList();
+
+    [Fact]
+    public void TheScan_HintsTheBytesAheadOfIt()
+    {
+        var source = new PrefetchRecordingSource(Encoding.UTF8.GetBytes("[" + string.Join(",", Enumerable.Repeat("{\"a\":1}", 1000)) + "]"));
+        var index = JsonSparseIndex.StartIndexing(source, Promotion, Checkpoint);
+        index.IndexingTask.GetAwaiter().GetResult();
+
+        Assert.Equal(0, source.Hints[0].Offset);
+    }
 }

@@ -10,6 +10,8 @@ using Avalonia.Platform.Storage;
 using Avalonia.Styling;
 using Avalonia.Threading;
 using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Locations;
+using Argonaut.Shell.FilePicking;
 using Argonaut.Engine.Logging;
 using Argonaut.Engine.Settings;
 using Argonaut.Features.Json.Schema;
@@ -45,6 +47,7 @@ public partial class MainWindow : Window
     private readonly UpdateService updateService;
     private readonly ISettingsStore settings;
     private readonly IDiagnosticLog log;
+    private readonly IFilePicker filePicker;
     private readonly Action? openLogFolder;
     private readonly UpdateSettings updateSettings;
     private DispatcherTimer? toastTimer;
@@ -57,14 +60,19 @@ public partial class MainWindow : Window
     {
     }
 
+    /// <param name="configLocations">Where configuration files live, offered beside Open file; null
+    /// hides the button.</param>
     /// <param name="openLogFolder">Shows the folder <paramref name="log"/> writes to, or null
     /// when there is none to show - which hides the status bar's button for it.</param>
-    public MainWindow(ISettingsStore settings, JsonSchemaCatalog schemaCatalog, IDiagnosticLog log, Action? openLogFolder = null)
+    public MainWindow(ISettingsStore settings, JsonSchemaCatalog schemaCatalog, IDiagnosticLog log, Action? openLogFolder = null,
+        IConfigLocationSource? configLocations = null)
     {
         InitializeComponent();
 
         this.settings = settings;
         this.log = log;
+        var windowPicker = new AvaloniaFilePicker(this);
+        filePicker = OperatingSystem.IsMacOS() ? new MacFilePicker(windowPicker) : windowPicker;
         this.openLogFolder = openLogFolder;
         OpenLogFolderButton.IsVisible = openLogFolder is not null;
         updateSettings = settings.Get<UpdateSettings>();
@@ -75,7 +83,8 @@ public partial class MainWindow : Window
             pickSaveDestination: PickSaveDestinationAsync,
             askAboutUnsavedChanges: message => UnsavedChangesDialog.Show(this, message),
             reportFailure: message => ConfirmDialog.Inform(this, message),
-            log: log);
+            log: log,
+            configLocations: configLocations);
         DataContext = viewModel;
         viewModel.PropertyChanged += OnViewModelPropertyChanged;
         viewModel.FindStatusChanged += status => FindBarControl.SetStatus(status);
@@ -100,6 +109,11 @@ public partial class MainWindow : Window
         EmptyState.SetPasteAvailable(viewModel.CanPaste);
         EmptyState.OpenRecentFileRequested += (_, path) => viewModel.OpenRecentFile(path);
         EmptyState.ClearRecentFilesRequested += (_, _) => viewModel.ClearRecentFiles();
+        EmptyState.ToggleFavouriteRequested += (_, path) => viewModel.ToggleFavourite(path);
+        EmptyState.LocationsRequested += (_, _) => EmptyState.SetLocations(viewModel.GetConfigLocations());
+        EmptyState.BrowseFromFolderRequested += async (_, folder) => await BrowseForFile(folder);
+        EmptyState.SetLocations(viewModel.GetConfigLocations());
+        EmptyState.SetFavourites(viewModel.Favourites);
         EmptyState.SetRecentFiles(viewModel.RecentFiles);
 
         ApplyThemeMode(viewModel.ThemeMode);
@@ -189,6 +203,9 @@ public partial class MainWindow : Window
 
         if (e.PropertyName is null or nameof(MainWindowViewModel.RecentFiles))
             EmptyState.SetRecentFiles(viewModel.RecentFiles);
+
+        if (e.PropertyName is null or nameof(MainWindowViewModel.Favourites))
+            EmptyState.SetFavourites(viewModel.Favourites);
 
 #if DEBUG
         if (e.PropertyName is null or nameof(MainWindowViewModel.CurrentDocument))
@@ -577,34 +594,17 @@ public partial class MainWindow : Window
 
     private async void OnCompareFile(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
-        {
-            Title = "Choose the JSON file to compare with",
-            AllowMultiple = false
-        });
-
-        if (files.Count == 0)
-            return;
-
-        var path = files[0].TryGetLocalPath();
+        var path = await filePicker.PickFileAsync("Choose the JSON file to compare with");
         if (path is null)
             return;
 
         await viewModel.CompareWithAsync(path);
     }
 
-    private async Task BrowseForFile()
+    /// <param name="startFolder">Where the picker opens, or null for the platform's default.</param>
+    private async Task BrowseForFile(string? startFolder = null)
     {
-        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
-        {
-            Title = "Open JSON, NDJSON, CSV, or TSV file",
-            AllowMultiple = false
-        });
-
-        if (files.Count == 0)
-            return;
-
-        var path = files[0].TryGetLocalPath();
+        var path = await filePicker.PickFileAsync("Open JSON, NDJSON, CSV, or TSV file", startFolder);
         if (path is null)
             return;
 

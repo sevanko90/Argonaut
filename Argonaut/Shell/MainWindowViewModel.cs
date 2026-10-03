@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Detection;
 using Argonaut.Engine.Indexing;
+using Argonaut.Engine.Locations;
 using Argonaut.Engine.Logging;
 using Argonaut.Engine.Progress;
 using Argonaut.Engine.Saving;
@@ -68,6 +69,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private readonly AppearanceSettings appearance;
     private readonly RecentFileHistory recentFileHistory;
+    private readonly FavouriteFiles favouriteFiles;
+    private readonly IConfigLocationSource? configLocations;
     private readonly Func<string, Task<bool>> confirmReplace;
     private readonly Func<Task<byte[]?>>? readClipboardBytes;
     private readonly DocumentLoader documentLoader;
@@ -98,6 +101,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private string title = DefaultTitle;
     private string fileName = string.Empty;
     private IReadOnlyList<RecentFileItem> recentFiles = Array.Empty<RecentFileItem>();
+    private IReadOnlyList<RecentFileItem> favourites = Array.Empty<RecentFileItem>();
     private ThemeMode themeMode;
     private ContentFontMode contentFontMode;
     private DocumentViewOption? selectedView;
@@ -148,6 +152,8 @@ public sealed class MainWindowViewModel : ObservableObject
     /// <see cref="ProgressBoard.Shared"/> unless a test substitutes one.</param>
     /// <param name="log">Where the open/load path records what it did; nothing is kept without
     /// one.</param>
+    /// <param name="configLocations">Where configuration files live on this machine, offered as
+    /// places to browse from. Without one there are none to offer.</param>
     public MainWindowViewModel(ISettingsStore settings, JsonSchemaCatalog schemaCatalog, Func<string, Task<bool>> confirmReplace,
         Func<Task<byte[]?>>? readClipboardBytes = null, DocumentLoader? documentLoader = null,
         Func<IByteOrigin, Task<string?>>? pickSaveDestination = null,
@@ -155,10 +161,13 @@ public sealed class MainWindowViewModel : ObservableObject
         Func<string, Task>? reportFailure = null,
         IFileReplacer? fileReplacer = null,
         ProgressBoard? progressBoard = null,
-        IDiagnosticLog? log = null)
+        IDiagnosticLog? log = null,
+        IConfigLocationSource? configLocations = null)
     {
         this.appearance = settings.Get<AppearanceSettings>();
         this.recentFileHistory = settings.Get<RecentFileHistory>();
+        this.favouriteFiles = settings.Get<FavouriteFiles>();
+        this.configLocations = configLocations;
         this.confirmReplace = confirmReplace;
         this.readClipboardBytes = readClipboardBytes;
         this.documentLoader = documentLoader ?? new DocumentViewCatalog(settings, schemaCatalog).LoadAsync;
@@ -302,10 +311,29 @@ public sealed class MainWindowViewModel : ObservableObject
             await navigable.RevealByteRangeAsync(range);
     }
 
+    /// <summary>Recently opened files, newest first, without the ones already pinned.</summary>
     public IReadOnlyList<RecentFileItem> RecentFiles
     {
         get => recentFiles;
         private set => SetField(ref recentFiles, value);
+    }
+
+    /// <summary>The pinned files, in the order they were pinned.</summary>
+    public IReadOnlyList<RecentFileItem> Favourites
+    {
+        get => favourites;
+        private set => SetField(ref favourites, value);
+    }
+
+    /// <summary>The configuration folders that exist right now. Read when the list is shown, not
+    /// cached, so it reflects the machine as it is.</summary>
+    public IReadOnlyList<ConfigLocation> GetConfigLocations() => configLocations?.GetExisting() ?? [];
+
+    /// <summary>Pins the file if it is not pinned, unpins it if it is.</summary>
+    public void ToggleFavourite(string path)
+    {
+        favouriteFiles.Toggle(path);
+        ReloadRecentFiles();
     }
 
     /// <summary>True when "Compare with…" applies: the current document is being viewed as
@@ -561,7 +589,11 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private void ReloadRecentFiles()
     {
+        Favourites = favouriteFiles.Paths
+            .Select(path => new RecentFileItem(path, Path.GetFileName(path), IsFavourite: true))
+            .ToList();
         RecentFiles = recentFileHistory.Paths
+            .Where(path => !favouriteFiles.Contains(path))
             .Select(path => new RecentFileItem(path, Path.GetFileName(path)))
             .ToList();
     }

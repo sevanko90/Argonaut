@@ -512,6 +512,104 @@ public class JsonArrayTableViewModelTests
         });
 
     [Fact]
+    public Task ArrayOfArrays_ValueColumnOpensIntoPositions()
+        => WithDocument("[[1,2,3],[4,5,6]]", document =>
+        {
+            Assert.Equal(["value"], ColumnNames(document));
+            Assert.Equal(["[ 3 items ]"], CellsOf(document, 0));
+
+            document.ToggleColumn(KeyOf(document, 0));
+
+            Assert.Equal(["value[0]", "value[1]", "value[2]"], ColumnNames(document));
+            Assert.Equal(["1", "2", "3"], CellsOf(document, 0));
+            Assert.Equal(["4", "5", "6"], CellsOf(document, 1));
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task ArrayOfJaggedArrays_DrawsTheFirstPositionsAndARemainder()
+        => WithDocument("[[1,2],[1,2,3,4,5,6]]", document =>
+        {
+            document.ToggleColumn(KeyOf(document, 0));
+
+            // The column count is bounded by the position cap, never by the longest row; a short
+            // row leaves its positions empty and the remainder carries every row's real count.
+            Assert.Equal(["value[0]", "value[1]", "value[2]", "value[3]", "value[…]"], ColumnNames(document));
+            Assert.Equal(["1", "2", "", "", "[ 2 items ]"], CellsOf(document, 0));
+            Assert.Equal(["1", "2", "3", "4", "[ 6 items ]"], CellsOf(document, 1));
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task ArrayOfArrays_RemainderCellIsTheElementItself()
+        => WithDocument("[[1,2,3,4,5]]", document =>
+        {
+            document.ToggleColumn(KeyOf(document, 0));
+
+            var node = document.Rows.NodeForCell(0, 4);
+            Assert.NotNull(node);
+            Assert.Equal(1, node.Value.ValueStart); // the element's own '[', just inside the outer one
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task ArrayOfArrays_CollapsingFromAPositionsHeaderReturnsToValue()
+        => WithDocument("[[1,2],[3,4]]", document =>
+        {
+            string key = KeyOf(document, 0);
+            document.ToggleColumn(key);
+
+            // The ancestor piece of an opened position's header folds the element back up.
+            Assert.Equal(["value", "[0]"], document.Headers[0].Segments.Select(s => s.Text));
+            Assert.Equal(key, document.Headers[0].Segments[0].Key);
+            document.ToggleColumn(key);
+
+            Assert.Equal(["value"], ColumnNames(document));
+            Assert.Equal(["[ 2 items ]"], CellsOf(document, 0));
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task ArrayOfArrays_PositionsThatAreArraysOpenInTurn()
+        => WithDocument("[[[1,2],[3,4]]]", document =>
+        {
+            document.ToggleColumn(KeyOf(document, 0));
+            document.ToggleColumn(KeyOf(document, 0)); // value[0]
+
+            Assert.Equal(["value[0][0]", "value[0][1]", "value[1]"], ColumnNames(document));
+            Assert.Equal(["1", "2", "[ 2 items ]"], CellsOf(document, 0));
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task ArrayOfArrays_AScalarElementStaysOneCell()
+        => WithDocument("[[1,2],7]", document =>
+        {
+            document.ToggleColumn(KeyOf(document, 0));
+
+            Assert.Equal(["value[0]", "value[1]"], ColumnNames(document));
+            Assert.Equal(["7"], CellsOf(document, 1));
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task ArrayOfScalars_ValueColumnOffersNothingToOpen()
+        => WithDocument("[1,2,3]", document =>
+        {
+            Assert.Null(document.Headers[0].Segments[^1].Key);
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task ArrayOfObjects_AnArrayElementStaysOneCell()
+        => WithDocument("""[{"a":1},[1,2]]""", document =>
+        {
+            Assert.Equal(["a"], ColumnNames(document));
+            Assert.Equal(["[ 2 items ]"], CellsOf(document, 1));
+            return Task.CompletedTask;
+        });
+
+    [Fact]
     public async Task TooManyColumns_StopsAtTheCapAndSaysSo()
     {
         string wide = "[{" + string.Join(',', Enumerable.Range(0, 200).Select(i => $"\"p{i}\":{i}")) + "}]";

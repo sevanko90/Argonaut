@@ -250,6 +250,12 @@ budget the whole feature has to live inside.
   not dots. JSON requires control characters inside strings to be escaped, so a marker cannot occur
   in a raw property name: a property literally named `a.b` and an expanded `a` containing `b` stay
   distinct, and a key splits back into route steps by parsing rather than guessing.
+- **An array of arrays opens from its "value" column**, as though the element were an array
+  column: its key is the empty route (`JsonArrayColumnDiscovery.ElementKey`), so the positions
+  get the routes `[0]`, `[1]`… and the remainder is the element itself
+  (`ExpandedRoutes.ElementColumn`). A jagged array costs the same cap-bounded columns as a regular
+  one. Only when no sampled element is an object: in an array of objects an array element is
+  ragged data and keeps its single cell.
 - **The expand affordance is the link styling itself**, with no chevron or separate expander glyph.
   A glyph would have to be paid for out of the column's discovered width, and the thing it would
   mark is already the only underlined, accent-coloured text in the header.

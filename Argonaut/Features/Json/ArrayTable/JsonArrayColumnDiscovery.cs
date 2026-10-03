@@ -92,6 +92,12 @@ public sealed class OpenColumns
 /// showing the array's own summary. That is what keeps
 /// <c>$.features[7].geometry.coordinates[7982]</c> from becoming eight thousand columns, and it
 /// keeps the real count on screen rather than quietly dropping the tail.
+///
+/// An array of arrays opens the same way, from its single "value" column: the element itself is
+/// the open array (<see cref="ElementKey"/>), so a list of coordinates reads as
+/// <c>value[0] value[1] value[2]</c> and a jagged one costs no more columns than a regular one.
+/// Only when no sampled element is an object - beside property columns, positions would read as
+/// noise, so a mixed array keeps one cell per array element.
 /// </summary>
 public static class JsonArrayColumnDiscovery
 {
@@ -119,6 +125,16 @@ public static class JsonArrayColumnDiscovery
     /// <see cref="NameMarker"/>.</summary>
     internal const char IndexMarker = '\u001E';
 
+    /// <summary>
+    /// The key of the element itself, which is what the "value" column of an array of arrays
+    /// opens. Empty, because a column key is the steps from the element to the value and there
+    /// are none - so an opened element's positions get exactly the keys, and routes, of
+    /// <c>[0]</c>, <c>[1]</c>…, and closing it closes everything, since every key starts with it.
+    /// </summary>
+    public const string ElementKey = "";
+
+    private const string ElementName = "value";
+
     private static readonly char[] Markers = [NameMarker, IndexMarker];
 
     /// <summary>
@@ -130,6 +146,7 @@ public static class JsonArrayColumnDiscovery
         JsonArrayElements elements, int sample, OpenColumns open, int arrayColumns)
     {
         var walk = new Walk(reader, text, open, Math.Clamp(arrayColumns, 1, MaxArrayColumns));
+        bool elementsOpen = open.IsOpen(ElementKey) && !AnyObject(elements, sample);
 
         for (int e = 0; e < sample; e++)
         {
@@ -137,11 +154,26 @@ public static class JsonArrayColumnDiscovery
 
             if (element.FormatKind == (byte)JsonTokenKind.StartObject)
                 walk.Object(element, keyPrefix: string.Empty, displayPrefix: string.Empty, ancestors: []);
+            else if (elementsOpen && element.FormatKind == (byte)JsonTokenKind.StartArray)
+                walk.OpenElement(element);
             else
                 walk.Element(element);
         }
 
         return walk.Finish();
+    }
+
+    /// <summary>Whether the sample holds an object - asked first, because it decides how every
+    /// array element in the sample is drawn, including the ones before the first object.</summary>
+    private static bool AnyObject(JsonArrayElements elements, int sample)
+    {
+        for (int e = 0; e < sample; e++)
+        {
+            if (elements.ElementAt(e).FormatKind == (byte)JsonTokenKind.StartObject)
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -171,6 +203,7 @@ public static class JsonArrayColumnDiscovery
         private bool sawObject;
         private bool truncated;
         private int valueChars;
+        private ColumnNesting valueNesting;
 
         public Walk(JsonTreeReader reader, JsonTreeText text, OpenColumns open, int arrayColumns)
         {
@@ -180,10 +213,28 @@ public static class JsonArrayColumnDiscovery
             this.arrayColumns = arrayColumns;
         }
 
-        /// <summary>A sampled element that is not an object: it has no properties to distribute,
-        /// so it only ever widths the single "value" column.</summary>
+        /// <summary>A sampled element that is not an object and is not being opened: it has no
+        /// properties to distribute, so it only ever widths the single "value" column - and tells
+        /// it whether there is an array in it to open.</summary>
         public void Element(TreeNode element)
-            => this.valueChars = Math.Max(this.valueChars, RenderedLength(element));
+        {
+            this.valueChars = Math.Max(this.valueChars, RenderedLength(element));
+            this.valueNesting = Nested(this.valueNesting, element);
+        }
+
+        /// <summary>A sampled element that is itself an open array: its positions become the
+        /// columns, exactly as an open array column's do, under a header that folds back to
+        /// "value".</summary>
+        public void OpenElement(TreeNode element)
+        {
+            if (this.text.End(element) == long.MaxValue)
+            {
+                Element(element);
+                return;
+            }
+
+            Array(element, ElementKey, ElementName, [new JsonArrayColumnHeaderSegment(ElementName, ElementKey)]);
+        }
 
         /// <summary>An object's direct children, each one either drawn as a column or - when it
         /// is an open container - walked into.</summary>
@@ -390,14 +441,16 @@ public static class JsonArrayColumnDiscovery
 
         public DiscoveredColumns Finish()
         {
-            if (!this.sawObject)
+            if (!this.sawObject && this.displays.Count == 0)
             {
-                // An array of scalars: one column that IS the element, so there is no route into
-                // an element to take and no header piece to click.
-                this.displays.Add("value");
-                this.maxChars.Add(Math.Max(this.valueChars, "value".Length));
-                this.nesting.Add(ColumnNesting.Scalar);
-                this.headers.Add(new JsonArrayColumnHeader([new JsonArrayColumnHeaderSegment("value", null)], "value"));
+                // An array of scalars, or of arrays nobody has opened: one column that IS the
+                // element, so there is no route into an element to take. Its header opens only
+                // when the sample saw an array to open.
+                this.displays.Add(ElementName);
+                this.maxChars.Add(Math.Max(this.valueChars, ElementName.Length));
+                this.nesting.Add(this.valueNesting);
+                string? opensTo = this.valueNesting.HasArrays ? ElementKey : null;
+                this.headers.Add(new JsonArrayColumnHeader([new JsonArrayColumnHeaderSegment(ElementName, opensTo)], ElementName));
 
                 return new DiscoveredColumns(Structure(), ExpandedRoutes.None, this.nesting, this.headers,
                     SawObject: false, this.truncated);
@@ -406,7 +459,7 @@ public static class JsonArrayColumnDiscovery
             Reorder();
 
             return new DiscoveredColumns(Structure(), ExpandedRoutes.Build(this.routes), this.nesting, this.headers,
-                SawObject: true, this.truncated);
+                this.sawObject, this.truncated);
         }
 
         private TableStructure Structure()

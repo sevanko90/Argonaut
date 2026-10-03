@@ -100,4 +100,30 @@ public class JsonArrayColumnRoutesTests
         Assert.False(ExpandedRoutes.None.TryMatchName(Utf8("id"), out _, out _));
         Assert.False(ExpandedRoutes.None.TryMatchIndex(0, out _, out _));
     }
+
+    [Fact]
+    public void ZeroStepRoute_IsTheElementItself()
+    {
+        // An opened array of arrays: two positions, then a remainder column showing the element.
+        var routes = ExpandedRoutes.Build([
+            new ColumnRoute([RouteStep.At(0)], "value[0]"),
+            new ColumnRoute([RouteStep.At(1)], "value[1]"),
+            new ColumnRoute([], "value[…]"),
+        ]);
+
+        Assert.Equal(2, routes.ElementColumn);
+        Assert.True(routes.DrawsPositions);
+        Assert.True(routes.TryMatchIndex(1, out int column, out _));
+        Assert.Equal(1, column);
+    }
+
+    [Fact]
+    public void PropertyRoutes_DoNotDrawPositionsAtTheElement()
+    {
+        // An array element in an array of objects keeps its single cell because of this.
+        var routes = ExpandedRoutes.Build([new ColumnRoute([RouteStep.Property("bbox"), RouteStep.At(0)], "bbox[0]")]);
+
+        Assert.False(routes.DrawsPositions);
+        Assert.Equal(-1, routes.ElementColumn);
+    }
 }

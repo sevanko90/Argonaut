@@ -62,11 +62,18 @@ public sealed class ExpandedRoutes
 {
     /// <summary>No columns at all - what the reshape modes use, where a cell is a whole element
     /// and there is no route to take.</summary>
-    public static ExpandedRoutes None { get; } = new([]);
+    public static ExpandedRoutes None { get; } = new([], elementColumn: -1);
 
     private readonly Entry[] entries;
 
-    private ExpandedRoutes(Entry[] entries) => this.entries = entries;
+    private ExpandedRoutes(Entry[] entries, int elementColumn)
+    {
+        this.entries = entries;
+        ElementColumn = elementColumn;
+
+        foreach (var entry in entries)
+            DrawsPositions |= entry.Step.IsIndex;
+    }
 
     /// <param name="Column">Column this step's value is drawn in, or -1 when the step is only
     /// passed through on the way to something deeper.</param>
@@ -74,7 +81,22 @@ public sealed class ExpandedRoutes
     /// expanded.</param>
     private readonly record struct Entry(RouteStep Step, int Column, ExpandedRoutes? Inner);
 
-    public bool IsEmpty => this.entries.Length == 0;
+    public bool IsEmpty => this.entries.Length == 0 && ElementColumn < 0;
+
+    /// <summary>
+    /// Column that shows the element itself, or -1 - the remainder column of an opened array of
+    /// arrays, whose route is zero steps long. Only ever set on the outermost level: a nested
+    /// remainder is drawn by its parent's entry instead.
+    /// </summary>
+    public int ElementColumn { get; }
+
+    /// <summary>
+    /// This level matches children by position - so at the outermost level, the elements are
+    /// arrays that were opened, and an element that is an array is spread across columns rather
+    /// than drawn as one cell. Never true at the outermost level of an array of objects, where
+    /// an array element is ragged data and keeps its single cell.
+    /// </summary>
+    public bool DrawsPositions { get; }
 
     /// <summary>
     /// Builds the levels for a set of columns, in the order given - column <c>c</c> is
@@ -149,9 +171,17 @@ public sealed class ExpandedRoutes
         private readonly List<RouteStep> steps = [];
         private readonly List<int> columns = [];
         private readonly List<Level?> inner = [];
+        private int elementColumn = -1;
 
         public void Add(IReadOnlyList<RouteStep> steps, int depth, int column)
         {
+            if (steps.Count == 0)
+            {
+                // Zero steps is the element itself. Only the outermost level is ever handed one.
+                this.elementColumn = column;
+                return;
+            }
+
             var step = steps[depth];
             int slot = Slot(step);
             if (slot < 0)
@@ -181,7 +211,7 @@ public sealed class ExpandedRoutes
             for (int i = 0; i < frozen.Length; i++)
                 frozen[i] = new Entry(this.steps[i], this.columns[i], this.inner[i]?.Freeze());
 
-            return new ExpandedRoutes(frozen);
+            return new ExpandedRoutes(frozen, this.elementColumn);
         }
 
         private int Slot(RouteStep step)

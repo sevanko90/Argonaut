@@ -181,11 +181,24 @@ public sealed class JsonArrayRowCollection : VirtualizingItemsSourceBase, IColum
         }
 
         var element = elements.ElementAt(rowIndex);
-        if (element.FormatKind != (byte)JsonTokenKind.StartObject)
+        if (!SpreadsAcrossColumns(element))
             return column == 0 ? element : null;
+
+        if (column == routes.ElementColumn)
+            return element;
 
         return NodeIn(routes, element, column);
     }
+
+    /// <summary>
+    /// Whether an element's children are distributed over the columns or the element is one
+    /// cell. An object always spreads; an array only once its table's "value" column has been
+    /// opened, which is what puts positions at the routes' outermost level. In an array of
+    /// objects, an array element is ragged data and stays a single cell.
+    /// </summary>
+    private bool SpreadsAcrossColumns(TreeNode element)
+        => element.FormatKind == (byte)JsonTokenKind.StartObject
+           || (element.FormatKind == (byte)JsonTokenKind.StartArray && routes.DrawsPositions);
 
     /// <summary>The same descent <see cref="FillFrom"/> makes, stopping at one column.</summary>
     private TreeNode? NodeIn(ExpandedRoutes level, TreeNode container, int wanted)
@@ -211,16 +224,17 @@ public sealed class JsonArrayRowCollection : VirtualizingItemsSourceBase, IColum
     }
 
     /// <summary>
-    /// One element across the property columns. A non-object element (a scalar, a nested array -
-    /// a ragged array is data, not an error) has no properties to distribute, so it renders as a
-    /// single cell in the first column; that is also the shape a whole array of scalars takes,
-    /// where discovery produced one "value" column to begin with.
+    /// One element across the columns. An element that does not spread (a scalar, or an array
+    /// nobody opened - a ragged array is data, not an error) renders as a single cell in the
+    /// first column; that is also the shape a whole array of scalars takes, where discovery
+    /// produced one "value" column to begin with. An opened array element spreads by position,
+    /// and a row shorter than the columns simply leaves the rest empty.
     /// </summary>
     private TableCell[] ByPropertyCells(int rowIndex)
     {
         var element = elements.ElementAt(rowIndex);
 
-        if (element.FormatKind != (byte)JsonTokenKind.StartObject)
+        if (!SpreadsAcrossColumns(element))
             return [new TableCell(text.ValueText(element))];
 
         var cells = new TableCell[structure.ColumnCount];
@@ -228,6 +242,10 @@ public sealed class JsonArrayRowCollection : VirtualizingItemsSourceBase, IColum
             cells[c] = new TableCell(string.Empty);
 
         FillFrom(cells, routes, element);
+
+        if (routes.ElementColumn is >= 0 and var self && self < cells.Length)
+            cells[self] = new TableCell(text.ValueText(element));
+
         return cells;
     }
 

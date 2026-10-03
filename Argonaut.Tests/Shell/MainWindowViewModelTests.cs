@@ -278,6 +278,36 @@ public sealed class MainWindowViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task ToggleFavourite_MovesAFileFromRecentToFavouritesAndBack()
+    {
+        string path = WriteJsonFile();
+        var document = new FakeDocument { FilePath = path };
+        var vm = CreateViewModel((_, _, _) => Task.FromResult<IDocumentViewModel>(document));
+        await vm.OpenPathAsync(path);
+
+        vm.ToggleFavourite(path);
+
+        Assert.Contains(vm.Favourites, item => item.IsFavourite && string.Equals(item.Path, path, StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(vm.RecentFiles, item => string.Equals(item.Path, path, StringComparison.OrdinalIgnoreCase));
+
+        vm.ToggleFavourite(path);
+
+        Assert.Empty(vm.Favourites);
+        Assert.Contains(vm.RecentFiles, item => string.Equals(item.Path, path, StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Favourites_SurviveReopeningTheSettings()
+    {
+        var settings = SettingsStore.InMemory();
+        settings.Get<FavouriteFiles>().Toggle(Path.Combine(tempDir, "pinned.ini"));
+
+        var vm = CreateViewModel((_, _, _) => throw new InvalidOperationException(), settings);
+
+        Assert.Equal("pinned.ini", Assert.Single(vm.Favourites).FileName);
+    }
+
+    [Fact]
     public async Task OpenPath_AddsToRecentFiles()
     {
         string path = WriteJsonFile();

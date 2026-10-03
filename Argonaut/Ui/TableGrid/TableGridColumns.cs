@@ -17,6 +17,7 @@ using Avalonia.Markup.Xaml.MarkupExtensions;
 using Avalonia.Media;
 using Avalonia.Reactive;
 using Avalonia.VisualTree;
+using Argonaut.Engine.Text;
 
 namespace Argonaut.Ui.TableGrid;
 
@@ -289,7 +290,7 @@ public sealed partial class TableGridColumns : IDisposable
 
         public object? Convert(IList<object?> inputs, Type targetType, object? parameter, CultureInfo culture)
             => inputs.Count == 2 && inputs[0] is IReadOnlyList<TableCell> cells && inputs[1] is int index
-                && index >= 0 && index < cells.Count ? cells[index].Text : null;
+                && index >= 0 && index < cells.Count ? ControlGlyphs.ForDisplay(cells[index].Text) : null;
     }
 
     /// <summary>

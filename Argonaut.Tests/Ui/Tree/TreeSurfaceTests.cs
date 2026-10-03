@@ -423,6 +423,28 @@ public sealed class TreeSurfaceTests
         Assert.Equal(0, h.Surface.WidestRowWidth);
     }, painter: bytes => new TwoPanePainter(bytes));
 
+    /// <summary>Adds a value holding the separators JSON allows unescaped in a string - each a
+    /// mandatory line break to the text layout - to every row.</summary>
+    private sealed class SeparatorPainter(byte[] bytes) : ITreeRowPainter
+    {
+        private readonly SExpressionTreeFormat.Painter inner = new(bytes);
+
+        public void AppendRuns(in TreeRow row, List<TreeRun> runs)
+        {
+            inner.AppendRuns(row, runs);
+            runs.Add(new TreeRun(" line\u2028para\u2029next\u0085end", TreeRunStyle.String));
+        }
+    }
+
+    [Fact]
+    public Task ARowHoldingLineSeparatorsStaysOneLine() => WithSurface(defaultDepth: 9, h =>
+    {
+        // Laid out as the characters they are, they would stack four lines in one row band and
+        // clip all but the first.
+        Assert.Equal(1, h.Surface.PaneTextLayout(0).TextLines.Count);
+        return Task.CompletedTask;
+    }, painter: bytes => new SeparatorPainter(bytes));
+
     /// <summary>Marks lists but not atoms, the way JSON marks array elements but not an
     /// element's members - so a marked row's children are unmarked.</summary>
     private sealed class MarkedListsPainter(byte[] bytes) : ITreeRowPainter

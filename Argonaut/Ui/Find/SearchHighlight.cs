@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
+using Argonaut.Engine.Text;
 
 namespace Argonaut.Ui.Find;
 
@@ -51,7 +52,9 @@ public sealed class SearchHighlight : AvaloniaObject
 
     private static void Update(TextBlock tb)
     {
-        string text = GetText(tb) ?? string.Empty;
+        // One line of text: a separator that would break it is drawn as a glyph (one char for one,
+        // so the term is matched against exactly what is shown).
+        string text = ControlGlyphs.ForDisplay(GetText(tb) ?? string.Empty);
         string suffix = GetSuffix(tb) ?? string.Empty;
 
         var segments = SearchTextSplitter.Split(text, GetTerm(tb));

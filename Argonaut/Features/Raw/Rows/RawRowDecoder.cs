@@ -2,6 +2,7 @@ using System;
 using System.Buffers;
 using System.Text;
 using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Text;
 
 namespace Argonaut.Features.Raw.Rows;
 
@@ -156,7 +157,7 @@ public static class RawRowDecoder
                 int charsWritten = rune.EncodeToUtf16(encoded);
                 for (int i = 0; i < charsWritten; i++)
                 {
-                    chars[charCount] = RawRowReader.SubstituteControl(encoded[i]);
+                    chars[charCount] = ControlGlyphs.ForDisplay(encoded[i]);
                     offsets[charCount] = consumed;
                     charCount++;
                 }

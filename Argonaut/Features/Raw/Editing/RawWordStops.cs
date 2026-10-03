@@ -2,6 +2,7 @@ using System;
 using System.Text;
 using Argonaut.Engine.Bytes;
 using Argonaut.Features.Raw.Rows;
+using Argonaut.Engine.Text;
 
 namespace Argonaut.Features.Raw.Editing;
 
@@ -36,7 +37,7 @@ public static class RawWordStops
 
         /// <summary>
         /// A display substitution - U+FFFD for a run of invalid bytes, or one of the glyphs
-        /// <see cref="RawRowReader.IsSubstitutionGlyph"/> names: a Control Picture for a C0
+        /// <see cref="ControlGlyphs.IsSubstitutionGlyph"/> names: a Control Picture for a C0
         /// control or DEL, and the marks standing for NEL, LINE SEPARATOR and PARAGRAPH
         /// SEPARATOR. It stands for bytes that are not text, so it never joins a run: selecting
         /// exactly one of them is what makes a corrupt sequence a single thing to delete.
@@ -203,7 +204,7 @@ public static class RawWordStops
 
     private static WordClass Classify(char c)
     {
-        if (c == Rune.ReplacementChar.Value || RawRowReader.IsSubstitutionGlyph(c))
+        if (c == Rune.ReplacementChar.Value || ControlGlyphs.IsSubstitutionGlyph(c))
             return WordClass.Opaque;
         if (char.IsWhiteSpace(c))
             return WordClass.Whitespace;

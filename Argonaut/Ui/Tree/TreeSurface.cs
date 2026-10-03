@@ -12,6 +12,7 @@ using Avalonia.Utilities;
 using Argonaut.Engine.Indexing.Trees;
 using Argonaut.Ui.Find;
 using Argonaut.Ui.Rows;
+using Argonaut.Engine.Text;
 
 namespace Argonaut.Ui.Tree;
 
@@ -245,6 +246,10 @@ public class TreeSurface : RowSurface
 
         return null;
     }
+
+    /// <summary>The text layout of one pane of realized row <paramref name="index"/>, for tests.</summary>
+    internal TextLayout PaneTextLayout(int index, int pane = 0)
+        => LayoutFor(realized[index], new Typeface(FontFamily), FontSize).Panes[pane].Layout;
 
     /// <summary>Where realized row <paramref name="index"/>'s arrow is drawn in a pane, for tests.</summary>
     internal double ArrowX(int index, int pane = 0) => ArrowLeft(index, pane);
@@ -594,7 +599,10 @@ public class TreeSurface : RowSurface
             text.Append(run.Text);
         }
 
-        string content = text.ToString();
+        // A separator a value may hold unescaped (U+2028 and kin) would break the layout onto a
+        // second line inside one row band, so it is drawn as a glyph; the length is unchanged, so
+        // the runs and links above still line up.
+        string content = ControlGlyphs.ForDisplay(text.ToString());
         var layout = new TextLayout(content, typeface, fontSize, foreground, TextAlignment.Left, TextWrapping.NoWrap,
             textStyleOverrides: overrides);
 

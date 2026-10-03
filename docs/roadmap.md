@@ -72,6 +72,10 @@ it in (see "Saving" in architecture.md).
   trivia. They would be leaf rows in `TreeRunStyle.Comment`. Needs the reader to report a comment
   as a child (with ordinals skipping it, so array indices and paths are unchanged) and the sparse
   index's separator logic to still treat a comment as trivia.
+- **Guess-both-ways for minified JSON rows beyond the lookback.** The raw view colours a wrapped
+  row from its line's start and leaves a row plain when that start is more than 16 rows back.
+  Lexing such a row once as if inside a string and once as if outside, and keeping the reading
+  that stays consistent, would colour it without walking back.
 - **Not planned, stated for completeness:** scaling the promotion and checkpoint sizes (fixed
   64 KB each) with file size or a memory budget; dropping closing brackets as rows; a per-object
   key-hash filter for path resolution - a path through 3M then 1M keys
@@ -175,6 +179,8 @@ rendering gives up. Reasoning in [markdown-options.md](markdown-options.md).
 
 - **Highlighting in the raw view.** Fence state carried on the index's existing anchors (one bit
   per 64 rows), span classification per visible row, styled runs in `RawTextSurface`.
+  Builds on the raw view's line-local lexers (`IRawLexer`) and is the first that needs state across
+  lines, which those deliberately do not carry.
 - **Detection.** `.md`/`.markdown` by extension, plus a corroborated content heuristic: the
   discriminating construct is heading *depth* varying (`#` and `##` in one file), not the hash
   itself; everything else (fence, setext underline, link, table) needs a second distinct signal.

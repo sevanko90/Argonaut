@@ -10,10 +10,12 @@ using Avalonia.Input.Platform;
 using Avalonia.Media;
 using Avalonia.Media.TextFormatting;
 using Avalonia.Threading;
+using Avalonia.Utilities;
 using System.Threading.Tasks;
 using Avalonia.Interactivity;
 using Argonaut.Engine.Bytes;
 using Argonaut.Features.Raw.Editing;
+using Argonaut.Features.Raw.Highlighting;
 using Argonaut.Features.Raw.Rows;
 using Argonaut.Ui.Find;
 using Argonaut.Ui.Notifications;
@@ -80,6 +82,33 @@ public class RawTextSurface : RowSurface
     /// </summary>
     private readonly Dictionary<int, RawDecodedRow> decoded = new();
 
+    /// <summary>
+    /// The lexer state at the end of each row laid out, keyed by row index, so the row below can
+    /// start from it. Same lifetime as <see cref="layouts"/>: it is cleared wherever they are,
+    /// because after an edit a surviving state would colour the row below from text that is gone.
+    /// </summary>
+    private readonly Dictionary<int, RawLexState> exitStates = new();
+
+    /// <summary>The spans of the row being laid out; reused so colouring allocates nothing per row.</summary>
+    private readonly List<RawStyledSpan> rowSpans = new();
+
+    /// <summary>The spans of rows lexed only to reach a later row's entry state, then discarded.</summary>
+    private readonly List<RawStyledSpan> lookbackSpans = new();
+
+    /// <summary>
+    /// How far back a wrapped row looks for the start of its line, in rows. A row that begins
+    /// mid-line needs the lexer state its line had reached, which only lexing from the line's
+    /// start can give; this bounds that work per row (16 rows is 1.3 to 8 KB across the three wrap
+    /// widths). A line start further back leaves the row, and the rest of its line, plain.
+    /// </summary>
+    private const int MaxLookbackRows = 16;
+
+    private TextRunProperties?[]? styleProperties;
+    private Typeface stylePropertiesTypeface;
+    private double stylePropertiesFontSize;
+
+    private IRawLexer? lexer;
+    private IReadOnlyDictionary<RawTextStyle, IBrush>? styleBrushes;
     private RawViewModel? viewModel;
     private INotifyCollectionChanged? subscribedRows;
     private RawCaretController? caret;
@@ -112,6 +141,33 @@ public class RawTextSurface : RowSurface
     {
         get => GetValue(CaretBrushProperty);
         set => SetValue(CaretBrushProperty, value);
+    }
+
+    /// <summary>
+    /// Colours rows from their drawn text; null draws every row in the foreground. Colour needs
+    /// this and <see cref="StyleBrushes"/> both.
+    /// </summary>
+    public IRawLexer? Lexer
+    {
+        get => this.lexer;
+        set
+        {
+            this.lexer = value;
+            DropLayouts();
+            InvalidateVisual();
+        }
+    }
+
+    /// <summary>The brush per text style; a style with none uses <see cref="RowSurface.Foreground"/>.</summary>
+    public IReadOnlyDictionary<RawTextStyle, IBrush>? StyleBrushes
+    {
+        get => this.styleBrushes;
+        set
+        {
+            this.styleBrushes = value;
+            DropLayouts();
+            InvalidateVisual();
+        }
     }
 
     /// <summary>
@@ -276,6 +332,7 @@ public class RawTextSurface : RowSurface
     private void DropRowCaches()
     {
         this.layouts.Clear();
+        this.exitStates.Clear();
         this.decoded.Clear();
         this.measuredRange = (0, -1);
     }
@@ -288,6 +345,7 @@ public class RawTextSurface : RowSurface
     /// </summary>
     private void DropLayouts()
     {
+        this.styleProperties = null;
         DropRowCaches();
         ResetWidestRowWidth();
     }
@@ -324,6 +382,7 @@ public class RawTextSurface : RowSurface
             if (this.viewModel is not null)
                 this.viewModel.ViewportRows = null;
             this.layouts.Clear();
+            this.exitStates.Clear();
             return;
         }
 
@@ -519,22 +578,156 @@ public class RawTextSurface : RowSurface
         => string.IsNullOrEmpty(text) ? string.Empty : text[..Math.Min(count, text.Length)];
 
     private TextLayout LayoutFor(int rowIndex, RawVisibleRow row, Typeface typeface, double fontSize, IBrush foreground)
-        => LayoutFor(rowIndex, typeface, fontSize, foreground, row.Text);
+        => LayoutFor(rowIndex, typeface, fontSize, foreground, row.Text, row);
 
-    private TextLayout LayoutFor(int rowIndex, Typeface typeface, double fontSize, IBrush foreground, string text)
+    private TextLayout LayoutFor(int rowIndex, Typeface typeface, double fontSize, IBrush foreground, string text, RawVisibleRow? row = null)
     {
         if (this.layouts.TryGetValue(rowIndex, out var cached))
             return cached;
 
+        // The cache is shared by every caller, so whichever lays a row out first decides how it
+        // is drawn: a caller that only has the row's text must colour it too, or the plain layout
+        // it cached would be what Render draws.
+        IReadOnlyList<ValueSpan<TextRunProperties>>? overrides = null;
+        if (ColouringEnabled && (row ?? RowAt(rowIndex)) is { } source)
+            overrides = StyleOverridesFor(rowIndex, source, text, typeface, fontSize, foreground);
+
         // No wrapping and no width constraint: the row is already byte-capped by the index, and
         // laying it out at its natural width is what lets it be panned rather than re-flowed.
-        var layout = new TextLayout(text, typeface, fontSize, foreground, TextAlignment.Left, TextWrapping.NoWrap);
+        var layout = new TextLayout(text, typeface, fontSize, foreground, TextAlignment.Left, TextWrapping.NoWrap,
+            textStyleOverrides: overrides);
         this.layouts[rowIndex] = layout;
         return layout;
     }
 
+    private bool ColouringEnabled => this.lexer is not null && this.styleBrushes is not null;
+
+    private RawVisibleRow? RowAt(int rowIndex)
+        => this.viewModel is { } vm && vm.HasRows && (uint)rowIndex < (uint)vm.RowCount
+            ? vm.Rows[rowIndex] as RawVisibleRow
+            : null;
+
+    /// <summary>
+    /// The per-span text properties for one row, or null when nothing in it is coloured. Lexes
+    /// the row from its drawn text, which is also why an edit needs nothing special: an edited
+    /// row's text already comes through the piece table.
+    /// </summary>
+    private IReadOnlyList<ValueSpan<TextRunProperties>>? StyleOverridesFor(
+        int rowIndex, RawVisibleRow row, string text, Typeface typeface, double fontSize, IBrush foreground)
+    {
+        this.rowSpans.Clear();
+        LexRow(rowIndex, row, text, this.rowSpans);
+        if (this.rowSpans.Count == 0)
+            return null;
+
+        var overrides = new List<ValueSpan<TextRunProperties>>(this.rowSpans.Count);
+        foreach (var span in this.rowSpans)
+            overrides.Add(new ValueSpan<TextRunProperties>(span.Start, span.Length, PropertiesFor(span.Style, typeface, fontSize, foreground)));
+
+        return overrides;
+    }
+
+    /// <summary>
+    /// The text properties a style draws with, built once per typeface and size. A section header
+    /// is the one style drawn bold: it shares the keys' colour, and the weight is what makes it
+    /// read as the heading it is. Internal for tests.
+    /// </summary>
+    internal TextRunProperties PropertiesFor(RawTextStyle style, Typeface typeface, double fontSize, IBrush foreground)
+    {
+        if (this.styleProperties is null || this.stylePropertiesTypeface != typeface || this.stylePropertiesFontSize != fontSize)
+        {
+            this.styleProperties = new TextRunProperties?[Enum.GetValues<RawTextStyle>().Length];
+            this.stylePropertiesTypeface = typeface;
+            this.stylePropertiesFontSize = fontSize;
+        }
+
+        var face = style == RawTextStyle.Section ? new Typeface(typeface.FontFamily, typeface.Style, FontWeight.Bold) : typeface;
+        return this.styleProperties[(int)style] ??= new GenericTextRunProperties(face, fontSize,
+            foregroundBrush: this.styleBrushes is not null && this.styleBrushes.TryGetValue(style, out var brush) ? brush : foreground);
+    }
+
+    /// <summary>
+    /// Lexes one row into <paramref name="into"/> and records the state it ends in. A row whose
+    /// entry state is unknown gets no spans and passes the unknown on, so the rest of its line is
+    /// plain without walking back for it again.
+    /// </summary>
+    private void LexRow(int rowIndex, RawVisibleRow row, string text, List<RawStyledSpan> into)
+    {
+        var entry = EntryStateFor(rowIndex, row);
+        this.exitStates[rowIndex] = entry.IsUnknown ? entry : this.lexer!.Lex(text, entry, into);
+    }
+
+    /// <summary>
+    /// The lexer state a row starts in: a line start is the initial state, a row below one we
+    /// have already lexed continues from it, and otherwise the line is lexed forward from its
+    /// start - at most <see cref="MaxLookbackRows"/> rows back, beyond which the state is unknown.
+    /// </summary>
+    private RawLexState EntryStateFor(int rowIndex, RawVisibleRow row)
+    {
+        if (row.LineNumber is not null)
+            return RawLexState.LineStart;
+
+        if (this.exitStates.TryGetValue(rowIndex - 1, out var above))
+            return above;
+
+        if (this.viewModel is not { } vm)
+            return RawLexState.Unknown;
+
+        int lineStart = -1;
+        for (int i = rowIndex - 1; i >= Math.Max(0, rowIndex - MaxLookbackRows); i--)
+        {
+            if (vm.Rows[i] is RawVisibleRow { LineNumber: not null })
+            {
+                lineStart = i;
+                break;
+            }
+        }
+
+        if (lineStart < 0)
+            return RawLexState.Unknown;
+
+        var state = RawLexState.LineStart;
+        for (int i = lineStart; i < rowIndex; i++)
+        {
+            this.lookbackSpans.Clear();
+            state = this.lexer!.Lex(((RawVisibleRow)vm.Rows[i]!).Text, state, this.lookbackSpans);
+            this.exitStates[i] = state;
+        }
+
+        return state;
+    }
+
+    /// <summary>
+    /// The coloured spans of a realized row, for tests: lexed the way layout lexes it, without
+    /// needing a renderer.
+    /// </summary>
+    internal IReadOnlyList<RawStyledSpan> StyledSpansFor(int rowIndex)
+    {
+        if (this.lexer is null || RowAt(rowIndex) is not { } row)
+            return Array.Empty<RawStyledSpan>();
+
+        var spans = new List<RawStyledSpan>();
+        LexRow(rowIndex, row, row.Text, spans);
+        return spans;
+    }
+
     private void PruneLayouts(int firstRow, int lastRow)
     {
+        // Lookback leaves states for rows above the viewport that no layout accounts for, so the
+        // states are bounded on their own: the viewport plus the band a lookback can reach.
+        if (this.exitStates.Count > (lastRow - firstRow + 1) * 2 + MaxLookbackRows)
+        {
+            var outside = new List<int>();
+            foreach (int rowIndex in this.exitStates.Keys)
+            {
+                if (rowIndex < firstRow - MaxLookbackRows || rowIndex > lastRow)
+                    outside.Add(rowIndex);
+            }
+
+            foreach (int rowIndex in outside)
+                this.exitStates.Remove(rowIndex);
+        }
+
         if (this.layouts.Count <= (lastRow - firstRow + 1) * 2)
             return;
 
@@ -548,6 +741,7 @@ public class RawTextSurface : RowSurface
         foreach (int rowIndex in stale)
         {
             this.layouts.Remove(rowIndex);
+            this.exitStates.Remove(rowIndex);
             this.decoded.Remove(rowIndex);
         }
     }

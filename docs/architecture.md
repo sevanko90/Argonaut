@@ -381,6 +381,20 @@ The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLeng
   recycled containers around one piece of state. `RawRowCollection` survives as the row cache it
   reads by index and whose growth notifications it follows, but nothing binds it as an
   `ItemsSource`.
+- **The raw view's colours are line-local lexers over the drawn text.** An `IRawLexer`
+  (`Features/Raw/Highlighting`: JSON, and one config lexer for YAML and the `key = value`
+  formats, whose colon separates only before a blank) turns one row's text into styled
+  spans and returns a small state for the next row of the same line; the state resets at every
+  line start, so nothing is coloured across lines. `RawTextSurface` lexes the rows it lays out,
+  from `RawVisibleRow.Text` rather than from bytes, and keeps each row's exit state beside its
+  text layout, clearing both together. A row that begins mid-line (a forced wrap) takes its entry
+  state from the row above, or by lexing its line forward from the line start at most 16 rows
+  back; a line start further back leaves that row and the rest of its line plain, never guessed.
+  The scan index is not involved: no state is stored on anchors. Edit mode needs nothing extra,
+  because an edited row's text already comes through the piece table and every edit drops the
+  surface's layout cache, so the viewport is re-lexed on each keystroke. `RawLexerChoice` picks
+  the lexer from the file's name, or by sniffing the first line starts for a document with no
+  path; the toolbar picker overrides it per document.
 - **One scroll interface, two position models, no `ScrollViewer`.** A surface's position is a
   fraction of its document (`ScrollFraction`, `ViewportFraction`, `ShowsEnd`), moved by
   `ScrollByPixels`, `ScrollToFraction` and `ScrollToEnd`, and announced by

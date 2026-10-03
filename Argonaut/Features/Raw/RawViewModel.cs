@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -9,6 +10,7 @@ using Argonaut.Engine.Progress;
 using Argonaut.Engine.Saving;
 using Argonaut.Engine.Settings;
 using Argonaut.Features.Raw.Editing;
+using Argonaut.Features.Raw.Highlighting;
 using Argonaut.Features.Raw.Rows;
 using Argonaut.Ui.Documents;
 using Argonaut.Ui.Documents.Navigation;
@@ -47,6 +49,8 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     private RawEditController? editor;
     private bool isEditing;
     private bool isSaving;
+    private RawColourChoice colourChoice;
+    private IRawLexer? autoLexer;
 
     /// <summary>The background half of a save - the copy into the stage - which disposal must
     /// stop and join before the session releases the mapping it reads.</summary>
@@ -625,7 +629,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         this.Origin = origin;
         this.FilePath = origin.Path ?? origin.DisplayName;
         this.wrapWidth = this.settings.WrapWidth;
-        this.toolbar = new RawToolbarViewModel(this.wrapWidth, ChooseWrapWidth, SetEditing);
+        this.toolbar = new RawToolbarViewModel(this.wrapWidth, ChooseWrapWidth, SetEditing, SetColours);
 
         var session = StartSession(origin, progressReporter);
 
@@ -639,12 +643,57 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         this.rows = new RawRowCollection(session.Index, session.Bytes);
         Caret = new RawCaretController(session.Index, session.Bytes);
 
+        this.autoLexer = ChooseAutoLexer(origin);
+        this.toolbar.SetAutoColours(this.autoLexer?.DisplayName);
+
         OnPropertyChanged(nameof(Rows));
         OnPropertyChanged(nameof(RowCount));
+        OnPropertyChanged(nameof(Lexer));
 
         StatusText = $"{FilePath} — {RowCount:N0} rows indexed so far";
         MonitorIndexing();
     }
+
+    /// <summary>
+    /// What colours the rows, or null for none: the picker's choice, with Auto resolved from the
+    /// file's name or, for a document that is not a file, the text of its first lines.
+    /// </summary>
+    public IRawLexer? Lexer => RawLexerChoice.For(this.colourChoice, this.autoLexer);
+
+    /// <summary>The toolbar's colour choice, applied to this document only.</summary>
+    private void SetColours(RawColourChoice choice)
+    {
+        if (this.IsDisposed || choice == this.colourChoice)
+            return;
+
+        this.colourChoice = choice;
+        OnPropertyChanged(nameof(Lexer));
+    }
+
+    /// <summary>
+    /// Auto's choice. The name decides when it can, and only a document it says nothing about is
+    /// sniffed - from the rows already indexed, bounded so a file of minified lines cannot make
+    /// this read far. The path is the only thing consulted, never the display name: a pasted
+    /// document has no path and is judged by its text.
+    /// </summary>
+    private IRawLexer? ChooseAutoLexer(IByteOrigin origin)
+    {
+        if (RawLexerChoice.ForPath(origin.Path) is { } named)
+            return named;
+
+        var lineStarts = new List<string>(RawLexerChoice.MaxSniffedLines);
+        int rowCount = Math.Min(RowCount, MaxSniffedRows);
+        for (int i = 0; i < rowCount && lineStarts.Count < RawLexerChoice.MaxSniffedLines; i++)
+        {
+            if (Rows[i] is RawVisibleRow { LineNumber: not null } row)
+                lineStarts.Add(row.Text);
+        }
+
+        return RawLexerChoice.Sniff(lineStarts);
+    }
+
+    /// <summary>The most rows Auto reads to guess a format.</summary>
+    private const int MaxSniffedRows = 200;
 
     /// <summary>The toolbar's wrap-width choice: remembered for the next document, then applied
     /// to this one.</summary>

@@ -69,6 +69,17 @@ everything else, so a multi-gigabyte log scrolls smoothly from the moment it ope
   that's breaking your file. Names come from the Unicode Character Database 16.0.0, since .NET
   exposes character categories but no names.
 - Double-click to select a word
+- Syntax colouring for config-style files, in both viewing and editing:
+  - JSON, JSONC and NDJSON - keys, strings, numbers, `true`/`false`/`null`, comments
+  - Config files - YAML, INI, `.properties`, `.env`, `.editorconfig`, simple TOML: keys,
+    values, sections, comments and YAML's list markers
+  - Picked automatically from the file name, or from the content for a paste or an unfamiliar
+    extension; override or turn it off from the toolbar
+  - Colouring works one line at a time, so things that span lines (a multi-line YAML block, an
+    unclosed `/* */`) aren't coloured across them
+  - On very long lines (eg minified JSON), colour holds near the start of the line and while
+    you scroll smoothly down from there; jump far into the line and the rest of it shows
+    uncoloured rather than risk wrong colours
 
 ### JSON Schema support for documentation
 

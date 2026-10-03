@@ -29,5 +29,17 @@
             <ComboBoxItem Content="Wrap: 160 bytes" />
             <ComboBoxItem Content="Wrap: 512 bytes" />
         </ComboBox>
+        <ComboBox x:Name="ColoursCombo"
+                  SelectedIndex="{Binding ColoursIndex, Mode=TwoWay}"
+                  FontSize="12"
+                  MinWidth="130"
+                  Margin="8,0,0,0"
+                  VerticalAlignment="Center"
+                  ToolTip.Tip="Syntax colours for this document">
+            <ComboBoxItem Content="{Binding AutoColoursLabel}" />
+            <ComboBoxItem Content="Off" />
+            <ComboBoxItem Content="JSON" />
+            <ComboBoxItem Content="Config" />
+        </ComboBox>
     </StackPanel>
 </UserControl>

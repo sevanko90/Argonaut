@@ -3,6 +3,7 @@ using System.ComponentModel;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Reactive;
+using Argonaut.Features.Raw.Highlighting;
 using Argonaut.Ui.Rows;
 
 namespace Argonaut.Features.Raw;
@@ -26,6 +27,7 @@ public partial class RawView : UserControl
         Loaded += OnLoaded;
         DataContextChanged += OnDataContextChanged;
         DetachedFromVisualTree += OnDetachedFromVisualTree;
+        ActualThemeVariantChanged += OnThemeChanged;
         scrollBars = new RowScrollBars(Surface, VerticalScrollBar, PanScrollBar);
         EditOverview.EditChosen += OnEditChosen;
         fontResourceSubscription = this.GetResourceObservable("AppContentFontFamily")
@@ -34,6 +36,8 @@ public partial class RawView : UserControl
 
     private void OnLoaded(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
+        ApplyTextBrushes();
+
         if (DataContext is RawViewModel vm)
             RevealSelectedRow(vm);
 
@@ -46,6 +50,11 @@ public partial class RawView : UserControl
         // this cannot steal focus from the find box, which is focused later and by the user.
         Surface.Focus();
     }
+
+    private void OnThemeChanged(object? sender, EventArgs e) => ApplyTextBrushes();
+
+    /// <summary>The text palette, from the theme - again whenever the theme changes.</summary>
+    private void ApplyTextBrushes() => RawTextPalette.Apply(Surface, this);
 
     private void OnDataContextChanged(object? sender, EventArgs e)
     {
@@ -61,6 +70,7 @@ public partial class RawView : UserControl
             vm.PropertyChanged += OnViewModelPropertyChanged;
         }
 
+        Surface.Lexer = (DataContext as RawViewModel)?.Lexer;
         scrollBars.Refresh();
         UpdateEditOverview();
     }
@@ -72,6 +82,9 @@ public partial class RawView : UserControl
 
         if (e.PropertyName is null or nameof(RawViewModel.SelectedRowIndex))
             RevealSelectedRow(vm);
+
+        if (e.PropertyName is null or nameof(RawViewModel.Lexer))
+            Surface.Lexer = vm.Lexer;
 
         // The toggle that turns editing on lives in the header toolbar, so the click that
         // enabled it left focus there. Typing has to work without a second click into the text.
@@ -110,6 +123,7 @@ public partial class RawView : UserControl
     private void OnDetachedFromVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
     {
         scrollBars.Dispose();
+        ActualThemeVariantChanged -= OnThemeChanged;
         EditOverview.EditChosen -= OnEditChosen;
         DataContextChanged -= OnDataContextChanged;
         fontResourceSubscription.Dispose();

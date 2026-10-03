@@ -26,7 +26,14 @@ namespace Argonaut.Ui.Tree;
 /// position is a fraction of the document - the anchor's byte position - so a scrollbar's thumb
 /// is where the view is in the file. The wheel, a trackpad, arrows and pages move the anchor by
 /// rows (<see cref="ScrollByPixels"/>); dragging a thumb seeks to the byte it points at
-/// (<see cref="ScrollToFraction"/>). The scrollbar is the host's, and only ever follows
+/// (<see cref="ScrollToFraction"/>).
+///
+/// <b>The thumb is a fixed size</b> (<see cref="ThumbLength"/>), because nothing here knows how
+/// much of the document a screen shows: a screen of expanded scalars covers a few hundred bytes,
+/// a screen of collapsed containers can cover the whole file, and a thumb sized from the rows on
+/// screen grew and shrank as the view moved - and, since its travel is what the size leaves,
+/// shifted under a view that had not. So the thumb only says where, and its travel is the file:
+/// top of the track the first byte, bottom the last. The scrollbar is the host's, and only ever follows
 /// (<see cref="ScrollPositionChanged"/>) - it never feeds a correction back, which is what would
 /// make a dragged thumb stutter.
 /// </summary>
@@ -62,6 +69,10 @@ public class TreeSurface : RowSurface
     /// <summary>A row covers this many bytes until rows on screen say otherwise.</summary>
     private const double InitialBytesPerRow = 32;
 
+    /// <summary>The scrollbar thumb's length, in pixels, whatever the document - see the remarks
+    /// on the class for why it is not sized from the content.</summary>
+    public const double ThumbLength = 48;
+
     /// <summary>A gap left between two panes, split either side of the line drawn between them.</summary>
     private const double PaneGap = 8;
 
@@ -92,6 +103,7 @@ public class TreeSurface : RowSurface
     private ITreeRowCursor? anchor;
     private double anchorPixel;
     private bool showsEnd;
+    private bool showsAll;
     private double bytesPerRow = InitialBytesPerRow;
     private ITreeRowCursor? selection;
     private string? highlightTerm;
@@ -474,6 +486,7 @@ public class TreeSurface : RowSurface
         realized.Clear();
         insets.Clear();
         showsEnd = false;
+        showsAll = false;
         if (anchor is null || Bounds.Height <= 0)
             return;
 
@@ -497,14 +510,17 @@ public class TreeSurface : RowSurface
                 realized.Insert(0, anchor.Current);
         }
 
+        // Asked only at the end, so scrolling through the middle never pays for the step back.
+        showsAll = showsEnd && anchorPixel == 0 && !anchor.Clone().MovePrevious();
+
         ComputeInsets();
         EstimateBytesPerRow();
         PruneLayouts();
         MeasureRealizedRows();
     }
 
-    /// <summary>Refines the bytes a row covers from the rows on screen, smoothed so the scroll
-    /// range does not lurch with every screen.</summary>
+    /// <summary>Refines the bytes a row covers from the rows on screen - what a part-scrolled top
+    /// row adds to the position - smoothed so the position does not lurch with every screen.</summary>
     private void EstimateBytesPerRow()
     {
         if (realized.Count < 2)
@@ -765,7 +781,7 @@ public class TreeSurface : RowSurface
     // source - for a document, its byte offset - since there is no row count to take a fraction of.
 
     /// <summary>The anchor's scroll position as a fraction of the source's, plus the part of a row
-    /// scrolled off the top.</summary>
+    /// scrolled off the top - laid over the thumb's travel, so the whole file spans the track.</summary>
     public override double ScrollFraction
     {
         get
@@ -775,20 +791,26 @@ public class TreeSurface : RowSurface
                 return 0;
 
             double position = document!.ScrollPosition(anchor.Current) + anchorPixel / RowHeight * bytesPerRow;
-            return Math.Clamp(position / length, 0, 1);
+            return Math.Clamp(position / length, 0, 1) * ThumbTravel;
         }
     }
 
-    /// <summary>From the average scroll range a row covers - smoothed, so a scrollbar thumb sized
-    /// from it does not flicker.</summary>
+    /// <summary>A fixed <see cref="ThumbLength"/> of the track, or all of it when a screen shows
+    /// every row.</summary>
     public override double ViewportFraction
     {
         get
         {
-            long length = document?.ScrollLength ?? 0;
-            return length <= 0 ? 1 : Math.Clamp(VisibleRowCount() * bytesPerRow / length, 0, 1);
+            if (showsAll || (document?.ScrollLength ?? 0) <= 0 || Bounds.Height <= 0)
+                return 1;
+
+            return Math.Clamp(ThumbLength / Bounds.Height, 0, 0.5);
         }
     }
+
+    /// <summary>The share of the track the thumb's top can move over - what a fraction of the
+    /// file is scaled by on the way to the scrollbar, and back on the way from it.</summary>
+    private double ThumbTravel => 1 - ViewportFraction;
 
     public override bool ShowsEnd => showsEnd;
 
@@ -812,8 +834,8 @@ public class TreeSurface : RowSurface
     }
 
     /// <summary>
-    /// Puts the row at <paramref name="fraction"/> of the scroll range at the top - what a dragged
-    /// thumb does. At the end, the last row settles at the bottom. How far a seek may reach while
+    /// Puts the row at <paramref name="fraction"/> of the thumb's travel at the top - what a
+    /// dragged thumb does; the travel spans the file, so the track's middle is the file's. At the end, the last row settles at the bottom. How far a seek may reach while
     /// the rows are still being worked out is the source's to say
     /// (<see cref="ITreeRowSource.SeekScrollPosition"/>).
     /// </summary>
@@ -822,7 +844,9 @@ public class TreeSurface : RowSurface
         if (anchor is null || document is null)
             return;
 
-        document.SeekScrollPosition(anchor, (long)(Math.Clamp(fraction, 0, 1) * document.ScrollLength));
+        double travel = ThumbTravel;
+        double ofFile = travel > 0 ? fraction / travel : 0;
+        document.SeekScrollPosition(anchor, (long)(Math.Clamp(ofFile, 0, 1) * document.ScrollLength));
 
         anchorPixel = 0;
         Realize();

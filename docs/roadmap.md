@@ -62,7 +62,12 @@ it in (see "Saving" in architecture.md).
 
 - **Per-depth row counts**, only if the estimated scrollbar proves not good enough in use. They
   would give the tree the exact scroll model the raw view has, under the same `RowSurface`
-  interface.
+  interface. The fixed-size thumb snaps on a document with few visible rows of uneven size (a
+  collapsed file: a drag lands on whichever row holds the byte), which is the case to judge it by.
+  A cheaper middle step for exactly that case: count the visible rows with a capped cursor walk
+  after each structural change, use the exact model under the cap and the byte model over it -
+  no index or scan change, but a walk on the UI thread per toggle, so measure the walk rate
+  before choosing the cap.
 - **JSONC comments as rows.** Settings files lean on them, and `JsonTreeReader` skips them as
   trivia. They would be leaf rows in `TreeRunStyle.Comment`. Needs the reader to report a comment
   as a child (with ordinals skipping it, so array indices and paths are unchanged) and the sparse

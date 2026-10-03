@@ -131,6 +131,52 @@ public sealed class TreeSurfaceTests
     });
 
     [Fact]
+    public Task TheThumbKeepsItsSizeWhereverTheViewIs() => WithSurface(defaultDepth: 1, async h =>
+    {
+        // Depth 1 mixes expanded rows with collapsed containers, so how many bytes a screen covers
+        // varies from place to place - exactly what used to resize the thumb.
+        double atTop = h.Surface.ViewportFraction;
+        Assert.InRange(atTop, 0.01, 0.5);
+
+        foreach (double fraction in new[] { 0.2, 0.5, 0.8 })
+        {
+            h.Surface.ScrollToFraction(fraction * (1 - atTop));
+            await PumpAsync();
+            Assert.Equal(atTop, h.Surface.ViewportFraction);
+        }
+
+        Press(h.Window, Key.Home);
+        h.Surface.ScrollByPixels(10 * RowSurface.RowHeight);
+        await PumpAsync();
+        Assert.Equal(atTop, h.Surface.ViewportFraction);
+    });
+
+    [Fact]
+    public Task TheThumbsTravelSpansTheWholeFile() => WithSurface(defaultDepth: 9, async h =>
+    {
+        double travel = 1 - h.Surface.ViewportFraction;
+
+        // The middle of the travel is the middle of the file, not the middle less a thumb.
+        h.Surface.ScrollToFraction(travel / 2);
+        await PumpAsync();
+        Assert.InRange(h.Surface.RealizedRows[0].Start, h.Bytes.Length * 4 / 10, h.Bytes.Length * 6 / 10);
+
+        // And the bottom of it is the end.
+        h.Surface.ScrollToFraction(travel);
+        await PumpAsync();
+        Assert.True(h.Surface.ShowsEnd);
+        Assert.Equal(h.Rows[^1].Key, h.Surface.RealizedRows[^1].Key);
+    });
+
+    [Fact]
+    public Task ADocumentThatFitsOnScreenHasNoThumb() => WithSurface(defaultDepth: 0, h =>
+    {
+        Assert.True(h.Rows.Count < FullRows, "the collapsed document should fit in the window");
+        Assert.Equal(1, h.Surface.ViewportFraction);
+        return Task.CompletedTask;
+    }, topLevelChildren: 5);
+
+    [Fact]
     public Task DraggingTheThumbMovesSteadilyOneWay() => WithSurface(defaultDepth: 9, async h =>
     {
         // A thumb dragged down in small steps: the top row only ever moves down, and the reported

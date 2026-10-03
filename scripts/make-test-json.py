@@ -17,8 +17,12 @@
     coordinate arrays running to tens of thousands of positions, nested GeometryCollections
     for the recursive $ref, and free-form feature properties (one of them a JS-epoch-ms
     timestamp, so a date hint and a schema label land on the same row).
+  - wide-object-sample.json: ~130MB, a root object of 3,000,000 keys whose last member holds
+    another object of 1,000,000 keys - for timing JSONPath navigation into objects with
+    millions of keys, which finds a member by reading the container's names in order. The
+    paths worth typing into the toolbar's path box are printed when it is written.
 
-Run with no arguments to generate all three. Pass --corrupt, --valid or --geojson to
+Run with no arguments to generate all four. Pass --corrupt, --valid, --geojson or --wide to
 generate just one - the 4GB corrupt file takes minutes, so the others alone are handy for
 quick UI iteration.
 """
@@ -28,6 +32,10 @@ OUT_DIR = os.path.expanduser("~/testData")
 CORRUPT_OUT = os.path.join(OUT_DIR, "corrupt-sample-4gb.json")
 VALID_OUT = os.path.join(OUT_DIR, "valid-sample-50mb.json")
 GEOJSON_OUT = os.path.join(OUT_DIR, "geojson-sample-25mb.json")
+WIDE_OUT = os.path.join(OUT_DIR, "wide-object-sample.json")
+
+WIDE_OUTER_KEYS = 3_000_000
+WIDE_INNER_KEYS = 1_000_000
 
 CORRUPT_TARGET = 4 * 1024**3
 CORRUPT_AT = 3 * 1024**3
@@ -345,14 +353,58 @@ def make_geojson_sample():
           f"({summary}) -> {GEOJSON_OUT}  ({time.time() - start:.1f}s)", flush=True)
 
 
+def make_wide_object_sample():
+    """Deterministic - no random draws - so it never shifts the other files' seeded stream.
+
+    Keys are zero-padded so every member is the same size and a key's position in the file is
+    proportional to its number: k0000000 is the first name read, k2999999 the last. The last
+    outer member is the one that nests, so the slowest path pays for two full scans in a row.
+    """
+    start = time.time()
+    outer_last = f"k{WIDE_OUTER_KEYS - 1:07d}"
+    inner_last = f"n{WIDE_INNER_KEYS - 1:07d}"
+
+    with open(WIDE_OUT, "w", buffering=4 * 1024 * 1024) as f:
+        f.write("{\n")
+        batch = []
+        for i in range(WIDE_OUTER_KEYS - 1):
+            batch.append(f'"k{i:07d}":{{"id":{i},"v":{i % 997}}},\n')
+            if len(batch) == 10_000:
+                f.write("".join(batch))
+                batch.clear()
+        f.write("".join(batch))
+        batch.clear()
+
+        f.write(f'"{outer_last}":{{"inner":{{\n')
+        for i in range(WIDE_INNER_KEYS - 1):
+            batch.append(f'"n{i:07d}":{{"id":{i}}},\n')
+            if len(batch) == 10_000:
+                f.write("".join(batch))
+                batch.clear()
+        f.write("".join(batch))
+        # An array at the bottom, so "view as table" and Back - which navigates by path - can
+        # be timed from the deepest point too.
+        f.write(f'"{inner_last}":{{"rows":[{{"a":1,"b":2}},{{"a":3,"b":4}}]}}\n')
+        f.write("}}\n}\n")
+
+    size = os.path.getsize(WIDE_OUT)
+    print(f"DONE: wide object sample ~{size / 1024**2:.1f} MiB -> {WIDE_OUT}  ({time.time() - start:.1f}s)")
+    print("  paths, fastest to slowest:")
+    print("    $.k0000000                      first key")
+    print("    $.k1500000                      middle of the root")
+    print(f"    $.{outer_last}                      last key of the root")
+    print(f"    $.{outer_last}.inner.{inner_last}.rows   both scans in full, then into an array", flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--corrupt", action="store_true", help="generate only the 4GB corrupt file")
     parser.add_argument("--valid", action="store_true", help="generate only the 50MB valid file")
     parser.add_argument("--geojson", action="store_true", help="generate only the 25MB GeoJSON file")
+    parser.add_argument("--wide", action="store_true", help="generate only the ~130MB million-key object file")
     args = parser.parse_args()
 
-    everything = not (args.corrupt or args.valid or args.geojson)
+    everything = not (args.corrupt or args.valid or args.geojson or args.wide)
 
     os.makedirs(OUT_DIR, exist_ok=True)
     if args.valid or everything:
@@ -363,6 +415,8 @@ def main():
     # from the same seeded random stream).
     if args.geojson or everything:
         make_geojson_sample()
+    if args.wide or everything:
+        make_wide_object_sample()
 
 
 if __name__ == "__main__":

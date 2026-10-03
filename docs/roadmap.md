@@ -72,10 +72,12 @@ it in (see "Saving" in architecture.md).
   trivia. They would be leaf rows in `TreeRunStyle.Comment`. Needs the reader to report a comment
   as a child (with ordinals skipping it, so array indices and paths are unchanged) and the sparse
   index's separator logic to still treat a comment as trivia.
-- **Open questions, to settle from measurement:** whether the promotion and checkpoint sizes
-  (64 KB each) should scale with file size or a memory budget; whether closing brackets stay rows;
-  whether a path resolver that repeats key scans over objects with millions of keys wants a sparse
-  key-hash filter per large object; whether `Vector512` is worth a path beside `Vector256`.
+- **Not planned, stated for completeness:** scaling the promotion and checkpoint sizes (fixed
+  64 KB each) with file size or a memory budget; dropping closing brackets as rows; a per-object
+  key-hash filter for path resolution - a path through 3M then 1M keys
+  (`make-test-json.py --wide`) resolves in about 2 s, off the UI thread; a wider-vector
+  (`Vector256`/`Vector512`) path beside the classifier's `Vector128`, which is native on both
+  x64 and ARM64, where the wider types are emulated - and AVX-512 is uncommon on desktop CPUs.
 
 ## JSON diff
 

@@ -118,7 +118,7 @@
                 Background="{DynamicResource AppWindowBackgroundBrush}"
                 ClipToBounds="True">
             <Grid RowDefinitions="Auto,*,Auto" Margin="8">
-                <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,6">
+                <Grid ColumnDefinitions="*,Auto,Auto" Margin="0,0,0,6">
                     <TextBlock Text="{Binding CellDetail.Title}"
                                ToolTip.Tip="{Binding CellDetail.Title}"
                                TextTrimming="CharacterEllipsis"
@@ -126,6 +126,15 @@
                                FontWeight="SemiBold"
                                FontSize="12" />
                     <Button Grid.Column="1"
+                            Content="Copy"
+                            Click="OnCopyDetailText"
+                            IsVisible="{Binding CellDetail.IsText}"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            Padding="6,0"
+                            FontSize="12"
+                            ToolTip.Tip="Copy the value as it is in the cell" />
+                    <Button Grid.Column="2"
                             Content="✕"
                             Click="OnCloseDetail"
                             Background="Transparent"
@@ -140,7 +149,7 @@
                               IsVisible="{Binding CellDetail.IsText}"
                               HorizontalScrollBarVisibility="Disabled"
                               VerticalScrollBarVisibility="Auto">
-                    <SelectableTextBlock Text="{Binding CellDetail.Text}"
+                    <SelectableTextBlock Text="{Binding CellDetail.WrappableText}"
                                          TextWrapping="Wrap"
                                          FontFamily="{DynamicResource AppContentFontFamily}" />
                 </ScrollViewer>

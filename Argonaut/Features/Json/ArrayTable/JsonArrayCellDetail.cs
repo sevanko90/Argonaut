@@ -30,9 +30,16 @@ public sealed class JsonArrayCellDetail : IDisposable
     /// <summary>
     /// Bytes of a scalar decoded for the pane. Far past the grid's own display cap - the point of
     /// the pane is to show what the cell could not - while still bounded, because a JSON string
-    /// can be as large as the file.
+    /// can be as large as the file, and the pane lays the whole of it out at once.
     /// </summary>
-    public const int MaxScalarBytes = 256 * 1024;
+    public const int MaxScalarBytes = 64 * 1024;
+
+    /// <summary>
+    /// Longest run without whitespace the pane hands to its wrapping text block; longer runs are
+    /// cut into paragraphs (<see cref="DisplayText.BreakLongRuns"/>), which keeps a 64KB hash or
+    /// base64 value at tens of milliseconds to lay out instead of seconds.
+    /// </summary>
+    private const int MaxWrappableRun = 1024;
 
     /// <summary>Levels of a container cell opened on the click - enough to see its shape without
     /// reading a large subtree.</summary>
@@ -45,6 +52,7 @@ public sealed class JsonArrayCellDetail : IDisposable
     {
         Title = title;
         Text = text;
+        WrappableText = text is null ? null : DisplayText.BreakLongRuns(text, MaxWrappableRun);
         Truncated = truncated;
         Tree = tree;
         this.session = session;
@@ -53,8 +61,13 @@ public sealed class JsonArrayCellDetail : IDisposable
     /// <summary>Which cell this is: the column's route, and the row it came from.</summary>
     public string Title { get; }
 
-    /// <summary>The scalar's full text, or null when this cell holds a container.</summary>
+    /// <summary>The scalar's text exactly as it is in the cell (up to <see cref="MaxScalarBytes"/>),
+    /// which is what copying takes; null when this cell holds a container.</summary>
     public string? Text { get; }
+
+    /// <summary><see cref="Text"/> as the pane shows it, with newlines cutting any run too long to
+    /// wrap cheaply - so selecting across one of those cuts copies a newline the value lacks.</summary>
+    public string? WrappableText { get; }
 
     /// <summary>The scalar was longer than <see cref="MaxScalarBytes"/> and is shown cut.</summary>
     public bool Truncated { get; }

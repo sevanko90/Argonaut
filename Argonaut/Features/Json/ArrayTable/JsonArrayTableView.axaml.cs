@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel;
+using Argonaut.Ui.Notifications;
 using Argonaut.Ui.Rows;
 using Argonaut.Ui.TableGrid;
 using Argonaut.Ui.ViewModels;
@@ -8,6 +9,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Templates;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Markup.Xaml.MarkupExtensions;
@@ -107,6 +109,18 @@ public partial class JsonArrayTableView : UserControl
     }
 
     private void OnCloseDetail(object? sender, RoutedEventArgs e) => this.subscribedViewModel?.CloseCellDetail();
+
+    /// <summary>Copies the cell's own text rather than the pane's, which may carry newlines cut
+    /// into a run too long to wrap.</summary>
+    private async void OnCopyDetailText(object? sender, RoutedEventArgs e)
+    {
+        if (this.subscribedViewModel?.CellDetail?.Text is not { } text
+            || TopLevel.GetTopLevel(this)?.Clipboard is not { } clipboard)
+            return;
+
+        await clipboard.SetTextAsync(text);
+        ToastService.Show("Value copied to clipboard");
+    }
 
     /// <summary>
     /// Opens or closes the pane's grid column. Width lives here rather than in the view model:

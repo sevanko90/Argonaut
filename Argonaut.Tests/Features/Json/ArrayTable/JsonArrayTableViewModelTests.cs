@@ -747,6 +747,33 @@ public class JsonArrayTableViewModelTests
         });
 
     [Fact]
+    public Task ShowCell_OnAnUnbrokenScalar_ShowsItInParagraphsButKeepsTheTextToCopy()
+        => WithDocument($$"""[{"hash":"{{new string('x', 3000)}}"}]""", document =>
+        {
+            document.ShowCell(0, 0);
+
+            // A run with no break opportunity costs the layout quadratic time to wrap, so the
+            // pane shows it cut into paragraphs - while copying still takes the value as it is.
+            var detail = Assert.IsType<JsonArrayCellDetail>(document.CellDetail);
+            Assert.Equal(new string('x', 3000), detail.Text);
+            Assert.Contains('\n', detail.WrappableText);
+            Assert.Equal(detail.Text, detail.WrappableText!.Replace("\n", ""));
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public Task ShowCell_OnAScalarPastTheCap_ShowsItCut()
+        => WithDocument($$"""[{"huge":"{{new string('x', JsonArrayCellDetail.MaxScalarBytes + 10)}}"}]""", document =>
+        {
+            document.ShowCell(0, 0);
+
+            var detail = Assert.IsType<JsonArrayCellDetail>(document.CellDetail);
+            Assert.True(detail.Truncated);
+            Assert.Equal(JsonArrayCellDetail.MaxScalarBytes + 1, detail.Text!.Length); // plus the ellipsis
+            return Task.CompletedTask;
+        });
+
+    [Fact]
     public Task ShowCell_FollowsAnExpandedColumnsRoute()
         => WithDocument("""[{"geometry":{"coordinates":[7,8]}}]""", document =>
         {

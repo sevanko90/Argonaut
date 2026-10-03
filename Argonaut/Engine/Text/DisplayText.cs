@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using Argonaut.Engine.Bytes;
 
@@ -57,5 +58,54 @@ public static class DisplayText
             cut--;
 
         return Encoding.UTF8.GetString(span[..cut]) + "…";
+    }
+
+    /// <summary>
+    /// Inserts a newline into every run of more than <paramref name="maxRun"/> characters that
+    /// holds no whitespace, so wrapped text never asks the layout engine to break a run it has no
+    /// break opportunity in. Avalonia's emergency wrap of such a run costs quadratic time in its
+    /// length - 256K characters of base64 or a hash takes seconds per layout pass - while the
+    /// same text cut into short paragraphs lays out in linear time.
+    ///
+    /// The result is for display only; it is no longer the value. Returns
+    /// <paramref name="text"/> itself when no run needs breaking.
+    /// </summary>
+    public static string BreakLongRuns(string text, int maxRun)
+    {
+        StringBuilder? broken = null;
+        int copiedTo = 0;
+        int run = 0;
+        for (int i = 0; i < text.Length; i++)
+        {
+            if (char.IsWhiteSpace(text[i]))
+            {
+                run = 0;
+                continue;
+            }
+
+            // A break waits for a position that does not split a character: the second half of a
+            // surrogate pair, a combining mark or a joiner belongs with what precedes it.
+            if (run >= maxRun && StartsCharacter(text, i))
+            {
+                broken ??= new StringBuilder(text.Length + text.Length / maxRun + 1);
+                broken.Append(text, copiedTo, i - copiedTo).Append('\n');
+                copiedTo = i;
+                run = 0;
+            }
+
+            run++;
+        }
+
+        return broken is null ? text : broken.Append(text, copiedTo, text.Length - copiedTo).ToString();
+    }
+
+    private static bool StartsCharacter(string text, int index)
+    {
+        char c = text[index];
+        if (char.IsLowSurrogate(c) || c == '\u200D' || text[index - 1] == '\u200D' || c is >= '\uFE00' and <= '\uFE0F')
+            return false;
+
+        return CharUnicodeInfo.GetUnicodeCategory(c) is not (UnicodeCategory.NonSpacingMark
+            or UnicodeCategory.SpacingCombiningMark or UnicodeCategory.EnclosingMark);
     }
 }

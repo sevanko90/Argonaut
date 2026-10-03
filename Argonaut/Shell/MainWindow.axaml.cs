@@ -556,9 +556,11 @@ public partial class MainWindow : Window
         bool restart = await ConfirmDialog.Show(
             this, $"Update downloaded (v{version}). Restart Argonaut now to apply it?", "Restart");
         if (restart && await viewModel.ResolveUnsavedChangesAsync("restarting"))
+        {
             // Velopack ends the process without the app's Exit, which is where settings are saved.
             settings.Save();
             updateService.ApplyUpdatesAndRestart(info);
+        }
     }
 
     private void OnOpenLogFolder(object? sender, Avalonia.Interactivity.RoutedEventArgs e)

@@ -5,7 +5,9 @@
     testing JsonStructureIndex's partial-index / IndexFailure path (a scan that stops with
     items already published).
   - valid-sample-50mb.json: ~50MB, top-level array of 15 well-formed objects, each with
-    string/number/bool/array-of-string/array-of-number/array-of-object properties, a
+    string/number/bool/array-of-string/array-of-number/array-of-object properties, an "i18n"
+    object of non-ASCII keys and values (scripts, emoji, combining marks, invisible characters,
+    U+2028 and JSON unicode escapes), a
     JS-epoch-ms "date" property, and a 4-object-deep nested hierarchy - for baseline
     valid-file rendering. Object[1] (the second object) carries a single ~10MB string
     property to exercise overflow rendering for a pathologically long value.
@@ -27,11 +29,17 @@
     times). Every 50th section carries one ~20KB value, a single line long enough to wrap past
     the colouring lookback.
 
-Run with no arguments to generate all five. Pass --corrupt, --valid, --geojson, --wide or --ini
-to generate just one - the 4GB corrupt file takes minutes, so the others alone are handy for
+  - huge-sample-<N>gb.ndjson: 100GB of NDJSON by default (size set by --huge-gb), far past any laptop's
+    RAM, for stress-testing indexing, scrolling, search and memory use on a file that cannot be
+    held in memory. Two needle lines - at 50% and near the end - give search and go-to something
+    unique to find; their byte offsets are printed. Only ever written when --huge is passed, never
+    by a bare run, and refused when the disk would be left with less than 10GB free.
+
+Run with no arguments to generate the first five. Pass --corrupt, --valid, --geojson, --wide or
+--ini to generate just one, or --huge for the 100GB file - the 4GB corrupt file takes minutes, so the others alone are handy for
 quick UI iteration.
 """
-import argparse, math, os, random, time
+import argparse, math, os, random, shutil, time
 
 OUT_DIR = os.path.expanduser("~/testData")
 CORRUPT_OUT = os.path.join(OUT_DIR, "corrupt-sample-4gb.json")
@@ -43,6 +51,29 @@ INI_OUT = os.path.join(OUT_DIR, "config-sample.ini")
 INI_SECTIONS = 2_000
 INI_LONG_VALUE_EVERY = 50
 INI_LONG_VALUE_CHARS = 20_000
+
+HUGE_DEFAULT_GB = 100
+HUGE_TEMPLATE_LINES = 40_000
+HUGE_MIN_FREE_AFTER = 10 * 1024**3
+HUGE_BLOCK_MARK = b"#BLOCK##"  # 8 bytes, replaced by the block number padded with spaces
+
+# Non-ASCII keys and values for the valid and huge files, written as raw UTF-8 unless marked. Chosen to
+# cover what tends to break text handling: 2-, 3- and 4-byte UTF-8, right-to-left scripts,
+# combining marks, emoji ZWJ sequences and flags, invisible characters, and JSON \u escapes
+# (including an escaped surrogate pair) that decode to the same kind of text.
+SAMPLE_UNICODE_KEYS = (
+    "名前", "città", "größe", "имя", "اسم", "שם", "emoji_🚀", "日本語キー", "naïve", "ключ_🔑",
+    "\\u00e9t\\u00e9",          # escaped: été
+)
+SAMPLE_UNICODE_VALUES = (
+    "こんにちは世界", "Ünïcödé façade", "Ελληνικά γράμματα", "مرحبا بالعالم", "שלום עולם",
+    "한국어 텍스트", "हिन्दी पाठ", "ภาษาไทย", "😀🎉🚀", "👩‍💻 ZWJ sequence", "🇬🇧🇯🇵 flags",
+    "é combining acute",  # e + U+0301
+    "zero​width space",    # U+200B
+    "no break space",      # U+00A0
+    "line separator",      # U+2028, legal unescaped in JSON
+    "escaped \\u00fcml\\u00e4ut and \\ud83d\\ude00",  # escaped: ümläut and 😀 (surrogate pair)
+)
 
 WIDE_OUTER_KEYS = 3_000_000
 WIDE_INNER_KEYS = 1_000_000
@@ -156,12 +187,24 @@ def build_base_fields(i):
     return name, value, active, date_ms, tags, numbers, objects, nested
 
 
+def unicode_object(i):
+    """Every sample value under a sample key, the keys rotated by i so each object pairs them
+    differently; once the keys run out they repeat with a suffix, keeping each one unique. No
+    random draws, so the seeded stream - and every other file - is unchanged."""
+    keys, values = SAMPLE_UNICODE_KEYS, SAMPLE_UNICODE_VALUES
+    members = []
+    for k, value in enumerate(values):
+        key = keys[(i + k) % len(keys)] + ("" if k < len(keys) else f"_{k}")
+        members.append(f'"{key}":"{value}"')
+    return "{" + ",".join(members) + "}"
+
+
 def render_object(i, fields, extra_key, extra_val):
     name, value, active, date_ms, tags, numbers, objects, nested = fields
     return (
         f'{{"id":{i},"name":"{name}","value":{value},"active":{active},"date":{date_ms},'
         f'"tags":[{tags}],"numbers":[{numbers}],"objects":[{objects}],'
-        f'"nested":{nested},'
+        f'"nested":{nested},"i18n":{unicode_object(i)},'
         f'"{extra_key}":{extra_val}}}'
     )
 
@@ -189,7 +232,7 @@ def make_valid_sample():
     padding_per_object = leftover // (VALID_OBJECT_COUNT - 1)
 
     written = 0
-    with open(VALID_OUT, "w", buffering=1024 * 1024) as f:
+    with open(VALID_OUT, "w", encoding="utf-8", buffering=1024 * 1024) as f:
         f.write("[\n")
         for i in range(VALID_OBJECT_COUNT):
             if i == HUGE_STRING_OBJECT_INDEX:
@@ -456,6 +499,85 @@ def make_ini_sample():
           f"({time.time() - start:.1f}s)", flush=True)
 
 
+def _huge_template():
+    """One block of varied NDJSON lines, every one carrying HUGE_BLOCK_MARK in its "block" field.
+
+    Built once from its own seeded Random, so it never shifts the other files' shared stream.
+    Stamping each copy with its block number keeps every line unique as (block, seq) without
+    formatting hundreds of millions of lines one at a time.
+    """
+    rng = random.Random(2026)
+    statuses = ("active", "pending", "closed", "failed", "retrying")
+    lines = []
+    for seq in range(HUGE_TEMPLATE_LINES):
+        tags = ",".join(f'"{rng.choice(WORDS)}"' for _ in range(rng.randint(0, 5)))
+        readings = ",".join(f"{rng.uniform(-50, 150):.3f}" for _ in range(rng.randint(1, 8)))
+        note = " ".join(rng.choice(WORDS) for _ in range(rng.randint(3, 25)))
+        if seq % 97 == 0:
+            note += ' with \\"escaped quotes\\" and a tab\\t'
+        # Every line has a non-ASCII label; every 7th also an object whose keys are non-ASCII.
+        label = SAMPLE_UNICODE_VALUES[seq % len(SAMPLE_UNICODE_VALUES)]
+        i18n = ""
+        if seq % 7 == 0:
+            members = ",".join(
+                f'"{SAMPLE_UNICODE_KEYS[(seq + k) % len(SAMPLE_UNICODE_KEYS)]}":'
+                f'"{SAMPLE_UNICODE_VALUES[(seq * 3 + k) % len(SAMPLE_UNICODE_VALUES)]}"'
+                for k in range(3))
+            i18n = f',"i18n":{{{members}}}'
+        lines.append(
+            f'{{"block":{HUGE_BLOCK_MARK.decode()},"seq":{seq},'
+            f'"ts":{1_700_000_000_000 + seq * 1_337},'
+            f'"status":"{rng.choice(statuses)}","active":{"true" if rng.random() < 0.5 else "false"},'
+            f'"score":{rng.uniform(0, 1):.6f},"tags":[{tags}],'
+            f'"geo":{{"lat":{rng.uniform(-90, 90):.5f},"lon":{rng.uniform(-180, 180):.5f}}},'
+            f'"readings":[{readings}],"note":"{note}","label":"{label}"{i18n},'
+            f'"parent":{"null" if seq % 5 else seq - 1}}}\n'
+        )
+    return "".join(lines).encode("utf-8")
+
+
+def make_huge_ndjson(target_gb):
+    out = os.path.join(OUT_DIR, f"huge-sample-{target_gb:g}gb.ndjson")
+    target = int(target_gb * 1024**3)
+    free = shutil.disk_usage(OUT_DIR).free
+    if free - target < HUGE_MIN_FREE_AFTER:
+        print(f"REFUSED: {target / 1024**3:.0f} GiB would leave {(free - target) / 1024**3:.1f} GiB free "
+              f"in {OUT_DIR} - less than {HUGE_MIN_FREE_AFTER / 1024**3:.0f} GiB. Pass a smaller --huge-gb.",
+              flush=True)
+        return
+
+    start = time.time()
+    template = _huge_template()
+    blocks = max(1, target // len(template))
+    needles = {blocks // 2: "argonaut-needle-50pct", max(0, blocks - 2): "argonaut-needle-end"}
+    found = {}
+    written = 0
+    next_report = 5 * 1024**3
+
+    with open(out, "wb", buffering=16 * 1024 * 1024) as f:
+        for block in range(blocks):
+            # Padded with spaces, not zeros: JSON forbids a leading 0, but allows the whitespace.
+            f.write(template.replace(HUGE_BLOCK_MARK, b"%8d" % block))
+            written += len(template)
+
+            if block in needles:
+                found[needles[block]] = written
+                needle = f'{{"block":{block},"seq":-1,"needle":"{needles[block]}"}}\n'.encode()
+                f.write(needle)
+                written += len(needle)
+
+            if written >= next_report:
+                rate = written / max(time.time() - start, 1e-6) / 1024**2
+                print(f"  {written / 1024**3:.0f} GiB written ({rate:.0f} MiB/s)", flush=True)
+                next_report += 5 * 1024**3
+
+    lines = blocks * HUGE_TEMPLATE_LINES + len(needles)
+    print(f"DONE: huge ndjson ~{written / 1024**3:.1f} GiB, {lines:,} lines -> {out}  "
+          f"({time.time() - start:.1f}s)")
+    for name, offset in found.items():
+        print(f"  {name} at byte {offset:,}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--corrupt", action="store_true", help="generate only the 4GB corrupt file")
@@ -463,7 +585,17 @@ def main():
     parser.add_argument("--geojson", action="store_true", help="generate only the 25MB GeoJSON file")
     parser.add_argument("--wide", action="store_true", help="generate only the ~130MB million-key object file")
     parser.add_argument("--ini", action="store_true", help="generate only the ~2MB INI config file")
+    parser.add_argument("--huge", action="store_true",
+                        help="generate the 100GB NDJSON stress file (never part of a bare run)")
+    parser.add_argument("--huge-gb", type=float, default=HUGE_DEFAULT_GB, metavar="GB",
+                        help=f"size of the --huge file in GiB (default {HUGE_DEFAULT_GB})")
     args = parser.parse_args()
+
+    if args.huge:
+        os.makedirs(OUT_DIR, exist_ok=True)
+        make_huge_ndjson(args.huge_gb)
+        if not (args.corrupt or args.valid or args.geojson or args.wide or args.ini):
+            return
 
     everything = not (args.corrupt or args.valid or args.geojson or args.wide or args.ini)
 

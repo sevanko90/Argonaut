@@ -206,8 +206,17 @@ public sealed class MainWindowViewModel : ObservableObject
     public string Title
     {
         get => title;
-        private set => SetField(ref title, value);
+        private set
+        {
+            if (SetField(ref title, value))
+                OnPropertyChanged(nameof(HeaderTitle));
+        }
     }
+
+    /// <summary>What the title bar names the open document by: the file name, or the document's
+    /// own <see cref="IDocumentViewModel.HeaderTitle"/>. Raised alongside <see cref="Title"/>, which
+    /// changes whenever the document or its file does.</summary>
+    public string HeaderTitle => currentDocument?.HeaderTitle ?? FileName;
 
     /// <summary>True when a document is loaded; drives the toolbar's visibility.</summary>
     public bool IsFileOpen => currentFilePath is not null;

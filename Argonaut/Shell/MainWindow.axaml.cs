@@ -69,6 +69,14 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
+        // The title bar is drawn by the app (see TitleBar in the XAML), so it keeps clear of
+        // the platform's own window buttons: macOS's traffic lights sit at the left, the
+        // caption buttons elsewhere at the right.
+        TitleBar.Padding = OperatingSystem.IsMacOS() ? new Thickness(84, 0, 12, 0) : new Thickness(12, 0, 144, 0);
+        // AppKit puts the traffic lights back on every resize, so they are re-centred each time.
+        Opened += (_, _) => Dispatcher.UIThread.Post(() => MacUnifiedTitleBar.Apply(this, TitleBar.Height), DispatcherPriority.Background);
+        Resized += (_, _) => MacUnifiedTitleBar.Apply(this, TitleBar.Height);
+
         this.settings = settings;
         this.log = log;
         var windowPicker = new AvaloniaFilePicker(this);

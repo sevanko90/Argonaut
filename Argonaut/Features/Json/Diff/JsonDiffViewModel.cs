@@ -33,7 +33,10 @@ namespace Argonaut.Features.Json.Diff;
 /// <see cref="IndexFailure"/> with the side named in the message - the shell's existing
 /// zero-progress/partial-progress handling then applies unchanged.
 /// </summary>
-public sealed class JsonDiffViewModel : IndexedDocumentViewModel
+// IDocumentViewModel is listed again so WindowTitle and HeaderTitle below implement its
+// default members: a derived class's public member does not, unless the class re-implements
+// the interface.
+public sealed class JsonDiffViewModel : IndexedDocumentViewModel, IDocumentViewModel
 {
     /// <summary>How often the rows are told the comparison has more to show.</summary>
     private static readonly TimeSpan GrowthInterval = TimeSpan.FromMilliseconds(500);
@@ -384,6 +387,9 @@ public sealed class JsonDiffViewModel : IndexedDocumentViewModel
     /// repetition: the toolbar and status bar describe what the comparison found.</summary>
     public string WindowTitle =>
         $"{AppInfo.Name} Diff ({Path.GetFileName(FilePath)} ↔ {Path.GetFileName(RightFilePath)})";
+
+    /// <summary>Both file names, as the title bar shows them.</summary>
+    public string HeaderTitle => $"{Path.GetFileName(FilePath)} ↔ {Path.GetFileName(RightFilePath)}";
 
     /// <summary>
     /// Opens both files and starts the pipeline. Returns once the rows exist - the left document

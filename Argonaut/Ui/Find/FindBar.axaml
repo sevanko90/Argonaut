@@ -4,49 +4,73 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              mc:Ignorable="d"
              x:Class="Argonaut.Ui.Find.FindBar">
-    <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto">
-        <TextBox Grid.Column="0"
-                 x:Name="TermBox"
-                 Width="240"
-                 FontSize="12"
-                 PlaceholderText="Find"
-                 FontFamily="{DynamicResource AppContentFontFamily}" />
-        <Button Grid.Column="1"
-                x:Name="PreviousButton"
-                Classes="iconbutton"
-                Margin="8,0,0,0"
-                ToolTip.Tip="Previous match (Shift+Enter)">
-            <Viewbox Width="12" Height="12">
-                <Path Fill="{DynamicResource AppMutedTextBrush}"
-                      Data="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z" />
+    <UserControl.Styles>
+        <!-- The field's own buttons: small, borderless, inside the field's edge. -->
+        <Style Selector="Button.infield">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="4" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Button.infield:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource AppHoverBackgroundBrush}" />
+        </Style>
+    </UserControl.Styles>
+
+    <!-- One search field, as a native search box is: the magnifier, the term, the match count
+         and the previous/next/clear buttons all sit inside its border, so find reads as a
+         single control rather than a field with buttons floating beside it. -->
+    <TextBox x:Name="TermBox"
+             Width="220"
+             FontSize="12"
+             MinHeight="28"
+             Padding="2,4,4,4"
+             PlaceholderText="Find"
+             FontFamily="{DynamicResource AppContentFontFamily}">
+        <TextBox.InnerLeftContent>
+            <Viewbox Width="12" Height="12" Margin="10,0,4,0" VerticalAlignment="Center">
+                <!-- Material "search" -->
+                <Path Fill="{DynamicResource AppSubtleIconBrush}"
+                      Data="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
             </Viewbox>
-        </Button>
-        <Button Grid.Column="2"
-                x:Name="NextButton"
-                Classes="iconbutton"
-                ToolTip.Tip="Next match (Enter)">
-            <Viewbox Width="12" Height="12">
-                <Path Fill="{DynamicResource AppMutedTextBrush}"
-                      Data="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z" />
-            </Viewbox>
-        </Button>
-        <TextBlock Grid.Column="3"
-                   x:Name="StatusLabel"
-                   FontSize="12"
-                   Margin="8,0,0,0"
-                   VerticalAlignment="Center"
-                   MinWidth="70"
-                   MaxWidth="140"
-                   TextTrimming="CharacterEllipsis"
-                   Foreground="{DynamicResource AppMutedTextBrush}" />
-        <Button Grid.Column="4"
-                x:Name="CloseButton"
-                Classes="iconbutton"
-                ToolTip.Tip="Clear search (Esc)">
-            <Viewbox Width="12" Height="12">
-                <Path Fill="{DynamicResource AppMutedTextBrush}"
-                      Data="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
-            </Viewbox>
-        </Button>
-    </Grid>
+        </TextBox.InnerLeftContent>
+        <TextBox.InnerRightContent>
+            <StackPanel Orientation="Horizontal" Spacing="0" Margin="0,0,2,0">
+                <TextBlock x:Name="StatusLabel"
+                           FontSize="11"
+                           Margin="4,0,4,0"
+                           VerticalAlignment="Center"
+                           MaxWidth="130"
+                           TextTrimming="CharacterEllipsis"
+                           FontFamily="{DynamicResource AppSansFontFamily}"
+                           Foreground="{DynamicResource AppMutedTextBrush}" />
+                <Button x:Name="PreviousButton"
+                        Classes="infield"
+                        ToolTip.Tip="Previous match (Shift+Enter)">
+                    <Viewbox Width="10" Height="10">
+                        <Path Fill="{DynamicResource AppMutedTextBrush}"
+                              Data="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z" />
+                    </Viewbox>
+                </Button>
+                <Button x:Name="NextButton"
+                        Classes="infield"
+                        ToolTip.Tip="Next match (Enter)">
+                    <Viewbox Width="10" Height="10">
+                        <Path Fill="{DynamicResource AppMutedTextBrush}"
+                              Data="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z" />
+                    </Viewbox>
+                </Button>
+                <Button x:Name="CloseButton"
+                        Classes="infield"
+                        ToolTip.Tip="Clear search (Esc)">
+                    <Viewbox Width="9" Height="9">
+                        <Path Fill="{DynamicResource AppMutedTextBrush}"
+                              Data="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
+                    </Viewbox>
+                </Button>
+            </StackPanel>
+        </TextBox.InnerRightContent>
+    </TextBox>
 </UserControl>

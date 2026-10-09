@@ -4,10 +4,10 @@
              x:Class="Argonaut.Features.Json.Diff.JsonDiffToolbarView"
              x:DataType="diff:JsonDiffToolbarViewModel">
     <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
-        <CheckBox Content="Changes only"
-                  IsChecked="{Binding ChangesOnly}"
-                  VerticalAlignment="Center"
-                  ToolTip.Tip="Hide unchanged rows" />
+        <ToggleButton Content="Changes only"
+                      IsChecked="{Binding ChangesOnly}"
+                      Classes="tool"
+                      ToolTip.Tip="Hide unchanged rows" />
         <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
             <Button Classes="iconbutton compact"
                     Click="OnPreviousDiff"

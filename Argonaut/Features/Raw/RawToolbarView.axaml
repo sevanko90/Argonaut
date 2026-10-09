@@ -6,24 +6,25 @@
              mc:Ignorable="d"
              x:Class="Argonaut.Features.Raw.RawToolbarView"
              x:DataType="raw:RawToolbarViewModel">
-    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-        <Border Width="1"
-                Margin="0,2,12,2"
-                Background="{DynamicResource AppBorderBrush}" />
+    <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
         <ToggleButton x:Name="EditToggle"
                       IsChecked="{Binding IsEditing, Mode=TwoWay}"
                       IsEnabled="{Binding CanEdit}"
-                      Content="Edit"
-                      FontSize="12"
-                      Margin="0,0,8,0"
-                      VerticalAlignment="Center"
-                      ToolTip.Tip="Type to change the document. Changes are held in memory until you save (Ctrl+S or Cmd+S)." />
+                      Classes="tool"
+                      ToolTip.Tip="Type to change the document. Changes are held in memory until you save (Ctrl+S or Cmd+S).">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+                <Viewbox Width="13" Height="13" VerticalAlignment="Center">
+                    <!-- Material "edit" -->
+                    <Path Fill="{Binding $parent[ToggleButton].Foreground}"
+                          Data="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z" />
+                </Viewbox>
+                <TextBlock Text="Edit" VerticalAlignment="Center" />
+            </StackPanel>
+        </ToggleButton>
         <ComboBox x:Name="WrapWidthCombo"
                   SelectedIndex="{Binding WrapWidthIndex, Mode=TwoWay}"
                   IsEnabled="{Binding CanChangeWrapWidth}"
-                  FontSize="12"
-                  MinWidth="130"
-                  VerticalAlignment="Center"
+                  Classes="tool"
                   ToolTip.Tip="Force line breaks at this many bytes (re-indexes the file)">
             <ComboBoxItem Content="Wrap: 80 bytes" />
             <ComboBoxItem Content="Wrap: 160 bytes" />
@@ -31,10 +32,7 @@
         </ComboBox>
         <ComboBox x:Name="ColoursCombo"
                   SelectedIndex="{Binding ColoursIndex, Mode=TwoWay}"
-                  FontSize="12"
-                  MinWidth="130"
-                  Margin="8,0,0,0"
-                  VerticalAlignment="Center"
+                  Classes="tool"
                   ToolTip.Tip="Syntax colours for this document">
             <ComboBoxItem Content="{Binding AutoColoursLabel}" />
             <ComboBoxItem Content="Off" />

@@ -23,8 +23,7 @@
          v1, so there is never a term to highlight. -->
     <Grid x:Name="Layout" ColumnDefinitions="*,Auto,Auto">
         <Border BorderBrush="{DynamicResource AppBorderBrush}"
-                BorderThickness="1"
-                CornerRadius="8"
+                BorderThickness="0"
                 Background="{DynamicResource AppWindowBackgroundBrush}"
                 ClipToBounds="True">
             <TableView x:Name="Table"
@@ -111,10 +110,8 @@
         <Border Grid.Column="2"
                 x:Name="Detail"
                 IsVisible="{Binding HasCellDetail}"
-                Margin="8,0,0,0"
                 BorderBrush="{DynamicResource AppBorderBrush}"
-                BorderThickness="1"
-                CornerRadius="8"
+                BorderThickness="1,0,0,0"
                 Background="{DynamicResource AppWindowBackgroundBrush}"
                 ClipToBounds="True">
             <Grid RowDefinitions="Auto,*,Auto" Margin="8">

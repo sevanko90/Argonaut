@@ -7,8 +7,7 @@
              x:Class="Argonaut.Features.Raw.RawView"
              x:DataType="raw:RawViewModel">
     <Border BorderBrush="{DynamicResource AppBorderBrush}"
-            BorderThickness="1"
-            CornerRadius="8"
+            BorderThickness="0"
             Background="{DynamicResource AppWindowBackgroundBrush}"
             ClipToBounds="True">
         <Grid RowDefinitions="*,Auto,Auto" ColumnDefinitions="*,Auto,Auto">

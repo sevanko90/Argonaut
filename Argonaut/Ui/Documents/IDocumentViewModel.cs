@@ -53,6 +53,13 @@ public interface IDocumentViewModel : INotifyPropertyChanged, IDisposable
     /// </summary>
     string? WindowTitle => null;
 
+    /// <summary>
+    /// What the title bar names this document by, or null for the file name. The diff names
+    /// both files, for the same reason as <see cref="WindowTitle"/>. Read once, when the document
+    /// is published - not observable.
+    /// </summary>
+    string? HeaderTitle => null;
+
     /// <summary>The full status-bar line for this document; observable.</summary>
     string StatusText { get; }
 

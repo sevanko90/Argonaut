@@ -8,12 +8,14 @@
         <Setter Property="BorderThickness" Value="0" />
         <Setter Property="Padding" Value="0" />
         <Setter Property="Cursor" Value="Hand" />
-        <Setter Property="Foreground" Value="{DynamicResource AppAccentBrush}" />
-        <Setter Property="TextBlock.TextDecorations" Value="Underline" />
+        <Setter Property="MinHeight" Value="0" />
+        <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
     </Style>
+    <!-- A breadcrumb, not a row of hyperlinks: plain text that shows it can be clicked on hover. -->
     <Style Selector="Button.pathlink:pointerover /template/ ContentPresenter">
         <Setter Property="Background" Value="Transparent" />
-        <Setter Property="Foreground" Value="{DynamicResource AppAccentHoverBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource AppAccentBrush}" />
+        <Setter Property="TextBlock.TextDecorations" Value="Underline" />
     </Style>
 
     <Style Selector="Button.hintlink">

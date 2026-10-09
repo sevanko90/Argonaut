@@ -7,15 +7,15 @@
         <!-- Identify the array; the window title already identifies the file. -->
         <TextBlock Text="{Binding OriginDescription}"
                    VerticalAlignment="Center"
-                   TextWrapping="Wrap"
-                   MaxWidth="420"
+                   TextTrimming="CharacterEllipsis"
+                   MaxWidth="320"
                    Foreground="{DynamicResource AppMutedTextBrush}"
                    FontSize="12"
                    ToolTip.Tip="{Binding OriginDescription}" />
 
         <Button Content="Back to JSON"
                 Click="OnBack"
-                VerticalAlignment="Center"
+                Classes="tool"
                 ToolTip.Tip="Reopen the file as JSON and select this array" />
 
         <!-- Hidden for an array of objects: its columns are the property names by definition,
@@ -33,8 +33,7 @@
                        FontSize="12" />
             <ComboBox ItemsSource="{Binding ColumnModes}"
                       SelectedItem="{Binding SelectedColumnMode}"
-                      MinWidth="130"
-                      VerticalAlignment="Center"
+                      Classes="tool"
                       ToolTip.Tip="One row per element by property name, or reshape a flat array into N columns">
                 <ComboBox.ItemTemplate>
                     <DataTemplate x:DataType="arrayTable:JsonArrayColumnModeOption">
@@ -55,8 +54,7 @@
                        FontSize="12" />
             <ComboBox ItemsSource="{Binding ArrayColumnCounts}"
                       SelectedItem="{Binding SelectedArrayColumns}"
-                      MinWidth="60"
-                      VerticalAlignment="Center"
+                      Classes="tool"
                       ToolTip.Tip="How many positions an expanded array column draws before the rest are summarised in one" />
         </StackPanel>
     </StackPanel>

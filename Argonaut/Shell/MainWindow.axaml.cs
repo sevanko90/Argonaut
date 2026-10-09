@@ -70,12 +70,10 @@ public partial class MainWindow : Window
         InitializeComponent();
 
         // The title bar is drawn by the app (see TitleBar in the XAML), so it keeps clear of
-        // the platform's own window buttons: macOS's traffic lights sit at the left, the
-        // caption buttons elsewhere at the right.
-        TitleBar.Padding = OperatingSystem.IsMacOS() ? new Thickness(84, 0, 12, 0) : new Thickness(12, 0, 144, 0);
-        // AppKit puts the traffic lights back on every resize, so they are re-centred each time.
-        Opened += (_, _) => Dispatcher.UIThread.Post(() => MacUnifiedTitleBar.Apply(this, TitleBar.Height), DispatcherPriority.Background);
-        Resized += (_, _) => MacUnifiedTitleBar.Apply(this, TitleBar.Height);
+        // the platform's own window buttons, and the traffic lights are re-centred in it.
+        PadTitleBar();
+        Opened += (_, _) => Dispatcher.UIThread.Post(RecentreTrafficLights, DispatcherPriority.Background);
+        Resized += (_, _) => RecentreTrafficLights();
 
         this.settings = settings;
         this.log = log;
@@ -198,6 +196,58 @@ public partial class MainWindow : Window
         finally
         {
             (transfer as IDisposable)?.Dispose();
+        }
+    }
+
+    /// <summary>Re-centres the traffic lights after AppKit has finished leaving full screen.
+    /// AppKit lays the title bar out again at the end of the transition, after the last resize
+    /// the window hears about, so a re-centre on that resize alone is undone.</summary>
+    private DispatcherTimer? trafficLightSettle;
+
+    /// <summary>
+    /// Keeps the strip clear of the platform's window buttons: macOS's traffic lights at the
+    /// left, the caption buttons elsewhere at the right. Full screen on macOS hides the traffic
+    /// lights in a title bar of its own, so the strip takes its normal margin there.
+    /// </summary>
+    private void PadTitleBar()
+    {
+        if (!OperatingSystem.IsMacOS())
+            TitleBar.Padding = new Thickness(12, 0, 144, 0);
+        else
+            TitleBar.Padding = WindowState == WindowState.FullScreen ? new Thickness(12, 0, 12, 0) : new Thickness(84, 0, 12, 0);
+    }
+
+    /// <summary>
+    /// AppKit puts the traffic lights back wherever it likes on every resize, so they are
+    /// re-centred each time, and once more when a resize has settled. Never in full screen: the
+    /// lights live in AppKit's separate full-screen title bar there, and moving them would push
+    /// them out of it.
+    /// </summary>
+    private void RecentreTrafficLights()
+    {
+        if (!OperatingSystem.IsMacOS() || WindowState == WindowState.FullScreen)
+            return;
+
+        MacUnifiedTitleBar.Apply(this, TitleBar.Height);
+
+        trafficLightSettle ??= new DispatcherTimer(TimeSpan.FromMilliseconds(400), DispatcherPriority.Background, (_, _) =>
+        {
+            trafficLightSettle!.Stop();
+            if (WindowState != WindowState.FullScreen)
+                MacUnifiedTitleBar.Apply(this, TitleBar.Height);
+        });
+        trafficLightSettle.Stop();
+        trafficLightSettle.Start();
+    }
+
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+
+        if (change.Property == WindowStateProperty && TitleBar is not null)
+        {
+            PadTitleBar();
+            RecentreTrafficLights();
         }
     }
 

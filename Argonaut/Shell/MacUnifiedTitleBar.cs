@@ -25,6 +25,14 @@ internal static class MacUnifiedTitleBar
     /// <summary>Left edge to left edge, between adjacent buttons.</summary>
     private const double ButtonPitch = 20;
 
+    /// <summary>
+    /// How wide the native container is left: just the traffic lights' corner. Full width, it
+    /// lies over the app's own title-bar controls and takes their text input - a click focuses the
+    /// search field but nothing typed reaches it. The app's strip handles dragging itself, so
+    /// the container has nothing to do beyond holding the three buttons.
+    /// </summary>
+    private const double ContainerWidth = 80;
+
     public static void Apply(Window window, double titleBarHeight)
     {
         if (!OperatingSystem.IsMacOS() || window.TryGetPlatformHandle() is not { Handle: var nsWindow } || nsWindow == 0)
@@ -44,6 +52,8 @@ internal static class MacUnifiedTitleBar
         var containerFrame = ObjC.SendRect(container, ObjC.Selector("frame"));
         containerFrame.Height = titleBarHeight;
         containerFrame.Y = windowFrame.Height - titleBarHeight;
+        containerFrame.X = 0;
+        containerFrame.Width = ContainerWidth;
         ObjC.Send(container, ObjC.Selector("setFrame:"), containerFrame);
 
         var buttonHeight = ObjC.SendRect(close, ObjC.Selector("frame")).Height;

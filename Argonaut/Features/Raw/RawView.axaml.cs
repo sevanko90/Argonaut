@@ -102,8 +102,12 @@ public partial class RawView : UserControl
             // reopens the document with), so the old vertical offset means nothing against the
             // new rows - and leaving it in place would have the surface draw a viewport far past
             // the end of a row set that starts near-empty and then grows by millions of rows a
-            // second. A save's reopen puts the caret back with a reveal once the scan reaches it.
+            // second. A save's reopen puts the caret back with a reveal once the scan reaches it;
+            // a re-wrap hands over the place the user was at, which the surface lands once the
+            // new rows reach it.
             Surface.ResetScroll();
+            if (vm.TakePlaceAcrossRewrap() is { } place)
+                Surface.KeepPlace(place.Offset, place.ScreenRow);
             scrollBars.ResetPan();
             scrollBars.Refresh();
         }

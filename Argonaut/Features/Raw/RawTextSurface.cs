@@ -123,6 +123,7 @@ public class RawTextSurface : RowSurface
     /// </summary>
     private double? stickyX;
     private int? pendingRevealRow;
+    private (long Offset, int ScreenRow)? pendingPlace;
     private double scrollTop;
 
     /// <summary>The realized range <see cref="widestRowWidth"/> was last measured over.</summary>
@@ -361,6 +362,7 @@ public class RawTextSurface : RowSurface
         // After the reveal, not before: a reveal scrolls, which realizes a different set of rows,
         // and measuring the set it replaced would report a width for rows nobody is looking at.
         ApplyPendingReveal();
+        ApplyPendingPlace();
         MeasureRealizedRows();
         return finalSize;
     }
@@ -904,7 +906,7 @@ public class RawTextSurface : RowSurface
     {
         // A reveal in flight owns the viewport. Without this the caret's minimal scroll would
         // pre-empt a centred reveal that is still waiting for its row to be indexed.
-        if (this.pendingRevealRow is not null)
+        if (this.pendingRevealRow is not null || this.pendingPlace is not null)
             return;
 
         if (CaretRowIndex() is not int rowIndex)
@@ -1378,6 +1380,7 @@ public class RawTextSurface : RowSurface
         UpdateRealizedRows(Bounds.Height);
         SetVerticalOffset(scrollTop); // the rows may have grown or shrunk under the view
         ApplyPendingReveal();
+        ApplyPendingPlace();
     }
 
     /// <summary>
@@ -1443,5 +1446,46 @@ public class RawTextSurface : RowSurface
     }
 
     /// <summary>A reveal in flight belongs to the app, not the user; their first input ends it.</summary>
-    private void AbandonPendingReveal() => this.pendingRevealRow = null;
+    private void AbandonPendingReveal()
+    {
+        this.pendingRevealRow = null;
+        this.pendingPlace = null;
+    }
+
+    /// <summary>
+    /// Keeps the user's place across rows replaced wholesale: once the new rows reach
+    /// <paramref name="offset"/>, scrolls so the row holding it sits <paramref name="screenRow"/>
+    /// rows below the top of the view. Not applied here - the rows the surface sees at the moment
+    /// of the call may still be the old ones - but on the next layout or growth, like
+    /// <see cref="RevealRow"/>, and abandoned by the user's first input in the same way.
+    /// </summary>
+    public void KeepPlace(long offset, int screenRow) => this.pendingPlace = (offset, screenRow);
+
+    private void ApplyPendingPlace()
+    {
+        if (this.pendingPlace is not var (offset, screenRow) || this.viewModel is not { } vm)
+            return;
+
+        if (Bounds.Height <= 0 || RowCount == 0 || RowIndex is not { } index)
+            return;
+
+        // Null means "not published yet" while the scan runs, but "past the end" once it has
+        // finished - a place near the end of a document that shrank is landed as near as it can be.
+        int row;
+        if (index.RowForOffset(offset) is int found)
+            row = found;
+        else if (vm.IndexingTask.IsCompleted)
+            row = RowCount - 1;
+        else
+            return; // the scan has not reached it yet; a growth tick or its completion will re-try
+
+        double wanted = Math.Max(0, row - screenRow) * RowHeight;
+        SetVerticalOffset(wanted);
+
+        // Settled once the offset is where it was asked for. While the scan runs the extent under
+        // the view is short of the rows still to come, so a place near the growing end is clamped
+        // and has to be asked for again; once the scan is done the clamp is the document's end.
+        if (scrollTop == wanted || vm.IndexingTask.IsCompleted)
+            this.pendingPlace = null;
+    }
 }

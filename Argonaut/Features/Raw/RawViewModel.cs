@@ -562,6 +562,43 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     internal (int First, int Last)? ViewportRows { get; set; }
 
     /// <summary>
+    /// The place a re-wrap should carry the view to, set just before the wrap width is raised and
+    /// taken by the view as it resets its scroll for the new rows. It has to be worked out here:
+    /// by the time the view hears about an edited document's re-wrap the row index has already
+    /// been replaced, and the rows the old position was measured against are gone.
+    /// </summary>
+    internal ViewPlace? PlaceAcrossRewrap { get; private set; }
+
+    /// <summary>Hands the view the place to restore, once.</summary>
+    internal ViewPlace? TakePlaceAcrossRewrap()
+    {
+        var place = PlaceAcrossRewrap;
+        PlaceAcrossRewrap = null;
+        return place;
+    }
+
+    /// <summary>
+    /// Where the user is, as a place that survives new rows: the caret and the screen row it is
+    /// on while the caret is on screen, otherwise the first byte of the top row and screen row 0
+    /// - the same on-screen-or-scrolled-away decision <see cref="SelectedByteRange"/> makes.
+    /// Null when no view has laid out over the rows, so there is nothing to keep.
+    /// </summary>
+    private ViewPlace? CurrentPlace()
+    {
+        if (ViewportRows is not { } viewport || RowIndex is not { } rows || viewport.First >= rows.RowCount)
+            return null;
+
+        if (Caret is { } caret
+            && rows.RowForOffset(caret.Caret.Offset) is int caretRow
+            && caretRow >= viewport.First && caretRow <= viewport.Last)
+        {
+            return new ViewPlace(caret.Caret.Offset, caretRow - viewport.First);
+        }
+
+        return new ViewPlace(rows.GetRowInfo(viewport.First).Start, 0);
+    }
+
+    /// <summary>
     /// Where the user is: the selection, or the caret as a zero-length range - while the caret is
     /// on screen. Scrolling moves the view and not the caret, so after scrolling away the caret
     /// is where the user was, and the start of the top row on screen is where they are.
@@ -759,6 +796,8 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
             return;
         }
 
+        PlaceAcrossRewrap = CurrentPlace();
+
         // Raised BEFORE the Rows swap below - the view reacts by resetting its scroll and
         // re-laying-out against the old collection, so the virtualizer's remembered viewport
         // is back at the top when the new ItemsSource arrives (see RawView's
@@ -875,6 +914,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         KeepAnchors();
 
         var editor = this.editor!;
+        PlaceAcrossRewrap = CurrentPlace(); // while the old rows still answer for it
         editor.Rewrap(scan);
 
         // Raised BEFORE the Rows swap, for the reason SetWrapWidth's unedited path does: the view
@@ -1133,6 +1173,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
 
         this.isEditing = false;
         Origin = destination;
+        PlaceAcrossRewrap = null; // a reopen puts the caret back with a reveal instead
         IndexGeneration++;
 
         FilePath = destination.Path ?? destination.DisplayName;
@@ -1223,6 +1264,10 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
 
         OnPropertyChanged(nameof(CanEdit));
         OnPropertyChanged(nameof(CanSave));
+
+        // The last growth tick can land before the final rows are published; the view hears the
+        // total here, which is also what lets a place waiting on the end of the scan settle.
+        OnPropertyChanged(nameof(RowCount));
     }
 
     /// <summary>Indexing stopped early (failure, or cancellation on <paramref name="failure"/> null).</summary>

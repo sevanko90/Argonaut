@@ -483,6 +483,119 @@ public sealed class RawEditInputTests : IDisposable
             Assert.Equal(FreshRowCount(vm, target), vm.RowCount);
         });
 
+    // ---- position across a re-wrap ----------------------------------------------------------
+    //
+    // A wrap change replaces every row, so the old scroll offset means nothing - but the user's
+    // place in the document does. A caret on screen stays on screen at the same height; a caret
+    // the user has scrolled away from leaves the top of the view where it was, by byte offset.
+    // Both an edited and an unedited document keep it.
+
+    /// <summary>Lines several rows long at every width the tests use, enough of them that the
+    /// middle of the document is far from either end.</summary>
+    private static readonly string TallDocument = string.Concat(Enumerable.Repeat(new string('w', 300) + "\n", 2_000));
+
+    private const long DeepOffset = 1_000 * 301 + 150;
+
+    private static int CaretRow(RawViewModel vm) => vm.RowIndex!.RowForOffset(vm.Caret!.Caret.Offset)!.Value;
+
+    private static (int First, int Last) Viewport(RawViewModel vm)
+        => vm.ViewportRows ?? throw new InvalidOperationException("the surface has not reported a viewport");
+
+    /// <summary>Waits for the re-wrap to land and the surface to lay out over its rows.</summary>
+    private static async Task RewrapAndSettleAsync(RawViewModel vm, int target)
+    {
+        vm.SetWrapWidth(target);
+        await PumpUntilAsync(() => vm.WrapWidth == target, "the re-wrap");
+        await PumpUntilAsync(() => vm.IndexingTask.IsCompleted, "the re-wrap's scan");
+        await PumpAsync(50);
+        await PumpAsync(50);
+    }
+
+    [Fact]
+    public Task RewrapWhileEdited_KeepsTheCaretWhereItWasOnScreen()
+        => WhileEditing(TallDocument, async (window, vm, _) =>
+        {
+            int target = vm.WrapWidth == 80 ? 120 : 80;
+            await vm.JumpToByteOffsetAsync(DeepOffset);
+            await PumpAsync();
+            TypeText(window, "Q");
+            await PumpAsync();
+
+            long caret = vm.Caret!.Caret.Offset;
+            var before = Viewport(vm);
+            int heightBefore = CaretRow(vm) - before.First;
+            Assert.InRange(CaretRow(vm), before.First, before.Last);
+
+            await RewrapAndSettleAsync(vm, target);
+
+            Assert.Equal(caret, vm.Caret!.Caret.Offset);
+            var after = Viewport(vm);
+            Assert.InRange(CaretRow(vm), after.First, after.Last);
+            Assert.Equal(heightBefore, CaretRow(vm) - after.First);
+        });
+
+    [Fact]
+    public Task RewrapWhileEdited_WithTheCaretScrolledAway_KeepsTheTopOfTheView()
+        => WhileEditing(TallDocument, async (window, vm, _) =>
+        {
+            int target = vm.WrapWidth == 80 ? 120 : 80;
+            vm.Caret!.PlaceAt(0);
+            await PumpAsync();
+            TypeText(window, "Q");
+            await PumpAsync();
+
+            // Scroll deep into the document without moving the caret, as the scrollbar would.
+            vm.SelectRow(vm.RowIndex!.RowForOffset(DeepOffset)!.Value);
+            await PumpAsync();
+            await PumpAsync();
+            var before = Viewport(vm);
+            Assert.True(CaretRow(vm) < before.First, "the caret should be off screen above the view");
+            long topStart = vm.RowIndex!.GetRowInfo(before.First).Start;
+
+            await RewrapAndSettleAsync(vm, target);
+
+            Assert.Equal(1, vm.Caret!.Caret.Offset);
+            Assert.Equal(vm.RowIndex!.RowForOffset(topStart), Viewport(vm).First);
+        });
+
+    [Fact]
+    public Task RewrapUnedited_KeepsTheCaretWhereItWasOnScreen()
+        => WithView(TallDocument, async (_, vm, _) =>
+        {
+            int target = vm.WrapWidth == 80 ? 120 : 80;
+            await vm.JumpToByteOffsetAsync(DeepOffset);
+            await PumpAsync();
+            await PumpAsync();
+
+            var before = Viewport(vm);
+            int heightBefore = CaretRow(vm) - before.First;
+            Assert.InRange(CaretRow(vm), before.First, before.Last);
+
+            await RewrapAndSettleAsync(vm, target);
+
+            Assert.Equal(DeepOffset, vm.Caret!.Caret.Offset);
+            var after = Viewport(vm);
+            Assert.InRange(CaretRow(vm), after.First, after.Last);
+            Assert.Equal(heightBefore, CaretRow(vm) - after.First);
+        });
+
+    [Fact]
+    public Task RewrapUnedited_WithTheCaretScrolledAway_KeepsTheTopOfTheView()
+        => WithView(TallDocument, async (_, vm, _) =>
+        {
+            int target = vm.WrapWidth == 80 ? 120 : 80;
+            vm.SelectRow(vm.RowIndex!.RowForOffset(DeepOffset)!.Value);
+            await PumpAsync();
+            await PumpAsync();
+            var before = Viewport(vm);
+            Assert.True(CaretRow(vm) < before.First, "the caret should be off screen above the view");
+            long topStart = vm.RowIndex!.GetRowInfo(before.First).Start;
+
+            await RewrapAndSettleAsync(vm, target);
+
+            Assert.Equal(vm.RowIndex!.RowForOffset(topStart), Viewport(vm).First);
+        });
+
     // ---- edit overview --------------------------------------------------------------------
 
     private static string ManyLines(int count)

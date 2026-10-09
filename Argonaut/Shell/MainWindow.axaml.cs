@@ -218,8 +218,9 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// AppKit puts the traffic lights back wherever it likes on every resize, so they are
-    /// re-centred each time, and once more when a resize has settled. Never in full screen: the
+    /// AppKit puts the traffic lights back wherever it likes on every resize, title change and
+    /// change of key status, so they are re-centred each time, and once more when that has
+    /// settled. Never in full screen: the
     /// lights live in AppKit's separate full-screen title bar there, and moving them would push
     /// them out of it.
     /// </summary>
@@ -244,9 +245,18 @@ public partial class MainWindow : Window
     {
         base.OnPropertyChanged(change);
 
-        if (change.Property == WindowStateProperty && TitleBar is not null)
+        if (TitleBar is null)
+            return;
+
+        if (change.Property == WindowStateProperty)
         {
             PadTitleBar();
+            RecentreTrafficLights();
+        }
+        else if (change.Property == TitleProperty || change.Property == IsActiveProperty)
+        {
+            // AppKit lays its title bar out again when the title is set (opening or closing a
+            // file) and when the window gains or loses key status, putting the lights back.
             RecentreTrafficLights();
         }
     }

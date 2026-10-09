@@ -81,16 +81,17 @@
                 BorderThickness="0,0,0,1"
                 Padding="12,0">
             <Grid ColumnDefinitions="*,Auto,Auto,Auto">
-                <!-- What is open. The one column that gives way when the strip is short: the name
-                     truncates before any control is clipped. Hit-test transparent so it drags the
-                     window like the rest of the strip; the full path and size stay in the status
-                     bar. -->
+                <!-- What is open, with its close button beside the name as a tab's would be. The
+                     one column that gives way when the strip is short: the name truncates before
+                     any control is clipped. The badge and name are hit-test transparent so they drag
+                     the window like the rest of the strip; the full path and size stay in the
+                     status bar. -->
                 <DockPanel Grid.Column="0"
                            LastChildFill="True"
-                            VerticalAlignment="Center"
-                            IsHitTestVisible="False"
-                            Margin="0,0,16,0">
+                           VerticalAlignment="Center"
+                           Margin="0,0,16,0">
                     <Border DockPanel.Dock="Left"
+                            IsHitTestVisible="False"
                             Background="{DynamicResource AppAccentSurfaceBrush}"
                             CornerRadius="6"
                             Margin="0,0,8,0"
@@ -99,17 +100,39 @@
                               Stroke="{DynamicResource AppAccentBrush}" StrokeThickness="1.8"
                               Data="M8 3H5V9L2 12L5 15V21H8 M16 3H19V9L22 12L19 15V21H16" />
                     </Border>
-                    <TextBlock Text="{Binding HeaderTitle}"
-                               IsVisible="{Binding IsFileOpen}"
-                               FontSize="13"
-                               FontWeight="SemiBold"
-                               TextTrimming="CharacterEllipsis"
-                               VerticalAlignment="Center" />
-                    <TextBlock Text="Argonaut"
-                               IsVisible="{Binding !IsFileOpen}"
-                               FontSize="13"
-                               FontWeight="SemiBold"
-                               VerticalAlignment="Center" />
+                    <!-- Left-aligned, so the close button sits right after the name rather than at
+                         the far end of the column, and the name's star column truncates it. -->
+                    <Grid ColumnDefinitions="*,Auto" HorizontalAlignment="Left">
+                        <TextBlock Text="{Binding HeaderTitle}"
+                                   IsVisible="{Binding IsFileOpen}"
+                                   IsHitTestVisible="False"
+                                   FontSize="13"
+                                   FontWeight="SemiBold"
+                                   TextTrimming="CharacterEllipsis"
+                                   VerticalAlignment="Center" />
+                        <TextBlock Text="Argonaut"
+                                   IsVisible="{Binding !IsFileOpen}"
+                                   IsHitTestVisible="False"
+                                   FontSize="13"
+                                   FontWeight="SemiBold"
+                                   VerticalAlignment="Center" />
+                        <Button Grid.Column="1"
+                                x:Name="CloseFileButton"
+                                Classes="tool"
+                                IsVisible="{Binding IsFileOpen}"
+                                Click="OnCloseFile"
+                                MinHeight="0"
+                                Width="22" Height="22"
+                                Padding="0"
+                                Margin="6,0,0,0"
+                                HorizontalContentAlignment="Center"
+                                ToolTip.Tip="Close file">
+                            <Viewbox Width="9" Height="9">
+                                <Path Fill="{DynamicResource AppMutedTextBrush}"
+                                      Data="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
+                            </Viewbox>
+                        </Button>
+                    </Grid>
                 </DockPanel>
 
                 <!-- The open view's own options (expand depth, schema, wrap width...). -->
@@ -179,17 +202,19 @@
                             </Button.Flyout>
                         </Button>
                     </StackPanel>
-                    <Button x:Name="CloseFileButton"
-                            Classes="tool"
-                            Click="OnCloseFile"
-                            Padding="7"
-                            ToolTip.Tip="Close file">
-                        <Viewbox Width="12" Height="12">
-                            <Path Fill="{DynamicResource AppMutedTextBrush}"
-                                  Data="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
-                        </Viewbox>
-                    </Button>
-                    <Border Classes="toolseparator" IsVisible="{Binding IsFindAvailable}" />
+                    <!-- Before search only when something sits to its left to divide it from. -->
+                    <Border Classes="toolseparator">
+                        <Border.IsVisible>
+                            <MultiBinding Converter="{x:Static BoolConverters.And}">
+                                <Binding Path="IsFindAvailable" />
+                                <MultiBinding Converter="{x:Static BoolConverters.Or}">
+                                    <Binding Path="CurrentDocument.Toolbar" Converter="{x:Static ObjectConverters.IsNotNull}" FallbackValue="False" />
+                                    <Binding Path="CanCompare" />
+                                    <Binding Path="IsSaveAvailable" />
+                                </MultiBinding>
+                            </MultiBinding>
+                        </Border.IsVisible>
+                    </Border>
                 </StackPanel>
 
                 <find:FindBar Grid.Column="3"

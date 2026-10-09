@@ -119,6 +119,72 @@ public sealed class RawEditedRowIndex : IRawRowIndex
         this.maxLinesPerRun = maxLinesPerRun;
     }
 
+    /// <summary>
+    /// The same edits over <paramref name="scan"/>, a complete index of the same original bytes at
+    /// another wrap width - what a wrap-width change swaps in once its background scan lands.
+    ///
+    /// A span holds line records, and a line record means the same thing at any width: where the
+    /// line starts, how many bytes it covers, which original lines it replaced. Only the row
+    /// fields are derived from the width, so they are all that is recomputed here - each span's
+    /// original rows from <paramref name="scan"/>, its own rows by the arithmetic
+    /// <see cref="RawLineRows"/> already provides, and the running row displacement as a prefix sum
+    /// over the result. No edited byte is read, and the cost is the lines held plus two index
+    /// lookups per span, however long those lines are.
+    ///
+    /// <c>this</c> is not modified, so the view can keep reading it until it has swapped to the
+    /// result.
+    /// </summary>
+    /// <param name="scan">Complete index over the document's original bytes. The scan reads only
+    /// those, which no edit changes, which is why it may run while the user keeps typing.</param>
+    public RawEditedRowIndex RewrapOnto(RawSegmentIndex scan)
+    {
+        ArgumentNullException.ThrowIfNull(scan);
+
+        var rewrapped = new RawEditedRowIndex(scan, this.document, this.maxHeldLines, this.maxLinesPerRun);
+        rewrapped.heldLines = this.heldLines;
+        rewrapped.NeedsRebuild = this.NeedsRebuild;
+
+        // Adjacent spans usually share a boundary (a region's end is the next one's start), so the
+        // lookup is made once per distinct offset.
+        long cachedOffset = -1;
+        int cachedRow = 0;
+        int RowAt(long offset)
+        {
+            if (offset != cachedOffset)
+                (cachedOffset, cachedRow) = (offset, scan.RowAtLineBoundary(offset));
+
+            return cachedRow;
+        }
+
+        int rowDelta = 0;
+        foreach (var span in this.spans)
+        {
+            var moved = new LineRun
+            {
+                OriginalStartOffset = span.OriginalStartOffset,
+                OriginalStartLine = span.OriginalStartLine,
+                OriginalExtent = span.OriginalExtent,
+                OriginalLinesReplaced = span.OriginalLinesReplaced,
+                Extent = span.Extent,
+                Terminated = span.Terminated,
+                ByteDeltaBefore = span.ByteDeltaBefore,
+                LineDeltaBefore = span.LineDeltaBefore,
+            };
+
+            moved.OriginalStartRow = RowAt(moved.OriginalStartOffset);
+            moved.OriginalRowsEnd = RowAt(moved.OriginalEndOffset);
+            moved.LineStarts.AddRange(span.LineStarts);
+            moved.Recount(scan.WrapWidth);
+
+            moved.RowDeltaBefore = rowDelta;
+            rowDelta = moved.RowDeltaThrough;
+            rewrapped.spans.Add(moved);
+        }
+
+        rewrapped.totalRowDelta = rowDelta;
+        return rewrapped;
+    }
+
     /// <summary>Rows in the edited document.</summary>
     public int RowCount => this.original.RowCount + this.totalRowDelta;
 
@@ -709,10 +775,21 @@ public sealed class RawEditedRowIndex : IRawRowIndex
         public void Describe(List<long> lineStarts, int from, int to, int wrapWidth)
         {
             LineStarts.Clear();
-            RowPrefix.Clear();
             long start = lineStarts[from];
             for (int i = from; i < to; i++)
                 LineStarts.Add(lineStarts[i] - start);
+
+            Recount(wrapWidth);
+        }
+
+        /// <summary>
+        /// Recomputes <see cref="RowPrefix"/> and <see cref="RowsHeld"/> from the line records at
+        /// <paramref name="wrapWidth"/>. The one place a span's rows are derived, which is what lets
+        /// a wrap change redo them without touching anything else the span holds.
+        /// </summary>
+        public void Recount(int wrapWidth)
+        {
+            RowPrefix.Clear();
 
             // Row counts depend only on where each line starts and ends, never on where the span
             // itself sits, so they are right even before the running totals are renumbered.

@@ -46,9 +46,9 @@ it in (see "Saving" in architecture.md).
 - **In-memory rebuild when `NeedsRebuild` fires.** Past 524,288 line records (about half a
   million separate places edited) edits in new places are refused with a toast. A save clears this
   more cheaply, so only worth building if that proves not enough.
-- **Re-wrap while edited, and search over edited bytes.** Both are off while a piece table exists;
-  search reads the file and so lands near rather than on a match past the first edit. A
-  merge-iterator over piece-space would be a project of its own.
+- **Search over edited bytes.** Search is off while a piece table exists; it reads the file and so
+  lands near rather than on a match past the first edit. A merge-iterator over piece-space would
+  be a project of its own.
 - **Unicode descriptors elsewhere.** The JSON views could name the character under the cursor the
   way the raw view's readout does.
 - **An internals inspector for the JSON indexes**, if the raw one earns its keep.
@@ -68,6 +68,22 @@ it in (see "Saving" in architecture.md).
   after each structural change, use the exact model under the cap and the byte model over it -
   no index or scan change, but a walk on the UI thread per toggle, so measure the walk rate
   before choosing the cap.
+- **Filtering a container's children by a JSONPath subset.** Needs a spec before it is built.
+  The filter is written as a path: the path to one container, then a predicate on its children -
+  an object's members by name (`$.config.foo*`), or an array's elements by one member's value
+  (`$.tags[?@.key == 'foo*']`, for key/value arrays such as AWS tags or serialised dictionaries).
+  The result is shown in place in the tree, so the path, breadcrumbs, schema gutter and original
+  indices above and inside the container are unchanged. `TreeCursor` would take the container's
+  next and previous child from a match list rather than the bytes, through a format-agnostic hook
+  beside `TreeExpandState`, keyed by the container's start. The match list comes from a
+  background scan of just that container's range - append-only, rows never change once shown -
+  and is sparse (a checkpoint every N matches, re-filtering between) so a multi-GB root array
+  with millions of matches stays at megabytes. Find matches only inside visible children. To
+  settle first: exactly which JSONPath subset (RFC 9535 filter syntax, or a glob shorthand on
+  top), where the filter is typed (the path bar or a field beside it), case sensitivity, nested
+  filters, and whether a key/value filter can show only `value`. Full JSONPath (wildcards
+  mid-path, `..`, arbitrary filter expressions) is a separate, larger project: a whole-document
+  match scan with NDJSON-style results.
 - **JSONC comments as rows.** Settings files lean on them, and `JsonTreeReader` skips them as
   trivia. They would be leaf rows in `TreeRunStyle.Comment`. Needs the reader to report a comment
   as a child (with ordinals skipping it, so array indices and paths are unchanged) and the sparse

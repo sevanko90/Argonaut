@@ -103,6 +103,37 @@ public sealed class RawSaveTests : IDisposable
     }
 
     [Fact]
+    public async Task Save_WithARewrapPending_ReopensAtTheRequestedWidth()
+    {
+        // A save stops a re-wrap still scanning (it reads the mapping the commit unmaps) and the
+        // reopen scans at that width instead, so the request is neither lost nor scanned twice.
+        // Whether the scan had already landed when the save began does not change the outcome.
+        string path = WriteFile(string.Concat(Enumerable.Repeat(new string('w', 300) + "\n", 50)));
+        var origin = new FileByteOrigin(path);
+        var vm = await EditedAsync(origin, 10, "!");
+        try
+        {
+            int target = vm.WrapWidth == 80 ? 160 : 80;
+            vm.SetWrapWidth(target);
+
+            var result = await vm.SaveAsync(origin, SiblingFileReplacer.ForCurrentPlatform(), progress: null, CancellationToken.None);
+            Assert.Equal(DocumentSaveOutcome.Saved, result.Outcome);
+
+            await vm.IndexingTask;
+            Assert.Equal(target, vm.WrapWidth);
+            Assert.False(vm.IsRewrapping);
+
+            var fresh = Argonaut.Features.Raw.Rows.RawSegmentIndex.StartIndexing(new MemoryByteSource(File.ReadAllBytes(path)), target);
+            await fresh.IndexingTask;
+            Assert.Equal(fresh.RowCount, vm.RowCount);
+        }
+        finally
+        {
+            vm.Dispose();
+        }
+    }
+
+    [Fact]
     public async Task SaveAs_WritesANewFile_LeavesTheOriginalAlone_AndReadsFromTheNewOne()
     {
         string path = WriteFile("hello world");

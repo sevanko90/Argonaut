@@ -3,6 +3,7 @@ using System.Text;
 using Argonaut.Engine.Bytes;
 using Argonaut.Features.Raw.Editing;
 using Argonaut.Features.Raw.Rows;
+using Argonaut.Tests.Support;
 
 namespace Argonaut.Tests.Features.Raw.Editing;
 
@@ -20,7 +21,7 @@ public class RawEditedRowIndexTests
     private sealed class EditedDocument
     {
         private readonly byte[] originalBytes;
-        private readonly int wrapWidth;
+        private int wrapWidth;
 
         public EditedDocument(byte[] original, int wrapWidth, int maxHeldLines = int.MaxValue, int maxLinesPerRun = RawEditedRowIndex.MaxLinesPerRun)
         {
@@ -37,9 +38,9 @@ public class RawEditedRowIndexTests
         }
 
         public MemoryByteSource OriginalSource { get; }
-        public RawSegmentIndex Original { get; }
+        public RawSegmentIndex Original { get; private set; }
         public RawPieceTable Table { get; }
-        public RawEditedRowIndex Rows { get; }
+        public RawEditedRowIndex Rows { get; private set; }
         public List<byte> Oracle { get; }
 
         /// <summary>
@@ -48,6 +49,28 @@ public class RawEditedRowIndexTests
         /// same thing before and after an edit.
         /// </summary>
         public long OriginalRowStart(int row) => Original.GetRowInfo(row).Start;
+
+        /// <summary>A complete scan of the <i>original</i> bytes at another width - what a wrap
+        /// change starts on the background while the user carries on editing.</summary>
+        public RawSegmentIndex ScanOriginalAt(int width)
+        {
+            var scan = RawSegmentIndex.StartIndexing(OriginalSource, width);
+            scan.IndexingTask.GetAwaiter().GetResult();
+            return scan;
+        }
+
+        /// <summary>Moves the edits onto <paramref name="scan"/>, as the swap at the end of a
+        /// wrap change does. Later edits and assertions are at the new width.</summary>
+        public RawEditedRowIndex RewrapOnto(RawSegmentIndex scan)
+        {
+            var retired = Rows;
+            Original = scan;
+            Rows = retired.RewrapOnto(scan);
+            this.wrapWidth = scan.WrapWidth;
+            return retired;
+        }
+
+        public void Rewrap(int width) => RewrapOnto(ScanOriginalAt(width));
 
         public void Insert(long offset, byte[] bytes)
         {
@@ -881,5 +904,194 @@ public class RawEditedRowIndexTests
 
         Assert.Equal(2, document.Rows.GetRowInfo(1).LineNumber);
         document.AssertMatchesAFreshIndex("newline inserted onto a soft-wrap boundary");
+    }
+
+    // ---- re-wrapping -----------------------------------------------------------------------
+    //
+    // A span holds line records, not rows: its offsets, line starts and line numbers mean the same
+    // thing at any width, and only its row fields are derived from the width. So a wrap change
+    // while edited is a scan of the unchanged original bytes at the new width plus a recount of
+    // each span's rows - never a scan of the edited bytes. The oracle is unchanged: a fresh index
+    // of the edited bytes, now at the new width.
+
+    [Theory]
+    [InlineData(16, 40)]
+    [InlineData(40, 8)]
+    [InlineData(80, 23)]
+    public void RewrapWithNoEdits_MatchesAFreshIndexAtTheNewWidth(int from, int to)
+    {
+        var document = Document("alpha\nbeta is a rather longer line than the others\n\ngamma", from);
+
+        document.Rewrap(to);
+
+        document.AssertMatchesAFreshIndex($"no edits, {from} to {to}");
+    }
+
+    [Theory]
+    [InlineData(16, 40)]
+    [InlineData(40, 8)]
+    [InlineData(12, 80)]
+    public void RewrapAfterEditsInSeveralPlaces_MatchesAFreshIndexAtTheNewWidth(int from, int to)
+    {
+        var document = LongDocument(2_000, wrapWidth: from);
+        document.Insert(LineStart(document, 1_500) + 3, Bytes("a long insertion that wraps at every width used\nand adds a line"));
+        document.Delete(LineStart(document, 700), 30);
+        document.Insert(LineStart(document, 10) + 1, Bytes("é\r\n"));
+        Assert.Equal(3, document.Rows.SpanCount);
+
+        document.Rewrap(to);
+
+        document.AssertMatchesAFreshIndex($"three spans, {from} to {to}");
+    }
+
+    [Fact]
+    public void RewrapKeepsEverySpan_AndTheBudgetItHolds()
+    {
+        var document = LongDocument(2_000, wrapWidth: 40);
+        document.Insert(LineStart(document, 1_500), Bytes("x\ny\nz"));
+        document.Insert(LineStart(document, 200), Bytes("q"));
+        int spans = document.Rows.SpanCount;
+        int heldLines = document.Rows.HeldLines;
+
+        document.Rewrap(12);
+
+        // Line records do not depend on the width, so neither does the budget that counts them.
+        Assert.Equal(spans, document.Rows.SpanCount);
+        Assert.Equal(heldLines, document.Rows.HeldLines);
+        document.AssertMatchesAFreshIndex("spans carried across");
+    }
+
+    [Fact]
+    public void RewrapOfOneLongEditedLine_MatchesAFreshIndex()
+    {
+        // The single-line multi-GB case in miniature: one line, many rows, edited in the middle.
+        var document = Document(new string('x', 5_000) + "\n", wrapWidth: 64);
+        document.Insert(2_500, Bytes("éé\nsplit"));
+        document.Delete(4_000, 7);
+
+        document.Rewrap(17);
+
+        document.AssertMatchesAFreshIndex("long line, 64 to 17");
+    }
+
+    [Fact]
+    public void RewrapIncludesEditsMadeWhileTheNewScanRan()
+    {
+        // The scan is over the original bytes, which no edit touches - so an edit made after it
+        // started still lands correctly when the edits are moved onto it.
+        var document = LongDocument(500, wrapWidth: 40);
+        document.Insert(LineStart(document, 400) + 2, Bytes("before the scan "));
+
+        var scan = document.ScanOriginalAt(9);
+        document.Insert(LineStart(document, 100), Bytes("during the scan\n"));
+        document.Delete(5, 12);
+
+        document.RewrapOnto(scan);
+
+        document.AssertMatchesAFreshIndex("edits during the scan");
+    }
+
+    [Fact]
+    public void RewrapLeavesTheIndexItReplacesAnsweringAsBefore()
+    {
+        // The view keeps reading the old index until the swap, so building the new one must not
+        // disturb it.
+        var document = LongDocument(300, wrapWidth: 40);
+        document.Insert(LineStart(document, 150) + 1, Bytes("a line long enough to wrap at forty bytes, twice over, at least\n"));
+        var before = new List<RawRowInfo>();
+        for (int row = 0; row < document.Rows.RowCount; row++)
+            before.Add(document.Rows.GetRowInfo(row));
+
+        var retired = document.RewrapOnto(document.ScanOriginalAt(11));
+
+        Assert.Equal(before.Count, retired.RowCount);
+        for (int row = 0; row < before.Count; row++)
+            Assert.Equal(before[row], retired.GetRowInfo(row));
+    }
+
+    [Fact]
+    public void RewrapBackToTheOriginalWidth_MatchesAFreshIndex()
+    {
+        var document = LongDocument(400, wrapWidth: 40);
+        document.Insert(LineStart(document, 200), Bytes("xyz\n"));
+
+        document.Rewrap(7);
+        document.Rewrap(40);
+
+        document.AssertMatchesAFreshIndex("there and back");
+    }
+
+    [Theory]
+    [InlineData(11)]
+    [InlineData(404)]
+    [InlineData(31337)]
+    public void RandomEditsAcrossRewraps_AlwaysMatchAFreshIndex(int seed)
+    {
+        var random = new Random(seed);
+        int[] widths = [8, 16, 23, 40, 80];
+
+        var text = new StringBuilder();
+        while (text.Length < 3000)
+        {
+            int lineLength = random.Next(0, 90);
+            text.Append(random.Next(4) == 0 ? new string('é', lineLength / 2) : new string('x', lineLength));
+            text.Append(random.Next(8) == 0 ? "\r\n" : "\n");
+        }
+
+        var document = new EditedDocument(Bytes(text.ToString()), widths[random.Next(widths.Length)]);
+
+        for (int step = 0; step < 60; step++)
+        {
+            long length = document.Table.AvailableLength;
+            int roll = random.Next(100);
+            if (roll < 10)
+            {
+                int width = widths[random.Next(widths.Length)];
+                document.Rewrap(width);
+                document.AssertMatchesAFreshIndex($"seed {seed}, step {step}, rewrapped to {width}");
+                continue;
+            }
+
+            if (length > 0 && roll < 45)
+            {
+                int offset = random.Next((int)length);
+                int count = random.Next(1, Math.Min(30, (int)length - offset + 1));
+                document.Delete(offset, count);
+            }
+            else
+            {
+                int offset = random.Next((int)length + 1);
+                string payload = random.Next(4) switch
+                {
+                    0 => "\n",
+                    1 => "é",
+                    2 => new string('q', random.Next(1, 60)),
+                    _ => "\r\n"
+                };
+                document.Insert(offset, Bytes(payload));
+            }
+
+            document.AssertMatchesAFreshIndex($"seed {seed}, step {step}");
+        }
+    }
+
+    [Fact]
+    public void RewrapOntoAnUnfinishedScan_Throws()
+    {
+        byte[] text = Bytes("alpha\nbeta\n");
+        var source = new MemoryByteSource(text);
+        var scan = RawSegmentIndex.StartIndexing(source, 80);
+        scan.IndexingTask.GetAwaiter().GetResult();
+        var rows = new RawEditedRowIndex(scan, new RawPieceTable(source));
+
+        // The same bytes, still arriving, so the scan over them cannot have finished.
+        var arriving = new GrowingByteSource(text);
+        var unfinished = RawSegmentIndex.StartIndexing(arriving, 16);
+        Assert.False(unfinished.AllItemsPublished);
+
+        Assert.Throws<ArgumentException>(() => rows.RewrapOnto(unfinished));
+
+        arriving.Seal();
+        unfinished.IndexingTask.GetAwaiter().GetResult();
     }
 }

@@ -27,12 +27,23 @@ namespace Argonaut.Features.Raw;
 /// The scans check cancellation once per 4MB chunk, so the joins resolve in low single-digit
 /// milliseconds.
 ///
+/// A third scan can run beside the current one: <see cref="StartPendingIndex"/> scans the same
+/// bytes at another wrap width without touching <see cref="Index"/>, for a reader (the edited
+/// document) that cannot let go of the current index until the new one is complete. It has its
+/// own cancellation source, linked from the mapping one, and is joined by everything that joins
+/// the current scan: replacement by another pending scan, <see cref="DiscardPendingIndex"/>, and
+/// <see cref="Dispose"/> - so the mapping is never released under it.
+///
 /// Not thread-safe: create, restart and dispose from one thread (the UI thread in this app).
 /// </summary>
 public sealed class RawIndexSession : IDocumentSession
 {
     private readonly CancellationTokenSource mappingCts;
     private CancellationTokenSource indexCts;
+
+    /// <summary>The scan <see cref="StartPendingIndex"/> started, and the source that stops it.</summary>
+    private RawSegmentIndex? pendingIndex;
+    private CancellationTokenSource? pendingIndexCts;
     private bool disposed;
 
     public IByteSource Bytes { get; }
@@ -113,6 +124,71 @@ public sealed class RawIndexSession : IDocumentSession
         this.Index = BuildIndex(this.Bytes, wrapWidth, progressReporter, kept, this.indexCts.Token);
     }
 
+    /// <summary>
+    /// Starts a scan of the same bytes at <paramref name="wrapWidth"/> beside the current one,
+    /// which stays <see cref="Index"/> until <see cref="AdoptPendingIndex"/> says otherwise. Any
+    /// earlier pending scan is stopped and joined first, so only the newest request is ever
+    /// running.
+    /// </summary>
+    public RawSegmentIndex StartPendingIndex(int wrapWidth, IProgressReporter? progressReporter = null, RawRowAnchors? kept = null)
+    {
+        ObjectDisposedException.ThrowIf(this.disposed, this);
+
+        DiscardPendingIndex();
+
+        var pendingCts = CancellationTokenSource.CreateLinkedTokenSource(this.mappingCts.Token);
+        try
+        {
+            this.pendingIndex = BuildIndex(this.Bytes, wrapWidth, progressReporter, kept, pendingCts.Token);
+        }
+        catch
+        {
+            pendingCts.Dispose();
+            throw;
+        }
+
+        this.pendingIndexCts = pendingCts;
+        return this.pendingIndex;
+    }
+
+    /// <summary>
+    /// Stops the pending scan and joins it, which is a few ms for the same reason
+    /// <see cref="RestartIndex"/>'s join is. A no-op when there is none.
+    /// </summary>
+    public void DiscardPendingIndex()
+    {
+        if (this.pendingIndex is not { } pending)
+            return;
+
+        this.pendingIndexCts!.Cancel();
+        try { pending.IndexingTask.Wait(); } catch { /* cancellation/failure observed here only to unblock the discard */ }
+
+        this.pendingIndexCts.Dispose();
+        this.pendingIndexCts = null;
+        this.pendingIndex = null;
+    }
+
+    /// <summary>
+    /// Makes the finished pending scan the session's <see cref="Index"/>, retiring the one it
+    /// replaces (which has finished too: whoever needs a pending scan is holding a complete
+    /// index). The mapping is untouched, so nothing reading it is disturbed.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">There is no pending scan, or it has not
+    /// completed.</exception>
+    public void AdoptPendingIndex()
+    {
+        ObjectDisposedException.ThrowIf(this.disposed, this);
+
+        if (this.pendingIndex is not { AllItemsPublished: true } adopted)
+            throw new InvalidOperationException("There is no completed pending index to adopt.");
+
+        this.indexCts.Dispose();
+        this.indexCts = this.pendingIndexCts!;
+        this.Index = adopted;
+        this.pendingIndexCts = null;
+        this.pendingIndex = null;
+    }
+
     private static RawSegmentIndex BuildIndex(IByteSource bytes, int wrapWidth, IProgressReporter? progressReporter,
         RawRowAnchors? kept, CancellationToken stopping) =>
         kept is not null && kept.WrapWidth == wrapWidth && bytes.LengthSettled && bytes.AvailableLength == kept.Length
@@ -142,8 +218,10 @@ public sealed class RawIndexSession : IDocumentSession
 
         this.mappingCts.Cancel();
         try { this.Index.IndexingTask.Wait(); } catch { /* cancellation/failure observed here only to unblock disposal */ }
+        try { this.pendingIndex?.IndexingTask.Wait(); } catch { /* likewise */ }
 
         this.Bytes.Release();
+        this.pendingIndexCts?.Dispose();
         this.indexCts.Dispose();
         this.mappingCts.Dispose();
     }

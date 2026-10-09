@@ -312,6 +312,15 @@ public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IBackgro
     }
 
     /// <summary>
+    /// The row that begins at <paramref name="offset"/>, which must be the start of a line or the
+    /// end of the data (where it is the row count, there being nothing left to begin one). What
+    /// <see cref="Editing.RawEditedRowIndex.RewrapOnto"/> needs to restate where a run of whole
+    /// lines begins and ends in the rows of another width. Requires a complete scan.
+    /// </summary>
+    internal int RowAtLineBoundary(long offset)
+        => offset >= this.source.AvailableLength ? RowCount : LineStartContaining(offset).FirstRow;
+
+    /// <summary>
     /// Where the line holding <paramref name="offset"/> ends: the exclusive end of its last row
     /// (the '\n' included), whether it has a '\n' at all, the row after its last, and its number.
     /// The counterpart of <see cref="LineStartContaining"/>, bounded the same way: the walk that

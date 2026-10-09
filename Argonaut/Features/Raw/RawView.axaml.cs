@@ -5,6 +5,7 @@ using Avalonia.Controls;
 using Avalonia.Reactive;
 using Argonaut.Features.Raw.Highlighting;
 using Argonaut.Ui.Rows;
+using Argonaut.Ui.ViewModels;
 
 namespace Argonaut.Features.Raw;
 
@@ -61,6 +62,7 @@ public partial class RawView : UserControl
         if (subscribedViewModel is not null)
         {
             subscribedViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+            subscribedViewModel.ToolbarChoiceMade -= OnToolbarChoiceMade;
             subscribedViewModel = null;
         }
 
@@ -68,6 +70,7 @@ public partial class RawView : UserControl
         {
             subscribedViewModel = vm;
             vm.PropertyChanged += OnViewModelPropertyChanged;
+            vm.ToolbarChoiceMade += OnToolbarChoiceMade;
         }
 
         Surface.Lexer = (DataContext as RawViewModel)?.Lexer;
@@ -102,8 +105,12 @@ public partial class RawView : UserControl
             // reopens the document with), so the old vertical offset means nothing against the
             // new rows - and leaving it in place would have the surface draw a viewport far past
             // the end of a row set that starts near-empty and then grows by millions of rows a
-            // second. A save's reopen puts the caret back with a reveal once the scan reaches it.
+            // second. A save's reopen puts the caret back with a reveal once the scan reaches it;
+            // a re-wrap hands over the place the user was at, which the surface lands once the
+            // new rows reach it.
             Surface.ResetScroll();
+            if (vm.TakePlaceAcrossRewrap() is { } place)
+                Surface.KeepPlace(place.Offset, place.ScreenRow);
             scrollBars.ResetPan();
             scrollBars.Refresh();
         }
@@ -131,6 +138,7 @@ public partial class RawView : UserControl
         if (subscribedViewModel is not null)
         {
             subscribedViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+            subscribedViewModel.ToolbarChoiceMade -= OnToolbarChoiceMade;
             subscribedViewModel = null;
         }
 
@@ -151,6 +159,14 @@ public partial class RawView : UserControl
         EditOverview.IsVisible = editor is not null;
         EditOverview.Show(editor?.Document, editor?.RowIndex);
     }
+
+    /// <summary>
+    /// A wrap width or colours were picked from the toolbar: focus goes back to the text. Deferred because the
+    /// choice arrives inside the combo's selection commit, and moving focus away from a control
+    /// mid-commit is the kind of side effect CLAUDE.md's selection-bound setter rule hands to
+    /// <see cref="UiDeferral.AfterCurrentInput"/>.
+    /// </summary>
+    private void OnToolbarChoiceMade(object? sender, EventArgs e) => UiDeferral.AfterCurrentInput(() => Surface.Focus());
 
     /// <summary>A mark on the overview was clicked: put the caret on the edit it stands for.</summary>
     private void OnEditChosen(object? sender, long offset)

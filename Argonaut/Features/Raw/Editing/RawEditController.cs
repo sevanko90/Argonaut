@@ -73,26 +73,36 @@ public sealed class RawEditController
         this.originalLength = originalBytes.AvailableLength;
         Document = new RawPieceTable(originalBytes);
         RowIndex = new RawEditedRowIndex(scan, Document);
-        Caret = new RawCaretController(RowIndex, Document);
         this.journal = new RawEditJournal(Document);
+        Caret = CreateCaret(RowIndex);
+    }
 
-        // A caret moved by anything other than an edit ends the undo run, so undoing after
-        // clicking elsewhere does not also unwind what was typed before the click.
-        Caret.Moved += (_, _) =>
+    /// <summary>
+    /// A caret over <paramref name="rows"/>. A caret moved by anything other than an edit ends the
+    /// undo run, so undoing after clicking elsewhere does not also unwind what was typed before
+    /// the click.
+    /// </summary>
+    private RawCaretController CreateCaret(RawEditedRowIndex rows)
+    {
+        var caret = new RawCaretController(rows, Document);
+        caret.Moved += (_, _) =>
         {
             if (!this.movingForOwnEdit)
                 this.journal.BreakRun();
         };
+
+        return caret;
     }
 
     /// <summary>The edited document. What every reader in the view reads through while editing.</summary>
     public RawPieceTable Document { get; }
 
-    /// <summary>Rows over <see cref="Document"/>.</summary>
-    public RawEditedRowIndex RowIndex { get; }
+    /// <summary>Rows over <see cref="Document"/>. Replaced, with <see cref="Caret"/>, by
+    /// <see cref="Rewrap"/>; nothing else holds it across a call.</summary>
+    public RawEditedRowIndex RowIndex { get; private set; }
 
     /// <summary>The caret, over <see cref="Document"/> and <see cref="RowIndex"/>.</summary>
-    public RawCaretController Caret { get; }
+    public RawCaretController Caret { get; private set; }
 
     /// <summary>Raised after the document's bytes changed, before the caret is moved to follow
     /// them - so a listener that caches rows drops them while the caret is still where it was.</summary>
@@ -155,6 +165,55 @@ public sealed class RawEditController
     /// append log is read lock-free because nothing already written ever changes, and a row index
     /// mutated on the UI thread while the scan still appended to it would end that.</summary>
     public static bool CanEdit(RawSegmentIndex scan) => scan.AllItemsPublished;
+
+    /// <summary>
+    /// Moves the edits onto <paramref name="scan"/>, a complete index of the original bytes at
+    /// another wrap width (<see cref="RawEditedRowIndex.RewrapOnto"/>), replacing
+    /// <see cref="RowIndex"/> and <see cref="Caret"/> with ones over it. The document, the undo
+    /// history and the position of the caret and selection are untouched - they are all byte
+    /// offsets, which mean the same thing at any width - so undo and redo carry on, now folding
+    /// into the new rows.
+    ///
+    /// Nothing is raised: no byte changed, so <see cref="Changed"/> would only make a listener
+    /// drop rows it is about to replace anyway. The caller swaps the rows it reads, which is why
+    /// the old index stays valid for it until it has.
+    /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="scan"/> has not finished.</exception>
+    public void Rewrap(RawSegmentIndex scan)
+    {
+        ArgumentNullException.ThrowIfNull(scan);
+
+        var rows = RowIndex.RewrapOnto(scan);
+
+        var selection = Caret.Selection;
+        var caret = Caret.Caret;
+        var replacement = CreateCaret(rows);
+
+        // The row index is replaced before the caret is placed on it, which snaps to a legal
+        // position by asking it where the rows are.
+        RowIndex = rows;
+        Caret = replacement;
+
+        // Placing the caret is the editor repositioning it, not the user clicking elsewhere.
+        this.movingForOwnEdit = true;
+        try
+        {
+            if (selection.IsEmpty)
+            {
+                replacement.PlaceAt(caret.Offset, caret.Affinity);
+            }
+            else
+            {
+                // Anchor first, then extend, so a selection made right-to-left keeps its direction.
+                replacement.PlaceAt(selection.Anchor);
+                replacement.ExtendTo(selection.Active, caret.Affinity);
+            }
+        }
+        finally
+        {
+            this.movingForOwnEdit = false;
+        }
+    }
 
     /// <summary>Types <paramref name="text"/> at the caret, replacing the selection if there is
     /// one.</summary>

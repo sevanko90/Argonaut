@@ -48,6 +48,13 @@ internal static class MacUnifiedTitleBar
         if (container == 0)
             return;
 
+        // The app paints the strip; AppKit's own title bar must paint nothing. A zoom by
+        // double-clicking the title bar can un-hide its background view, a grey block over the
+        // traffic lights' corner, so transparency is asserted again on every pass and that view
+        // is hidden.
+        ObjC.Send(nsWindow, ObjC.Selector("setTitlebarAppearsTransparent:"), 1);
+        HideBackgroundViews(ObjC.Send(close, ObjC.Selector("superview")));
+
         var windowFrame = ObjC.SendRect(nsWindow, ObjC.Selector("frame"));
         var containerFrame = ObjC.SendRect(container, ObjC.Selector("frame"));
         containerFrame.Height = titleBarHeight;
@@ -63,6 +70,24 @@ internal static class MacUnifiedTitleBar
             var button = ObjC.Send(nsWindow, ObjC.Selector("standardWindowButton:"), kind);
             if (button != 0)
                 ObjC.Send(button, ObjC.Selector("setFrameOrigin:"), new NSPoint(FirstButtonX + kind * ButtonPitch, y));
+        }
+    }
+
+    /// <summary>Hides the views AppKit paints a title bar's background with -
+    /// <c>NSTitlebarBackgroundView</c>, and any material view - directly inside
+    /// <paramref name="view"/>.</summary>
+    private static void HideBackgroundViews(nint view)
+    {
+        if (view == 0)
+            return;
+
+        var subviews = ObjC.Send(view, ObjC.Selector("subviews"));
+        long count = ObjC.Send(subviews, ObjC.Selector("count"));
+        for (long i = 0; i < count; i++)
+        {
+            var subview = ObjC.Send(subviews, ObjC.Selector("objectAtIndex:"), (nint)i);
+            if (Marshal.PtrToStringUTF8(ObjC.ClassName(subview)) is { } name && (name.Contains("TitlebarBackground", StringComparison.Ordinal) || name.Contains("VisualEffect", StringComparison.Ordinal)))
+                ObjC.Send(subview, ObjC.Selector("setHidden:"), 1);
         }
     }
 
@@ -110,6 +135,9 @@ internal static class MacUnifiedTitleBar
             SendRectX64(out var result, receiver, selector);
             return result;
         }
+
+        [DllImport(Runtime, EntryPoint = "object_getClassName")]
+        public static extern nint ClassName(nint obj);
 
         public static nint Selector(string name) => sel_registerName(name);
     }

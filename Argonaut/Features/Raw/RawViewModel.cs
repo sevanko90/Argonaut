@@ -754,12 +754,22 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     /// <summary>The most rows Auto reads to guess a format.</summary>
     private const int MaxSniffedRows = 200;
 
+    /// <summary>
+    /// Raised when the user picks a wrap width from the toolbar. Picking from the combo leaves
+    /// focus in the toolbar, where the surface hides its caret and keys go nowhere, so the view
+    /// gives focus back to the text - the same hand-back the edit toggle gets. Raised at the
+    /// choice, not when an edited document's re-wrap lands seconds later, so focus never moves
+    /// out from under whatever the user has gone on to do.
+    /// </summary>
+    public event EventHandler? WrapWidthChosen;
+
     /// <summary>The toolbar's wrap-width choice: remembered for the next document, then applied
     /// to this one.</summary>
     private void ChooseWrapWidth(int bytes)
     {
         this.settings.WrapWidth = bytes;
         SetWrapWidth(bytes);
+        WrapWidthChosen?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>

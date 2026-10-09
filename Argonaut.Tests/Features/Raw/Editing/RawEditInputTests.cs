@@ -483,6 +483,52 @@ public sealed class RawEditInputTests : IDisposable
             Assert.Equal(FreshRowCount(vm, target), vm.RowCount);
         });
 
+    // ---- focus after a toolbar choice ----------------------------------------------------------
+    //
+    // The wrap-width combo lives in the header toolbar, so picking from it leaves focus there -
+    // and the surface hides its caret while unfocused, and keys typed next go nowhere. The
+    // document takes focus back once the choice is made, as it does for the edit toggle.
+
+    private static void ChooseWrapWidthFromTheToolbar(RawViewModel vm, int width)
+        => ((RawToolbarViewModel)vm.Toolbar!).WrapWidthIndex = Array.IndexOf(RawViewSettings.Widths, width);
+
+    [Fact]
+    public Task ChoosingAWrapWidthWhileEditing_GivesFocusBackToTheText()
+        => WhileEditing(LongLines, async (window, vm, surface) =>
+        {
+            int target = vm.WrapWidth == 80 ? 160 : 80;
+            vm.Caret!.PlaceAt(5);
+            await PumpAsync();
+            FocusSink(window).Focus();
+            await PumpAsync();
+            Assert.False(surface.IsFocused);
+
+            ChooseWrapWidthFromTheToolbar(vm, target);
+            await PumpUntilAsync(() => vm.WrapWidth == target, "the re-wrap");
+            await PumpAsync();
+
+            Assert.True(surface.IsFocused);
+            TypeText(window, "K");
+            await PumpAsync();
+            Assert.StartsWith("wwwwwK", DocumentText(vm));
+        });
+
+    [Fact]
+    public Task ChoosingAWrapWidthWhileViewing_GivesFocusBackToTheText()
+        => WithView(LongLines, async (window, vm, surface) =>
+        {
+            int target = vm.WrapWidth == 80 ? 160 : 80;
+            FocusSink(window).Focus();
+            await PumpAsync();
+            Assert.False(surface.IsFocused);
+
+            ChooseWrapWidthFromTheToolbar(vm, target);
+            await PumpUntilAsync(() => vm.WrapWidth == target, "the re-wrap");
+            await PumpAsync();
+
+            Assert.True(surface.IsFocused);
+        });
+
     // ---- position across a re-wrap ----------------------------------------------------------
     //
     // A wrap change replaces every row, so the old scroll offset means nothing - but the user's

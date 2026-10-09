@@ -46,9 +46,9 @@ it in (see "Saving" in architecture.md).
 - **In-memory rebuild when `NeedsRebuild` fires.** Past 524,288 line records (about half a
   million separate places edited) edits in new places are refused with a toast. A save clears this
   more cheaply, so only worth building if that proves not enough.
-- **Re-wrap while edited, and search over edited bytes.** Both are off while a piece table exists;
-  search reads the file and so lands near rather than on a match past the first edit. A
-  merge-iterator over piece-space would be a project of its own.
+- **Search over edited bytes.** Search is off while a piece table exists; it reads the file and so
+  lands near rather than on a match past the first edit. A merge-iterator over piece-space would
+  be a project of its own.
 - **Unicode descriptors elsewhere.** The JSON views could name the character under the cursor the
   way the raw view's readout does.
 - **An internals inspector for the JSON indexes**, if the raw one earns its keep.

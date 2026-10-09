@@ -174,9 +174,11 @@ open, so every reader of the document's file must be let go of first:
   under the index, the piece table and the rows together, and one `Remap()` puts it back if the
   commit fails. Anything new that holds the raw document's bytes must hold them through it, not a
   separate `origin.Open()`.
-- **Anything else reading the file must be stopped and joined by the save.** Today that is only
-  search (`FindController.StopSearchAndWaitAsync`). A new background reader of an origin's file
-  (a sidecar indexer, a checksum) must be added to that join, or saves fail on Windows only.
+- **Anything else reading the file must be stopped and joined by the save.** Today that is
+  search (`FindController.StopSearchAndWaitAsync`) and an edited document's pending re-wrap scan
+  (`RawViewModel.SaveAsync` withdraws it, and the reopen scans at its width). A new background
+  reader of an origin's file (a sidecar indexer, a checksum) must be added to that join, or saves
+  fail on Windows only.
 - **A failed commit leaves the destination untouched** - every `IFileReplacer` must guarantee it,
   because the recovery is to remap and carry on with the edits. If the original cannot be reopened
   either, the stage is kept (`KeepStagedContent`) and never deleted: it may be the only copy.

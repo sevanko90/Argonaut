@@ -296,4 +296,118 @@ public class RawEditControllerTests
         scan.IndexingTask.GetAwaiter().GetResult();
         Assert.True(RawEditController.CanEdit(scan));
     }
+
+    // ---- re-wrapping -----------------------------------------------------------------------
+
+    /// <summary>An editor plus the original bytes it edits, so a test can scan them again at
+    /// another width the way a wrap change does.</summary>
+    private static (RawEditController Editor, MemoryByteSource Original) EditingWithSource(string content)
+    {
+        var source = new MemoryByteSource(Encoding.UTF8.GetBytes(content));
+        var scan = RawSegmentIndex.StartIndexing(source, WrapWidth);
+        scan.IndexingTask.GetAwaiter().GetResult();
+
+        return (new RawEditController(scan, source), source);
+    }
+
+    private static RawSegmentIndex ScanAt(IByteSource source, int width)
+    {
+        var scan = RawSegmentIndex.StartIndexing(source, width);
+        scan.IndexingTask.GetAwaiter().GetResult();
+        return scan;
+    }
+
+    /// <summary>Rows a fresh scan of the edited bytes would have at <paramref name="width"/>.</summary>
+    private static int FreshRowCount(RawEditController editor, int width)
+    {
+        var bytes = new byte[editor.Document.AvailableLength];
+        editor.Document.CopyTo(0, bytes);
+        return ScanAt(new MemoryByteSource(bytes), width).RowCount;
+    }
+
+    private static readonly string LongLine = new string('w', 300) + "\n";
+
+    [Fact]
+    public void Rewrap_KeepsTheDocumentAndPutsItsRowsAtTheNewWidth()
+    {
+        var (editor, original) = EditingWithSource(LongLine + "short\n");
+        editor.Caret.PlaceAt(10);
+        editor.Type("inserted ");
+        string text = TextOf(editor);
+
+        editor.Rewrap(ScanAt(original, 40));
+
+        Assert.Equal(text, TextOf(editor));
+        Assert.True(editor.IsDirty);
+        Assert.Equal(FreshRowCount(editor, 40), editor.RowIndex.RowCount);
+    }
+
+    [Fact]
+    public void Rewrap_KeepsTheCaretAndSelectionByOffset()
+    {
+        var (editor, original) = EditingWithSource(LongLine + "short\n");
+        editor.Caret.PlaceAt(5);
+        editor.Type("abc");
+        editor.Caret.PlaceAt(250);
+        editor.Caret.ExtendTo(120);
+
+        editor.Rewrap(ScanAt(original, 33));
+
+        Assert.Equal(new RawSelection(250, 120), editor.Caret.Selection);
+        Assert.Equal(120, editor.Caret.Caret.Offset);
+    }
+
+    [Fact]
+    public void Rewrap_KeepsTheUndoHistory()
+    {
+        var (editor, original) = EditingWithSource(LongLine);
+        editor.Caret.PlaceAt(200);
+        editor.Type("!");
+        editor.Caret.PlaceAt(3);
+        editor.InsertNewLine();
+
+        editor.Rewrap(ScanAt(original, 50));
+
+        Assert.True(editor.CanUndo);
+        Assert.Equal(RawEditOutcome.Applied, editor.Undo());
+        Assert.Equal(RawEditOutcome.Applied, editor.Undo());
+        Assert.Equal(LongLine, TextOf(editor));
+        Assert.False(editor.IsDirty);
+        Assert.Equal(FreshRowCount(editor, 50), editor.RowIndex.RowCount);
+
+        Assert.Equal(RawEditOutcome.Applied, editor.Redo());
+        Assert.Equal(FreshRowCount(editor, 50), editor.RowIndex.RowCount);
+    }
+
+    [Fact]
+    public void EditsAfterARewrap_AreRowedAtTheNewWidth()
+    {
+        var (editor, original) = EditingWithSource(LongLine + LongLine);
+        editor.Caret.PlaceAt(1);
+        editor.Type("x");
+
+        editor.Rewrap(ScanAt(original, 25));
+        editor.Caret.PlaceAt(450);
+        editor.Type(new string('y', 60));
+        editor.InsertNewLine();
+
+        Assert.Equal(FreshRowCount(editor, 25), editor.RowIndex.RowCount);
+
+        // The caret walks the new rows: the end of the document is the end of its last row.
+        editor.Caret.PlaceAt(editor.Document.AvailableLength);
+        Assert.Equal(editor.Document.AvailableLength, editor.Caret.Caret.Offset);
+    }
+
+    [Fact]
+    public void Rewrap_OverAnUnfinishedScan_Throws()
+    {
+        var (editor, _) = EditingWithSource("abc\n");
+        var arriving = new GrowingByteSource(Encoding.UTF8.GetBytes("abc\n"));
+        var unfinished = RawSegmentIndex.StartIndexing(arriving, 40);
+
+        Assert.Throws<ArgumentException>(() => editor.Rewrap(unfinished));
+
+        arriving.Seal();
+        unfinished.IndexingTask.GetAwaiter().GetResult();
+    }
 }

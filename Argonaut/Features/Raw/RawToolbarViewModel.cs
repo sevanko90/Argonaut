@@ -90,8 +90,8 @@ public sealed class RawToolbarViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Whether re-wrapping is still allowed. Goes false once a piece table exists, because
-    /// re-wrapping an edited document means re-scanning the edited bytes.
+    /// Whether re-wrapping is allowed right now: not while a save is writing the document out,
+    /// which is reading the bytes a re-wrap would be scanning.
     /// </summary>
     public bool CanChangeWrapWidth
     {

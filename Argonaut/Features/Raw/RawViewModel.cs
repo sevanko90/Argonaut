@@ -30,6 +30,11 @@ namespace Argonaut.Features.Raw;
 /// survive (a live search scan may hold spans over it). The rows collection is swapped as a
 /// whole new instance rather than reset in place, so the ListBox rebinds cleanly and the
 /// disposed old collection reports empty for Avalonia's trailing ItemsSource walk.
+///
+/// An edited document re-wraps differently: its edits are layered on the current index, so that
+/// index stays in use while the new width is scanned beside it
+/// (<see cref="RawIndexSession.StartPendingIndex"/>) and the edits move onto the finished scan in
+/// one step (<see cref="RawEditController.Rewrap"/>). Until then the view keeps its old width.
 /// </summary>
 public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable, ISaveableDocument
 {
@@ -51,6 +56,14 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     private bool isSaving;
     private RawColourChoice colourChoice;
     private IRawLexer? autoLexer;
+
+    /// <summary>The width an edited document's background re-wrap is scanning for, or null when
+    /// none is running. See <see cref="SetWrapWidth"/>.</summary>
+    private int? pendingWrapWidth;
+
+    /// <summary>Counts re-wrap requests, so a scan that finishes after a newer request (or after
+    /// the request was withdrawn) can tell it is no longer wanted.</summary>
+    private int rewrapRequest;
 
     /// <summary>The background half of a save - the copy into the stage - which disposal must
     /// stop and join before the session releases the mapping it reads.</summary>
@@ -244,13 +257,23 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         get => this.isSaving;
         private set
         {
-            if (SetField(ref this.isSaving, value))
-                OnPropertyChanged(nameof(CanSave));
+            if (!SetField(ref this.isSaving, value))
+                return;
+
+            if (this.toolbar is { } toolbar)
+                toolbar.CanChangeWrapWidth = !value;
+
+            OnPropertyChanged(nameof(CanSave));
         }
     }
 
+    /// <summary>True while an edited document is scanning its original bytes at a new wrap width
+    /// (<see cref="SetWrapWidth"/>) and the view has not yet moved to it.</summary>
+    public bool IsRewrapping => this.pendingWrapWidth is not null;
+
     /// <summary>See <see cref="ISaveableDocument.CanSave"/>. Waits for the scan for the same
-    /// reason editing does, and because the save reopens the document over a fresh one.</summary>
+    /// reason editing does, and because the save reopens the document over a fresh one. A pending
+    /// re-wrap does not block it: <see cref="SaveAsync"/> stops it and carries its width across.</summary>
     public bool CanSave => !IsSaving && CanEdit;
 
     /// <summary>
@@ -268,8 +291,8 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     /// Turns edit mode on or off. Turning it on for the first time builds the piece table and
     /// swaps the view onto it; turning it off leaves any edits in place - they are the
     /// document now, and discarding them silently is not an option the toggle gets to take.
-    /// An edit-mode visit that changed nothing is undone completely, so the wrap-width combo
-    /// (which is locked while a piece table exists) comes back.
+    /// An edit-mode visit that changed nothing is undone completely, so the view is back on the
+    /// file itself with no piece table behind it.
     /// </summary>
     public void SetEditing(bool editing)
     {
@@ -383,11 +406,6 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         Caret = editor.Caret;
         RestoreCaret(caretOffset, selection);
 
-        // A piece table pins the wrap width: re-indexing it would mean a fresh scan over edited
-        // bytes, which is the same background re-index a rebuild needs and is not built.
-        if (this.toolbar is { } toolbar)
-            toolbar.CanChangeWrapWidth = false;
-
         OnPropertyChanged(nameof(RowCount));
         OnPropertyChanged(nameof(IsDirty));
         OnPropertyChanged(nameof(HasUnsavedChanges));
@@ -398,6 +416,10 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     /// so nothing downstream has to reason about an idle piece table.</summary>
     private void EndEditingUntouched()
     {
+        // A re-wrap still scanning has no edits to move onto once the piece table is gone, so it
+        // is withdrawn and re-requested the ordinary way below, once the view is back on the file.
+        int? withdrawnWrapWidth = WithdrawPendingRewrap();
+
         var session = this.session!;
         this.editor!.Changed -= OnDocumentEdited;
         this.editor = null;
@@ -409,10 +431,10 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         Caret = new RawCaretController(session.Index, session.Bytes);
         RestoreCaret(caretOffset, selection);
 
-        if (this.toolbar is { } toolbar)
-            toolbar.CanChangeWrapWidth = true;
-
         OnPropertyChanged(nameof(RowCount));
+
+        if (withdrawnWrapWidth is int width)
+            SetWrapWidth(width);
     }
 
     private void OnDocumentEdited(object? sender, EventArgs e)
@@ -704,22 +726,36 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     }
 
     /// <summary>
-    /// Applies a new wrap width by re-indexing the same mapping. Synchronous and entirely
-    /// internal: a running search is unaffected (matches are byte offsets over the unchanged
-    /// file), and the growth timer of the fresh collection fills rows in within ~120ms.
+    /// Applies a new wrap width by re-indexing the same mapping. Entirely internal: a running
+    /// search is unaffected (matches are byte offsets over the unchanged file), and the growth
+    /// timer of the fresh collection fills rows in within ~120ms.
+    ///
+    /// An unedited document switches at once. An edited one cannot: its edits sit on the current
+    /// index, so the original bytes are scanned at the new width beside it and the view moves
+    /// over when that finishes (<see cref="RewrapEditedAsync"/>), staying at the old width and
+    /// fully editable meanwhile. Choosing the width the view is already at withdraws a re-wrap
+    /// still running, and a newer choice supersedes an older one.
     /// </summary>
     public void SetWrapWidth(int bytes)
     {
-        if (this.IsDisposed || this.session is null || bytes == this.wrapWidth)
+        if (this.IsDisposed || this.session is null)
             return;
 
-        // A piece table's rows are derived from the file scan at the wrap width that scan used,
-        // so re-wrapping an edited document means re-scanning the edited bytes - the same
-        // background re-index a dirty-span rebuild needs, and not built. The toolbar disables
-        // the combo for the same reason; this is the guard behind it.
-        if (this.editor is not null || IsSaving)
+        if (bytes == this.wrapWidth)
         {
-            ToastService.Show("Wrap width cannot change while the document is being edited.");
+            WithdrawPendingRewrap();
+            return;
+        }
+
+        if (IsSaving)
+        {
+            ToastService.Show("Wrap width cannot change while the document is being saved.");
+            return;
+        }
+
+        if (this.editor is not null)
+        {
+            _ = RewrapEditedAsync(bytes);
             return;
         }
 
@@ -767,6 +803,93 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
 
         StatusText = $"{FilePath} — {RowCount:N0} rows indexed so far";
         MonitorIndexing();
+    }
+
+    /// <summary>
+    /// Stops a re-wrap that is still scanning and forgets it, returning the width it was for (null
+    /// when none was running). The scan is joined by the session, so nothing is left reading the
+    /// mapping; <see cref="RewrapEditedAsync"/>, which will wake when its scan ends, sees the
+    /// request number has moved on and does nothing.
+    /// </summary>
+    private int? WithdrawPendingRewrap()
+    {
+        if (this.pendingWrapWidth is not { } width)
+            return null;
+
+        this.rewrapRequest++;
+        this.pendingWrapWidth = null;
+        this.session?.DiscardPendingIndex();
+        OnPropertyChanged(nameof(IsRewrapping));
+        OnPropertyChanged(nameof(CanSave));
+        return width;
+    }
+
+    /// <summary>
+    /// The edited document's wrap change. Scans the original bytes at <paramref name="bytes"/> on
+    /// the background (the edits only touch the piece table, so those bytes never change under
+    /// the scan), then moves the edits onto the result in a single synchronous step on the UI
+    /// thread - the same swap an unedited change makes, with
+    /// <see cref="RawEditController.Rewrap"/> doing the part only an edited document has.
+    ///
+    /// Only the newest request lands. Starting one supersedes the last (its scan is stopped and
+    /// joined by the session), and a request is withdrawn by anything that bumps
+    /// <see cref="rewrapRequest"/> - choosing the current width, leaving an untouched edit session.
+    /// A scan that fails leaves the document at the width it had.
+    /// </summary>
+    private async Task RewrapEditedAsync(int bytes)
+    {
+        var session = this.session!;
+        int request = ++this.rewrapRequest;
+        this.pendingWrapWidth = bytes;
+        OnPropertyChanged(nameof(IsRewrapping));
+        OnPropertyChanged(nameof(CanSave));
+
+        var progress = this.progressBoard.Begin($"Re-indexing {Path.GetFileName(FilePath)}");
+        var scan = session.StartPendingIndex(bytes, progress, FindKeptAnchors(bytes));
+        progress.FinishWhen(scan.IndexingTask);
+
+        try
+        {
+            await scan.IndexingTask;
+        }
+        catch
+        {
+            // Cancellation or failure: told apart below by whether the request is still wanted.
+        }
+
+        if (this.IsDisposed || request != this.rewrapRequest)
+            return;
+
+        this.pendingWrapWidth = null;
+        OnPropertyChanged(nameof(IsRewrapping));
+        OnPropertyChanged(nameof(CanSave));
+
+        if (!scan.AllItemsPublished || scan.Failure is not null)
+        {
+            session.DiscardPendingIndex();
+            ToastService.Show("Couldn't change the wrap width. The document is unchanged.");
+            return;
+        }
+
+        session.AdoptPendingIndex();
+        KeepAnchors();
+
+        var editor = this.editor!;
+        editor.Rewrap(scan);
+
+        // Raised BEFORE the Rows swap, for the reason SetWrapWidth's unedited path does: the view
+        // resets its scroll against the old collection (see RawView's ResetScrollBeforeSourceSwap).
+        WrapWidth = bytes;
+        IndexGeneration++;
+        OnPropertyChanged(nameof(IndexGeneration));
+
+        SelectedRowIndex = null;
+
+        SwapRows(new RawRowCollection(editor.RowIndex, editor.Document));
+        Caret = editor.Caret;
+
+        OnPropertyChanged(nameof(RowCount));
+        StatusText = IsDirty ? $"{FilePath} — {RowCount:N0} rows — edited, not saved" : $"{FilePath} — {RowCount:N0} rows";
     }
 
     /// <summary>Opens <paramref name="origin"/> and starts scanning it, reading through a
@@ -836,6 +959,12 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
 
         string statusBefore = StatusText;
         long length = document.AvailableLength;
+
+        // A pending re-wrap scans the mapping the commit unmaps, so it is stopped and joined here,
+        // alongside search (see "Saving" in docs/architecture.md). Its width is not lost: a save
+        // that lands reopens the file straight at that width (ReopenOver, one scan in all), and
+        // one that does not leaves the edits open, so the re-wrap is restarted over them.
+        int? rewrapWanted = WithdrawPendingRewrap();
         IsSaving = true;
 
         StagedFile? stagedOrNull = null;
@@ -860,7 +989,10 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
             stagedOrNull?.Dispose();
             IsSaving = false;
             if (!IsDisposed)
+            {
                 StatusText = statusBefore;
+                ResumeRewrap(rewrapWanted);
+            }
 
             if (ex is not OperationCanceledException)
                 return DocumentSaveResult.NotSaved($"Couldn't save: {ex.Message}");
@@ -891,13 +1023,16 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
             staged.Dispose();
             IsSaving = false;
             StatusText = statusBefore;
+            ResumeRewrap(rewrapWanted);
             return DocumentSaveResult.Stopped;
         }
 
+        bool saved = false;
         try
         {
-            var result = CommitAndReopen(staged, destination, fileBytes);
-            if (result.Outcome != DocumentSaveOutcome.Saved)
+            var result = CommitAndReopen(staged, destination, fileBytes, rewrapWanted);
+            saved = result.Outcome == DocumentSaveOutcome.Saved;
+            if (!saved)
                 StatusText = statusBefore;
 
             return result;
@@ -906,7 +1041,16 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         {
             staged.Dispose();
             IsSaving = false;
+            if (!saved)
+                ResumeRewrap(rewrapWanted);
         }
+    }
+
+    /// <summary>Restarts a re-wrap a save stopped, once the save is over and left the edits open.</summary>
+    private void ResumeRewrap(int? width)
+    {
+        if (width is int wanted && !IsDisposed && this.editor is not null)
+            SetWrapWidth(wanted);
     }
 
     /// <summary>
@@ -914,7 +1058,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     /// while its mapping is gone: unmap, swap, and either reopen over the result or put the old
     /// mapping back.
     /// </summary>
-    private DocumentSaveResult CommitAndReopen(StagedFile staged, IByteOrigin destination, RemappableByteSource fileBytes)
+    private DocumentSaveResult CommitAndReopen(StagedFile staged, IByteOrigin destination, RemappableByteSource fileBytes, int? rewrapWanted)
     {
         var origin = Origin!;
         long mappedLength = fileBytes.AvailableLength;
@@ -947,7 +1091,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         // Before reopening: a small file can finish its fresh scan synchronously inside
         // ReopenOver, and resuming edit mode from there must not find a save still running.
         IsSaving = false;
-        ReopenOver(destination);
+        ReopenOver(destination, rewrapWanted);
         return DocumentSaveResult.Saved;
     }
 
@@ -960,7 +1104,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     /// Everything is swapped before anything is announced: the outgoing session reads a mapping
     /// that is already gone, and a property notification is what would make the view read it.
     /// </summary>
-    private void ReopenOver(IByteOrigin destination)
+    private void ReopenOver(IByteOrigin destination, int? rewrapWanted)
     {
         long caretOffset = Caret?.Caret.Offset ?? 0;
         bool wasEditing = IsEditing;
@@ -973,6 +1117,10 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
 
         var retiredRows = this.rows;
         var retiredSession = this.session;
+
+        // The fresh scan is the only one, so it takes the width a stopped re-wrap was heading for.
+        if (rewrapWanted is int wanted)
+            this.wrapWidth = wanted;
 
         // Named for where it now reads from - after a Save As, the new file.
         string name = destination.Path is { } path ? Path.GetFileName(path) : destination.DisplayName;
@@ -995,11 +1143,11 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         if (this.toolbar is { } toolbar)
         {
             toolbar.CanEdit = false;
-            toolbar.CanChangeWrapWidth = true;
             toolbar.IsEditing = false;
         }
 
         OnPropertyChanged(nameof(IndexGeneration));
+        OnPropertyChanged(nameof(WrapWidth));
         OnPropertyChanged(nameof(Rows));
         OnPropertyChanged(nameof(RowCount));
         OnPropertyChanged(nameof(IsEditing));

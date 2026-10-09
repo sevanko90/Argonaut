@@ -266,7 +266,7 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
         OnPropertyChanged(nameof(ColumnCount));
         OnPropertyChanged(nameof(RowCount));
 
-        StatusText = $"{FilePath} — {RowCount:N0} rows indexed so far";
+        StatusText = DocumentStatusLine.Compose(FilePath, $"{RowCount:N0} rows indexed so far");
         MonitorIndexing();
     }
 
@@ -281,7 +281,7 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
     protected override void OnIndexingCompleted()
     {
         OnPropertyChanged(nameof(RowCount));
-        StatusText = $"{FilePath} — {RowCount:N0} rows";
+        StatusText = DocumentStatusLine.Compose(FilePath, $"{RowCount:N0} rows");
     }
 
     protected override void OnIndexingFailed(IndexFailure? failure)

@@ -452,7 +452,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         // it), so its own notification cannot be relied on to refresh what is under it.
         RefreshCaretReadout();
 
-        StatusText = $"{FilePath} — {RowCount:N0} rows — edited, not saved";
+        StatusText = DocumentStatusLine.Compose(FilePath, $"{RowCount:N0} rows · edited, not saved");
     }
 
     private void SyncToolbarEditing()
@@ -709,7 +709,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         OnPropertyChanged(nameof(RowCount));
         OnPropertyChanged(nameof(Lexer));
 
-        StatusText = $"{FilePath} — {RowCount:N0} rows indexed so far";
+        StatusText = DocumentStatusLine.Compose(FilePath, $"{RowCount:N0} rows indexed so far");
         MonitorIndexing();
     }
 
@@ -857,7 +857,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         OnPropertyChanged(nameof(Rows));
         OnPropertyChanged(nameof(RowCount));
 
-        StatusText = $"{FilePath} — {RowCount:N0} rows indexed so far";
+        StatusText = DocumentStatusLine.Compose(FilePath, $"{RowCount:N0} rows indexed so far");
         MonitorIndexing();
     }
 
@@ -946,7 +946,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         Caret = editor.Caret;
 
         OnPropertyChanged(nameof(RowCount));
-        StatusText = IsDirty ? $"{FilePath} — {RowCount:N0} rows — edited, not saved" : $"{FilePath} — {RowCount:N0} rows";
+        StatusText = DocumentStatusLine.Compose(FilePath, IsDirty ? $"{RowCount:N0} rows · edited, not saved" : $"{RowCount:N0} rows");
     }
 
     /// <summary>Opens <paramref name="origin"/> and starts scanning it, reading through a
@@ -1215,7 +1215,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         OnPropertyChanged(nameof(CanEdit));
         OnPropertyChanged(nameof(CanSave));
 
-        StatusText = $"{FilePath} — saved — {RowCount:N0} rows indexed so far";
+        StatusText = DocumentStatusLine.Compose(FilePath, $"saved · {RowCount:N0} rows indexed so far");
         MonitorIndexing();
 
         _ = RestoreAfterReopenAsync(caretOffset, wasEditing);
@@ -1272,7 +1272,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     /// covering a wrap-width restart retiring this index mid-monitor.</summary>
     protected override void OnIndexingCompleted()
     {
-        StatusText = $"{FilePath} — {RowCount:N0} rows";
+        StatusText = DocumentStatusLine.Compose(FilePath, $"{RowCount:N0} rows");
         KeepAnchors();
 
         // Editing waits for the scan, so this is the moment the toggle becomes usable.

@@ -354,6 +354,7 @@
                 <TextBlock Grid.Column="0"
                            x:Name="StatusText"
                            Text="{Binding StatusText}"
+                           ToolTip.Tip="{Binding FilePath}"
                            FontSize="11"
                            TextTrimming="CharacterEllipsis"
                            VerticalAlignment="Center"

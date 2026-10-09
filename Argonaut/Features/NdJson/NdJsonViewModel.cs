@@ -324,8 +324,8 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
     private void UpdateStatusText()
     {
         StatusText = SelectedLineNumber is { } line
-            ? $"{FilePath} — {LineCount:N0} lines — Selected line: {line:N0}"
-            : $"{FilePath} — {LineCount:N0} lines";
+            ? DocumentStatusLine.Compose(FilePath, $"{LineCount:N0} lines · Selected line: {line:N0}")
+            : DocumentStatusLine.Compose(FilePath, $"{LineCount:N0} lines");
     }
 
     /// <summary>Indexing finished: keeps the "Selected line" suffix if one is selected by then.</summary>

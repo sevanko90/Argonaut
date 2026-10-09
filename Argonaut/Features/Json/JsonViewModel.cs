@@ -570,7 +570,7 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable, IB
         // Inference dereferences the mapping, so the session must join it before unmapping.
         _ = InferDefaultDateSchemeAsync(session, reader, text);
 
-        StatusText = $"{FilePath} — indexing…";
+        StatusText = DocumentStatusLine.Compose(FilePath, "indexing…");
         MonitorIndexing();
         return Task.CompletedTask;
     }
@@ -587,7 +587,7 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable, IB
     protected override void OnIndexingCompleted()
     {
         indexBasis?.Keep(JsonKeptStructure.Key, session?.Index.DetachStructure());
-        StatusText = $"{FilePath} — {FormatByteLength(session?.Bytes.AvailableLength ?? 0)}";
+        StatusText = DocumentStatusLine.Compose(FilePath, FormatByteLength(session?.Bytes.AvailableLength ?? 0));
         tree?.NotifyGrew();
         UpdateSchemaRootMatches();
     }

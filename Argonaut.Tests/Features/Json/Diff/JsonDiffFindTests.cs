@@ -322,7 +322,9 @@ public class JsonDiffFindTests
 
         await h.Controller.FindAsync("needle", 1);
 
-        await AssertSettlesOnAsync(h, "1 of 2 rows");
+        // Two stops, whichever end the selection is on: the two documents are scanned
+        // concurrently, so the first match found - the one selected - may be either.
+        await SettleOnStopCountAsync(h, 2);
         Assert.Equal("\"needle\"", h.Value(h.SelectedRow(), leftSide: true) ?? h.Value(h.SelectedRow(), leftSide: false));
     }
 

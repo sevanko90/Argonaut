@@ -688,7 +688,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         this.Origin = origin;
         this.FilePath = origin.Path ?? origin.DisplayName;
         this.wrapWidth = this.settings.WrapWidth;
-        this.toolbar = new RawToolbarViewModel(this.wrapWidth, ChooseWrapWidth, SetEditing, SetColours);
+        this.toolbar = new RawToolbarViewModel(this.wrapWidth, ChooseWrapWidth, SetEditing, ChooseColours);
 
         var session = StartSession(origin, progressReporter);
 
@@ -729,6 +729,13 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         OnPropertyChanged(nameof(Lexer));
     }
 
+    /// <summary>The toolbar's colour choice: applied, then focus handed back to the text.</summary>
+    private void ChooseColours(RawColourChoice choice)
+    {
+        SetColours(choice);
+        ToolbarChoiceMade?.Invoke(this, EventArgs.Empty);
+    }
+
     /// <summary>
     /// Auto's choice. The name decides when it can, and only a document it says nothing about is
     /// sniffed - from the rows already indexed, bounded so a file of minified lines cannot make
@@ -755,13 +762,13 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     private const int MaxSniffedRows = 200;
 
     /// <summary>
-    /// Raised when the user picks a wrap width from the toolbar. Picking from the combo leaves
-    /// focus in the toolbar, where the surface hides its caret and keys go nowhere, so the view
-    /// gives focus back to the text - the same hand-back the edit toggle gets. Raised at the
+    /// Raised when the user picks a wrap width or colours from the toolbar. Picking from a combo
+    /// leaves focus in the toolbar, where the surface hides its caret and keys go nowhere, so the
+    /// view gives focus back to the text - the same hand-back the edit toggle gets. Raised at the
     /// choice, not when an edited document's re-wrap lands seconds later, so focus never moves
     /// out from under whatever the user has gone on to do.
     /// </summary>
-    public event EventHandler? WrapWidthChosen;
+    public event EventHandler? ToolbarChoiceMade;
 
     /// <summary>The toolbar's wrap-width choice: remembered for the next document, then applied
     /// to this one.</summary>
@@ -769,7 +776,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     {
         this.settings.WrapWidth = bytes;
         SetWrapWidth(bytes);
-        WrapWidthChosen?.Invoke(this, EventArgs.Empty);
+        ToolbarChoiceMade?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>

@@ -62,7 +62,7 @@ public partial class RawView : UserControl
         if (subscribedViewModel is not null)
         {
             subscribedViewModel.PropertyChanged -= OnViewModelPropertyChanged;
-            subscribedViewModel.WrapWidthChosen -= OnWrapWidthChosen;
+            subscribedViewModel.ToolbarChoiceMade -= OnToolbarChoiceMade;
             subscribedViewModel = null;
         }
 
@@ -70,7 +70,7 @@ public partial class RawView : UserControl
         {
             subscribedViewModel = vm;
             vm.PropertyChanged += OnViewModelPropertyChanged;
-            vm.WrapWidthChosen += OnWrapWidthChosen;
+            vm.ToolbarChoiceMade += OnToolbarChoiceMade;
         }
 
         Surface.Lexer = (DataContext as RawViewModel)?.Lexer;
@@ -138,7 +138,7 @@ public partial class RawView : UserControl
         if (subscribedViewModel is not null)
         {
             subscribedViewModel.PropertyChanged -= OnViewModelPropertyChanged;
-            subscribedViewModel.WrapWidthChosen -= OnWrapWidthChosen;
+            subscribedViewModel.ToolbarChoiceMade -= OnToolbarChoiceMade;
             subscribedViewModel = null;
         }
 
@@ -161,12 +161,12 @@ public partial class RawView : UserControl
     }
 
     /// <summary>
-    /// A wrap width was picked from the toolbar: focus goes back to the text. Deferred because the
+    /// A wrap width or colours were picked from the toolbar: focus goes back to the text. Deferred because the
     /// choice arrives inside the combo's selection commit, and moving focus away from a control
     /// mid-commit is the kind of side effect CLAUDE.md's selection-bound setter rule hands to
     /// <see cref="UiDeferral.AfterCurrentInput"/>.
     /// </summary>
-    private void OnWrapWidthChosen(object? sender, EventArgs e) => UiDeferral.AfterCurrentInput(() => Surface.Focus());
+    private void OnToolbarChoiceMade(object? sender, EventArgs e) => UiDeferral.AfterCurrentInput(() => Surface.Focus());
 
     /// <summary>A mark on the overview was clicked: put the caret on the edit it stands for.</summary>
     private void OnEditChosen(object? sender, long offset)

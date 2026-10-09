@@ -529,6 +529,22 @@ public sealed class RawEditInputTests : IDisposable
             Assert.True(surface.IsFocused);
         });
 
+    [Fact]
+    public Task ChoosingColoursFromTheToolbar_GivesFocusBackToTheText()
+        => WhileEditing("hello\n", async (window, vm, surface) =>
+        {
+            var toolbar = (RawToolbarViewModel)vm.Toolbar!;
+            FocusSink(window).Focus();
+            await PumpAsync();
+            Assert.False(surface.IsFocused);
+
+            toolbar.ColoursIndex = toolbar.ColoursIndex == 1 ? 0 : 1;
+            await PumpAsync();
+            await PumpAsync();
+
+            Assert.True(surface.IsFocused);
+        });
+
     // ---- position across a re-wrap ----------------------------------------------------------
     //
     // A wrap change replaces every row, so the old scroll offset means nothing - but the user's

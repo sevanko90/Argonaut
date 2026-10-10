@@ -60,12 +60,8 @@ it in (see "Saving" in architecture.md).
   (a regex or a fixed format), never by the property's name - there are too many names to key
   on. Each is an `IValueHintProvider`, so it sees only rows on screen. ISO 8601 dates, colours
   (`#RRGGBB`, `#RRGGBBAA`, `rgb()`, `hsl()` - not the rare three- and four-digit hex, which is as
-  often an issue number) and JWTs have one; still to come, in this order:
-  - **URLs**: a hover action naming the host (`Open example.com ↗`), and Cmd/Ctrl+click on the
-    value; a plain click still only selects. `http`, `https` and `mailto` only - the file is
-    untrusted, and any other scheme hands it to whatever the OS registers. Whole-value URLs
-    first; a URL inside longer text needs a link over part of the text, later.
-  - **Cron expressions**: the schedule in words and the next run.
+  often an issue number), JWTs, web and mail addresses (`http`, `https` and `mailto` only; a URL
+  inside longer text is still to do) and cron expressions have one; still to come, in this order:
   - **JSON inside a string** (`"{\"id\":…}"`): a chip saying what it holds, and an action to open
     it as a tree.
   - **Base64**: decoded length and type from the first bytes (`PNG 32×32`, gzip), or a text
@@ -89,10 +85,13 @@ it in (see "Saving" in architecture.md).
 
   The raw view is the first other user. Classifying is not every word on the page: the raw
   view's lexers already split the rows on screen into tokens for colouring, so it is their strings
-  and values, a few hundred at most. How they show is the real work. Config files (one value per
-  line) can take a chip at the end of the line, as the tree does; free text needs inline marks - a
-  swatch before a colour, an underlined address with a card on hover - drawn by `RawTextSurface`
-  without disturbing the row's text, wrapping or caret. Wants a mock-up first.
+  and values, a few hundred at most. How they show is the real work, and the lexer already says
+  which way, line by line: where `ConfigRawLexer` (chosen by file name, by a sniff of the first
+  lines, or from the Colours picker - `RawLexerChoice`) marks a line's value, that value can take a
+  chip at the end of the line, as the tree does; anything else - no lexer, a comment, a long
+  wrapped line - needs inline marks, a swatch before a colour or an underlined address with a
+  card on hover, drawn by `RawTextSurface` without disturbing the row's text, wrapping or caret.
+  Wants a mock-up first.
 
   Timestamps inside IDs (ObjectId, UUID v7, ULID, Snowflake) were considered and dropped: too
   much inference to be reliable, for little use.

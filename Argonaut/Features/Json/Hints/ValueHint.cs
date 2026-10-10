@@ -11,6 +11,7 @@ public enum ValueHintKind : byte
     Colour,
     Jwt,
     Url,
+    Cron,
 }
 
 /// <summary>

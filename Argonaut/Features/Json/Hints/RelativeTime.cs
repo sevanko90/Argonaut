@@ -3,7 +3,8 @@ using System;
 namespace Argonaut.Features.Json.Hints;
 
 /// <summary>
-/// How far a time is from now, as a person would say it: "just now", "5 min ago", "in 3 hours",
+/// How far a time is from now, as a person would say it: "just now", "in under a minute",
+/// "5 min ago", "in 3 hours",
 /// "yesterday", "in 4 months", "2 years ago". Rounded to the largest unit that reads naturally,
 /// so 40 days is "1 month" and 11 months is "1 year".
 /// </summary>
@@ -14,7 +15,7 @@ public static class RelativeTime
     {
         double seconds = Math.Abs(delta.TotalSeconds);
         if (seconds < 45)
-            return "just now";
+            return delta < TimeSpan.Zero ? "just now" : "in under a minute";
 
         string amount = seconds switch
         {

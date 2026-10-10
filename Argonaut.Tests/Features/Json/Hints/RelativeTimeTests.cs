@@ -6,7 +6,7 @@ public class RelativeTimeTests
 {
     [Theory]
     [InlineData(-20, "just now")]
-    [InlineData(30, "just now")]
+    [InlineData(30, "in under a minute")]
     [InlineData(-5 * 60, "5 min ago")]
     [InlineData(60, "in 1 min")]
     [InlineData(3 * 3600, "in 3 hours")]

@@ -6,6 +6,7 @@
              xmlns:jsontree="clr-namespace:Argonaut.Features.Json.Tree"
              xmlns:tree="clr-namespace:Argonaut.Ui.Tree"
              xmlns:icons="clr-namespace:Argonaut.Ui.Icons"
+             xmlns:preview="clr-namespace:Argonaut.Features.Json.Preview"
              x:Class="Argonaut.Features.Json.JsonView"
              x:DataType="json:JsonViewModel">
     <UserControl.Styles>
@@ -150,6 +151,47 @@
                     </StackPanel>
                 </Grid>
             </Border>
+
+            <!-- What a hint's value encodes - a JWT's claims, JSON in a string, a Base64
+                 picture - in a card by the chip that was clicked. Placed against the chip from
+                 code; closes on a click elsewhere or Escape. -->
+            <Popup x:Name="HintCard"
+                   PlacementTarget="{Binding #Surface}"
+                   Placement="BottomEdgeAlignedRight"
+                   VerticalOffset="4"
+                   IsLightDismissEnabled="True"
+                   Closed="OnHintCardClosed">
+                <Border Width="440"
+                        Padding="10,8,10,10"
+                        CornerRadius="8"
+                        BorderThickness="1"
+                        BorderBrush="{DynamicResource AppBorderBrush}"
+                        Background="{DynamicResource AppWindowBackgroundBrush}"
+                        BoxShadow="0 8 28 0 #29000000"
+                        KeyDown="OnHintCardKeyDown">
+                    <Grid RowDefinitions="Auto,Auto">
+                        <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,6">
+                            <TextBlock x:Name="HintCardTitle"
+                                       FontWeight="SemiBold"
+                                       FontSize="12"
+                                       TextTrimming="CharacterEllipsis"
+                                       VerticalAlignment="Center" />
+                            <Button x:Name="HintCardOpenButton"
+                                    Grid.Column="1"
+                                    Classes="tool"
+                                    Padding="6,2"
+                                    FontSize="12"
+                                    Click="OnHintCardOpen"
+                                    ToolTip.Tip="Open what this value encodes as a document of its own">
+                                Open as document
+                            </Button>
+                        </Grid>
+                        <preview:ValuePreviewView x:Name="HintCardPreview"
+                                                  Grid.Row="1"
+                                                  ShowIndentGuides="{Binding ShowIndentGuides}" />
+                    </Grid>
+                </Border>
+            </Popup>
         </Grid>
     </Border>
 </UserControl>

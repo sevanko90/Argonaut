@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Detection;
 using Argonaut.Engine.Indexing;
+using Argonaut.Features.Json.Preview;
 using Argonaut.Ui.Documents;
 using Argonaut.Ui.Find;
 using Argonaut.Ui.Notifications;
@@ -54,7 +55,7 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
     private readonly OpenColumns openColumns = new();
 
     private int arrayColumns = JsonArrayColumnDiscovery.DefaultArrayColumns;
-    private JsonArrayCellDetail? cellDetail;
+    private ValuePreview? cellDetail;
     private bool showIndentGuides;
     private readonly JsonViewSettings viewSettings;
 
@@ -120,7 +121,7 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
     /// each new cell shown and disposed with the document - a container cell holds its own tree
     /// over the file, so it must not outlive it.
     /// </summary>
-    public JsonArrayCellDetail? CellDetail
+    public ValuePreview? CellDetail
     {
         get => this.cellDetail;
         private set

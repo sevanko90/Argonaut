@@ -613,6 +613,10 @@ public sealed class TreeSurfaceTests
         await PumpAsync();
 
         Assert.Equal(leaf.Node.ValueStart, clicked?.Link);
+
+        // Where the chip is, so what it opens can be placed against it.
+        Assert.Equal(bounds.Left, clicked!.Bounds.Left, 1);
+        Assert.Equal(bounds.Width, clicked.Bounds.Width, 1);
     }, painter: bytes => new ChippingPainter(bytes));
 
     [Fact]

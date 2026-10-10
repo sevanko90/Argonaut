@@ -1435,11 +1435,16 @@ public class TreeSurface : RowSurface
         double arrowX = ArrowLeft(index, pane);
 
         double shift = TrailingShift(laid, arrowX + ToggleWidth, PaneLeft(pane) + PaneWidth);
-        if (LinkAt(laid, point.X - arrowX - ToggleWidth, point.Y - CentreInRow(laid.Layout, index * RowHeight - anchorPixel), shift,
+        double textX = arrowX + ToggleWidth;
+        if (LinkAt(laid, point.X - textX, point.Y - CentreInRow(laid.Layout, index * RowHeight - anchorPixel), shift,
                 IsCommandHeld(e.KeyModifiers)) is { } link)
         {
+            double rowTop = index * RowHeight - anchorPixel;
+            var bounds = TrailingAt(laid, point.X - textX, shift) is var item and >= 0
+                ? new Rect(textX + shift + laid.Trailing![item].X, ChipTop(rowTop), laid.Trailing[item].Width, ChipHeight)
+                : new Rect(point.X, rowTop, 0, RowHeight);
             Select(row);
-            LinkClicked?.Invoke(this, new TreeLinkClickedEventArgs(row, link));
+            LinkClicked?.Invoke(this, new TreeLinkClickedEventArgs(row, link, bounds));
             e.Handled = true;
             return;
         }

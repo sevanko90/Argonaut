@@ -50,7 +50,10 @@ public sealed class JsonTreePainter(JsonTreeText text, IReadOnlyList<IValueHintP
             runs.Add(new TreeRun(ByteLengthText.Format(valueLength), TreeRunStyle.Note));
 
         if (hint is not null)
-            runs.Add(new TreeRun(hint.Text, hint.Style, hint.Link, hint.Icon, hint.Swatch));
+        {
+            object? link = hint.Expands is { } expands ? new ExpandHintLink(row.Node.ValueStart, row.Node.ValueEnd, expands) : hint.Link;
+            runs.Add(new TreeRun(hint.Text, hint.Style, link, hint.Icon, hint.Swatch));
+        }
 
         if (valueTruncated)
             runs.Add(new TreeRun("Open in raw", TreeRunStyle.Action, new ViewInRawLink(contentOffset), TreeRunIcon.FullText));

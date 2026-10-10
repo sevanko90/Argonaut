@@ -54,7 +54,7 @@ public sealed class JwtHintProvider(TimeProvider clock) : IValueHintProvider
             text += at > clock.GetUtcNow() ? $" · expires {when}" : $" · expired {when}";
         }
 
-        return new ValueHint(text, TreeRunIcon.Key);
+        return new ValueHint(text, TreeRunIcon.Key, Expands: ValueHintKind.Jwt);
     }
 
     /// <summary>A string member of the base64url-encoded JSON object <paramref name="part"/>, or

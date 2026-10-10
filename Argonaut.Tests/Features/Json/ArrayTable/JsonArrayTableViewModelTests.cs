@@ -2,6 +2,7 @@ using System.Text;
 using Argonaut.Engine.Detection;
 using Argonaut.Features.Json;
 using Argonaut.Features.Json.ArrayTable;
+using Argonaut.Features.Json.Preview;
 using Argonaut.Tests.Support;
 using Argonaut.Ui.Notifications;
 using Argonaut.Ui.TableGrid;
@@ -719,7 +720,7 @@ public class JsonArrayTableViewModelTests
 
     /// <summary>Every row the pane's tree shows, top to bottom, read through its own cursor and
     /// painter - exactly what its surface draws.</summary>
-    private static DetailRow[] DetailRows(JsonArrayCellDetail detail)
+    private static DetailRow[] DetailRows(ValuePreview detail)
     {
         var rows = new List<DetailRow>();
         var cursor = detail.Tree!.NewCursor();
@@ -741,7 +742,7 @@ public class JsonArrayTableViewModelTests
         {
             document.ShowCell(0, 1);
 
-            var detail = Assert.IsType<JsonArrayCellDetail>(document.CellDetail);
+            var detail = Assert.IsType<ValuePreview>(document.CellDetail);
             Assert.True(detail.IsTree);
             Assert.Contains("geometry", detail.Title);
 
@@ -764,7 +765,7 @@ public class JsonArrayTableViewModelTests
 
             document.ShowCell(0, 0);
 
-            var detail = Assert.IsType<JsonArrayCellDetail>(document.CellDetail);
+            var detail = Assert.IsType<ValuePreview>(document.CellDetail);
             Assert.True(detail.IsText);
             Assert.Equal(3000, detail.Text!.Length);
             Assert.False(detail.Truncated);
@@ -779,7 +780,7 @@ public class JsonArrayTableViewModelTests
 
             // A run with no break opportunity costs the layout quadratic time to wrap, so the
             // pane shows it cut into paragraphs - while copying still takes the value as it is.
-            var detail = Assert.IsType<JsonArrayCellDetail>(document.CellDetail);
+            var detail = Assert.IsType<ValuePreview>(document.CellDetail);
             Assert.Equal(new string('x', 3000), detail.Text);
             Assert.Contains('\n', detail.WrappableText);
             Assert.Equal(detail.Text, detail.WrappableText!.Replace("\n", ""));
@@ -788,13 +789,13 @@ public class JsonArrayTableViewModelTests
 
     [Fact]
     public Task ShowCell_OnAScalarPastTheCap_ShowsItCut()
-        => WithDocument($$"""[{"huge":"{{new string('x', JsonArrayCellDetail.MaxScalarBytes + 10)}}"}]""", document =>
+        => WithDocument($$"""[{"huge":"{{new string('x', ValuePreview.MaxTextBytes + 10)}}"}]""", document =>
         {
             document.ShowCell(0, 0);
 
-            var detail = Assert.IsType<JsonArrayCellDetail>(document.CellDetail);
+            var detail = Assert.IsType<ValuePreview>(document.CellDetail);
             Assert.True(detail.Truncated);
-            Assert.Equal(JsonArrayCellDetail.MaxScalarBytes + 1, detail.Text!.Length); // plus the ellipsis
+            Assert.Equal(ValuePreview.MaxTextBytes + 1, detail.Text!.Length); // plus the ellipsis
             return Task.CompletedTask;
         });
 
@@ -807,7 +808,7 @@ public class JsonArrayTableViewModelTests
 
             document.ShowCell(0, 0);
 
-            var detail = Assert.IsType<JsonArrayCellDetail>(document.CellDetail);
+            var detail = Assert.IsType<ValuePreview>(document.CellDetail);
             // The array's own elements, which the pane opens two levels deep - the closing
             // bracket rows the tree shows for an expanded container are not values.
             Assert.Equal(["7", "8"], DetailRows(detail).Where(r => r.ArrayIndex is not null).Select(r => r.Value));

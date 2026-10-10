@@ -33,7 +33,7 @@ public sealed class EmbeddedJsonHintProvider : IValueHintProvider
     public ValueHint? FormatHint(in ValueHintCandidate candidate, ReadOnlySpan<byte> rawValue, long valueLength, long valueOffset)
     {
         if (valueLength > rawValue.Length)
-            return new ValueHint($"looks like JSON · {ByteLengthText.Format(valueLength)}", TreeRunIcon.Json);
+            return new ValueHint($"looks like JSON · {ByteLengthText.Format(valueLength)}", TreeRunIcon.Json, Expands: ValueHintKind.EmbeddedJson);
 
         if (Unescape(rawValue) is not { } document || Shape(document) is not { } shape)
             return null;
@@ -41,7 +41,7 @@ public sealed class EmbeddedJsonHintProvider : IValueHintProvider
         string text = shape.IsObject
             ? $"JSON object · {shape.Children} {(shape.Children == 1 ? "member" : "members")}"
             : $"JSON array · {shape.Children} {(shape.Children == 1 ? "item" : "items")}";
-        return new ValueHint(text, TreeRunIcon.Json);
+        return new ValueHint(text, TreeRunIcon.Json, Expands: ValueHintKind.EmbeddedJson);
     }
 
     /// <summary>An object opening onto a member name or its close, or an array onto a value or

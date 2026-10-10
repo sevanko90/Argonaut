@@ -695,22 +695,33 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
+        await OpenBytesAsync(bytes, PastedDocumentName, "the clipboard contents");
+    }
+
+    /// <summary>
+    /// Opens bytes that are not a file as the document - a paste, or a value a hint decoded - once
+    /// whatever is open now has been let go of: unsaved changes resolved, or the replace confirmed.
+    /// </summary>
+    /// <param name="description">What is being opened, for the questions asked first ("the
+    /// clipboard contents").</param>
+    public async Task OpenBytesAsync(byte[] bytes, string displayName, string description)
+    {
         if (RefusedWhileSaving())
             return;
 
         if (HasUnsavedChanges)
         {
-            if (!await ResolveUnsavedChangesAsync("opening the clipboard contents"))
+            if (!await ResolveUnsavedChangesAsync($"opening {description}"))
                 return;
         }
         else if (IsFileOpen)
         {
-            var confirmed = await confirmReplace("Replace the currently loaded file with the clipboard contents?");
+            var confirmed = await confirmReplace($"Replace the currently loaded file with {description}?");
             if (!confirmed)
                 return;
         }
 
-        await OpenOriginAsync(new MemoryByteOrigin(bytes, PastedDocumentName), addToRecents: false);
+        await OpenOriginAsync(new MemoryByteOrigin(bytes, displayName), addToRecents: false);
     }
 
     /// <summary>

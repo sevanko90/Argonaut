@@ -119,6 +119,64 @@ public sealed class JsonViewTests : IDisposable
         Assert.Null(surface.CurrentMatch);
     });
 
+    private static string Jwt()
+    {
+        string Part(string json) => System.Buffers.Text.Base64Url.EncodeToString(Encoding.UTF8.GetBytes(json));
+        return $"{Part("""{"alg":"HS256"}""")}.{Part("""{"sub":"u1","exp":2000000000}""")}.c2ln";
+    }
+
+    /// <summary>A JWT's chip opens a card over the tree with its header and claims as a tree of
+    /// their own; a click elsewhere closes it and lets the preview go.</summary>
+    [Fact]
+    public Task ClickingAJwtChipOpensACardWithItsClaims() => WithView($$"""{"token":"{{Jwt()}}"}""", async (window, vm, surface) =>
+    {
+        int index = surface.RealizedRows.ToList().FindIndex(r => r.Shape == TreeRowShape.Leaf);
+        var chip = surface.LinkBounds(index)!.Value;
+        var point = surface.TranslatePoint(chip.Center, window)!.Value;
+        window.MouseDown(point, MouseButton.Left);
+        window.MouseUp(point, MouseButton.Left);
+        for (int i = 0; i < 50 && !CardIsOpen(window); i++)
+            await PumpAsync();
+
+        var view = window.GetVisualDescendants().OfType<JsonView>().Single();
+        var card = view.FindControl<Avalonia.Controls.Primitives.Popup>("HintCard")!;
+        Assert.True(card.IsOpen);
+        var preview = Assert.IsType<Argonaut.Features.Json.Preview.ValuePreview>(view.FindControl<Argonaut.Features.Json.Preview.ValuePreviewView>("HintCardPreview")!.DataContext);
+        Assert.True(preview.IsTree);
+        Assert.Equal("JWT · header and claims", preview.Title);
+
+        card.IsOpen = false;
+        await PumpAsync();
+        Assert.Null(view.FindControl<Argonaut.Features.Json.Preview.ValuePreviewView>("HintCardPreview")!.DataContext);
+    });
+
+    private static bool CardIsOpen(Window window)
+        => window.GetVisualDescendants().OfType<JsonView>().Single().FindControl<Avalonia.Controls.Primitives.Popup>("HintCard")!.IsOpen;
+
+    [Fact]
+    public Task AHintPreviewsWhatItsValueEncodes() => WithView("""{"embedded":"{\"a\":1,\"b\":[2]}","text":"aGVsbG8gdGhlcmUsIHJlYWRlcg==","bad":"{\"a\":"}""", async (_, vm, _) =>
+    {
+        string json = File.ReadAllText(path);
+        Argonaut.Features.Json.Tree.ExpandHintLink Link(string key, Argonaut.Features.Json.Hints.ValueHintKind kind)
+        {
+            int start = json.IndexOf('"', json.IndexOf($"\"{key}\":", StringComparison.Ordinal) + key.Length + 3);
+            int end = json.IndexOf('"', start + 1);
+            while (json[end - 1] == '\\')
+                end = json.IndexOf('"', end + 1);
+            return new(start, end + 1, kind);
+        }
+
+        var embedded = await vm.PreviewHintAsync(Link("embedded", Argonaut.Features.Json.Hints.ValueHintKind.EmbeddedJson));
+        Assert.True(embedded!.Preview.IsTree);
+
+        var text = await vm.PreviewHintAsync(Link("text", Argonaut.Features.Json.Hints.ValueHintKind.Base64));
+        Assert.Equal("hello there, reader", text!.Preview.Text);
+
+        Assert.Null(await vm.PreviewHintAsync(Link("bad", Argonaut.Features.Json.Hints.ValueHintKind.EmbeddedJson)));
+        embedded.Preview.Dispose();
+        text.Preview.Dispose();
+    });
+
     [Fact]
     public Task NavigatingToAPathRevealsIt() => WithView(BigDocument(), async (_, vm, surface) =>
     {

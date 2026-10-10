@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.ComponentModel;
 using System.Text;
 using System.Threading;
@@ -13,6 +14,7 @@ using Argonaut.Engine.Search;
 using Argonaut.Engine.Text;
 using Argonaut.Features.Json.Hints;
 using Argonaut.Features.Json.Indexing;
+using Argonaut.Features.Json.Preview;
 using Argonaut.Features.Json.Schema;
 using Argonaut.Features.Json.Tree;
 using Argonaut.Ui.Documents;
@@ -95,6 +97,9 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable, IB
 
     private JsonToolbarViewModel? toolbar;
     private bool showIndentGuides;
+
+    // What reads the values on rows for hints; the previews a hint opens use the same ones.
+    private IReadOnlyList<IValueHintProvider>? hintProviders;
 
     // The find match last revealed, until a reveal of anything else.
     private long? currentMatchOffset;
@@ -296,6 +301,55 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable, IB
         }
 
         return new TreeCurrentMatch(shown.Key, occurrence);
+    }
+
+    /// <summary>
+    /// What a hint's value encodes, ready to show: decoded off the UI thread from the value's
+    /// bytes, which are copied out first so nothing reads the document from another thread. Null
+    /// when it does not decode after all, or the document closed meanwhile.
+    /// </summary>
+    public async Task<HintPreview?> PreviewHintAsync(ExpandHintLink link)
+    {
+        if (Bytes is not { } bytes)
+            return null;
+
+        long start = link.ValueStart + 1;
+        long length = link.ValueEnd - 1 - start;
+        if (length > HintExpansion.MaxValueBytes)
+        {
+            return new HintPreview(ValuePreview.ForMessage("Too large to preview",
+                $"This value is {ByteLengthText.Format(length)} - too large to decode here. Open it in the raw view to see it."), null);
+        }
+
+        byte[] raw = bytes.RequireContiguous(start, (int)length).ToArray();
+        var decoded = await Task.Run(() => HintExpansion.Decode(link.Kind, raw));
+        if (decoded is null || IsDisposed)
+            return null;
+
+        var preview = decoded.Kind switch
+        {
+            ExpandedKind.Json => ValuePreview.ForJson(decoded.Title, decoded.Bytes, link.Kind == ValueHintKind.Jwt ? JwtHintProviders() : hintProviders),
+            ExpandedKind.Image => ValuePreview.ForImage(decoded.Title, decoded.Bytes),
+            ExpandedKind.Text => ValuePreview.ForText(decoded.Title,
+                Encoding.UTF8.GetString(decoded.Bytes, 0, Math.Min(decoded.Bytes.Length, ValuePreview.MaxTextBytes)),
+                decoded.Bytes.Length > ValuePreview.MaxTextBytes),
+            _ => ValuePreview.ForMessage(decoded.Title, "Binary data, with nothing here to show it. Open it as a document to see its bytes."),
+        };
+        return new HintPreview(preview, decoded);
+    }
+
+    /// <summary>The hints for a JWT's decoded claims: as the document's, except that a number
+    /// reads as a date in seconds - RFC 7519 defines <c>exp</c>, <c>iat</c> and <c>nbf</c> that
+    /// way - whatever the document's own numbers were taken to be.</summary>
+    private IReadOnlyList<IValueHintProvider> JwtHintProviders()
+    {
+        var seconds = new DateHintSettings();
+        seconds.SetUserDefault(DateDecodingScheme.JsSeconds);
+        seconds.SetTimeZoneMode(HintSettings.TimeZoneMode);
+        var providers = new List<IValueHintProvider> { new DateHintProvider(seconds) };
+        if (hintProviders is not null)
+            providers.AddRange(hintProviders.Where(provider => provider is not DateHintProvider));
+        return providers;
     }
 
     private void ShowWhenReady(long offset)
@@ -614,8 +668,13 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable, IB
         text = new JsonTreeText(session.Bytes, session.Index.Structure, reader);
         schemaResolver = new JsonSchemaResolver(session.Index.Structure, reader, text) { Schema = SchemaSettings.Document };
         expand = new TreeExpandState(DefaultExpandDepth);
-        var painter = new JsonTreePainter(text, new IValueHintProvider[] { new DateHintProvider(HintSettings), new IsoDateHintProvider(HintSettings, TimeProvider.System), new ColourHintProvider(), new JwtHintProvider(TimeProvider.System), new UrlHintProvider(), new CronHintProvider(HintSettings, TimeProvider.System),
-            new EmbeddedJsonHintProvider(), new Base64HintProvider() }, SupportsArrayTable);
+        hintProviders = new IValueHintProvider[]
+        {
+            new DateHintProvider(HintSettings), new IsoDateHintProvider(HintSettings, TimeProvider.System), new ColourHintProvider(),
+            new JwtHintProvider(TimeProvider.System), new UrlHintProvider(), new CronHintProvider(HintSettings, TimeProvider.System),
+            new EmbeddedJsonHintProvider(), new Base64HintProvider(),
+        };
+        var painter = new JsonTreePainter(text, hintProviders, SupportsArrayTable);
         var gutters = new ITreeGutter[] { new JsonSchemaGutter(schemaResolver, text) };
         var sourceBytes = session.Bytes;
         tree = new TreeDocument(session.Index.Structure, reader, painter, expand, () => sourceBytes.AvailableLength, gutters);

@@ -57,15 +57,15 @@ public sealed class Base64HintProvider : IValueHintProvider
         var payload = (Payload)candidate.SchemeHint;
         return payload switch
         {
-            Payload.Text => new ValueHint($"Base64 text · “{Preview(head)}” · {size}", TreeRunIcon.Binary),
+            Payload.Text => new ValueHint($"Base64 text · “{Preview(head)}” · {size}", TreeRunIcon.Binary, Expands: ValueHintKind.Base64),
             Payload.Png when head.Length >= 24 =>
-                new ValueHint($"PNG {BigEndian(head[16..20])}×{BigEndian(head[20..24])} · {size}", TreeRunIcon.Image),
+                new ValueHint($"PNG {BigEndian(head[16..20])}×{BigEndian(head[20..24])} · {size}", TreeRunIcon.Image, Expands: ValueHintKind.Base64),
             Payload.Gif when head.Length >= 10 =>
-                new ValueHint($"GIF {head[6] | head[7] << 8}×{head[8] | head[9] << 8} · {size}", TreeRunIcon.Image),
-            Payload.Png or Payload.Gif or Payload.Jpeg or Payload.WebP => new ValueHint($"{payload.ToString().ToUpperInvariant()} image · {size}", TreeRunIcon.Image),
-            Payload.Pdf => new ValueHint($"PDF · {size}", TreeRunIcon.Binary),
-            Payload.Zip => new ValueHint($"ZIP · {size}", TreeRunIcon.Binary),
-            _ => new ValueHint($"gzip · {size}", TreeRunIcon.Binary),
+                new ValueHint($"GIF {head[6] | head[7] << 8}×{head[8] | head[9] << 8} · {size}", TreeRunIcon.Image, Expands: ValueHintKind.Base64),
+            Payload.Png or Payload.Gif or Payload.Jpeg or Payload.WebP => new ValueHint($"{payload.ToString().ToUpperInvariant()} image · {size}", TreeRunIcon.Image, Expands: ValueHintKind.Base64),
+            Payload.Pdf => new ValueHint($"PDF · {size}", TreeRunIcon.Binary, Expands: ValueHintKind.Base64),
+            Payload.Zip => new ValueHint($"ZIP · {size}", TreeRunIcon.Binary, Expands: ValueHintKind.Base64),
+            _ => new ValueHint($"gzip · {size}", TreeRunIcon.Binary, Expands: ValueHintKind.Base64),
         };
     }
 

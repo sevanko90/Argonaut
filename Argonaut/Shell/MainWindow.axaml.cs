@@ -97,6 +97,7 @@ public partial class MainWindow : Window
         viewModel.Progress.WorkStarted += (_, _) => StartProgressTicks();
         RawJumpService.Requested += range => _ = viewModel.RevealInTextViewAsync(range);
         ArrayTableService.Requested += request => _ = viewModel.OpenArrayTableAsync(request);
+        OpenDocumentService.Requested += request => _ = viewModel.OpenBytesAsync(request.Bytes, request.DisplayName, request.Description);
 
         // The platform's own modifier, so the menu shows the shortcut the key handler honours.
         // Reached through the button rather than by name: a control named inside a flyout is not

@@ -6,6 +6,7 @@
              xmlns:tree="clr-namespace:Argonaut.Ui.Tree"
              xmlns:arrayTable="clr-namespace:Argonaut.Features.Json.ArrayTable"
              xmlns:csv="clr-namespace:Argonaut.Features.Csv"
+             xmlns:preview="clr-namespace:Argonaut.Features.Json.Preview"
              x:Class="Argonaut.Features.Json.ArrayTable.JsonArrayTableView"
              x:DataType="arrayTable:JsonArrayTableViewModel">
 
@@ -140,64 +141,13 @@
                             ToolTip.Tip="Close the cell pane" />
                 </Grid>
 
-                <!-- Its own scroll: reading a value must never move the grid the reader is
-                     comparing rows in. -->
-                <ScrollViewer Grid.Row="1"
-                              IsVisible="{Binding CellDetail.IsText}"
-                              HorizontalScrollBarVisibility="Disabled"
-                              VerticalScrollBarVisibility="Auto">
-                    <SelectableTextBlock Text="{Binding CellDetail.WrappableText}"
-                                         TextWrapping="Wrap"
-                                         FontFamily="{DynamicResource AppContentFontFamily}" />
-                </ScrollViewer>
-
-                <!-- The cell's own tree, drawn by the same surface as the JSON view over just this
-                     cell's bytes, so it holds nothing beyond the rows on screen - a 2,199-item
-                     array opens instantly. -->
-                <Grid Grid.Row="1"
-                      RowDefinitions="*,Auto"
-                      ColumnDefinitions="*,Auto"
-                      IsVisible="{Binding CellDetail.IsTree}">
-                    <tree:TreeSurface x:Name="DetailTree"
-                                      Background="{DynamicResource AppWindowBackgroundBrush}"
-                                      FontFamily="{DynamicResource AppContentFontFamily}"
-                                      FontSize="{DynamicResource AppContentFontSize}"
-                                      Foreground="{DynamicResource AppTextBrush}"
-                                      GutterForeground="{DynamicResource AppMutedTextBrush}"
-                                      HighlightBrush="{DynamicResource AppSearchMatchBrush}"
-                                      HighlightEdgeBrush="{DynamicResource AppSearchMatchEdgeBrush}"
-                                      CurrentHighlightBrush="{DynamicResource AppSearchCurrentBrush}"
-                                      CurrentHighlightForeground="{DynamicResource AppSearchCurrentTextBrush}"
-                                      SelectionBrush="{DynamicResource AppAccentSurfaceBrush}"
-                                      ChipFontFamily="{DynamicResource AppSansFontFamily}"
-                                      ChipBackground="{DynamicResource AppChipBrush}"
-                                      ChipHoverBackground="{DynamicResource AppChipHoverBrush}"
-                                      ExpanderBrush="{DynamicResource AppSubtleIconBrush}"
-                                      ExpanderRowHoverBrush="{DynamicResource AppMutedTextBrush}"
-                                      GuideBrush="{DynamicResource AppIndentGuideBrush}"
-                                      ShowIndentGuides="{Binding ShowIndentGuides}" />
-
-                    <ScrollBar x:Name="DetailVerticalScrollBar"
-                               Grid.Column="1"
-                               Orientation="Vertical"
-                               IsVisible="False"
-                               Minimum="0" />
-
-                    <ScrollBar x:Name="DetailPanScrollBar"
-                               Grid.Row="1"
-                               Orientation="Horizontal"
-                               AllowAutoHide="False"
-                               IsVisible="False"
-                               Minimum="0" />
-                </Grid>
-
-                <TextBlock Grid.Row="2"
-                           Text="Value truncated — open the file in the raw view to see all of it"
-                           IsVisible="{Binding CellDetail.Truncated}"
-                           Foreground="{DynamicResource AppMutedTextBrush}"
-                           TextWrapping="Wrap"
-                           FontSize="11"
-                           Margin="0,6,0,0" />
+                <!-- The cell in full - its text, or its own tree over just this cell's bytes, so
+                     a 2,199-item array opens instantly. Its own scroll: reading a value must never
+                     move the grid the reader is comparing rows in. -->
+                <preview:ValuePreviewView Grid.Row="1"
+                                          Grid.RowSpan="2"
+                                          DataContext="{Binding CellDetail}"
+                                          ShowIndentGuides="{Binding $parent[arrayTable:JsonArrayTableView].((arrayTable:JsonArrayTableViewModel)DataContext).ShowIndentGuides, FallbackValue=False}" />
             </Grid>
         </Border>
     </Grid>

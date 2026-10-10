@@ -60,12 +60,12 @@ it in (see "Saving" in architecture.md).
   (a regex or a fixed format), never by the property's name - there are too many names to key
   on. Each is an `IValueHintProvider`, so it sees only rows on screen. ISO 8601 dates, colours
   (`#RRGGBB`, `#RRGGBBAA`, `rgb()`, `hsl()` - not the rare three- and four-digit hex, which is as
-  often an issue number), JWTs, web and mail addresses (`http`, `https` and `mailto` only; a URL
-  inside longer text is still to do) and cron expressions have one; still to come, in this order:
-  - **JSON inside a string** (`"{\"id\":…}"`): a chip saying what it holds, and an action to open
-    it as a tree.
-  - **Base64**: decoded length and type from the first bytes (`PNG 32×32`, gzip), or a text
-    preview.
+  often an issue number), JWTs, web and mail addresses (`http`, `https` and `mailto` only), cron
+  expressions, JSON inside a string and Base64 have one. Still to do: a URL inside longer text,
+  which needs a link over part of the text.
+
+  Timestamps inside IDs (ObjectId, UUID v7, ULID, Snowflake) were considered and dropped: too
+  much inference to be reliable, for little use.
 
 - **Expanding a hint into what it encodes.** One idea common to the hints that hide a document
   inside a value: a JWT's header and claims, Base64's decoded bytes, JSON inside a string. The
@@ -77,7 +77,7 @@ it in (see "Saving" in architecture.md).
   up before it is built.
 
 - **Value hints beyond the JSON tree.** The parsers are already plain functions over bytes
-  (`IsoDateHintClassifier`, `ColourHintClassifier`, `DateHintClassifier`); what ties hints to the
+  (`IsoDateHintClassifier`, `ColourHintClassifier`, `CronHintClassifier`, `DateHintClassifier`); what ties hints to the
   tree is the provider contract - it takes a `JsonTokenKind` and returns the tree's chip icon,
   link and style. The split: what a value *is* and what it reads as (a time, a colour, an
   address, an expiry) moves down to `Engine`, free of Avalonia and of JSON, the JWT and URL checks
@@ -92,15 +92,6 @@ it in (see "Saving" in architecture.md).
   wrapped line - needs inline marks, a swatch before a colour or an underlined address with a
   card on hover, drawn by `RawTextSurface` without disturbing the row's text, wrapping or caret.
   Wants a mock-up first.
-
-  Timestamps inside IDs (ObjectId, UUID v7, ULID, Snowflake) were considered and dropped: too
-  much inference to be reliable, for little use.
-
-  Providers get the value's bytes only up to the display cap (`DisplayText.MaxLength`), and a
-  value past it gets no hint today. JSON in a string and Base64 can be megabytes, so they classify
-  from what the cap allows plus the value's length, which the index already knows: Base64's
-  decoded size is arithmetic and its type needs only the first few bytes; a long embedded JSON
-  value is offered as one to open, parsed only when asked, in the background.
 
 - **Per-depth row counts**, only if the estimated scrollbar proves not good enough in use. They
   would give the tree the exact scroll model the raw view has, under the same `RowSurface`

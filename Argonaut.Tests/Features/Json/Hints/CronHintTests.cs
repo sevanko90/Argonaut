@@ -76,7 +76,7 @@ public class CronHintTests
         settings.SetTimeZoneMode(DateHintTimeZoneMode.Utc);
         var provider = new CronHintProvider(settings, new FixedClock());
         byte[] raw = "0 9 * * 1-5"u8.ToArray();
-        Assert.True(provider.TryClassify(JsonTokenKind.String, raw, out var candidate));
-        Assert.Equal("at 09:00, Mon–Fri · next in 2 days", provider.FormatHint(candidate, raw, 0)?.Text);
+        Assert.True(provider.TryClassify(JsonTokenKind.String, raw, raw.Length, out var candidate));
+        Assert.Equal("at 09:00, Mon–Fri · next in 2 days", provider.FormatHint(candidate, raw, raw.Length, 0)?.Text);
     }
 }

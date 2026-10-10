@@ -10,6 +10,7 @@ using Argonaut.Engine.Indexing;
 using Argonaut.Engine.Indexing.Trees;
 using Argonaut.Engine.Progress;
 using Argonaut.Engine.Search;
+using Argonaut.Engine.Text;
 using Argonaut.Features.Json.Hints;
 using Argonaut.Features.Json.Indexing;
 using Argonaut.Features.Json.Schema;
@@ -613,7 +614,8 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable, IB
         text = new JsonTreeText(session.Bytes, session.Index.Structure, reader);
         schemaResolver = new JsonSchemaResolver(session.Index.Structure, reader, text) { Schema = SchemaSettings.Document };
         expand = new TreeExpandState(DefaultExpandDepth);
-        var painter = new JsonTreePainter(text, new IValueHintProvider[] { new DateHintProvider(HintSettings), new IsoDateHintProvider(HintSettings, TimeProvider.System), new ColourHintProvider(), new JwtHintProvider(TimeProvider.System), new UrlHintProvider(), new CronHintProvider(HintSettings, TimeProvider.System) }, SupportsArrayTable);
+        var painter = new JsonTreePainter(text, new IValueHintProvider[] { new DateHintProvider(HintSettings), new IsoDateHintProvider(HintSettings, TimeProvider.System), new ColourHintProvider(), new JwtHintProvider(TimeProvider.System), new UrlHintProvider(), new CronHintProvider(HintSettings, TimeProvider.System),
+            new EmbeddedJsonHintProvider(), new Base64HintProvider() }, SupportsArrayTable);
         var gutters = new ITreeGutter[] { new JsonSchemaGutter(schemaResolver, text) };
         var sourceBytes = session.Bytes;
         tree = new TreeDocument(session.Index.Structure, reader, painter, expand, () => sourceBytes.AvailableLength, gutters);
@@ -647,7 +649,7 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable, IB
     protected override void OnIndexingCompleted()
     {
         indexBasis?.Keep(JsonKeptStructure.Key, session?.Index.DetachStructure());
-        StatusText = DocumentStatusLine.Compose(FilePath, FormatByteLength(session?.Bytes.AvailableLength ?? 0));
+        StatusText = DocumentStatusLine.Compose(FilePath, ByteLengthText.Format(session?.Bytes.AvailableLength ?? 0));
         tree?.NotifyGrew();
         UpdateSchemaRootMatches();
     }
@@ -684,13 +686,6 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable, IB
         }
     }
 
-    private static string FormatByteLength(long bytes) => bytes switch
-    {
-        < 1024 => $"{bytes:N0} bytes",
-        < 1024 * 1024 => $"{bytes / 1024.0:0.#} KB",
-        < 1024 * 1024 * 1024 => $"{bytes / (1024.0 * 1024.0):0.#} MB",
-        _ => $"{bytes / (1024.0 * 1024.0 * 1024.0):0.#} GB",
-    };
 
     /// <summary>
     /// What the base disposes before releasing the session: the growth monitor stops, and every

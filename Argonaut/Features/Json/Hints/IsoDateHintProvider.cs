@@ -25,7 +25,7 @@ public sealed class IsoDateHintProvider : IValueHintProvider
 
     public bool IsActive => true;
 
-    public bool TryClassify(JsonTokenKind kind, ReadOnlySpan<byte> rawValue, out ValueHintCandidate candidate)
+    public bool TryClassify(JsonTokenKind kind, ReadOnlySpan<byte> rawValue, long valueLength, out ValueHintCandidate candidate)
     {
         candidate = default;
         if (kind != JsonTokenKind.String || !IsoDateHintClassifier.TryClassify(rawValue, out long ticks, out var shape, out short offset))
@@ -35,7 +35,7 @@ public sealed class IsoDateHintProvider : IValueHintProvider
         return true;
     }
 
-    public ValueHint? FormatHint(in ValueHintCandidate candidate, ReadOnlySpan<byte> rawValue, long valueOffset)
+    public ValueHint? FormatHint(in ValueHintCandidate candidate, ReadOnlySpan<byte> rawValue, long valueLength, long valueOffset)
     {
         var shape = (IsoDateShape)candidate.SchemeHint;
         if (shape == IsoDateShape.Date)

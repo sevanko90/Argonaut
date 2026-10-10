@@ -107,14 +107,15 @@ public sealed class JsonTreeText(IByteSource bytes, SparseContainerIndex index, 
         }
     }
 
-    /// <summary>The raw bytes a hint provider classifies: a string's content, or a scalar's
-    /// whole token.</summary>
-    public ReadOnlySpan<byte> ScalarBytes(in TreeRow row, int maxLength)
+    /// <summary>The raw bytes a hint provider classifies - a string's content, or a scalar's
+    /// whole token - up to <paramref name="maxLength"/> of them, and how long it is in full.</summary>
+    public ReadOnlySpan<byte> ScalarBytes(in TreeRow row, int maxLength, out long fullLength)
     {
         var node = row.Node;
         long start = node.FormatKind == (byte)JsonTokenKind.String ? node.ValueStart + 1 : node.ValueStart;
         long end = node.FormatKind == (byte)JsonTokenKind.String ? node.ValueEnd - 1 : node.ValueEnd;
-        return end - start > maxLength ? ReadOnlySpan<byte>.Empty : bytes.RequireContiguous(start, (int)(end - start));
+        fullLength = end - start;
+        return bytes.RequireContiguous(start, (int)Math.Min(fullLength, maxLength));
     }
 
     /// <summary>An open row's text: its bracket when expanded, a summary with its child count

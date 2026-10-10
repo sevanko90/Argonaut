@@ -61,6 +61,12 @@ public enum TreeRunIcon : byte
     OpenLink,
     /// <summary>A mail address.</summary>
     Mail,
+    /// <summary>A JSON document - one held inside a value.</summary>
+    Json,
+    /// <summary>Encoded binary data.</summary>
+    Binary,
+    /// <summary>A picture.</summary>
+    Image,
 }
 
 /// <summary>One stretch of a row's text in one style.</summary>

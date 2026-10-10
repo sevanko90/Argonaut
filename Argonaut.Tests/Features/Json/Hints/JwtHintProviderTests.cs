@@ -22,7 +22,7 @@ public class JwtHintProviderTests
     {
         var provider = new JwtHintProvider(new FixedClock());
         byte[] raw = Encoding.UTF8.GetBytes(value);
-        return provider.TryClassify(JsonTokenKind.String, raw, out var candidate) ? provider.FormatHint(candidate, raw, 0)?.Text : null;
+        return provider.TryClassify(JsonTokenKind.String, raw, raw.Length, out var candidate) ? provider.FormatHint(candidate, raw, raw.Length, 0)?.Text : null;
     }
 
     [Fact]

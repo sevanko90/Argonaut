@@ -12,6 +12,8 @@ public enum ValueHintKind : byte
     Jwt,
     Url,
     Cron,
+    EmbeddedJson,
+    Base64,
 }
 
 /// <summary>

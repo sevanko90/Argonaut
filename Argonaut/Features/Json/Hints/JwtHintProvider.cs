@@ -17,7 +17,7 @@ public sealed class JwtHintProvider(TimeProvider clock) : IValueHintProvider
 {
     public bool IsActive => true;
 
-    public bool TryClassify(JsonTokenKind kind, ReadOnlySpan<byte> rawValue, out ValueHintCandidate candidate)
+    public bool TryClassify(JsonTokenKind kind, ReadOnlySpan<byte> rawValue, long valueLength, out ValueHintCandidate candidate)
     {
         candidate = default;
         if (kind != JsonTokenKind.String || rawValue.Length < 10 || !rawValue.StartsWith("eyJ"u8))
@@ -39,7 +39,7 @@ public sealed class JwtHintProvider(TimeProvider clock) : IValueHintProvider
         return true;
     }
 
-    public ValueHint? FormatHint(in ValueHintCandidate candidate, ReadOnlySpan<byte> rawValue, long valueOffset)
+    public ValueHint? FormatHint(in ValueHintCandidate candidate, ReadOnlySpan<byte> rawValue, long valueLength, long valueOffset)
     {
         int first = rawValue.IndexOf((byte)'.');
         int second = first + 1 + rawValue[(first + 1)..].IndexOf((byte)'.');

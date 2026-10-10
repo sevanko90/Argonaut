@@ -20,7 +20,7 @@ public sealed class UrlHintProvider : IValueHintProvider
 {
     public bool IsActive => true;
 
-    public bool TryClassify(JsonTokenKind kind, ReadOnlySpan<byte> rawValue, out ValueHintCandidate candidate)
+    public bool TryClassify(JsonTokenKind kind, ReadOnlySpan<byte> rawValue, long valueLength, out ValueHintCandidate candidate)
     {
         candidate = default;
         if (kind != JsonTokenKind.String || !HasSafeScheme(rawValue))
@@ -38,7 +38,7 @@ public sealed class UrlHintProvider : IValueHintProvider
         return true;
     }
 
-    public ValueHint? FormatHint(in ValueHintCandidate candidate, ReadOnlySpan<byte> rawValue, long valueOffset)
+    public ValueHint? FormatHint(in ValueHintCandidate candidate, ReadOnlySpan<byte> rawValue, long valueLength, long valueOffset)
     {
         if (!Uri.TryCreate(Encoding.UTF8.GetString(rawValue), UriKind.Absolute, out var address) || address.IdnHost.Length == 0)
             return null;

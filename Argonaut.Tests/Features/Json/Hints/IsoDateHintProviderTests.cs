@@ -21,8 +21,8 @@ public class IsoDateHintProviderTests
         settings.SetTimeZoneMode(mode);
         var provider = new IsoDateHintProvider(settings, new FixedClock());
         byte[] raw = Encoding.UTF8.GetBytes(value);
-        return provider.TryClassify(JsonTokenKind.String, raw, out var candidate)
-            ? provider.FormatHint(candidate, raw, 0)?.Text
+        return provider.TryClassify(JsonTokenKind.String, raw, raw.Length, out var candidate)
+            ? provider.FormatHint(candidate, raw, raw.Length, 0)?.Text
             : null;
     }
 
@@ -52,6 +52,6 @@ public class IsoDateHintProviderTests
     public void OnlyStringsAreRead()
     {
         var provider = new IsoDateHintProvider(new DateHintSettings(), new FixedClock());
-        Assert.False(provider.TryClassify(JsonTokenKind.Number, Encoding.UTF8.GetBytes("2026-10-10"), out _));
+        Assert.False(provider.TryClassify(JsonTokenKind.Number, Encoding.UTF8.GetBytes("2026-10-10"), 10, out _));
     }
 }

@@ -20,7 +20,7 @@ public sealed class DateHintProvider : IValueHintProvider
 
     public bool IsActive => settings.FileDefaultScheme != DateDecodingScheme.Off;
 
-    public bool TryClassify(JsonTokenKind kind, ReadOnlySpan<byte> rawValue, out ValueHintCandidate candidate)
+    public bool TryClassify(JsonTokenKind kind, ReadOnlySpan<byte> rawValue, long valueLength, out ValueHintCandidate candidate)
     {
         candidate = default;
 
@@ -34,7 +34,7 @@ public sealed class DateHintProvider : IValueHintProvider
         return true;
     }
 
-    public ValueHint? FormatHint(in ValueHintCandidate candidate, ReadOnlySpan<byte> rawValue, long valueOffset)
+    public ValueHint? FormatHint(in ValueHintCandidate candidate, ReadOnlySpan<byte> rawValue, long valueLength, long valueOffset)
     {
         if (settings.FileDefaultScheme == DateDecodingScheme.Off)
             return null;

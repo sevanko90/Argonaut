@@ -47,9 +47,9 @@ public class ColourHintTests
     {
         var provider = new ColourHintProvider();
         byte[] raw = Encoding.UTF8.GetBytes(value);
-        if (!provider.TryClassify(JsonTokenKind.String, raw, out var candidate))
+        if (!provider.TryClassify(JsonTokenKind.String, raw, raw.Length, out var candidate))
             return (null, null);
-        var hint = provider.FormatHint(candidate, raw, 0);
+        var hint = provider.FormatHint(candidate, raw, raw.Length, 0);
         return (hint?.Text, hint?.Swatch);
     }
 
@@ -64,5 +64,5 @@ public class ColourHintTests
 
     [Fact]
     public void OnlyStringsAreRead()
-        => Assert.False(new ColourHintProvider().TryClassify(JsonTokenKind.Number, "#fff"u8, out _));
+        => Assert.False(new ColourHintProvider().TryClassify(JsonTokenKind.Number, "#fff"u8, 4, out _));
 }

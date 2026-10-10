@@ -12,7 +12,7 @@ public class UrlHintProviderTests
     {
         var provider = new UrlHintProvider();
         byte[] raw = Encoding.UTF8.GetBytes(value);
-        return provider.TryClassify(JsonTokenKind.String, raw, out var candidate) ? provider.FormatHint(candidate, raw, 0) : null;
+        return provider.TryClassify(JsonTokenKind.String, raw, raw.Length, out var candidate) ? provider.FormatHint(candidate, raw, raw.Length, 0) : null;
     }
 
     [Fact]

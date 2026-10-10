@@ -14,7 +14,7 @@ public sealed class ColourHintProvider : IValueHintProvider
 {
     public bool IsActive => true;
 
-    public bool TryClassify(JsonTokenKind kind, ReadOnlySpan<byte> rawValue, out ValueHintCandidate candidate)
+    public bool TryClassify(JsonTokenKind kind, ReadOnlySpan<byte> rawValue, long valueLength, out ValueHintCandidate candidate)
     {
         candidate = default;
         if (kind != JsonTokenKind.String || !ColourHintClassifier.TryClassify(rawValue, out uint argb, out bool isHex))
@@ -24,7 +24,7 @@ public sealed class ColourHintProvider : IValueHintProvider
         return true;
     }
 
-    public ValueHint? FormatHint(in ValueHintCandidate candidate, ReadOnlySpan<byte> rawValue, long valueOffset)
+    public ValueHint? FormatHint(in ValueHintCandidate candidate, ReadOnlySpan<byte> rawValue, long valueLength, long valueOffset)
     {
         var colour = Color.FromUInt32((uint)candidate.Payload);
         bool isHex = candidate.SchemeHint == 1;

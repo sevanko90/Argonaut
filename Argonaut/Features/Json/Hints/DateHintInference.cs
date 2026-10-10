@@ -26,8 +26,8 @@ public static class DateHintInference
             if (row.Shape != TreeRowShape.Leaf || row.Node.FormatKind != (byte)JsonTokenKind.Number)
                 continue;
 
-            var raw = text.ScalarBytes(row, 64);
-            if (!raw.IsEmpty && DateHintClassifier.TryClassify(raw, out _, out var scheme))
+            var raw = text.ScalarBytes(row, 64, out long length);
+            if (length == raw.Length && DateHintClassifier.TryClassify(raw, out _, out var scheme))
                 return scheme;
         }
 

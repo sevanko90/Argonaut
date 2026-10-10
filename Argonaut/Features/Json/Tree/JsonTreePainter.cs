@@ -47,7 +47,7 @@ public sealed class JsonTreePainter(JsonTreeText text, IReadOnlyList<IValueHintP
         if (nameTruncated)
             runs.Add(new TreeRun(NameTruncatedNote(nameLength), TreeRunStyle.Note));
         if (valueTruncated)
-            runs.Add(new TreeRun(FormatByteLength(valueLength), TreeRunStyle.Note));
+            runs.Add(new TreeRun(ByteLengthText.Format(valueLength), TreeRunStyle.Note));
 
         if (hint is not null)
             runs.Add(new TreeRun(hint.Text, hint.Style, hint.Link, hint.Icon, hint.Swatch));
@@ -64,15 +64,17 @@ public sealed class JsonTreePainter(JsonTreeText text, IReadOnlyList<IValueHintP
         if (hintProviders is null)
             return null;
 
-        // No classifiable value (a date in some encoding) is anywhere near the display cap.
-        var raw = text.ScalarBytes(row, DisplayText.MaxLength);
+        // Most hints read whole values, which are never near the display cap; past it, only the
+        // ones that classify from a prefix (Base64, an embedded document) are asked.
+        var raw = text.ScalarBytes(row, DisplayText.MaxLength, out long length);
         if (raw.IsEmpty)
             return null;
 
+        bool isWhole = length == raw.Length;
         foreach (var provider in hintProviders)
         {
-            if (provider.IsActive && provider.TryClassify(kind, raw, out var candidate)
-                && provider.FormatHint(in candidate, raw, row.Node.ValueStart) is { } hint)
+            if (provider.IsActive && (isWhole || provider.ReadsPrefixes) && provider.TryClassify(kind, raw, length, out var candidate)
+                && provider.FormatHint(in candidate, raw, length, row.Node.ValueStart) is { } hint)
                 return hint;
         }
 
@@ -88,13 +90,6 @@ public sealed class JsonTreePainter(JsonTreeText text, IReadOnlyList<IValueHintP
         _ => TreeRunStyle.Plain,
     };
 
-    private static string NameTruncatedNote(long length) => $"name truncated, full length {FormatByteLength(length)}";
+    private static string NameTruncatedNote(long length) => $"name truncated, full length {ByteLengthText.Format(length)}";
 
-    private static string FormatByteLength(long bytes) => bytes switch
-    {
-        < 1024 => $"{bytes:N0} bytes",
-        < 1024 * 1024 => $"{bytes / 1024.0:0.#} KB",
-        < 1024 * 1024 * 1024 => $"{bytes / (1024.0 * 1024.0):0.#} MB",
-        _ => $"{bytes / (1024.0 * 1024.0 * 1024.0):0.#} GB",
-    };
 }

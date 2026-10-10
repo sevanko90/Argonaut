@@ -639,7 +639,16 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     /// selection is anchored at the end and extended back to the start so the caret - which the
     /// view scrolls to - sits where the reveal is, not at the far end of a large node.
     /// </summary>
-    public async Task RevealByteRangeAsync(ByteRange range)
+    public Task RevealByteRangeAsync(ByteRange range) => RevealRangeAsync(range, announceArrival: true);
+
+    /// <summary>
+    /// A jump in from elsewhere landed at this offset: the view flashes it, since in a wall of
+    /// packed text the caret alone is easy to lose. Not raised for a reveal from inside the raw
+    /// view - a find step, the edit overview - or for putting the caret back after a save.
+    /// </summary>
+    public event Action<long>? Arrived;
+
+    private async Task RevealRangeAsync(ByteRange range, bool announceArrival)
     {
         if (this.session is null)
             return;
@@ -667,6 +676,9 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
                 caret.PlaceAt(range.End);
                 caret.ExtendTo(range.Offset);
             }
+
+            if (announceArrival)
+                Arrived?.Invoke(range.Offset);
         }
         catch (ObjectDisposedException)
         {
@@ -1228,7 +1240,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     /// </summary>
     private async Task RestoreAfterReopenAsync(long caretOffset, bool resumeEditing)
     {
-        await JumpToByteOffsetAsync(caretOffset);
+        await RevealRangeAsync(ByteRange.At(caretOffset), announceArrival: false);
         if (!resumeEditing || IsDisposed)
             return;
 

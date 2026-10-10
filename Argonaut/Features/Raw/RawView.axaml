@@ -25,7 +25,8 @@
                                 GutterForeground="{DynamicResource AppMutedTextBrush}"
                                 HighlightBrush="{DynamicResource AppSearchHighlightBrush}"
                                 SelectionBrush="{DynamicResource AppTextSelectionBrush}"
-                                CaretBrush="{DynamicResource AppTextBrush}" />
+                                CaretBrush="{DynamicResource AppTextBrush}"
+                                ArrivalBrush="{DynamicResource AppAccentBrush}" />
 
             <ScrollBar x:Name="VerticalScrollBar"
                        Grid.Row="0"

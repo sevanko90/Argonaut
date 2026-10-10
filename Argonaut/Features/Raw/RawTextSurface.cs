@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Specialized;
+using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
@@ -126,12 +127,29 @@ public class RawTextSurface : RowSurface
     private (long Offset, int ScreenRow)? pendingPlace;
     private double scrollTop;
 
+    // The arrival flash (see RawArrivalFlash): where it is, when it started, and whether it is
+    // still running - which is what keeps animation frames coming.
+    private long arrivalOffset;
+    private long arrivalStarted;
+    private bool isFlashingArrival;
+    private bool arrivalNeedsRoom;
+
     /// <summary>The realized range <see cref="widestRowWidth"/> was last measured over.</summary>
     private (int First, int Last) measuredRange = (0, -1);
 
     static RawTextSurface()
     {
         AffectsRender<RawTextSurface>(CaretBrushProperty);
+    }
+
+    /// <summary>Brush for the flash where a jump in landed.</summary>
+    public static readonly StyledProperty<IBrush?> ArrivalBrushProperty =
+        AvaloniaProperty.Register<RawTextSurface, IBrush?>(nameof(ArrivalBrush));
+
+    public IBrush? ArrivalBrush
+    {
+        get => GetValue(ArrivalBrushProperty);
+        set => SetValue(ArrivalBrushProperty, value);
     }
 
     /// <summary>Brush for the caret itself.</summary>
@@ -220,7 +238,10 @@ public class RawTextSurface : RowSurface
         }
 
         if (this.viewModel is not null)
+        {
             this.viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+            this.viewModel.Arrived -= OnArrived;
+        }
     }
 
     private void Attach(RawViewModel? next)
@@ -229,12 +250,19 @@ public class RawTextSurface : RowSurface
             return;
 
         if (this.viewModel is not null)
+        {
             this.viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+            this.viewModel.Arrived -= OnArrived;
+        }
 
         this.viewModel = next;
+        this.isFlashingArrival = false;
 
         if (this.viewModel is not null)
+        {
             this.viewModel.PropertyChanged += OnViewModelPropertyChanged;
+            this.viewModel.Arrived += OnArrived;
+        }
 
         SubscribeRows();
         AttachCaret();
@@ -468,6 +496,7 @@ public class RawTextSurface : RowSurface
 
                 DrawSelection(context, layout, row, rowIndex, textTop);
                 DrawHighlights(context, layout, rowIndex, textTop);
+                DrawArrival(context, layout, rowIndex, textTop);
                 layout.Draw(context, new Point(TextOriginX - PanOffset, textTop));
                 DrawCaret(context, layout, rowIndex, textTop);
             }
@@ -848,6 +877,152 @@ public class RawTextSurface : RowSurface
 
         double x = TextOriginX - PanOffset + XForOffset(rowIndex, layout, this.caret.Caret.Offset);
         return new Rect(Math.Floor(x), textTop, CaretWidth, layout.Height);
+    }
+
+    // ---- arrival flash ----------------------------------------------------------------------
+
+    private void OnArrived(long offset)
+    {
+        this.arrivalOffset = offset;
+        this.arrivalStarted = Stopwatch.GetTimestamp();
+        this.isFlashingArrival = true;
+        this.arrivalNeedsRoom = true;
+        RequestArrivalFrame();
+        InvalidateVisual();
+    }
+
+    /// <summary>
+    /// Pans so the whole flash is on screen, once, on the first frame after arrival - by then the
+    /// reveal has laid its rows out. The caret's own scroll-into-view stops as soon as the caret
+    /// is visible, which can leave it at the right edge with what it points at cut off, or leave
+    /// the part of the flash that wrapped onto the next row off to the left. Where the flash is
+    /// wider than the window, the landing point wins.
+    /// </summary>
+    private void MakeRoomForArrival()
+    {
+        this.arrivalNeedsRoom = false;
+
+        // The flash's extent in text coordinates, independent of the current pan.
+        double left = double.MaxValue, right = double.MinValue, landing = 0;
+        for (int rowsAfter = 0; ArrivalRect(rowsAfter) is { } rect; rowsAfter++)
+        {
+            double rectLeft = rect.Left - TextOriginX + PanOffset;
+            if (rowsAfter == 0)
+                landing = rectLeft;
+            left = Math.Min(left, rectLeft);
+            right = Math.Max(right, rect.Right - TextOriginX + PanOffset);
+        }
+
+        if (left > right)
+            return;
+
+        double margin = FontSize;
+        double width = TextViewportWidth;
+        double pan = PanOffset;
+        if (right + margin > pan + width)
+            pan = right + margin - width;
+        if (left - margin < pan)
+            pan = left - margin;
+        if (landing < pan || landing + margin > pan + width)
+            pan = landing - margin;
+
+        pan = Math.Max(0, pan);
+        if (pan != PanOffset)
+            RequestPan(pan);
+    }
+
+    /// <summary>The edges of the text area, in surface coordinates, for tests.</summary>
+    internal double TextViewportLeft => TextOriginX;
+
+    internal double TextViewportRight => TextOriginX + TextViewportWidth;
+
+    private TimeSpan ArrivalElapsed => Stopwatch.GetElapsedTime(this.arrivalStarted);
+
+    /// <summary>Frames rather than a timer: the flash redraws in step with the display while it
+    /// runs, and asks for nothing once it is over.</summary>
+    private void RequestArrivalFrame() => TopLevel.GetTopLevel(this)?.RequestAnimationFrame(_ =>
+    {
+        if (!this.isFlashingArrival)
+            return;
+
+        if (this.arrivalNeedsRoom)
+            MakeRoomForArrival();
+
+        if (ArrivalElapsed >= RawArrivalFlash.Duration)
+            this.isFlashingArrival = false;
+        else
+            RequestArrivalFrame();
+
+        InvalidateVisual();
+    });
+
+    private void DrawArrival(DrawingContext context, TextLayout layout, int rowIndex, double textTop)
+    {
+        if (ArrivalBrush is not { } brush || ArrivalRectFor(rowIndex, layout, textTop) is not { } rect)
+            return;
+
+        var elapsed = ArrivalElapsed;
+        var wash = rect.Inflate(new Thickness(2, 1));
+        using (context.PushOpacity(0.3 * RawArrivalFlash.StrengthAt(elapsed)))
+            context.DrawRectangle(brush, null, new RoundedRect(wash, 3));
+
+        var (spread, opacity) = RawArrivalFlash.RingAt(elapsed);
+        if (opacity > 0)
+        {
+            using (context.PushOpacity(0.5 * opacity))
+                context.DrawRectangle(null, new Pen(brush, 1.5), new RoundedRect(wash.Inflate(spread), 3 + spread));
+        }
+    }
+
+    /// <summary>
+    /// Where the flash is drawn on this row, or null when it is not running or misses the row:
+    /// its share of the bytes from the landing point on, which may run across a wrap onto the
+    /// next row. The landing row's share is at least a glyph wide, so a landing at the very end
+    /// of a row still shows there.
+    /// </summary>
+    private Rect? ArrivalRectFor(int rowIndex, TextLayout layout, double textTop)
+    {
+        if (!this.isFlashingArrival || RowIndex is not { } index || DecodedRow(rowIndex) is not { } row)
+            return null;
+
+        int landingRow = index.RowForOffset(this.arrivalOffset) ?? -1;
+        if (rowIndex < landingRow)
+            return null;
+
+        long rowStart = row.RowStart;
+        long drawnEnd = rowStart + row.DisplayByteLength;
+        long start = Math.Max(this.arrivalOffset, rowStart);
+        long end = Math.Min(this.arrivalOffset + RawArrivalFlash.Bytes, drawnEnd);
+        bool isLanding = rowIndex == landingRow;
+        if (end <= start && !isLanding)
+            return null;
+
+        int startChar = row.CharIndexForByte((int)(start - rowStart));
+        double left = layout.HitTestTextPosition(startChar).X;
+        double right = end > start ? layout.HitTestTextPosition(row.CharIndexForByte((int)(end - rowStart))).X : left;
+        return new Rect(TextOriginX - PanOffset + left, textTop, Math.Max(right - left, FontSize * 0.6), layout.Height);
+    }
+
+    /// <summary>The flash's rectangle on the landing row, or <paramref name="rowsAfter"/> rows
+    /// below it, in surface coordinates, for tests; null when none is drawn there.</summary>
+    internal Rect? ArrivalRect(int rowsAfter = 0)
+    {
+        if (!this.isFlashingArrival || RowIndex?.RowForOffset(this.arrivalOffset) is not int landingRow
+            || DecodedRow(landingRow + rowsAfter) is not { } row)
+            return null;
+
+        int rowIndex = landingRow + rowsAfter;
+
+        var layout = LayoutFor(rowIndex, new Typeface(FontFamily), FontSize, Foreground ?? Brushes.Black, row.Text);
+        double y = rowIndex * RowHeight - scrollTop;
+        return ArrivalRectFor(rowIndex, layout, CentreInRow(layout, y));
+    }
+
+    /// <summary>Ends a running flash at once, for tests - as the clock would.</summary>
+    internal void EndArrivalFlash()
+    {
+        this.isFlashingArrival = false;
+        InvalidateVisual();
     }
 
     /// <summary>

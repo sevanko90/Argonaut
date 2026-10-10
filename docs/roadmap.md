@@ -56,6 +56,26 @@ it in (see "Saving" in architecture.md).
 
 ## JSON tree
 
+- **More value hints, beside the date chip.** Each classified from the value alone, by its shape
+  (a regex or a fixed format), never by the property's name - there are too many names to key
+  on. Each is an `IValueHintProvider`, so it sees only rows on screen:
+  - **JSON inside a string** (`"{\"id\":…}"`): a chip saying what it holds, and an action to open
+    it as a tree.
+  - **Timestamps inside IDs**: MongoDB ObjectId, UUID v1 and v7, ULID, Snowflake IDs - the
+    creation time.
+  - **JWT**: the algorithm and the expiry, marked when already expired.
+  - **Colours**: `#RGB`, `#RRGGBB`, `#RRGGBBAA`, `rgb()`, `hsl()` as a swatch.
+  - **Cron expressions**: the schedule in words and the next run.
+  - **ISO 8601 date strings**: local time and a relative reading ("3 days ago", "in 4 months").
+  - **Base64**: decoded length and type from the first bytes (`PNG 32×32`, gzip), or a text
+    preview.
+
+  Providers get the value's bytes only up to the display cap (`DisplayText.MaxLength`), and a
+  value past it gets no hint today. JSON in a string and Base64 can be megabytes, so they classify
+  from what the cap allows plus the value's length, which the index already knows: Base64's
+  decoded size is arithmetic and its type needs only the first few bytes; a long embedded JSON
+  value is offered as one to open, parsed only when asked, in the background.
+
 - **Per-depth row counts**, only if the estimated scrollbar proves not good enough in use. They
   would give the tree the exact scroll model the raw view has, under the same `RowSurface`
   interface. The fixed-size thumb snaps on a document with few visible rows of uneven size (a

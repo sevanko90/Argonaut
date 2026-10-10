@@ -23,7 +23,10 @@
                                 FontSize="{DynamicResource AppContentFontSize}"
                                 Foreground="{DynamicResource AppTextBrush}"
                                 GutterForeground="{DynamicResource AppMutedTextBrush}"
-                                HighlightBrush="{DynamicResource AppSearchHighlightBrush}"
+                                HighlightBrush="{DynamicResource AppSearchMatchBrush}"
+                                HighlightEdgeBrush="{DynamicResource AppSearchMatchEdgeBrush}"
+                                CurrentHighlightBrush="{DynamicResource AppSearchCurrentBrush}"
+                                CurrentHighlightForeground="{DynamicResource AppSearchCurrentTextBrush}"
                                 SelectionBrush="{DynamicResource AppTextSelectionBrush}"
                                 CaretBrush="{DynamicResource AppTextBrush}"
                                 ArrivalBrush="{DynamicResource AppAccentBrush}" />

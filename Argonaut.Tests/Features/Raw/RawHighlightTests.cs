@@ -1,4 +1,5 @@
 using System.Text;
+using Argonaut.Engine.Search;
 using Argonaut.Features.Raw;
 using Argonaut.Tests.Support;
 using Avalonia.Controls;
@@ -137,6 +138,41 @@ public sealed class RawHighlightTests : IDisposable
 
             Assert.Empty(surface.HighlightRectsFor(0, LayoutFor(surface, vm, 0)));
             Assert.Empty(surface.HighlightRectsFor(1, LayoutFor(surface, vm, 1)));
+        });
+
+    [Fact]
+    public Task ARevealedMatchIsTheCurrentOneAmongTheRowsMatches()
+        => WithView("one needle, two needle, three\n", 80, async (vm, surface) =>
+        {
+            vm.HighlightTerm = "needle";
+            long second = "one needle, two ".Length;
+            vm.RevealMatch(new SearchMatch(second, "needle".Length), 0);
+            await PumpAsync();
+
+            Assert.Equal(((int)second, (int)second + 6), surface.CurrentMatchChars(0));
+
+            // A new term, or a reveal that is not a match, leaves nothing current.
+            vm.HighlightTerm = "two";
+            Assert.Null(surface.CurrentMatchChars(0));
+            vm.HighlightTerm = "needle";
+            vm.RevealMatch(new SearchMatch(second, "needle".Length), 0);
+            vm.RevealOffset(0, 0);
+            Assert.Null(surface.CurrentMatchChars(0));
+        });
+
+    [Fact]
+    public Task ACurrentMatchStraddlingASoftWrapIsCurrentOnBothRows()
+        => WithView(new string('a', 77) + "needle" + new string('b', 40) + "\n", 80, async (vm, surface) =>
+        {
+            vm.HighlightTerm = "needle";
+            vm.RevealMatch(new SearchMatch(77, "needle".Length), 0);
+            await PumpAsync();
+
+            var first = surface.CurrentMatchChars(0);
+            var second = surface.CurrentMatchChars(1);
+            Assert.NotNull(first);
+            Assert.Equal(0, second?.Start);
+            Assert.Equal(6, first!.Value.End - first.Value.Start + second!.Value.End);
         });
 
     [Fact]

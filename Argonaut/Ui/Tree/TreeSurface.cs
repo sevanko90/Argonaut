@@ -104,8 +104,6 @@ public class TreeSurface : RowSurface
     private const double ChipIconGap = 5;
     private const double ChipIconStroke = 2;
 
-    /// <summary>How far a find match's pill reaches past its text either side.</summary>
-    private const double MatchPillPadding = 2;
 
     /// <summary>One note or chip after a pane's text, at <paramref name="X"/> from the text's
     /// start.</summary>
@@ -165,7 +163,6 @@ public class TreeSurface : RowSurface
     private long turnStarted;
     private double turnFrom;
     private readonly Dictionary<IBrush, Pen> expanderPens = new();
-    private Pen? highlightEdgePen;
 
     // Per realized row, the open containers its indent guides run down from: a span of
     // guideAncestors, each an ancestor's depth and inset (the inset arrays are shared with insets).
@@ -323,37 +320,6 @@ public class TreeSurface : RowSurface
         set => SetValue(ChipHoverBackgroundProperty, value);
     }
 
-    /// <summary>The fine edge around a find match's pill; null draws none.</summary>
-    public static readonly StyledProperty<IBrush?> HighlightEdgeBrushProperty =
-        AvaloniaProperty.Register<TreeSurface, IBrush?>(nameof(HighlightEdgeBrush));
-
-    /// <summary>The pill behind <see cref="CurrentMatch"/>.</summary>
-    public static readonly StyledProperty<IBrush?> CurrentHighlightBrushProperty =
-        AvaloniaProperty.Register<TreeSurface, IBrush?>(nameof(CurrentHighlightBrush));
-
-    /// <summary>The text of <see cref="CurrentMatch"/>, which sits on its own solid pill rather
-    /// than the row's colours.</summary>
-    public static readonly StyledProperty<IBrush?> CurrentHighlightForegroundProperty =
-        AvaloniaProperty.Register<TreeSurface, IBrush?>(nameof(CurrentHighlightForeground));
-
-    public IBrush? HighlightEdgeBrush
-    {
-        get => GetValue(HighlightEdgeBrushProperty);
-        set => SetValue(HighlightEdgeBrushProperty, value);
-    }
-
-    public IBrush? CurrentHighlightBrush
-    {
-        get => GetValue(CurrentHighlightBrushProperty);
-        set => SetValue(CurrentHighlightBrushProperty, value);
-    }
-
-    public IBrush? CurrentHighlightForeground
-    {
-        get => GetValue(CurrentHighlightForegroundProperty);
-        set => SetValue(CurrentHighlightForegroundProperty, value);
-    }
-
     /// <summary>The expander at rest. Null uses <see cref="RowSurface.Foreground"/>.</summary>
     public static readonly StyledProperty<IBrush?> ExpanderBrushProperty =
         AvaloniaProperty.Register<TreeSurface, IBrush?>(nameof(ExpanderBrush));
@@ -398,8 +364,7 @@ public class TreeSurface : RowSurface
     static TreeSurface()
     {
         AffectsRender<TreeSurface>(GutterBackgroundProperty, DividerBrushProperty, ChipBackgroundProperty, ChipHoverBackgroundProperty,
-            ExpanderBrushProperty, ExpanderRowHoverBrushProperty, ShowIndentGuidesProperty, GuideBrushProperty,
-            HighlightEdgeBrushProperty, CurrentHighlightBrushProperty, CurrentHighlightForegroundProperty);
+            ExpanderBrushProperty, ExpanderRowHoverBrushProperty, ShowIndentGuidesProperty, GuideBrushProperty);
     }
 
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
@@ -1224,36 +1189,35 @@ public class TreeSurface : RowSurface
     private bool ShowsActions(in TreeRow row)
         => row.Key == hoveredKey || (selection is { } selected && row.Key == selected.Current.Key);
 
-    /// <summary>A pill behind each find match in a row's text, except the current one, which
-    /// <see cref="DrawCurrentMatch"/> draws over the text.</summary>
+    /// <summary>A pill behind each find match in a row's text; the current one is drawn over
+    /// the text afterwards, by <see cref="DrawCurrentMatch"/>.</summary>
     private void DrawHighlights(DrawingContext context, TextLayout layout, string text, double x, double textTop, double rowTop, int current)
     {
-        if (HighlightBrush is not { } brush || SearchTextSplitter.Split(text, highlightTerm) is not { } segments)
+        if (SearchTextSplitter.Split(text, highlightTerm) is not { } segments)
             return;
 
-        var edge = HighlightEdgeBrush is { } edgeBrush ? HighlightEdgePen(edgeBrush) : null;
         int occurrence = 0;
         foreach (var segment in segments)
         {
             if (!segment.IsMatch)
                 continue;
 
-            if (occurrence++ == current && CurrentHighlightBrush is not null)
-                continue;
-
+            bool isCurrent = occurrence++ == current;
             foreach (var rect in layout.HitTestTextRange(segment.Start, segment.Length))
-                context.DrawRectangle(brush, edge, MatchPill(rect, x, textTop, rowTop));
+            {
+                var at = rect.Translate(new Vector(x, textTop));
+                if (isCurrent)
+                    DrawCurrentMatchPill(context, at, rowTop, text.Substring(segment.Start, segment.Length), overText: false);
+                else
+                    DrawMatchPill(context, at, rowTop);
+            }
         }
     }
 
-    /// <summary>
-    /// The current match: a solid pill drawn over the row's text, then the match's own text again
-    /// on top in <see cref="CurrentHighlightForeground"/> - the row's run colours do not all read
-    /// on the pill, and the row's layout is shared and cached, so it is not restyled for one match.
-    /// </summary>
+    /// <summary>The current match, over the row's text.</summary>
     private void DrawCurrentMatch(DrawingContext context, TextLayout layout, string text, double x, double textTop, double rowTop, int current)
     {
-        if (CurrentHighlightBrush is not { } brush || SearchTextSplitter.Split(text, highlightTerm) is not { } segments)
+        if (SearchTextSplitter.Split(text, highlightTerm) is not { } segments)
             return;
 
         int occurrence = 0;
@@ -1263,26 +1227,9 @@ public class TreeSurface : RowSurface
                 continue;
 
             foreach (var rect in layout.HitTestTextRange(segment.Start, segment.Length))
-                context.DrawRectangle(brush, null, MatchPill(rect, x, textTop, rowTop));
-
-            var start = layout.HitTestTextPosition(segment.Start);
-            using var label = new TextLayout(text.Substring(segment.Start, segment.Length), new Typeface(FontFamily), FontSize,
-                CurrentHighlightForeground ?? Foreground);
-            label.Draw(context, new Point(x + start.X, textTop));
+                DrawCurrentMatchPill(context, rect.Translate(new Vector(x, textTop)), rowTop, text.Substring(segment.Start, segment.Length), overText: true);
             return;
         }
-    }
-
-    /// <summary>A match's pill: its text, a little wider either side, as tall as a chip and
-    /// centred in the row.</summary>
-    private static RoundedRect MatchPill(Rect text, double x, double textTop, double rowTop)
-        => new(new Rect(x + text.X - MatchPillPadding, ChipTop(rowTop), text.Width + 2 * MatchPillPadding, ChipHeight), ChipRadius);
-
-    private Pen HighlightEdgePen(IBrush brush)
-    {
-        if (highlightEdgePen?.Brush != brush)
-            highlightEdgePen = new Pen(brush, 1);
-        return highlightEdgePen;
     }
 
     // ---- scrolling ------------------------------------------------------------------------

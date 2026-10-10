@@ -324,6 +324,10 @@ public class RawTextSurface : RowSurface
                 InvalidateVisual();
                 break;
 
+            case nameof(RawViewModel.CurrentMatch):
+                InvalidateVisual();
+                break;
+
             case nameof(RawViewModel.Caret):
                 AttachCaret();
                 InvalidateVisual();
@@ -495,9 +499,12 @@ public class RawTextSurface : RowSurface
                 double textTop = CentreInRow(layout, y);
 
                 DrawSelection(context, layout, row, rowIndex, textTop);
-                DrawHighlights(context, layout, rowIndex, textTop);
+                var current = CurrentMatchCharsIn(rowIndex);
+                DrawHighlights(context, layout, rowIndex, textTop, y, current);
                 DrawArrival(context, layout, rowIndex, textTop);
                 layout.Draw(context, new Point(TextOriginX - PanOffset, textTop));
+                if (current is { } currentChars)
+                    DrawCurrentMatch(context, layout, rowIndex, textTop, y, currentChars, overText: true);
                 DrawCaret(context, layout, rowIndex, textTop);
             }
 
@@ -525,40 +532,89 @@ public class RawTextSurface : RowSurface
         layout.Draw(context, new Point(x, CentreInRow(layout, y)));
     }
 
-    /// <summary>
-    /// Paints a background behind every occurrence of the find term. Matching is re-done against
-    /// the row's displayed text rather than mapped from the search's byte offsets: the row is
-    /// decoded and substituted, so re-finding the term in what is actually on screen lights up
-    /// every visible occurrence rather than only the one the search is sitting on.
-    /// </summary>
-    private void DrawHighlights(DrawingContext context, TextLayout layout, int rowIndex, double y)
+    /// <summary>A pill behind every occurrence of the find term in the row (see
+    /// <see cref="HighlightRangesFor"/>); the current match is drawn over the text afterwards.</summary>
+    private void DrawHighlights(DrawingContext context, TextLayout layout, int rowIndex, double textTop, double rowTop, (int Start, int End)? current)
     {
-        if (HighlightBrush is not { } brush)
+        var origin = new Vector(TextOriginX - PanOffset, textTop);
+        foreach (var range in HighlightRangesFor(rowIndex))
+        {
+            if (range == current)
+            {
+                DrawCurrentMatch(context, layout, rowIndex, textTop, rowTop, range, overText: false);
+                continue;
+            }
+
+            foreach (var rect in layout.HitTestTextRange(range.Start, range.End - range.Start))
+                DrawMatchPill(context, rect.Translate(origin), rowTop);
+        }
+    }
+
+    /// <summary>The current match's share of this row - see <see cref="RowSurface.DrawCurrentMatchPill"/>
+    /// for why it is drawn both before and after the text.</summary>
+    private void DrawCurrentMatch(DrawingContext context, TextLayout layout, int rowIndex, double textTop, double rowTop, (int Start, int End) chars, bool overText)
+    {
+        if (RowTextAt(rowIndex) is not { } text || chars.End > text.Length)
             return;
 
-        var origin = new Vector(TextOriginX - PanOffset, y);
-        foreach (var rect in HighlightRectsFor(rowIndex, layout))
-            context.FillRectangle(brush, rect.Translate(origin));
+        var origin = new Vector(TextOriginX - PanOffset, textTop);
+        string matchText = text.Substring(chars.Start, chars.End - chars.Start);
+        foreach (var rect in layout.HitTestTextRange(chars.Start, chars.End - chars.Start))
+            DrawCurrentMatchPill(context, rect.Translate(origin), rowTop, matchText, overText);
     }
 
     /// <summary>
-    /// The highlight rectangles for one row, in layout coordinates.
+    /// The characters of this row the current find match covers, or null when it misses the row.
+    /// From the match's bytes rather than re-found in the text, which is what tells it apart from
+    /// the other occurrences; a match running across a wrap has a share on each row.
+    /// </summary>
+    private (int Start, int End)? CurrentMatchCharsIn(int rowIndex)
+    {
+        if (this.viewModel is not { CurrentMatch: { } match, HighlightTerm.Length: > 0 } || DecodedRow(rowIndex) is not { } row)
+            return null;
+
+        long rowStart = row.RowStart;
+        long start = Math.Max(match.Offset, rowStart);
+        long end = Math.Min(match.Offset + match.Length, rowStart + row.DisplayByteLength);
+        if (end <= start)
+            return null;
+
+        return (row.CharIndexForByte((int)(start - rowStart)), row.CharIndexForByte((int)(end - rowStart)));
+    }
+
+    /// <summary>Test hook: the characters of a row the current find match covers.</summary>
+    internal (int Start, int End)? CurrentMatchChars(int rowIndex) => CurrentMatchCharsIn(rowIndex);
+
+    /// <summary>The highlight rectangles for one row, in layout coordinates, for tests.</summary>
+    internal IReadOnlyList<Rect> HighlightRectsFor(int rowIndex, TextLayout layout)
+    {
+        var rects = new List<Rect>();
+        foreach (var range in HighlightRangesFor(rowIndex))
+            rects.AddRange(layout.HitTestTextRange(range.Start, range.End - range.Start));
+        return rects;
+    }
+
+    /// <summary>
+    /// The find term's occurrences in one row's displayed text, as character ranges. Matching is
+    /// re-done against the text on screen rather than mapped from the search's byte offsets: the
+    /// row is decoded and substituted, so re-finding the term in what is shown lights up every
+    /// visible occurrence rather than only the one the search is sitting on.
     ///
     /// A match that straddles a soft-wrap boundary is the case worth describing. The row is only
     /// part of its line, so half the term sits here and half on the row below - and searching
     /// either row's text alone finds neither half. So the term is looked for in a window that
-    /// reaches one term-length into the neighbouring rows, and each row paints whatever part of a
+    /// reaches one term-length into the neighbouring rows, and each row gets whatever part of a
     /// match falls inside it. Both halves light up, in their own rows.
     ///
     /// The reach only crosses soft-wrap boundaries, never a real line ending: a line break is a
     /// place a match genuinely cannot span, and reaching across one would highlight text that
     /// merely happens to adjoin.
     /// </summary>
-    internal IReadOnlyList<Rect> HighlightRectsFor(int rowIndex, TextLayout layout)
+    private IEnumerable<(int Start, int End)> HighlightRangesFor(int rowIndex)
     {
         string? term = this.viewModel?.HighlightTerm;
         if (string.IsNullOrEmpty(term) || RowTextAt(rowIndex) is not { } text)
-            return Array.Empty<Rect>();
+            yield break;
 
         // One less than the term: any more cannot contribute to a match overlapping this row.
         int reach = term.Length - 1;
@@ -567,9 +623,8 @@ public class RawTextSurface : RowSurface
 
         var segments = SearchTextSplitter.Split(prefix + text + suffix, term);
         if (segments is null)
-            return Array.Empty<Rect>();
+            yield break;
 
-        List<Rect>? rects = null;
         foreach (var segment in segments)
         {
             if (!segment.IsMatch)
@@ -579,14 +634,9 @@ public class RawTextSurface : RowSurface
             // a neighbour paints only the part that is actually here.
             int start = Math.Max(segment.Start - prefix.Length, 0);
             int end = Math.Min(segment.Start - prefix.Length + segment.Length, text.Length);
-            if (end <= start)
-                continue;
-
-            rects ??= new List<Rect>();
-            rects.AddRange(layout.HitTestTextRange(start, end - start));
+            if (end > start)
+                yield return (start, end);
         }
-
-        return (IReadOnlyList<Rect>?)rects ?? Array.Empty<Rect>();
     }
 
     private string? RowTextAt(int rowIndex)

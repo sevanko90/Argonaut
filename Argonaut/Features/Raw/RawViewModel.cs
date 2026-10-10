@@ -8,6 +8,7 @@ using Argonaut.Engine.Detection;
 using Argonaut.Engine.Indexing;
 using Argonaut.Engine.Progress;
 using Argonaut.Engine.Saving;
+using Argonaut.Engine.Search;
 using Argonaut.Engine.Settings;
 using Argonaut.Features.Raw.Editing;
 using Argonaut.Features.Raw.Highlighting;
@@ -48,6 +49,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     private RawRowCollection? rows;
     private RawToolbarViewModel? toolbar;
     private string? highlightTerm;
+    private SearchMatch? currentMatch;
     private int? selectedRowIndex;
     private RawCaretController? caret;
     private RawCaretReadout? caretReadout;
@@ -519,7 +521,26 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     public string? HighlightTerm
     {
         get => this.highlightTerm;
-        set => SetField(ref this.highlightTerm, value);
+        set
+        {
+            if (SetField(ref this.highlightTerm, value))
+                CurrentMatch = null;
+        }
+    }
+
+    /// <summary>The find match last revealed, which the view draws stronger than the others,
+    /// until a reveal of anything else or a new term.</summary>
+    public SearchMatch? CurrentMatch
+    {
+        get => this.currentMatch;
+        private set => SetField(ref this.currentMatch, value);
+    }
+
+    /// <summary>Reveals a find match, which then becomes <see cref="CurrentMatch"/>.</summary>
+    public void RevealMatch(SearchMatch match, int rowIndex)
+    {
+        RevealOffset(match.Offset, rowIndex);
+        CurrentMatch = match;
     }
 
     /// <summary>Row index a search reveal wants scrolled/selected into view; the view mirrors
@@ -546,6 +567,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         // and the centred reveal that follows then finds it already on screen and leaves it
         // there. Ordering is load-bearing here, which is why the jump is tested end to end
         // rather than by calling the surface's reveal directly.
+        CurrentMatch = null;
         SelectRow(rowIndex);
         Caret?.PlaceAt(byteOffset);
     }

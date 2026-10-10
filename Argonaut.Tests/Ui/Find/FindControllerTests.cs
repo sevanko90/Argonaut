@@ -213,7 +213,7 @@ public class FindControllerTests
             File.WriteAllBytes(path, Encoding.UTF8.GetBytes(content));
             var navigator = new StubNavigator(path);
             var statuses = new List<string?>();
-            var controller = new FindController(statuses.Add, () => null);
+            var controller = new FindController(status => statuses.Add(status?.Description), () => null);
             controller.Attach(navigator);
 
             await test(controller, navigator, statuses);

@@ -122,7 +122,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private long publishedRequest = -1;
 
     /// <summary>Raised when the find bar's status text should change (null clears it).</summary>
-    public event Action<string?>? FindStatusChanged;
+    public event Action<FindStatus?>? FindStatusChanged;
 
     /// <summary>Raised when the find bar should clear its term/status (file open, switch, or close).</summary>
     public event Action? FindBarResetRequested;

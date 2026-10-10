@@ -26,7 +26,7 @@ namespace Argonaut.Ui.Find;
 /// </summary>
 public sealed class FindController
 {
-    private readonly Action<string?> statusChanged;
+    private readonly Action<FindStatus?> statusChanged;
     /// <summary>Makes the progress entry one scan reports through, or null to report nowhere.
     /// Each entry is finished here when its scan ends.</summary>
     private readonly Func<ProgressEntry?> progressFactory;
@@ -58,7 +58,7 @@ public sealed class FindController
     /// wait for a first match - which over a multi-GB file can last the whole scan - ends now.</summary>
     private CancellationTokenSource? pressCts;
 
-    public FindController(Action<string?> statusChanged, Func<ProgressEntry?> progressFactory)
+    public FindController(Action<FindStatus?> statusChanged, Func<ProgressEntry?> progressFactory)
     {
         this.statusChanged = statusChanged;
         this.progressFactory = progressFactory;
@@ -216,7 +216,7 @@ public sealed class FindController
             if (cursor.Fold(sessions, navigator!.OrderKey).HasStopAhead || complete)
                 return true;
 
-            statusChanged("Searching…");
+            statusChanged(FindStatus.Searching);
 
             var waits = new List<Task>(sessions.Length);
             foreach (var session in sessions)

@@ -67,7 +67,7 @@ public class JsonDiffFindTests
         await vm.FinalRefreshTask;
 
         var statuses = new List<string?>();
-        var controller = new FindController(statuses.Add, () => null);
+        var controller = new FindController(status => statuses.Add(status?.Description), () => null);
         controller.Attach(vm.CreateSearchNavigator());
 
         return new Harness

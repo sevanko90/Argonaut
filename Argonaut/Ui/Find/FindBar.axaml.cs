@@ -41,9 +41,11 @@ public partial class FindBar : UserControl
         SetStatus(null);
     }
 
-    public void SetStatus(string? status)
+    /// <summary>Shows the short status in the field, and the full wording as its tooltip.</summary>
+    public void SetStatus(FindStatus? status)
     {
-        StatusLabel.Text = status ?? string.Empty;
+        StatusLabel.Text = status?.Label ?? string.Empty;
+        ToolTip.SetTip(StatusLabel, status?.Description);
     }
 
     public void RequestFind(int direction)

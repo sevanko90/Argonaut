@@ -130,7 +130,10 @@ public partial class JsonView : UserControl
             return;
 
         if (e.PropertyName is null or nameof(JsonViewModel.HighlightTerm))
+        {
             Surface.HighlightTerm = vm.HighlightTerm;
+            Surface.CurrentMatch = vm.CurrentMatchIn(Surface.SelectedRow);
+        }
     }
 
     private void OnRevealRequested(object? sender, EventArgs e) => ApplyPendingReveal();
@@ -144,6 +147,7 @@ public partial class JsonView : UserControl
 
         vm.ClearPendingReveal();
         Surface.Reveal(offset, expandAncestors: true);
+        Surface.CurrentMatch = vm.CurrentMatchIn(Surface.SelectedRow);
     }
 
     private void OnRowsInvalidated(object? sender, EventArgs e)

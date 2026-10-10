@@ -69,7 +69,7 @@ public sealed class NdJsonSearchNavigator : ISearchNavigator
             return;
 
         // The line's tree reads its bytes directly, so the offset can be shown straight away.
-        nested.Reveal(relativeOffset);
+        nested.RevealMatch(relativeOffset);
     }
 
     /// <summary>

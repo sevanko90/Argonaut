@@ -102,6 +102,24 @@ public sealed class JsonViewTests : IDisposable
     });
 
     [Fact]
+    public Task ARevealedMatchIsTheCurrentOneInItsRow() => WithView("""{"fruit":"banana bandana","other":"nab"}""", async (_, vm, surface) =>
+    {
+        string json = File.ReadAllText(path);
+        vm.HighlightTerm = "an";
+        long third = json.IndexOf("an", json.IndexOf("ban", json.IndexOf("banana", StringComparison.Ordinal) + 1, StringComparison.Ordinal), StringComparison.Ordinal);
+
+        vm.RevealMatch(third);
+        await PumpAsync();
+
+        Assert.Equal(new TreeCurrentMatch(surface.SelectedRow!.Value.Key, 2), surface.CurrentMatch);
+
+        // Anything else revealed is not a match, and nothing is current.
+        vm.Reveal(json.IndexOf("\"nab\"", StringComparison.Ordinal));
+        await PumpAsync();
+        Assert.Null(surface.CurrentMatch);
+    });
+
+    [Fact]
     public Task NavigatingToAPathRevealsIt() => WithView(BigDocument(), async (_, vm, surface) =>
     {
         await vm.NavigateToPathAsync("$.items[19999].tags[1]");

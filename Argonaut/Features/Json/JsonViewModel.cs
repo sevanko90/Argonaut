@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Engine.Bytes;
@@ -93,6 +94,13 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable, IB
 
     private JsonToolbarViewModel? toolbar;
     private bool showIndentGuides;
+
+    // The find match last revealed, until a reveal of anything else.
+    private long? currentMatchOffset;
+
+    /// <summary>How far into a row a current match is looked for: past what a row's text shows,
+    /// so a match further in has nothing to draw.</summary>
+    private const int CurrentMatchReach = 64 * 1024;
 
     /// <summary>This document's header toolbar (see <see cref="IDocumentViewModel.Toolbar"/>).
     /// Null until LoadAsync creates it; always null for the nested per-NDJSON-line instances,
@@ -243,8 +251,16 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable, IB
     /// a multi-GB scan - waits for it: seeking there sooner would read every sibling from the
     /// last indexed point to the target on the UI thread.
     /// </summary>
-    public void Reveal(long offset)
+    public void Reveal(long offset) => Reveal(offset, isMatch: false);
+
+    /// <summary>Reveals a find match, which the tree then draws as the current one (see
+    /// <see cref="CurrentMatchIn"/>).</summary>
+    public void RevealMatch(long offset) => Reveal(offset, isMatch: true);
+
+    private void Reveal(long offset, bool isMatch)
     {
+        // Set first: the view may show the reveal before this returns.
+        currentMatchOffset = isMatch ? offset : null;
         if (IsCovered(offset))
         {
             ShowWhenReady(offset);
@@ -254,6 +270,31 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable, IB
         PendingReveal = null;
         revealAwaitingIndex = offset;
         _ = RevealWhenCoveredAsync(offset);
+    }
+
+    /// <summary>
+    /// Which of the find term's occurrences in <paramref name="row"/>'s text is the match last
+    /// revealed: the occurrences in the row's bytes before it, counted as the tree counts them in
+    /// its text. Null when the row does not hold it, or holds it further in than a row shows.
+    /// </summary>
+    public TreeCurrentMatch? CurrentMatchIn(TreeRow? row)
+    {
+        if (currentMatchOffset is not { } offset || row is not { } shown || string.IsNullOrEmpty(HighlightTerm) || Bytes is not { } bytes)
+            return null;
+
+        long before = offset - shown.Node.RowStart;
+        if (before < 0 || before > CurrentMatchReach)
+            return null;
+
+        string preceding = Encoding.UTF8.GetString(bytes.RequireContiguous(shown.Node.RowStart, (int)before));
+        int occurrence = 0;
+        for (int at = preceding.IndexOf(HighlightTerm, StringComparison.OrdinalIgnoreCase); at >= 0;
+             at = preceding.IndexOf(HighlightTerm, at + HighlightTerm.Length, StringComparison.OrdinalIgnoreCase))
+        {
+            occurrence++;
+        }
+
+        return new TreeCurrentMatch(shown.Key, occurrence);
     }
 
     private void ShowWhenReady(long offset)

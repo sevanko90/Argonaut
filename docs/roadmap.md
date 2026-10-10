@@ -14,10 +14,6 @@ Two decision records hold the reasoning behind items here that is too long to re
 - **The array table on the sparse index.** Open "view as table" on arrays of objects and of
   scalars, expand and collapse column headers, reshape, click cells (scalar and container) and use
   the cell pane's tree.
-- **The diff on the tree surface.** Both panes line up while scrolling, with tints, change marks,
-  array indices and badges; expand unchanged, added, removed, moved and moved-and-changed rows and
-  a range; the context bar's values and paths; next/previous change; "changes only"; find across
-  both files; the scrollbar over a long diff.
 
 ## Editing
 
@@ -273,9 +269,6 @@ Measure against [index-benchmarks.md](index-benchmarks.md), rerun the same way.
 - **Skip the progress bar for work about to finish.** `ProgressBoard` shows anything still
   running after 450ms; it could also project the time left and stay hidden when that is under
   ~300ms. Only if a pointless bar is seen in practice.
-- **Chrome detail polish.** Row hover restyling and a search-highlight pill - deferred over
-  rendering-speed concerns on the drawn tree. The compact
-  density (22px rows, 16px indent) is settled and not part of this.
 
 ## Distribution
 

@@ -30,6 +30,10 @@
             <SolidColorBrush x:Key="AppPopupBackgroundBrush" Color="#FFFFFF" />
             <SolidColorBrush x:Key="AppDangerHoverBrush" Color="#EF4444" />
             <SolidColorBrush x:Key="AppSearchHighlightBrush" Color="#FDE68A" />
+            <SolidColorBrush x:Key="AppSearchMatchBrush" Color="#FEF3C7" />
+            <SolidColorBrush x:Key="AppSearchMatchEdgeBrush" Color="#E9C46A" />
+            <SolidColorBrush x:Key="AppSearchCurrentBrush" Color="#F59E0B" />
+            <SolidColorBrush x:Key="AppSearchCurrentTextBrush" Color="#1C1D21" />
             <SolidColorBrush x:Key="AppTextSelectionBrush" Color="#C2D9FF" />
             <SolidColorBrush x:Key="AppEditMarkBrush" Color="#F59E0B" />
             <SolidColorBrush x:Key="AppChipBrush" Color="#EEEFF2" />
@@ -155,6 +159,10 @@
             <SolidColorBrush x:Key="AppPopupBackgroundBrush" Color="#26272D" />
             <SolidColorBrush x:Key="AppDangerHoverBrush" Color="#F87171" />
             <SolidColorBrush x:Key="AppSearchHighlightBrush" Color="#7A5B00" />
+            <SolidColorBrush x:Key="AppSearchMatchBrush" Color="#4A3A08" />
+            <SolidColorBrush x:Key="AppSearchMatchEdgeBrush" Color="#9A7410" />
+            <SolidColorBrush x:Key="AppSearchCurrentBrush" Color="#F2B43C" />
+            <SolidColorBrush x:Key="AppSearchCurrentTextBrush" Color="#18191D" />
             <SolidColorBrush x:Key="AppTextSelectionBrush" Color="#2F5F9F" />
             <SolidColorBrush x:Key="AppEditMarkBrush" Color="#F59E0B" />
             <SolidColorBrush x:Key="AppChipBrush" Color="#25262C" />

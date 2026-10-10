@@ -310,8 +310,12 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
     protected override void OnIndexingCompleted()
     {
         OnPropertyChanged(nameof(RowCount));
-        StatusText = DocumentStatusLine.Compose(FilePath, $"{RowCount:N0} rows");
+        ReportRowCount();
     }
+
+    /// <summary>The finished table's row count in the status line - which a re-shape changes, so
+    /// it is said again then: three columns of 300 numbers is 100 rows.</summary>
+    private void ReportRowCount() => StatusText = DocumentStatusLine.Compose(FilePath, $"{RowCount:N0} rows");
 
     protected override void OnIndexingFailed(IndexFailure? failure)
     {
@@ -397,6 +401,8 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
         OnPropertyChanged(nameof(Structure));
         OnPropertyChanged(nameof(ColumnCount));
         OnPropertyChanged(nameof(RowCount));
+        if (IndexingTask.IsCompletedSuccessfully)
+            ReportRowCount();
     }
 
     /// <summary>Headers for columns that are not routes into an element - the reshape modes'

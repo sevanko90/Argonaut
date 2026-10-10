@@ -151,6 +151,21 @@ public class JsonArrayTableViewModelTests
             return Task.CompletedTask;
         });
 
+    /// <summary>The status line's row count is the table's, which a re-shape changes.</summary>
+    [Fact]
+    public Task Reshaping_SaysTheNewRowCount()
+        => WithDocument("[1,2,3,4,5,6]", async document =>
+        {
+            await document.IndexingTask;
+            await Task.Yield();
+            Assert.EndsWith("6 rows", document.StatusText);
+
+            var toolbar = Assert.IsType<JsonArrayTableToolbarViewModel>(document.Toolbar);
+            toolbar.SelectedColumnMode = toolbar.ColumnModes.Single(o => o.Mode == JsonArrayColumnMode.Reshape && o.Columns == 3);
+
+            Assert.EndsWith("2 rows", document.StatusText);
+        });
+
     [Fact]
     public Task PickingByPropertyAgain_RestoresTheValueColumn()
         => WithDocument("[1,2,3,4]", document =>

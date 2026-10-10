@@ -1,3 +1,5 @@
+using Avalonia.Media;
+
 namespace Argonaut.Ui.Tree;
 
 /// <summary>
@@ -53,6 +55,8 @@ public enum TreeRunIcon : byte
     Table,
     /// <summary>The value's text in full, elsewhere.</summary>
     FullText,
+    /// <summary>A credential - a decoded token.</summary>
+    Key,
 }
 
 /// <summary>One stretch of a row's text in one style.</summary>
@@ -60,4 +64,6 @@ public enum TreeRunIcon : byte
 /// the format's own token for what the link does. The surface only knows it is clickable.</param>
 /// <param name="Icon">The icon a <see cref="TreeRunStyle.Chip"/> or <see cref="TreeRunStyle.Action"/>
 /// leads with; ignored for other styles.</param>
-public readonly record struct TreeRun(string Text, TreeRunStyle Style, object? Link = null, TreeRunIcon Icon = TreeRunIcon.None);
+/// <param name="Swatch">A colour a chip leads with in place of its icon - the colour a value
+/// names.</param>
+public readonly record struct TreeRun(string Text, TreeRunStyle Style, object? Link = null, TreeRunIcon Icon = TreeRunIcon.None, Color? Swatch = null);

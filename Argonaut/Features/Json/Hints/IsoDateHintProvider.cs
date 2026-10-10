@@ -35,7 +35,7 @@ public sealed class IsoDateHintProvider : IValueHintProvider
         return true;
     }
 
-    public ValueHint? FormatHint(in ValueHintCandidate candidate, long valueOffset)
+    public ValueHint? FormatHint(in ValueHintCandidate candidate, ReadOnlySpan<byte> rawValue, long valueOffset)
     {
         var shape = (IsoDateShape)candidate.SchemeHint;
         if (shape == IsoDateShape.Date)

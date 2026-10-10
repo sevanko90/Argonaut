@@ -7,6 +7,7 @@ using Avalonia.Automation.Peers;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
+using Avalonia.Media.Immutable;
 using Avalonia.Media.TextFormatting;
 using Avalonia.Threading;
 using Avalonia.Utilities;
@@ -103,11 +104,12 @@ public class TreeSurface : RowSurface
     private const double ChipIconSize = 11;
     private const double ChipIconGap = 5;
     private const double ChipIconStroke = 2;
+    private const double ChipSwatchRadius = 2.5;
 
 
     /// <summary>One note or chip after a pane's text, at <paramref name="X"/> from the text's
     /// start.</summary>
-    private sealed record TrailingItem(TextLayout Label, IBrush Brush, TreeRunStyle Style, TreeRunIcon Icon, double X, double Width, object? Link)
+    private sealed record TrailingItem(TextLayout Label, IBrush Brush, TreeRunStyle Style, TreeRunIcon Icon, IBrush? Swatch, double X, double Width, object? Link)
     {
         public bool IsChip => Style != TreeRunStyle.Note;
     }
@@ -163,6 +165,7 @@ public class TreeSurface : RowSurface
     private long turnStarted;
     private double turnFrom;
     private readonly Dictionary<IBrush, Pen> expanderPens = new();
+    private Pen? swatchEdgePen;
 
     // Per realized row, the open containers its indent guides run down from: a span of
     // guideAncestors, each an ancestor's depth and inset (the inset arrays are shared with insets).
@@ -850,12 +853,13 @@ public class TreeSurface : RowSurface
             var brush = runBrushes is not null && runBrushes.TryGetValue(run.Style, out var styled) ? styled : foreground;
             var label = new TextLayout(ControlGlyphs.ForDisplay(run.Text), typeface, labelSize, brush);
             bool isChip = run.Style != TreeRunStyle.Note;
-            var icon = isChip && runIcons is not null && runIcons.ContainsKey(run.Icon) ? run.Icon : TreeRunIcon.None;
+            var swatch = isChip && run.Swatch is { } colour ? new ImmutableSolidColorBrush(colour) : null;
+            var icon = swatch is null && isChip && runIcons is not null && runIcons.ContainsKey(run.Icon) ? run.Icon : TreeRunIcon.None;
             double width = label.WidthIncludingTrailingWhitespace
                 + (isChip ? 2 * ChipPadding : 0)
-                + (icon != TreeRunIcon.None ? ChipIconSize + ChipIconGap : 0);
+                + (icon != TreeRunIcon.None || swatch is not null ? ChipIconSize + ChipIconGap : 0);
 
-            items.Add(new TrailingItem(label, brush, run.Style, icon, x, width, run.Link));
+            items.Add(new TrailingItem(label, brush, run.Style, icon, swatch, x, width, run.Link));
             x += width + TrailingSpacing;
         }
 
@@ -1161,7 +1165,12 @@ public class TreeSurface : RowSurface
                     context.DrawRectangle(fill, null, new RoundedRect(new Rect(labelX, ChipTop(y), item.Width, ChipHeight), ChipRadius));
 
                 labelX += ChipPadding;
-                if (item.Icon != TreeRunIcon.None && runIcons!.TryGetValue(item.Icon, out var glyph))
+                if (item.Swatch is { } swatch)
+                {
+                    DrawSwatch(context, swatch, item.Brush, new Rect(labelX, y + (RowHeight - ChipIconSize) / 2, ChipIconSize, ChipIconSize));
+                    labelX += ChipIconSize + ChipIconGap;
+                }
+                else if (item.Icon != TreeRunIcon.None && runIcons!.TryGetValue(item.Icon, out var glyph))
                 {
                     double scale = ChipIconSize / 24;
                     var at = Matrix.CreateScale(scale, scale) * Matrix.CreateTranslation(labelX, y + (RowHeight - ChipIconSize) / 2);
@@ -1176,6 +1185,39 @@ public class TreeSurface : RowSurface
     }
 
     private static double ChipTop(double rowTop) => rowTop + (RowHeight - ChipHeight) / 2;
+
+    /// <summary>
+    /// A colour swatch in a chip: a checker under it, so a translucent colour shows as one, and a
+    /// faint edge in the chip's text colour, so a colour close to the chip's own still has a shape.
+    /// </summary>
+    private void DrawSwatch(DrawingContext context, IBrush swatch, IBrush edge, Rect area)
+    {
+        var shape = new RoundedRect(area, ChipSwatchRadius);
+        using (context.PushClip(shape))
+        {
+            if (swatch is ISolidColorBrush { Color.A: < 255 })
+            {
+                double half = area.Width / 2;
+                using (context.PushOpacity(0.35))
+                {
+                    context.FillRectangle(edge, new Rect(area.X, area.Y, half, half));
+                    context.FillRectangle(edge, new Rect(area.X + half, area.Y + half, half, half));
+                }
+            }
+
+            context.FillRectangle(swatch, area);
+        }
+
+        using (context.PushOpacity(0.45))
+            context.DrawRectangle(null, SwatchEdgePen(edge), new RoundedRect(area.Deflate(0.5), ChipSwatchRadius));
+    }
+
+    private Pen SwatchEdgePen(IBrush brush)
+    {
+        if (swatchEdgePen?.Brush != brush)
+            swatchEdgePen = new Pen(brush, 1);
+        return swatchEdgePen;
+    }
 
     private Pen IconPen(IBrush brush)
     {

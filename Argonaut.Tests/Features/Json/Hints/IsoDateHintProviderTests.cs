@@ -20,8 +20,9 @@ public class IsoDateHintProviderTests
         var settings = new DateHintSettings();
         settings.SetTimeZoneMode(mode);
         var provider = new IsoDateHintProvider(settings, new FixedClock());
-        return provider.TryClassify(JsonTokenKind.String, Encoding.UTF8.GetBytes(value), out var candidate)
-            ? provider.FormatHint(candidate, 0)?.Text
+        byte[] raw = Encoding.UTF8.GetBytes(value);
+        return provider.TryClassify(JsonTokenKind.String, raw, out var candidate)
+            ? provider.FormatHint(candidate, raw, 0)?.Text
             : null;
     }
 

@@ -34,7 +34,7 @@ public sealed class DateHintProvider : IValueHintProvider
         return true;
     }
 
-    public ValueHint? FormatHint(in ValueHintCandidate candidate, long valueOffset)
+    public ValueHint? FormatHint(in ValueHintCandidate candidate, ReadOnlySpan<byte> rawValue, long valueOffset)
     {
         if (settings.FileDefaultScheme == DateDecodingScheme.Off)
             return null;

@@ -582,6 +582,45 @@ public sealed class TreeSurfaceTests
         return Task.CompletedTask;
     }, painter: bytes => new ChippingPainter(bytes));
 
+    /// <summary>Atoms run far past the window, then trail a note and an action.</summary>
+    private sealed class OverlongPainter(byte[] bytes) : ITreeRowPainter
+    {
+        private readonly SExpressionTreeFormat.Painter inner = new(bytes);
+
+        public void AppendRuns(in TreeRow row, List<TreeRun> runs)
+        {
+            inner.AppendRuns(row, runs);
+            if (row.Shape != TreeRowShape.Leaf)
+                return;
+
+            runs.Add(new TreeRun(new string('x', 600), TreeRunStyle.String));
+            runs.Add(new TreeRun("4.9 KB", TreeRunStyle.Note));
+            runs.Add(new TreeRun("Open", TreeRunStyle.Action, Link: row.Node.ValueStart, Icon: TreeRunIcon.FullText));
+        }
+
+        public string? Marker(in TreeRow row) => null;
+    }
+
+    [Fact]
+    public Task WhatTrailsAnOverlongRowIsPinnedInsideTheWindow() => WithSurface(defaultDepth: 9, async h =>
+    {
+        int leafIndex = h.Surface.RealizedRows.ToList().FindIndex(r => r.Shape == TreeRowShape.Leaf);
+        var leaf = h.Surface.RealizedRows[leafIndex];
+        TreeLinkClickedEventArgs? clicked = null;
+        h.Surface.LinkClicked += (_, e) => clicked = e;
+
+        var bounds = h.Surface.LinkBounds(leafIndex)!.Value;
+        Assert.True(bounds.Right <= h.Surface.Bounds.Width, $"the action ends at {bounds.Right}, past the surface's {h.Surface.Bounds.Width}");
+        Assert.True(bounds.Left > h.Surface.Bounds.Width / 2, "pinned to the right, not the left");
+
+        var point = h.Surface.TranslatePoint(bounds.Center, h.Window)!.Value;
+        h.Window.MouseDown(point, MouseButton.Left);
+        h.Window.MouseUp(point, MouseButton.Left);
+        await PumpAsync();
+
+        Assert.Equal(leaf.Node.ValueStart, clicked?.Link);
+    }, painter: bytes => new OverlongPainter(bytes));
+
     [Fact]
     public Task AltExpandOpensTheWholeSubtreeAndAltCollapseForgetsIt() => WithSurface(defaultDepth: 1, async h =>
     {

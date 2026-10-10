@@ -45,8 +45,13 @@
         <!-- Control shape and fills come from the Fluent keys AppColors.axaml overrides
              (ControlCornerRadius, the 28px minimum heights, the fill and field brushes), so every
              stock control shares one look without a style here per control. -->
+        <!-- Selected text in a field: the same soft wash as the raw view's selection, with the
+             text keeping its own colour. Fluent's accent fill with unchanged dark text was
+             unreadable in the light theme. -->
         <Style Selector="TextBox">
             <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="SelectionBrush" Value="{DynamicResource AppTextSelectionBrush}" />
+            <Setter Property="SelectionForegroundBrush" Value="{DynamicResource AppTextBrush}" />
         </Style>
         <Style Selector="ComboBox">
             <Setter Property="VerticalContentAlignment" Value="Center" />

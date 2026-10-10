@@ -81,6 +81,9 @@ public class TreeSurface : RowSurface
     private const double TrailingGap = 12;
     private const double TrailingSpacing = 6;
 
+    /// <summary>Space kept between pinned trailing items and the pane's right edge.</summary>
+    private const double TrailingPinMargin = 8;
+
     // A chip: its inner padding, height and corner, and the icon it leads with - sized and
     // weighted (on Lucide's 24-unit grid) to sit with the smaller interface text inside it.
     private const double ChipPadding = 6;
@@ -326,8 +329,13 @@ public class TreeSurface : RowSurface
 
         for (int pane = 0; pane < laid.Panes.Length; pane++)
         {
-            if (laid.Panes[pane].Trailing?.Find(item => item.Link is not null) is { } item)
-                return new Rect(ArrowLeft(index, pane) + ToggleWidth + item.X, ChipTop(index * RowHeight - anchorPixel), item.Width, ChipHeight);
+            var laidPane = laid.Panes[pane];
+            if (laidPane.Trailing?.Find(item => item.Link is not null) is { } item)
+            {
+                double textX = ArrowLeft(index, pane) + ToggleWidth;
+                double shift = TrailingShift(laidPane, textX, PaneLeft(pane) + PaneWidth);
+                return new Rect(textX + shift + item.X, ChipTop(index * RowHeight - anchorPixel), item.Width, ChipHeight);
+            }
         }
 
         return null;
@@ -891,7 +899,37 @@ public class TreeSurface : RowSurface
         laid.Layout.Draw(context, new Point(textX, textTop));
 
         if (laid.Trailing is { } trailing)
-            DrawTrailing(context, row, trailing, textX, y);
+        {
+            double shift = TrailingShift(laid, textX, paneRight);
+            if (shift < 0)
+                MaskUnderPinned(context, row, textX + shift + trailing[0].X - TrailingGap, paneRight, y);
+            DrawTrailing(context, row, trailing, textX + shift, y);
+        }
+    }
+
+    /// <summary>
+    /// How far a pane's trailing items move left so they end inside it. A row whose text runs past
+    /// the edge - a value cut at the display cap - keeps its size note and its actions in view,
+    /// over the end of the text, rather than out where only panning would find them.
+    /// </summary>
+    private static double TrailingShift(PaneLayout laid, double textX, double paneRight)
+    {
+        if (laid.Trailing is not { Count: > 0 } trailing)
+            return 0;
+
+        double overflow = textX + laid.Width + TrailingPinMargin - paneRight;
+        return overflow <= 0 ? 0 : -Math.Min(overflow, trailing[0].X);
+    }
+
+    /// <summary>Covers the text pinned trailing items sit over, in whatever the row shows behind
+    /// its text, so the two do not draw through each other.</summary>
+    private void MaskUnderPinned(DrawingContext context, in TreeRow row, double left, double paneRight, double y)
+    {
+        var area = new Rect(left, y, Math.Max(0, paneRight - left), RowHeight);
+        if (Background is { } background)
+            context.FillRectangle(background, area);
+        if (SelectionBrush is { } selected && selection is { } cursor && row.Key == cursor.Current.Key)
+            context.FillRectangle(selected, area);
     }
 
     /// <summary>The notes and chips after a pane's text; actions only where they show.</summary>
@@ -1105,7 +1143,8 @@ public class TreeSurface : RowSurface
         var laid = LayoutFor(row, new Typeface(FontFamily), FontSize).Panes[pane];
         double arrowX = ArrowLeft(index, pane);
 
-        if (LinkAt(laid, point.X - arrowX - ToggleWidth, point.Y - CentreInRow(laid.Layout, index * RowHeight - anchorPixel)) is { } link)
+        double shift = TrailingShift(laid, arrowX + ToggleWidth, PaneLeft(pane) + PaneWidth);
+        if (LinkAt(laid, point.X - arrowX - ToggleWidth, point.Y - CentreInRow(laid.Layout, index * RowHeight - anchorPixel), shift) is { } link)
         {
             Select(row);
             LinkClicked?.Invoke(this, new TreeLinkClickedEventArgs(row, link));
@@ -1145,9 +1184,11 @@ public class TreeSurface : RowSurface
         if (!overEdge && document is not null && RowAt(point.Y) is { } hovered)
         {
             var laid = LayoutFor(hovered.Row, new Typeface(FontFamily), FontSize).Panes[pane];
-            double x = point.X - ArrowLeft(hovered.Index, pane) - ToggleWidth;
-            overLink = LinkAt(laid, x, point.Y - CentreInRow(laid.Layout, hovered.Index * RowHeight - anchorPixel)) is not null;
-            SetHover(hovered.Row.Key, TrailingAt(laid, x));
+            double textX = ArrowLeft(hovered.Index, pane) + ToggleWidth;
+            double x = point.X - textX;
+            double shift = TrailingShift(laid, textX, PaneLeft(pane) + PaneWidth);
+            overLink = LinkAt(laid, x, point.Y - CentreInRow(laid.Layout, hovered.Index * RowHeight - anchorPixel), shift) is not null;
+            SetHover(hovered.Row.Key, TrailingAt(laid, x, shift));
         }
         else
         {
@@ -1206,11 +1247,16 @@ public class TreeSurface : RowSurface
         return null;
     }
 
-    /// <summary>The link under a point given in the row text's own coordinates.</summary>
-    private static object? LinkAt(PaneLayout laid, double x, double y)
+    /// <summary>The link under a point given in the row text's own coordinates, with the
+    /// trailing items moved by <paramref name="trailingShift"/> (see <see cref="TrailingShift"/>).</summary>
+    private static object? LinkAt(PaneLayout laid, double x, double y, double trailingShift)
     {
-        if (TrailingAt(laid, x) is var item and >= 0)
+        if (TrailingAt(laid, x, trailingShift) is var item and >= 0)
             return laid.Trailing![item].Link;
+
+        // Text covered by pinned trailing items is not there to click.
+        if (trailingShift < 0 && x >= laid.Trailing![0].X + trailingShift - TrailingGap)
+            return null;
 
         if (laid.Links is null || x < 0 || x > laid.Layout.WidthIncludingTrailingWhitespace)
             return null;
@@ -1227,11 +1273,12 @@ public class TreeSurface : RowSurface
 
     /// <summary>The trailing item under an x given from the row text's start, or -1. An action is
     /// hit whether or not it is drawn: the pointer being there makes its row the hovered one.</summary>
-    private static int TrailingAt(PaneLayout laid, double x)
+    private static int TrailingAt(PaneLayout laid, double x, double trailingShift)
     {
         if (laid.Trailing is not { } trailing)
             return -1;
 
+        x -= trailingShift;
         for (int i = 0; i < trailing.Count; i++)
         {
             if (x >= trailing[i].X && x < trailing[i].X + trailing[i].Width)

@@ -31,6 +31,9 @@ public sealed class TreeSurfaceTests
         Dispatcher.UIThread.RunJobs();
     }
 
+    /// <summary>The modifier that makes a link in a row's text open: Cmd on macOS, Ctrl elsewhere.</summary>
+    private static RawInputModifiers Command => OperatingSystem.IsMacOS() ? RawInputModifiers.Meta : RawInputModifiers.Control;
+
     private static void Press(Window window, Key key) => window.KeyPress(key, RawInputModifiers.None, PhysicalKey.None, string.Empty);
 
     private sealed record Harness(Window Window, TreeSurface Surface, byte[] Bytes, List<TreeRow> Rows, TreeDocument Document);
@@ -455,8 +458,8 @@ public sealed class TreeSurfaceTests
         Assert.True(bounds.X >= RightPaneLeft(h.Surface));
         var point = h.Surface.TranslatePoint(new Point(bounds.X + 4, bounds.Center.Y), h.Window)!.Value;
 
-        h.Window.MouseDown(point, MouseButton.Left);
-        h.Window.MouseUp(point, MouseButton.Left);
+        h.Window.MouseDown(point, MouseButton.Left, Command);
+        h.Window.MouseUp(point, MouseButton.Left, Command);
         await PumpAsync();
 
         Assert.Equal(leaf.Node.ValueStart, clicked?.Link);
@@ -531,7 +534,7 @@ public sealed class TreeSurfaceTests
     }, painter: bytes => new MarkedListsPainter(bytes));
 
     [Fact]
-    public Task ClickingALinkRaisesItInsteadOfToggling() => WithSurface(defaultDepth: 9, async h =>
+    public Task CommandClickingALinkInTheTextRaisesIt() => WithSurface(defaultDepth: 9, async h =>
     {
         int leafIndex = h.Surface.RealizedRows.ToList().FindIndex(r => r.Shape == TreeRowShape.Leaf);
         var leaf = h.Surface.RealizedRows[leafIndex];
@@ -543,12 +546,31 @@ public sealed class TreeSurfaceTests
         var point = bounds.Center;
         var translated = h.Surface.TranslatePoint(point, h.Window)!.Value;
 
-        h.Window.MouseDown(translated, MouseButton.Left);
-        h.Window.MouseUp(translated, MouseButton.Left);
+        h.Window.MouseDown(translated, MouseButton.Left, Command);
+        h.Window.MouseUp(translated, MouseButton.Left, Command);
         await PumpAsync();
 
         Assert.NotNull(clicked);
         Assert.Equal(leaf.Node.ValueStart, clicked!.Link);
+        Assert.Equal(leaf.Key, h.Surface.SelectedRow!.Value.Key);
+    }, painter: bytes => new LinkingPainter(bytes));
+
+    /// <summary>Clicking a row is how it is selected, so a plain click on a link in its text
+    /// selects it and opens nothing.</summary>
+    [Fact]
+    public Task APlainClickOnALinkInTheTextOnlySelects() => WithSurface(defaultDepth: 9, async h =>
+    {
+        int leafIndex = h.Surface.RealizedRows.ToList().FindIndex(r => r.Shape == TreeRowShape.Leaf);
+        var leaf = h.Surface.RealizedRows[leafIndex];
+        TreeLinkClickedEventArgs? clicked = null;
+        h.Surface.LinkClicked += (_, e) => clicked = e;
+
+        var translated = h.Surface.TranslatePoint(h.Surface.LinkBounds(leafIndex)!.Value.Center, h.Window)!.Value;
+        h.Window.MouseDown(translated, MouseButton.Left);
+        h.Window.MouseUp(translated, MouseButton.Left);
+        await PumpAsync();
+
+        Assert.Null(clicked);
         Assert.Equal(leaf.Key, h.Surface.SelectedRow!.Value.Key);
     }, painter: bytes => new LinkingPainter(bytes));
 

@@ -157,6 +157,12 @@ public class TreeSurface : RowSurface
     private (long, bool)? hoveredKey;
     private int hoveredItem = -1;
 
+    // The link in a row's text under the pointer while the command modifier is held, drawn
+    // underlined; and where the pointer last was, so pressing the modifier shows it.
+    private sealed record UnderlinedLink((long, bool) RowKey, int Pane, int Start, int Length);
+    private UnderlinedLink? underlinedLink;
+    private Point? lastPointer;
+
     // The pane whose expander is under the pointer, on the hovered row, or -1.
     private int hoveredExpanderPane = -1;
 
@@ -1015,6 +1021,11 @@ public class TreeSurface : RowSurface
         int current = pane == 0 && currentMatch is { } match && match.RowKey == row.Key ? match.Occurrence : -1;
         DrawHighlights(context, laid.Layout, laid.Text, textX, textTop, y, current);
         laid.Layout.Draw(context, new Point(textX, textTop));
+        if (underlinedLink is { } underline && underline.RowKey == row.Key && underline.Pane == pane)
+        {
+            foreach (var rect in laid.Layout.HitTestTextRange(underline.Start, underline.Length))
+                context.FillRectangle(foreground, new Rect(textX + rect.X, textTop + rect.Bottom - 1, rect.Width, 1));
+        }
         if (current >= 0)
             DrawCurrentMatch(context, laid.Layout, laid.Text, textX, textTop, y, current);
 
@@ -1424,7 +1435,8 @@ public class TreeSurface : RowSurface
         double arrowX = ArrowLeft(index, pane);
 
         double shift = TrailingShift(laid, arrowX + ToggleWidth, PaneLeft(pane) + PaneWidth);
-        if (LinkAt(laid, point.X - arrowX - ToggleWidth, point.Y - CentreInRow(laid.Layout, index * RowHeight - anchorPixel), shift) is { } link)
+        if (LinkAt(laid, point.X - arrowX - ToggleWidth, point.Y - CentreInRow(laid.Layout, index * RowHeight - anchorPixel), shift,
+                IsCommandHeld(e.KeyModifiers)) is { } link)
         {
             Select(row);
             LinkClicked?.Invoke(this, new TreeLinkClickedEventArgs(row, link));
@@ -1458,30 +1470,63 @@ public class TreeSurface : RowSurface
             return;
         }
 
+        lastPointer = point;
+        UpdateHover(point, e.KeyModifiers);
+        UpdateToolTip(point);
+    }
+
+    /// <summary>
+    /// What the pointer is over: the hovered row and chip, the expander, and - with the command
+    /// modifier held - a link in the row's text, underlined to show it will open. Also run when a
+    /// modifier is pressed or let go, so the link shows without the pointer moving.
+    /// </summary>
+    private void UpdateHover(Point point, KeyModifiers modifiers)
+    {
         bool overEdge = GutterEdgeAt(point.X) is not null;
         int pane = PaneAt(point.X);
         bool overLink = false;
+        UnderlinedLink? underline = null;
         if (!overEdge && document is not null && RowAt(point.Y) is { } hovered)
         {
             var laid = LayoutFor(hovered.Row, new Typeface(FontFamily), FontSize).Panes[pane];
             double arrowX = ArrowLeft(hovered.Index, pane);
             double textX = arrowX + ToggleWidth;
             double x = point.X - textX;
+            double y = point.Y - CentreInRow(laid.Layout, hovered.Index * RowHeight - anchorPixel);
             double shift = TrailingShift(laid, textX, PaneLeft(pane) + PaneWidth);
-            overLink = LinkAt(laid, x, point.Y - CentreInRow(laid.Layout, hovered.Index * RowHeight - anchorPixel), shift) is not null;
+            int trailing = TrailingAt(laid, x, shift);
+            if (trailing < 0 && IsCommandHeld(modifiers) && TextLinkAt(laid, x, y, shift) is { } textLink)
+                underline = new UnderlinedLink(hovered.Row.Key, pane, textLink.Start, textLink.Length);
+            overLink = (trailing >= 0 && laid.Trailing![trailing].Link is not null) || underline is not null;
             bool overExpander = DrawsArrow(hovered.Row, laid) && IsOnExpander(laid, arrowX, point.X);
-            SetHover(hovered.Row.Key, TrailingAt(laid, x, shift), overExpander ? pane : -1);
+            SetHover(hovered.Row.Key, trailing, overExpander ? pane : -1);
         }
         else
         {
             SetHover(null, -1, -1);
         }
 
+        if (underline != underlinedLink)
+        {
+            underlinedLink = underline;
+            InvalidateVisual();
+        }
+
         Cursor = overEdge ? new Cursor(StandardCursorType.SizeWestEast)
             : overLink ? new Cursor(StandardCursorType.Hand)
             : null;
+    }
 
-        UpdateToolTip(point);
+    /// <summary>Whether the platform's command modifier is held - Cmd on macOS, Ctrl elsewhere -
+    /// which is what makes a link in a row's text open rather than select the row.</summary>
+    private static bool IsCommandHeld(KeyModifiers modifiers)
+        => (modifiers & (OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control)) != 0;
+
+    protected override void OnKeyUp(KeyEventArgs e)
+    {
+        base.OnKeyUp(e);
+        if (lastPointer is { } point)
+            UpdateHover(point, e.KeyModifiers);
     }
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
@@ -1501,6 +1546,12 @@ public class TreeSurface : RowSurface
         base.OnPointerExited(e);
         SetToolTip(null);
         SetHover(null, -1, -1);
+        lastPointer = null;
+        if (underlinedLink is not null)
+        {
+            underlinedLink = null;
+            InvalidateVisual();
+        }
     }
 
     private (TreeRow Row, int Index)? RowAt(double y)
@@ -1531,11 +1582,20 @@ public class TreeSurface : RowSurface
 
     /// <summary>The link under a point given in the row text's own coordinates, with the
     /// trailing items moved by <paramref name="trailingShift"/> (see <see cref="TrailingShift"/>).</summary>
-    private static object? LinkAt(PaneLayout laid, double x, double y, double trailingShift)
+    /// <summary>The link under a point given from the row text's start: a chip's, or with the
+    /// command modifier held, one in the row's text - a plain click on the text selects the row,
+    /// which is what clicking a row is for.</summary>
+    private static object? LinkAt(PaneLayout laid, double x, double y, double trailingShift, bool commandHeld)
     {
         if (TrailingAt(laid, x, trailingShift) is var item and >= 0)
             return laid.Trailing![item].Link;
 
+        return commandHeld ? TextLinkAt(laid, x, y, trailingShift)?.Link : null;
+    }
+
+    /// <summary>The link in the row's own text under a point, and the characters it covers.</summary>
+    private static (int Start, int Length, object Link)? TextLinkAt(PaneLayout laid, double x, double y, double trailingShift)
+    {
         // Text covered by pinned trailing items is not there to click.
         if (trailingShift < 0 && x >= laid.Trailing![0].X + trailingShift - TrailingGap)
             return null;
@@ -1544,10 +1604,10 @@ public class TreeSurface : RowSurface
             return null;
 
         int position = laid.Layout.HitTestPoint(new Point(x, Math.Clamp(y, 0, laid.Layout.Height - 1))).TextPosition;
-        foreach (var (start, length, link) in laid.Links)
+        foreach (var textLink in laid.Links)
         {
-            if (position >= start && position < start + length)
-                return link;
+            if (position >= textLink.Start && position < textLink.Start + textLink.Length)
+                return textLink;
         }
 
         return null;
@@ -1673,6 +1733,8 @@ public class TreeSurface : RowSurface
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
+        if (lastPointer is { } pointer)
+            UpdateHover(pointer, e.KeyModifiers);
         if (document is null || anchor is null || e.Handled)
             return;
 

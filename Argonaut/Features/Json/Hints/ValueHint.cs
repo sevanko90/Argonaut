@@ -10,6 +10,7 @@ public enum ValueHintKind : byte
     IsoDate,
     Colour,
     Jwt,
+    Url,
 }
 
 /// <summary>
@@ -23,5 +24,8 @@ public enum ValueHintKind : byte
 public readonly record struct ValueHintCandidate(ValueHintKind Kind, long Payload, byte SchemeHint, short OffsetMinutes = 0);
 
 /// <summary>A hint as a row shows it: a chip's text, its icon or a colour swatch in place of
-/// one, and what clicking it does, if anything.</summary>
-public sealed record ValueHint(string Text, TreeRunIcon Icon, JsonRowLink? Link = null, Color? Swatch = null);
+/// one, and what clicking it does, if anything. <paramref name="Style"/> is a chip, always shown,
+/// or an action, shown on the hovered or selected row; <paramref name="ValueLink"/> makes the value
+/// itself a link, followed with Cmd/Ctrl+click.</summary>
+public sealed record ValueHint(string Text, TreeRunIcon Icon, JsonRowLink? Link = null, Color? Swatch = null,
+    TreeRunStyle Style = TreeRunStyle.Chip, JsonRowLink? ValueLink = null);

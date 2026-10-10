@@ -57,6 +57,10 @@ public enum TreeRunIcon : byte
     FullText,
     /// <summary>A credential - a decoded token.</summary>
     Key,
+    /// <summary>Somewhere outside the app - a web address.</summary>
+    OpenLink,
+    /// <summary>A mail address.</summary>
+    Mail,
 }
 
 /// <summary>One stretch of a row's text in one style.</summary>

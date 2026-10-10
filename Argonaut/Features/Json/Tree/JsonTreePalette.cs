@@ -45,6 +45,8 @@ public static class JsonTreePalette
         AddIcon(TreeRunIcon.Table, "Icon.Table");
         AddIcon(TreeRunIcon.FullText, "Icon.FullText");
         AddIcon(TreeRunIcon.Key, "Icon.Key");
+        AddIcon(TreeRunIcon.OpenLink, "Icon.OpenLink");
+        AddIcon(TreeRunIcon.Mail, "Icon.Mail");
         surface.RunIcons = icons;
     }
 }

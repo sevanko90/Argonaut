@@ -1,3 +1,5 @@
+using System;
+
 namespace Argonaut.Features.Json.Tree;
 
 /// <summary>What a clickable run on a JSON tree row does, carried as the run's
@@ -15,3 +17,8 @@ public sealed record DateSchemeLink(long ValueOffset) : JsonRowLink;
 /// <summary>Show this array's elements as a table.</summary>
 /// <param name="ArrayStart">The array's opening bracket.</param>
 public sealed record ViewAsTableLink(long ArrayStart) : JsonRowLink;
+
+/// <summary>Open a web or mail address the value holds, in the system's handler for it.</summary>
+/// <param name="Address">An absolute <c>http</c>, <c>https</c> or <c>mailto</c> URI - the only
+/// schemes a value may hand to the system.</param>
+public sealed record OpenUrlLink(Uri Address) : JsonRowLink;

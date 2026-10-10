@@ -179,6 +179,9 @@ public partial class JsonView : UserControl
                 hintFlyoutValueOffset = hint.ValueOffset;
                 (hintFlyout ??= BuildHintFlyout()).ShowAt(Surface, showAtPointer: true);
                 break;
+            case OpenUrlLink url when UrlHintProvider.IsSafe(url.Address):
+                _ = TopLevel.GetTopLevel(this)?.Launcher.LaunchUriAsync(url.Address);
+                break;
         }
     }
 

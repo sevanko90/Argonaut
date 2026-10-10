@@ -64,4 +64,8 @@
     <StreamGeometry x:Key="Icon.IndentGuides">M17 6H3 M21 12H8 M21 18H8 M3 12v6</StreamGeometry>
     <!-- Lucide "key-round" -->
     <StreamGeometry x:Key="Icon.Key">M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z M16,7.5 A0.5,0.5 0 1 0 17,7.5 A0.5,0.5 0 1 0 16,7.5 Z</StreamGeometry>
+    <!-- Lucide "external-link" -->
+    <StreamGeometry x:Key="Icon.OpenLink">M15 3h6v6 M10 14 21 3 M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6</StreamGeometry>
+    <!-- Lucide "mail" -->
+    <StreamGeometry x:Key="Icon.Mail">M4,4 H20 A2,2 0 0 1 22,6 V18 A2,2 0 0 1 20,20 H4 A2,2 0 0 1 2,18 V6 A2,2 0 0 1 4,4 Z M22 7 l-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7</StreamGeometry>
 </ResourceDictionary>

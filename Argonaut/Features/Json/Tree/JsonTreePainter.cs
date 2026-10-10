@@ -39,7 +39,8 @@ public sealed class JsonTreePainter(JsonTreeText text, IReadOnlyList<IValueHintP
 
         var kind = (JsonTokenKind)row.Node.FormatKind;
         string value = text.Scalar(row, out bool valueTruncated, out long contentOffset, out long valueLength);
-        runs.Add(new TreeRun(value, StyleOf(kind)));
+        var hint = Hint(row, kind);
+        runs.Add(new TreeRun(value, StyleOf(kind), hint?.ValueLink));
 
         // Notes, then chips, then actions: information first, and what appears on hover last, so
         // showing it moves nothing.
@@ -48,8 +49,8 @@ public sealed class JsonTreePainter(JsonTreeText text, IReadOnlyList<IValueHintP
         if (valueTruncated)
             runs.Add(new TreeRun(FormatByteLength(valueLength), TreeRunStyle.Note));
 
-        if (Hint(row, kind) is { } hint)
-            runs.Add(new TreeRun(hint.Text, TreeRunStyle.Chip, hint.Link, hint.Icon, hint.Swatch));
+        if (hint is not null)
+            runs.Add(new TreeRun(hint.Text, hint.Style, hint.Link, hint.Icon, hint.Swatch));
 
         if (valueTruncated)
             runs.Add(new TreeRun("Open in raw", TreeRunStyle.Action, new ViewInRawLink(contentOffset), TreeRunIcon.FullText));

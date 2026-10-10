@@ -61,14 +61,16 @@ it in (see "Saving" in architecture.md).
   on. Each is an `IValueHintProvider`, so it sees only rows on screen:
   - **JSON inside a string** (`"{\"id\":…}"`): a chip saying what it holds, and an action to open
     it as a tree.
-  - **Timestamps inside IDs**: MongoDB ObjectId, UUID v1 and v7, ULID, Snowflake IDs - the
-    creation time.
   - **JWT**: the algorithm and the expiry, marked when already expired.
   - **Colours**: `#RGB`, `#RRGGBB`, `#RRGGBBAA`, `rgb()`, `hsl()` as a swatch.
   - **Cron expressions**: the schedule in words and the next run.
   - **ISO 8601 date strings**: local time and a relative reading ("3 days ago", "in 4 months").
   - **Base64**: decoded length and type from the first bytes (`PNG 32×32`, gzip), or a text
     preview.
+
+  Built in this order: ISO dates (beside the existing date chip), colours and JWT, cron, then
+  JSON in a string and Base64. Timestamps inside IDs (ObjectId, UUID v7, ULID, Snowflake) were
+  considered and dropped: too much inference to be reliable, for little use.
 
   Providers get the value's bytes only up to the display cap (`DisplayText.MaxLength`), and a
   value past it gets no hint today. JSON in a string and Base64 can be megabytes, so they classify

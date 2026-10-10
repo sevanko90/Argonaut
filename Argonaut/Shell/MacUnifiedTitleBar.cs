@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Avalonia.Controls;
 
@@ -11,9 +12,10 @@ namespace Argonaut.Shell;
 /// Avalonia leaves the traffic lights where a plain 28pt title bar puts them - high in a taller
 /// strip. AppKit offers no setting for that, so this does what Electron's
 /// <c>trafficLightPosition</c> does: it grows the native title bar container to the strip's
-/// height and moves the three buttons to its vertical centre. AppKit lays them out again on
-/// resize and on entering or leaving full screen, so the window calls <see cref="Apply"/> again
-/// whenever its size changes.
+/// height and moves the three buttons to its vertical centre. AppKit lays them out again
+/// whenever it sees fit - a resize, a title change, key status, and passes nothing in the app
+/// can see coming - so <see cref="Watch"/> reports every change to the container's or the close
+/// button's frame, and the window puts them back when they have moved.
 ///
 /// A no-op anywhere but macOS, and when the window has no native handle.
 /// </summary>
@@ -70,6 +72,107 @@ internal static class MacUnifiedTitleBar
             var button = ObjC.Send(nsWindow, ObjC.Selector("standardWindowButton:"), kind);
             if (button != 0)
                 ObjC.Send(button, ObjC.Selector("setFrameOrigin:"), new NSPoint(FirstButtonX + kind * ButtonPitch, y));
+        }
+    }
+
+    /// <summary>Whether the container and the buttons are where <see cref="Apply"/> puts them.
+    /// True off macOS, where there is nothing to place.</summary>
+    public static bool IsInPlace(Window window, double titleBarHeight)
+    {
+        if (!OperatingSystem.IsMacOS() || window.TryGetPlatformHandle() is not { Handle: var nsWindow } || nsWindow == 0)
+            return true;
+
+        var close = ObjC.Send(nsWindow, ObjC.Selector("standardWindowButton:"), 0);
+        if (close == 0)
+            return true;
+
+        var container = ObjC.Send(ObjC.Send(close, ObjC.Selector("superview")), ObjC.Selector("superview"));
+        var buttonFrame = ObjC.SendRect(close, ObjC.Selector("frame"));
+        return container != 0
+               && Math.Abs(ObjC.SendRect(container, ObjC.Selector("frame")).Height - titleBarHeight) < 0.5
+               && Math.Abs(buttonFrame.Y - Math.Round((titleBarHeight - buttonFrame.Height) / 2)) < 0.5
+               && Math.Abs(buttonFrame.X - FirstButtonX) < 0.5;
+    }
+
+    /// <summary>
+    /// Calls <paramref name="moved"/> whenever AppKit changes the frame of the title bar
+    /// container or the close button - including the changes <see cref="Apply"/> makes itself,
+    /// so the callback checks <see cref="IsInPlace"/> rather than applying unconditionally. It
+    /// runs inside AppKit's layout, so it should defer its work. Null off macOS; dispose to stop.
+    /// </summary>
+    public static IDisposable? Watch(Window window, Action moved)
+    {
+        if (!OperatingSystem.IsMacOS() || window.TryGetPlatformHandle() is not { Handle: var nsWindow } || nsWindow == 0)
+            return null;
+
+        var close = ObjC.Send(nsWindow, ObjC.Selector("standardWindowButton:"), 0);
+        var container = close == 0 ? 0 : ObjC.Send(ObjC.Send(close, ObjC.Selector("superview")), ObjC.Selector("superview"));
+        if (container == 0)
+            return null;
+
+        return new FrameWatch(moved, container, close);
+    }
+
+    /// <summary>
+    /// An Objective-C object registered for <c>NSViewFrameDidChangeNotification</c> on the watched
+    /// views. AppKit can only notify an Objective-C object, so a class is defined at run time
+    /// with one method, which finds its callback by the object's own handle.
+    /// </summary>
+    private sealed unsafe class FrameWatch : IDisposable
+    {
+        private const string ClassName = "ArgonautTitleBarFrameWatch";
+        private static readonly Dictionary<nint, Action> Callbacks = new();
+        private static nint watchClass;
+
+        private nint observer;
+
+        public FrameWatch(Action moved, params nint[] views)
+        {
+            observer = ObjC.Send(ObjC.Send(WatchClass(), ObjC.Selector("alloc")), ObjC.Selector("init"));
+            Callbacks[observer] = moved;
+
+            var center = ObjC.Send(ObjC.Class("NSNotificationCenter"), ObjC.Selector("defaultCenter"));
+            var name = ObjC.String("NSViewFrameDidChangeNotification");
+            foreach (var view in views)
+            {
+                ObjC.Send(view, ObjC.Selector("setPostsFrameChangedNotifications:"), 1);
+                ObjC.AddObserver(center, ObjC.Selector("addObserver:selector:name:object:"), observer, ObjC.Selector("frameChanged:"), name, view);
+            }
+        }
+
+        public void Dispose()
+        {
+            if (observer == 0)
+                return;
+
+            var center = ObjC.Send(ObjC.Class("NSNotificationCenter"), ObjC.Selector("defaultCenter"));
+            ObjC.Send(center, ObjC.Selector("removeObserver:"), observer);
+            Callbacks.Remove(observer);
+            ObjC.Send(observer, ObjC.Selector("release"));
+            observer = 0;
+        }
+
+        private static nint WatchClass()
+        {
+            if (watchClass != 0)
+                return watchClass;
+
+            watchClass = ObjC.Class(ClassName);
+            if (watchClass != 0)
+                return watchClass;
+
+            watchClass = ObjC.AllocateClassPair(ObjC.Class("NSObject"), ClassName, 0);
+            delegate* unmanaged<nint, nint, nint, void> frameChanged = &FrameChanged;
+            ObjC.AddMethod(watchClass, ObjC.Selector("frameChanged:"), (nint)frameChanged, "v@:@");
+            ObjC.RegisterClassPair(watchClass);
+            return watchClass;
+        }
+
+        [UnmanagedCallersOnly]
+        private static void FrameChanged(nint self, nint selector, nint notification)
+        {
+            if (Callbacks.TryGetValue(self, out var moved))
+                moved();
         }
     }
 
@@ -138,6 +241,38 @@ internal static class MacUnifiedTitleBar
 
         [DllImport(Runtime, EntryPoint = "object_getClassName")]
         public static extern nint ClassName(nint obj);
+
+        [DllImport(Runtime, EntryPoint = "objc_msgSend")]
+        public static extern void AddObserver(nint receiver, nint selector, nint observer, nint observed, nint name, nint sender);
+
+        [DllImport(Runtime)]
+        private static extern nint objc_getClass([MarshalAs(UnmanagedType.LPUTF8Str)] string name);
+
+        [DllImport(Runtime, EntryPoint = "objc_allocateClassPair")]
+        public static extern nint AllocateClassPair(nint superclass, [MarshalAs(UnmanagedType.LPUTF8Str)] string name, nint extraBytes);
+
+        [DllImport(Runtime, EntryPoint = "objc_registerClassPair")]
+        public static extern void RegisterClassPair(nint cls);
+
+        [DllImport(Runtime, EntryPoint = "class_addMethod")]
+        [return: MarshalAs(UnmanagedType.I1)]
+        public static extern bool AddMethod(nint cls, nint selector, nint implementation, [MarshalAs(UnmanagedType.LPUTF8Str)] string types);
+
+        public static nint Class(string name) => objc_getClass(name);
+
+        /// <summary>An autoreleased <c>NSString</c>, which the run loop's pool frees.</summary>
+        public static nint String(string value)
+        {
+            var utf8 = Marshal.StringToCoTaskMemUTF8(value);
+            try
+            {
+                return Send(Class("NSString"), Selector("stringWithUTF8String:"), utf8);
+            }
+            finally
+            {
+                Marshal.FreeCoTaskMem(utf8);
+            }
+        }
 
         public static nint Selector(string name) => sel_registerName(name);
     }

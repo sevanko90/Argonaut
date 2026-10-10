@@ -63,7 +63,13 @@ public partial class MainWindow : Window
         // The title bar is drawn by the app (see TitleBar in the XAML), so it keeps clear of
         // the platform's own window buttons, and the traffic lights are re-centred in it.
         PadTitleBar();
-        Opened += (_, _) => Dispatcher.UIThread.Post(RecentreTrafficLights, DispatcherPriority.Background);
+        Opened += (_, _) =>
+        {
+            Dispatcher.UIThread.Post(RecentreTrafficLights, DispatcherPriority.Background);
+            // Out of AppKit's layout pass, which is where a frame change is reported from.
+            trafficLightWatch = MacUnifiedTitleBar.Watch(this, () => Dispatcher.UIThread.Post(PutBackTrafficLights, DispatcherPriority.Background));
+        };
+        Closed += (_, _) => trafficLightWatch?.Dispose();
         Resized += (_, _) => RecentreTrafficLights();
 
         this.settings = settings;
@@ -194,6 +200,7 @@ public partial class MainWindow : Window
     /// AppKit lays the title bar out again at the end of the transition, after the last resize
     /// the window hears about, so a re-centre on that resize alone is undone.</summary>
     private DispatcherTimer? trafficLightSettle;
+    private IDisposable? trafficLightWatch;
 
     /// <summary>
     /// Keeps the strip clear of the platform's window buttons: macOS's traffic lights at the
@@ -230,6 +237,15 @@ public partial class MainWindow : Window
         });
         trafficLightSettle.Stop();
         trafficLightSettle.Start();
+    }
+
+    /// <summary>AppKit moved the title bar container or the buttons; puts them back if they are
+    /// out of place. Checked rather than applied outright, because putting them back is itself
+    /// a frame change that is reported here.</summary>
+    private void PutBackTrafficLights()
+    {
+        if (WindowState != WindowState.FullScreen && !MacUnifiedTitleBar.IsInPlace(this, TitleBar.Height))
+            MacUnifiedTitleBar.Apply(this, TitleBar.Height);
     }
 
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)

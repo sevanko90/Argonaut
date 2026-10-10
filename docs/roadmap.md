@@ -9,12 +9,6 @@ Two decision records hold the reasoning behind items here that is too long to re
 [markdown-options.md](markdown-options.md) and
 [store-distribution-comparison.md](store-distribution-comparison.md).
 
-## Waiting on a check by hand
-
-- **The array table on the sparse index.** Open "view as table" on arrays of objects and of
-  scalars, expand and collapse column headers, reshape, click cells (scalar and container) and use
-  the cell pane's tree.
-
 ## Editing
 
 The raw view edits through a piece table and saves by staging a copy beside the file and swapping

@@ -55,8 +55,34 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
 
     private int arrayColumns = JsonArrayColumnDiscovery.DefaultArrayColumns;
     private JsonArrayCellDetail? cellDetail;
+    private bool showIndentGuides;
+    private readonly JsonViewSettings viewSettings;
+
+    /// <param name="viewSettings">Where the indent-guides choice is remembered, shared with the
+    /// JSON tree; the cell detail's tree draws them.</param>
+    public JsonArrayTableViewModel(JsonViewSettings viewSettings)
+    {
+        this.viewSettings = viewSettings;
+        showIndentGuides = viewSettings.ShowIndentGuides;
+    }
 
     protected override IDocumentSession? Session => this.session;
+
+    /// <summary>Whether the tree draws indent guides - the remembered choice.</summary>
+    public bool ShowIndentGuides
+    {
+        get => this.showIndentGuides;
+        private set => SetField(ref this.showIndentGuides, value);
+    }
+
+    /// <summary>The toolbar's indent-guides choice: remembered for the next document, then
+    /// applied to this one.</summary>
+    private void ChooseIndentGuides(bool show)
+    {
+        this.viewSettings.ShowIndentGuides = show;
+        ShowIndentGuides = show;
+    }
+
 
     protected override IDisposable? MappedRows => this.rows;
 
@@ -255,7 +281,9 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
             canReshape: !elementsAreObjects,
             setColumnMode: ApplyColumnMode,
             setArrayColumns: columns => ArrayColumns = columns,
-            back: () => navigateBack?.Invoke(arrayPath) ?? Task.CompletedTask);
+            back: () => navigateBack?.Invoke(arrayPath) ?? Task.CompletedTask,
+            showIndentGuides: ShowIndentGuides,
+            applyIndentGuides: ChooseIndentGuides);
 
         this.toolbar.ShowArrayColumns(HasArrayColumns);
 

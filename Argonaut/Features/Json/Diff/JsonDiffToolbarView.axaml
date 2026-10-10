@@ -22,5 +22,10 @@
                 <icons:LucideIcon Data="{StaticResource Icon.ChevronDown}" />
             </Button>
         </StackPanel>
+        <ToggleButton IsChecked="{Binding ShowIndentGuides, Mode=TwoWay}"
+                      Classes="tool icononly"
+                      ToolTip.Tip="Indent guides: a line down each open container's contents">
+            <icons:LucideIcon Data="{StaticResource Icon.IndentGuides}" />
+        </ToggleButton>
     </StackPanel>
 </UserControl>

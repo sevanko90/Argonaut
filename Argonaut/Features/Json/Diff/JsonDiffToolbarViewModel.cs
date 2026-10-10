@@ -17,14 +17,18 @@ public sealed class JsonDiffToolbarViewModel : ObservableObject
     private readonly Action<bool> setChangesOnly;
     private readonly Action goToPreviousDiff;
     private readonly Action goToNextDiff;
+    private readonly Action<bool> applyIndentGuides;
     private bool changesOnly;
+    private bool showIndentGuides;
 
     public JsonDiffToolbarViewModel(Action<bool> setChangesOnly,
-        Action goToPreviousDiff, Action goToNextDiff)
+        Action goToPreviousDiff, Action goToNextDiff, bool showIndentGuides, Action<bool> applyIndentGuides)
     {
         this.setChangesOnly = setChangesOnly;
         this.goToPreviousDiff = goToPreviousDiff;
         this.goToNextDiff = goToNextDiff;
+        this.showIndentGuides = showIndentGuides;
+        this.applyIndentGuides = applyIndentGuides;
     }
 
     public void GoToPreviousDiff() => goToPreviousDiff();
@@ -40,6 +44,20 @@ public sealed class JsonDiffToolbarViewModel : ObservableObject
                 return;
 
             setChangesOnly(value);
+        }
+    }
+
+    /// <summary>Bound two-way to the indent-guides toggle; reports the choice to the document,
+    /// which remembers it and applies it to its tree.</summary>
+    public bool ShowIndentGuides
+    {
+        get => showIndentGuides;
+        set
+        {
+            if (!SetField(ref showIndentGuides, value))
+                return;
+
+            applyIndentGuides(value);
         }
     }
 }

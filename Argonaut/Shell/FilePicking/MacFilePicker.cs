@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 namespace Argonaut.Shell.FilePicking;
 
 /// <summary>
-/// The macOS open panel with hidden files showing, which is where dotfile configuration lives.
+/// The macOS open panel, able to show hidden files, which is where dotfile configuration lives.
 /// <c>NSOpenPanel.showsHiddenFiles</c> is per panel, so the user's Finder setting is untouched,
 /// and the panel is the same one Avalonia shows - it is the sandbox's own route to a user-chosen
 /// file. Avalonia exposes no way to set the property, so the panel is driven through the
@@ -25,23 +25,23 @@ public sealed class MacFilePicker : IFilePicker
 
     public MacFilePicker(IFilePicker fallback) => this.fallback = fallback;
 
-    public Task<string?> PickFileAsync(string title, string? startFolder = null)
+    public Task<string?> PickFileAsync(string title, string? startFolder = null, bool showsHiddenFiles = true)
     {
         try
         {
-            if (TryRunOpenPanel(title, startFolder, out var path))
+            if (TryRunOpenPanel(title, startFolder, showsHiddenFiles, out var path))
                 return Task.FromResult(path);
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
         {
         }
 
-        return fallback.PickFileAsync(title, startFolder);
+        return fallback.PickFileAsync(title, startFolder, showsHiddenFiles);
     }
 
     /// <returns>False if the panel could not be created; otherwise true, with
     /// <paramref name="path"/> null when the user cancelled.</returns>
-    private static bool TryRunOpenPanel(string title, string? startFolder, out string? path)
+    private static bool TryRunOpenPanel(string title, string? startFolder, bool showsHiddenFiles, out string? path)
     {
         path = null;
 
@@ -52,7 +52,7 @@ public sealed class MacFilePicker : IFilePicker
         ObjC.Send(panel, ObjC.Selector("setCanChooseFiles:"), (byte)1);
         ObjC.Send(panel, ObjC.Selector("setCanChooseDirectories:"), (byte)0);
         ObjC.Send(panel, ObjC.Selector("setAllowsMultipleSelection:"), (byte)0);
-        ObjC.Send(panel, ObjC.Selector("setShowsHiddenFiles:"), (byte)1);
+        ObjC.Send(panel, ObjC.Selector("setShowsHiddenFiles:"), showsHiddenFiles ? (byte)1 : (byte)0);
         ObjC.Send(panel, ObjC.Selector("setTitle:"), ObjC.String(title));
 
         if (startFolder is not null)

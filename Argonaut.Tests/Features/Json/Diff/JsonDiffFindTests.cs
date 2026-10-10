@@ -1,5 +1,6 @@
 using System.Text;
 using Argonaut.Engine.Indexing.Trees;
+using Argonaut.Features.Json;
 using Argonaut.Features.Json.Diff;
 using Argonaut.Tests.Support;
 using Argonaut.Ui.Find;
@@ -56,7 +57,7 @@ public class JsonDiffFindTests
     {
         string leftPath = WriteTemp(leftJson);
         string rightPath = WriteTemp(rightJson);
-        var vm = new JsonDiffViewModel();
+        var vm = new JsonDiffViewModel(new JsonViewSettings());
         await vm.LoadAsync(leftPath, rightPath);
         try { await vm.IndexingTask; } catch { }
 

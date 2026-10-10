@@ -170,7 +170,9 @@
                                       ChipBackground="{DynamicResource AppChipBrush}"
                                       ChipHoverBackground="{DynamicResource AppChipHoverBrush}"
                                       ExpanderBrush="{DynamicResource AppSubtleIconBrush}"
-                                      ExpanderRowHoverBrush="{DynamicResource AppMutedTextBrush}" />
+                                      ExpanderRowHoverBrush="{DynamicResource AppMutedTextBrush}"
+                                      GuideBrush="{DynamicResource AppIndentGuideBrush}"
+                                      ShowIndentGuides="{Binding ShowIndentGuides}" />
 
                     <ScrollBar x:Name="DetailVerticalScrollBar"
                                Grid.Column="1"

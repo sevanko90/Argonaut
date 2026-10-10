@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Argonaut.Features.Json;
 using Argonaut.Features.Json.ArrayTable;
 using Argonaut.Tests.Support;
 using Avalonia;
@@ -23,7 +24,7 @@ public sealed class JsonArrayTableViewportTests
             properties["property96"] = new { child = "child of last property", second = "second child" };
             string path = Path.GetTempFileName();
             File.WriteAllText(path, JsonSerializer.Serialize(Enumerable.Repeat(properties, 30)));
-            using var document = new JsonArrayTableViewModel();
+            using var document = new JsonArrayTableViewModel(new JsonViewSettings());
             Window? window = null;
             try
             {

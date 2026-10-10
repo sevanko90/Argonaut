@@ -59,6 +59,16 @@ public sealed class JsonDiffViewModel : IndexedDocumentViewModel, IDocumentViewM
     private string? sourcePlaceholder;
     private string? targetPlaceholder;
     private string? highlightTerm;
+    private bool showIndentGuides;
+    private readonly JsonViewSettings viewSettings;
+
+    /// <param name="viewSettings">Where the indent-guides choice is remembered, shared with the
+    /// JSON tree.</param>
+    public JsonDiffViewModel(JsonViewSettings viewSettings)
+    {
+        this.viewSettings = viewSettings;
+        showIndentGuides = viewSettings.ShowIndentGuides;
+    }
 
     protected override IDocumentSession? Session => session;
 
@@ -80,6 +90,21 @@ public sealed class JsonDiffViewModel : IndexedDocumentViewModel, IDocumentViewM
     private JsonDiffToolbarViewModel? toolbar;
 
     public override JsonDiffToolbarViewModel? Toolbar => toolbar;
+
+    /// <summary>Whether the tree draws indent guides - the remembered choice.</summary>
+    public bool ShowIndentGuides
+    {
+        get => showIndentGuides;
+        private set => SetField(ref showIndentGuides, value);
+    }
+
+    /// <summary>The toolbar's indent-guides choice: remembered for the next document, then
+    /// applied to this one.</summary>
+    private void ChooseIndentGuides(bool show)
+    {
+        viewSettings.ShowIndentGuides = show;
+        ShowIndentGuides = show;
+    }
 
     /// <summary>
     /// The active find term, highlighted in both panes. Null when no find is active.
@@ -429,7 +454,9 @@ public sealed class JsonDiffViewModel : IndexedDocumentViewModel, IDocumentViewM
         toolbar = new JsonDiffToolbarViewModel(
             setChangesOnly: SetChangesOnly,
             goToPreviousDiff: GoToPreviousDiff,
-            goToNextDiff: GoToNextDiff);
+            goToNextDiff: GoToNextDiff,
+            showIndentGuides: ShowIndentGuides,
+            applyIndentGuides: ChooseIndentGuides);
 
         diffTree = new JsonDiffTree(started);
 

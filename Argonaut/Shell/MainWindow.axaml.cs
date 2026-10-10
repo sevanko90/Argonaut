@@ -655,7 +655,7 @@ public partial class MainWindow : Window
 
     private async void OnCompareFile(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        var path = await filePicker.PickFileAsync("Choose the JSON file to compare with");
+        var path = await filePicker.PickFileAsync("Choose the JSON file to compare with", showsHiddenFiles: false);
         if (path is null)
             return;
 

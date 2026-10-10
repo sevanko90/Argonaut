@@ -43,16 +43,21 @@ public sealed class JsonArrayTableToolbarViewModel : ObservableObject
     private readonly Action<JsonArrayColumnModeOption> setColumnMode;
     private readonly Action<int> setArrayColumns;
     private readonly Func<Task> back;
+    private readonly Action<bool> applyIndentGuides;
+    private bool showIndentGuides;
     private JsonArrayColumnModeOption selectedColumnMode;
     private int selectedArrayColumns = JsonArrayColumnDiscovery.DefaultArrayColumns;
     private bool canExpandArrays;
 
     public JsonArrayTableToolbarViewModel(string arrayPath, bool canReshape,
-        Action<JsonArrayColumnModeOption> setColumnMode, Action<int> setArrayColumns, Func<Task> back)
+        Action<JsonArrayColumnModeOption> setColumnMode, Action<int> setArrayColumns, Func<Task> back,
+        bool showIndentGuides, Action<bool> applyIndentGuides)
     {
         this.setColumnMode = setColumnMode;
         this.setArrayColumns = setArrayColumns;
         this.back = back;
+        this.showIndentGuides = showIndentGuides;
+        this.applyIndentGuides = applyIndentGuides;
 
         ArrayPath = arrayPath;
 
@@ -136,4 +141,18 @@ public sealed class JsonArrayTableToolbarViewModel : ObservableObject
 
     /// <summary>Reloads the origin file as JSON and reveals the path this table came from.</summary>
     public Task BackAsync() => back();
+
+    /// <summary>Bound two-way to the indent-guides toggle; reports the choice to the document,
+    /// which remembers it and applies it to its tree.</summary>
+    public bool ShowIndentGuides
+    {
+        get => showIndentGuides;
+        set
+        {
+            if (!SetField(ref showIndentGuides, value))
+                return;
+
+            applyIndentGuides(value);
+        }
+    }
 }

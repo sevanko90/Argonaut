@@ -350,7 +350,7 @@ public class DocumentDisposalLifecycleTests
         string path = WriteLargeJson();
         try
         {
-            var vm = new JsonArrayTableViewModel();
+            var vm = new JsonArrayTableViewModel(new JsonViewSettings());
             await vm.LoadAsync(path, 0, new FileInfo(path).Length, "$");
             Assert.False(vm.IndexingTask.IsCompleted); // sanity: the walk genuinely still running
 
@@ -370,7 +370,7 @@ public class DocumentDisposalLifecycleTests
         string rightPath = WriteLargeJson();
         try
         {
-            var vm = new JsonDiffViewModel();
+            var vm = new JsonDiffViewModel(new JsonViewSettings());
             await vm.LoadAsync(leftPath, rightPath);
             Assert.False(vm.IndexingTask.IsCompleted);
 
@@ -391,7 +391,7 @@ public class DocumentDisposalLifecycleTests
         string rightPath = WriteLargeJson();
         try
         {
-            var vm = new JsonDiffViewModel();
+            var vm = new JsonDiffViewModel(new JsonViewSettings());
             await vm.LoadAsync(leftPath, rightPath);
             Assert.False(vm.IndexingTask.IsCompleted);
 
@@ -414,7 +414,7 @@ public class DocumentDisposalLifecycleTests
         string rightPath = WriteLargeJson();
         try
         {
-            var vm = new JsonDiffViewModel();
+            var vm = new JsonDiffViewModel(new JsonViewSettings());
             await vm.LoadAsync(leftPath, rightPath);
             Assert.False(vm.IndexingTask.IsCompleted);
 
@@ -485,7 +485,7 @@ public class DocumentDisposalLifecycleTests
             string path = WriteLargeJson();
             try
             {
-                var vm = new JsonArrayTableViewModel();
+                var vm = new JsonArrayTableViewModel(new JsonViewSettings());
                 await vm.LoadAsync(path, 0, new FileInfo(path).Length, "$");
                 await DisposeWithTimeoutAsync(vm.Dispose);
                 vm.Dispose();
@@ -497,7 +497,7 @@ public class DocumentDisposalLifecycleTests
             string rightPath = WriteLargeJson();
             try
             {
-                var vm = new JsonDiffViewModel();
+                var vm = new JsonDiffViewModel(new JsonViewSettings());
                 await vm.LoadAsync(leftPath, rightPath);
                 await DisposeWithTimeoutAsync(vm.Dispose);
                 vm.Dispose();

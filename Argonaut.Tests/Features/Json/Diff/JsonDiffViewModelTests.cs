@@ -1,6 +1,7 @@
 using System.Text;
 using Argonaut.Engine.Detection;
 using Argonaut.Engine.Indexing.Trees;
+using Argonaut.Features.Json;
 using Argonaut.Features.Json.Diff;
 using Argonaut.Tests.Support;
 
@@ -38,7 +39,7 @@ public class JsonDiffViewModelTests
     {
         string leftPath = WriteTemp(leftJson);
         string rightPath = WriteTemp(rightJson);
-        var vm = new JsonDiffViewModel();
+        var vm = new JsonDiffViewModel(new JsonViewSettings());
         await vm.LoadAsync(leftPath, rightPath);
         try { await vm.IndexingTask; } catch { }
         await vm.FinalRefreshTask;
@@ -57,6 +58,32 @@ public class JsonDiffViewModelTests
     private static TreeRow Selected(JsonDiffViewModel vm) => vm.SelectedRow ?? throw new InvalidOperationException("Nothing selected:\n" + JsonDiffRows.Describe(vm.DiffTree!));
 
     // ── The document ───────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task TheIndentGuidesToggle_IsRememberedAndApplied()
+    {
+        string leftPath = WriteTemp("""{"a":1}""");
+        string rightPath = WriteTemp("""{"a":2}""");
+        var settings = new JsonViewSettings { ShowIndentGuides = true };
+        var vm = new JsonDiffViewModel(settings);
+        try
+        {
+            await vm.LoadAsync(leftPath, rightPath);
+            Assert.True(vm.Toolbar!.ShowIndentGuides);
+            Assert.True(vm.ShowIndentGuides);
+
+            vm.Toolbar.ShowIndentGuides = false;
+
+            Assert.False(vm.ShowIndentGuides);
+            Assert.False(settings.ShowIndentGuides);
+        }
+        finally
+        {
+            try { await vm.IndexingTask; } catch { }
+            await vm.FinalRefreshTask;
+            Cleanup(vm, leftPath, rightPath);
+        }
+    }
 
     [Fact]
     public async Task Load_CompletesDiff_AndSummarizesChanges()
@@ -85,7 +112,7 @@ public class JsonDiffViewModelTests
     {
         string leftPath = WriteTemp("[1]");
         string rightPath = WriteTemp("[2]");
-        var vm = new JsonDiffViewModel();
+        var vm = new JsonDiffViewModel(new JsonViewSettings());
         try
         {
             await vm.LoadAsync(leftPath, rightPath);
@@ -128,7 +155,7 @@ public class JsonDiffViewModelTests
     {
         string leftPath = WriteTemp("[1]");
         string rightPath = WriteTemp("[1]");
-        var vm = new JsonDiffViewModel();
+        var vm = new JsonDiffViewModel(new JsonViewSettings());
         try
         {
             await vm.LoadAsync(leftPath, rightPath);

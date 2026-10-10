@@ -14,6 +14,7 @@ using Argonaut.Engine.Logging;
 using Argonaut.Engine.Progress;
 using Argonaut.Engine.Saving;
 using Argonaut.Engine.Settings;
+using Argonaut.Features.Json;
 using Argonaut.Features.Json.Schema;
 using Argonaut.Features.Json.ArrayTable;
 using Argonaut.Features.Json.Diff;
@@ -70,6 +71,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly AppearanceSettings appearance;
     private readonly RecentFileHistory recentFileHistory;
     private readonly FavouriteFiles favouriteFiles;
+    private readonly JsonViewSettings jsonViewSettings;
     private readonly IConfigLocationSource? configLocations;
     private readonly Func<string, Task<bool>> confirmReplace;
     private readonly Func<Task<byte[]?>>? readClipboardBytes;
@@ -167,6 +169,7 @@ public sealed class MainWindowViewModel : ObservableObject
         this.appearance = settings.Get<AppearanceSettings>();
         this.recentFileHistory = settings.Get<RecentFileHistory>();
         this.favouriteFiles = settings.Get<FavouriteFiles>();
+        this.jsonViewSettings = settings.Get<JsonViewSettings>();
         this.configLocations = configLocations;
         this.confirmReplace = confirmReplace;
         this.readClipboardBytes = readClipboardBytes;
@@ -396,7 +399,7 @@ public sealed class MainWindowViewModel : ObservableObject
         loadProgress?.Finish();
         StatusText = $"Comparing {leftPath} with {rightPath}…";
 
-        var document = new JsonDiffViewModel();
+        var document = new JsonDiffViewModel(jsonViewSettings);
         try
         {
             await document.LoadAsync(leftOrigin, rightOrigin);
@@ -450,7 +453,7 @@ public sealed class MainWindowViewModel : ObservableObject
         string sourceName = request.Origin.Path ?? request.Origin.DisplayName;
         StatusText = $"Opening {request.ArrayPath} as a table…";
 
-        var document = new JsonArrayTableViewModel();
+        var document = new JsonArrayTableViewModel(jsonViewSettings);
         try
         {
             await document.LoadAsync(request.Origin, request.Offset, request.Length, request.ArrayPath,

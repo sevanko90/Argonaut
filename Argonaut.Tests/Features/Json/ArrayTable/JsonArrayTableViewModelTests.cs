@@ -31,7 +31,7 @@ public class JsonArrayTableViewModelTests
         string path = WriteTempJson(json);
         try
         {
-            var document = new JsonArrayTableViewModel();
+            var document = new JsonArrayTableViewModel(new JsonViewSettings());
             try
             {
                 await document.LoadAsync(path, 0, new FileInfo(path).Length, "$");
@@ -114,6 +114,31 @@ public class JsonArrayTableViewModelTests
         });
 
     [Fact]
+    public async Task TheIndentGuidesToggle_IsRememberedAndApplied()
+    {
+        string path = WriteTempJson("""[{"a":{"b":1}}]""");
+        var settings = new JsonViewSettings { ShowIndentGuides = true };
+        var document = new JsonArrayTableViewModel(settings);
+        try
+        {
+            await document.LoadAsync(path, 0, new FileInfo(path).Length, "$");
+            var toolbar = Assert.IsType<JsonArrayTableToolbarViewModel>(document.Toolbar);
+            Assert.True(toolbar.ShowIndentGuides);
+            Assert.True(document.ShowIndentGuides);
+
+            toolbar.ShowIndentGuides = false;
+
+            Assert.False(document.ShowIndentGuides);
+            Assert.False(settings.ShowIndentGuides);
+        }
+        finally
+        {
+            document.Dispose();
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public Task PickingAReshapeWidth_ReChunksTheRows()
         => WithDocument("[1,2,3,4,5,6]", document =>
         {
@@ -178,7 +203,7 @@ public class JsonArrayTableViewModelTests
     public async Task ToolbarBannerNamesWhereTheTableCameFrom()
     {
         string path = WriteTempJson("[1,2,3]");
-        var document = new JsonArrayTableViewModel();
+        var document = new JsonArrayTableViewModel(new JsonViewSettings());
         try
         {
             await document.LoadAsync(path, 0, new FileInfo(path).Length, "$.items");
@@ -202,7 +227,7 @@ public class JsonArrayTableViewModelTests
 
         async Task RunAsync()
         {
-            var document = new JsonArrayTableViewModel();
+            var document = new JsonArrayTableViewModel(new JsonViewSettings());
             try
             {
                 string? navigatedTo = null;
@@ -256,7 +281,7 @@ public class JsonArrayTableViewModelTests
         string path = WriteTempJson("[1,2,3]");
         try
         {
-            var document = new JsonArrayTableViewModel();
+            var document = new JsonArrayTableViewModel(new JsonViewSettings());
             try
             {
                 await document.LoadAsync(path, 0, 4, "$"); // "[1,2" - not a whole JSON value
@@ -294,7 +319,7 @@ public class JsonArrayTableViewModelTests
             int offset = json.IndexOf("[{", StringComparison.Ordinal);
             int length = json.LastIndexOf(']') + 1 - offset;
 
-            var document = new JsonArrayTableViewModel();
+            var document = new JsonArrayTableViewModel(new JsonViewSettings());
             try
             {
                 await document.LoadAsync(path, offset, length, "$.items");
@@ -825,7 +850,7 @@ public class JsonArrayTableViewModelTests
         File.WriteAllBytes(path, System.Text.Encoding.UTF8.GetBytes("""[{"geometry":{"type":"Point"}}]"""));
         try
         {
-            var document = new JsonArrayTableViewModel();
+            var document = new JsonArrayTableViewModel(new JsonViewSettings());
             await document.LoadAsync(path, 0, new FileInfo(path).Length, "$");
             document.ShowCell(0, 0);
             var tree = document.CellDetail!.Tree!;

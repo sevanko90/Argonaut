@@ -1,5 +1,7 @@
 using System;
 using Argonaut.Features.Json.Indexing;
+using Argonaut.Features.Json.Tree;
+using Argonaut.Ui.Tree;
 
 namespace Argonaut.Features.Json.Hints;
 
@@ -32,16 +34,18 @@ public sealed class DateHintProvider : IValueHintProvider
         return true;
     }
 
-    public string? FormatHint(in ValueHintCandidate candidate, long valueOffset)
+    public ValueHint? FormatHint(in ValueHintCandidate candidate, long valueOffset)
     {
         if (settings.FileDefaultScheme == DateDecodingScheme.Off)
             return null;
 
+        // The chip opens the scheme menu for this value, so it stays clickable even when the
+        // value's own scheme is Off - an em dash keeps the menu reachable.
         var effective = settings.GetEffectiveScheme(valueOffset);
-        if (effective == DateDecodingScheme.Off)
-            return "—"; // em dash - a clickable placeholder so the flyout stays reachable
-
-        return DateHintDecoder.Format(candidate.Payload, effective, settings.TimeZoneMode) ?? "out of range";
+        string text = effective == DateDecodingScheme.Off
+            ? "—"
+            : DateHintDecoder.Format(candidate.Payload, effective, settings.TimeZoneMode) ?? "out of range";
+        return new ValueHint(text, TreeRunIcon.Time, new DateSchemeLink(valueOffset));
     }
 
     public event EventHandler? HintsChanged;

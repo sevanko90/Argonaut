@@ -53,10 +53,16 @@ public static class DateHintDecoder
         return mode == DateHintTimeZoneMode.Utc ? FormatUtc(unixMs) : FormatLocal(unixMs);
     }
 
-    private static string FormatLocal(long unixMs)
-    {
-        var local = DateTimeOffset.FromUnixTimeMilliseconds(unixMs).ToLocalTime();
+    /// <summary>An instant as a date chip shows it, in <paramref name="localZone"/> or UTC.</summary>
+    public static string FormatInstant(DateTimeOffset instant, DateHintTimeZoneMode mode, TimeZoneInfo localZone)
+        => mode == DateHintTimeZoneMode.Utc
+            ? FormatUtc(instant.ToUnixTimeMilliseconds())
+            : FormatLocal(TimeZoneInfo.ConvertTime(instant, localZone));
 
+    private static string FormatLocal(long unixMs) => FormatLocal(DateTimeOffset.FromUnixTimeMilliseconds(unixMs).ToLocalTime());
+
+    private static string FormatLocal(DateTimeOffset local)
+    {
         // "Local" means the machine's configured date/time format, not a fixed ISO-ish
         // pattern: short date pattern + long time pattern (with seconds) from the current
         // culture, so a US machine shows 12-hour "6/15/2024 2:05:09 PM" while a UK machine

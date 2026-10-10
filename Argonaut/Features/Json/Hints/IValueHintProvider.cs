@@ -20,7 +20,7 @@ public interface IValueHintProvider
 
     /// <summary>Formats the display hint for a classified candidate under current settings
     /// (an override for this value wins over the file default). Null means no hint should render.</summary>
-    string? FormatHint(in ValueHintCandidate candidate, long valueOffset);
+    ValueHint? FormatHint(in ValueHintCandidate candidate, long valueOffset);
 
     /// <summary>Raised (UI thread) when settings changed such that previously formatted hints
     /// are stale and realized rows should be re-rendered.</summary>

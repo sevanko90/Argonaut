@@ -49,7 +49,7 @@ public sealed class JsonTreePainter(JsonTreeText text, IReadOnlyList<IValueHintP
             runs.Add(new TreeRun(FormatByteLength(valueLength), TreeRunStyle.Note));
 
         if (Hint(row, kind) is { } hint)
-            runs.Add(new TreeRun(hint, TreeRunStyle.Chip, new DateSchemeLink(row.Node.ValueStart), TreeRunIcon.Time));
+            runs.Add(new TreeRun(hint.Text, TreeRunStyle.Chip, hint.Link, hint.Icon));
 
         if (valueTruncated)
             runs.Add(new TreeRun("Open in raw", TreeRunStyle.Action, new ViewInRawLink(contentOffset), TreeRunIcon.FullText));
@@ -58,7 +58,7 @@ public sealed class JsonTreePainter(JsonTreeText text, IReadOnlyList<IValueHintP
     public string? Marker(in TreeRow row)
         => row.ParentKind == (byte)JsonTokenKind.StartArray && row.Shape != TreeRowShape.Close ? row.Ordinal.ToString() : null;
 
-    private string? Hint(in TreeRow row, JsonTokenKind kind)
+    private ValueHint? Hint(in TreeRow row, JsonTokenKind kind)
     {
         if (hintProviders is null)
             return null;

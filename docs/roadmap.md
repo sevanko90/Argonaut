@@ -56,21 +56,32 @@ it in (see "Saving" in architecture.md).
 
 ## JSON tree
 
-- **More value hints, beside the date chip.** Each classified from the value alone, by its shape
+- **More value hints, beside the date chips.** Each classified from the value alone, by its shape
   (a regex or a fixed format), never by the property's name - there are too many names to key
-  on. Each is an `IValueHintProvider`, so it sees only rows on screen:
+  on. Each is an `IValueHintProvider`, so it sees only rows on screen. ISO 8601 dates, colours
+  (`#RRGGBB`, `#RRGGBBAA`, `rgb()`, `hsl()` - not the rare three- and four-digit hex, which is as
+  often an issue number) and JWTs have one; still to come, in this order:
+  - **URLs**: a hover action naming the host (`Open example.com ↗`), and Cmd/Ctrl+click on the
+    value; a plain click still only selects. `http`, `https` and `mailto` only - the file is
+    untrusted, and any other scheme hands it to whatever the OS registers. Whole-value URLs
+    first; a URL inside longer text needs a link over part of the text, later.
+  - **Cron expressions**: the schedule in words and the next run.
   - **JSON inside a string** (`"{\"id\":…}"`): a chip saying what it holds, and an action to open
     it as a tree.
-  - **JWT**: the algorithm and the expiry, marked when already expired.
-  - **Colours**: `#RGB`, `#RRGGBB`, `#RRGGBBAA`, `rgb()`, `hsl()` as a swatch.
-  - **Cron expressions**: the schedule in words and the next run.
-  - **ISO 8601 date strings**: local time and a relative reading ("3 days ago", "in 4 months").
   - **Base64**: decoded length and type from the first bytes (`PNG 32×32`, gzip), or a text
     preview.
 
-  Built in this order: ISO dates (beside the existing date chip), colours and JWT, cron, then
-  JSON in a string and Base64. Timestamps inside IDs (ObjectId, UUID v7, ULID, Snowflake) were
-  considered and dropped: too much inference to be reliable, for little use.
+- **Expanding a hint into what it encodes.** One idea common to the hints that hide a document
+  inside a value: a JWT's header and claims, Base64's decoded bytes, JSON inside a string. The
+  chip offers to expand it, and what is decoded opens as a document of its own kind - JSON as a
+  tree, text in the raw view, an image as itself - over bytes decoded on demand rather than at
+  classification, in the background when large. A hint would say whether it expands and how to
+  get the bytes; whether they open as child rows under the value, in a side pane like the array
+  table's cell detail, or as a document of their own is the design question, and wants mocking
+  up before it is built.
+
+  Timestamps inside IDs (ObjectId, UUID v7, ULID, Snowflake) were considered and dropped: too
+  much inference to be reliable, for little use.
 
   Providers get the value's bytes only up to the display cap (`DisplayText.MaxLength`), and a
   value past it gets no hint today. JSON in a string and Base64 can be megabytes, so they classify

@@ -236,7 +236,7 @@ def hint_samples(i):
         return text.replace("+00:00", "Z")
 
     exp = int((now + datetime.timedelta(hours=1 - 2 * (i % 2))).timestamp())  # odd items expired
-    colours = ("#1E90FF", "#f80", "#2E8B57CC", "rgb(255, 99, 71)", "hsl(210, 60%, 45%)")
+    colours = ("#1E90FF", "#ff8800", "#2E8B57CC", "rgb(255, 99, 71)", "hsl(210, 60%, 45%)")
     crons = ("*/15 * * * *", "0 9 * * 1-5", "30 2 1 * *", "0 0 * * 0", "15 14 1 1 *")
     embedded = json.dumps({"event": "order.created", "id": f"ord_{88000 + i}",
                            "lines": [{"sku": f"A-{100 + i}", "qty": i % 4 + 1}], "paid": i % 2 == 0},
@@ -255,8 +255,13 @@ def hint_samples(i):
         "cron": crons[i % len(crons)],
         "jsonInString": embedded,
         "base64": small_base64,
+        "url": ("https://example.com/orders", f"https://shop.example.co.uk/basket?item={i}&ref=email#pay",
+                "mailto:support@example.com?subject=Order%20" + str(88000 + i))[i % 3],
+        "urlMisleading": "https://good.example.com@evil.example.net/login",
+        "urlUnsafe": "javascript:alert(1)",
+        "urlInText": f"see https://example.com/help/{i} for details",
         "notADate": "2026-02-30",
-        "notAColour": "#12345",
+        "notAColour": ("#12345", "#f80", "#123")[i % 3],
         "notJson": "{ looks like json, but is not }",
         "notBase64": "Zm9v!YmFy",
     }

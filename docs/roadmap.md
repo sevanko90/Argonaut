@@ -80,6 +80,20 @@ it in (see "Saving" in architecture.md).
   table's cell detail, or as a document of their own is the design question, and wants mocking
   up before it is built.
 
+- **Value hints beyond the JSON tree.** The parsers are already plain functions over bytes
+  (`IsoDateHintClassifier`, `ColourHintClassifier`, `DateHintClassifier`); what ties hints to the
+  tree is the provider contract - it takes a `JsonTokenKind` and returns the tree's chip icon,
+  link and style. The split: what a value *is* and what it reads as (a time, a colour, an
+  address, an expiry) moves down to `Engine`, free of Avalonia and of JSON, the JWT and URL checks
+  with it, and each view renders that its own way.
+
+  The raw view is the first other user. Classifying is not every word on the page: the raw
+  view's lexers already split the rows on screen into tokens for colouring, so it is their strings
+  and values, a few hundred at most. How they show is the real work. Config files (one value per
+  line) can take a chip at the end of the line, as the tree does; free text needs inline marks - a
+  swatch before a colour, an underlined address with a card on hover - drawn by `RawTextSurface`
+  without disturbing the row's text, wrapping or caret. Wants a mock-up first.
+
   Timestamps inside IDs (ObjectId, UUID v7, ULID, Snowflake) were considered and dropped: too
   much inference to be reliable, for little use.
 

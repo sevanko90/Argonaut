@@ -5,6 +5,7 @@
              xmlns:json="clr-namespace:Argonaut.Features.NdJson"
              xmlns:jsonview="clr-namespace:Argonaut.Features.Json"
              xmlns:find="clr-namespace:Argonaut.Ui.Find"
+             xmlns:icons="clr-namespace:Argonaut.Ui.Icons"
              x:Class="Argonaut.Features.NdJson.NdJsonView"
              x:DataType="json:NdJsonViewModel">
     <Border BorderBrush="{DynamicResource AppBorderBrush}"
@@ -63,11 +64,11 @@
                                 HorizontalAlignment="Center"
                                 VerticalAlignment="Center"
                                 IsVisible="{Binding SelectedLineJsonViewModel, Converter={x:Static jsonview:IsNullConverter.Instance}}">
-                        <Viewbox Width="28" Height="28" HorizontalAlignment="Center">
-                            <!-- Material "data_object" -->
-                            <Path Fill="{DynamicResource AppSubtleIconBrush}"
-                                  Data="M4 7v2c0 .55-.45 1-1 1H2v4h1c.55 0 1 .45 1 1v2c0 1.65 1.35 3 3 3h3v-2H7c-.55 0-1-.45-1-1v-2c0-1.3-.84-2.42-2-2.83v-.34C5.16 11.42 6 10.3 6 9V7c0-.55.45-1 1-1h3V4H7C5.35 4 4 5.35 4 7zM21 10c-.55 0-1-.45-1-1V7c0-1.65-1.35-3-3-3h-3v2h3c.55 0 1 .45 1 1v2c0 1.3.84 2.42 2 2.83v.34c-1.16.41-2 1.52-2 2.83v2c0 .55-.45 1-1 1h-3v2h3c1.65 0 3-1.35 3-3v-2c0-.55.45-1 1-1h1v-4h-1z" />
-                        </Viewbox>
+                        <icons:LucideIcon Data="{StaticResource Icon.Json}"
+                                          Size="28"
+                                          StrokeWeight="1.5"
+                                          HorizontalAlignment="Center"
+                                          Foreground="{DynamicResource AppSubtleIconBrush}" />
                         <TextBlock Text="Select a line to see it as a tree"
                                    FontSize="12"
                                    HorizontalAlignment="Center"

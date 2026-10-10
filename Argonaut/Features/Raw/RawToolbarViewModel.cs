@@ -1,11 +1,12 @@
 using System;
+using System.Globalization;
 using Argonaut.Features.Raw.Highlighting;
 using Argonaut.Ui.ViewModels;
 
 namespace Argonaut.Features.Raw;
 
 /// <summary>
-/// Header toolbar for the raw viewer: the wrap-width combo, the colour picker and the edit-mode toggle. Reports the
+/// Header toolbar for the raw viewer: the wrap-width picker, the colour picker and the edit-mode toggle. Reports the
 /// wrap choice to the owning document, which remembers it and applies it via
 /// <see cref="RawViewModel.SetWrapWidth"/> (a re-index); the toggle goes to
 /// <see cref="RawViewModel.SetEditing"/>. Owned by the document view model that creates it and
@@ -17,6 +18,7 @@ public sealed class RawToolbarViewModel : ObservableObject
     private readonly Action<bool> applyEditing;
     private readonly Action<RawColourChoice>? applyColours;
     private int coloursIndex;
+    private string? autoLexerName;
     private string autoColoursLabel = AutoLabel(null);
     private int wrapWidthIndex;
     private bool canEdit;
@@ -35,8 +37,8 @@ public sealed class RawToolbarViewModel : ObservableObject
             wrapWidthIndex = Array.IndexOf(RawViewSettings.Widths, RawViewSettings.DefaultWrapWidth);
     }
 
-    /// <summary>Bound two-way to the wrap-width combo. The &lt; 0 guard absorbs the -1 a
-    /// ComboBox raises during teardown (see JsonToolbarViewModel's combo setters).</summary>
+    /// <summary>Bound two-way to the wrap-width choices. The &lt; 0 guard absorbs a -1 from a
+    /// selector being torn down.</summary>
     public int WrapWidthIndex
     {
         get => wrapWidthIndex;
@@ -45,9 +47,13 @@ public sealed class RawToolbarViewModel : ObservableObject
             if (value < 0 || value >= RawViewSettings.Widths.Length || !SetField(ref wrapWidthIndex, value))
                 return;
 
+            OnPropertyChanged(nameof(WrapWidthText));
             applyWrapWidth(RawViewSettings.Widths[value]);
         }
     }
+
+    /// <summary>The wrap width shown beside the button's icon, in bytes.</summary>
+    public string WrapWidthText => RawViewSettings.Widths[wrapWidthIndex].ToString(CultureInfo.InvariantCulture);
 
     /// <summary>
     /// Bound two-way to the colour picker; its order is <see cref="RawColourChoice"/>'s. Only
@@ -64,10 +70,23 @@ public sealed class RawToolbarViewModel : ObservableObject
             if (value < 0 || value > (int)RawColourChoice.Config || !SetField(ref coloursIndex, value))
                 return;
 
+            OnPropertyChanged(nameof(ColoursText));
             var choice = (RawColourChoice)value;
             UiDeferral.AfterCurrentInput(() => applyColours?.Invoke(choice));
         }
     }
+
+    /// <summary>
+    /// The colours shown beside the button's icon: the lexer drawing the document, so Auto
+    /// shows what it chose rather than the word Auto - which is left only for when it chose none.
+    /// </summary>
+    public string ColoursText => (RawColourChoice)coloursIndex switch
+    {
+        RawColourChoice.Auto => autoLexerName ?? "Auto",
+        RawColourChoice.Off => "Off",
+        RawColourChoice.Json => "JSON",
+        _ => "Config",
+    };
 
     /// <summary>The picker's first entry, which names what Auto chose.</summary>
     public string AutoColoursLabel
@@ -77,9 +96,14 @@ public sealed class RawToolbarViewModel : ObservableObject
     }
 
     /// <summary>Tells the picker what Auto chose; null for no lexer.</summary>
-    public void SetAutoColours(string? lexerName) => AutoColoursLabel = AutoLabel(lexerName);
+    public void SetAutoColours(string? lexerName)
+    {
+        autoLexerName = lexerName;
+        AutoColoursLabel = AutoLabel(lexerName);
+        OnPropertyChanged(nameof(ColoursText));
+    }
 
-    private static string AutoLabel(string? lexerName) => $"Colours: Auto ({lexerName ?? "none"})";
+    private static string AutoLabel(string? lexerName) => $"Auto ({lexerName ?? "none"})";
 
     /// <summary>Whether the edit toggle is usable yet - false until the background scan finishes,
     /// which is what an edited row index requires.</summary>

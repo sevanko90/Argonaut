@@ -273,10 +273,6 @@ Measure against [index-benchmarks.md](index-benchmarks.md), rerun the same way.
 - **Skip the progress bar for work about to finish.** `ProgressBoard` shows anything still
   running after 450ms; it could also project the time left and stay hidden when that is under
   ~300ms. Only if a pointless bar is seen in practice.
-- **Icons for the title-bar controls.** The Hints menu is already an icon with a chevron; the
-  others (Expand, Edit, Wrap, Colours, Compare, Save) could follow, with their labels moving to
-  tooltips or shown only where the meaning is not obvious from the icon. Needs a consistent icon
-  set rather than one-off Material paths.
 - **Nicer expanders in the JSON tree.** The plain triangles read as a default. A chevron that
   rotates on expand, sized and weighted to sit with the text, drawn by `TreeSurface` like the
   rest of the row.

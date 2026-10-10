@@ -11,7 +11,7 @@ namespace Argonaut.Features.Json;
 /// <summary>
 /// Header toolbar for the JSON tree view: date-hint scheme/time-zone radio groups (behind a
 /// single "Date" dropdown button) bound to a document's <see cref="DateHintSettings"/>, the
-/// default-expand-depth combo, and (JSON documents only) a "jump to JSONPath" text entry.
+/// default-expand-depth picker, and (JSON documents only) a "jump to JSONPath" text entry.
 /// Shared by JsonViewModel and NdJsonViewModel, which expose an identical surface (a
 /// DateHintSettings instance and a SetDefaultExpandDepth callback) and previously drove these
 /// same combos through the shell via type-switches. NdJsonViewModel omits
@@ -240,7 +240,7 @@ public sealed class JsonToolbarViewModel : ObservableObject
         }
     }
 
-    /// <summary>Bound two-way to the expand-depth combo. Reports the choice to the owning
+    /// <summary>Bound two-way to the expand-depth choices; the value is the depth itself. Reports the choice to the owning
     /// document, which remembers it and applies it live to its tree.</summary>
     public int ExpandDepthIndex
     {

@@ -4,6 +4,8 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:json="clr-namespace:Argonaut.Features.Json"
              xmlns:schema="clr-namespace:Argonaut.Features.Json.Schema"
+             xmlns:icons="clr-namespace:Argonaut.Ui.Icons"
+             xmlns:conv="clr-namespace:Argonaut.Ui.Converters"
              mc:Ignorable="d"
              x:Class="Argonaut.Features.Json.JsonToolbarView"
              x:DataType="json:JsonToolbarViewModel">
@@ -14,58 +16,44 @@
                 VerticalAlignment="Center">
         <Button x:Name="DateButton"
                 Classes="tool"
-                ToolTip.Tip="Hint options: date interpretation and time format">
+                ToolTip.Tip="Hints: date interpretation and time format">
             <StackPanel Orientation="Horizontal" Spacing="6">
-                <Viewbox Width="13" Height="13" VerticalAlignment="Center">
-                    <!-- Material "schedule" -->
-                    <Path Fill="{DynamicResource AppMutedTextBrush}"
-                          Data="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z" />
-                </Viewbox>
-                <Viewbox Width="8" Height="8" VerticalAlignment="Center">
-                    <Path Fill="{DynamicResource AppSubtleIconBrush}" Data="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z" />
-                </Viewbox>
+                <icons:LucideIcon Data="{StaticResource Icon.Hints}" />
+                <icons:LucideIcon Classes="chevron" Data="{StaticResource Icon.ChevronDown}" />
             </StackPanel>
             <Button.Flyout>
                 <Flyout Placement="BottomEdgeAlignedLeft">
                     <StackPanel Margin="12" Spacing="12" MinWidth="170">
                         <StackPanel Spacing="2">
-                            <TextBlock Text="Date interpretation"
-                                       FontSize="11"
-                                       FontWeight="SemiBold"
-                                       Margin="8,0,0,4"
-                                       Foreground="{DynamicResource AppMutedTextBrush}" />
+                            <TextBlock Classes="flyouthead" Text="Date interpretation" />
                             <RadioButton GroupName="dateHintScheme"
                                          Content="Off"
                                          FontSize="12"
-                                         IsChecked="{Binding DateHintSchemeIndex, Converter={x:Static json:IntEqualsConverter.Instance}, ConverterParameter=0}" />
+                                         IsChecked="{Binding DateHintSchemeIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=0}" />
                             <RadioButton GroupName="dateHintScheme"
                                          Content="JS milliseconds"
                                          FontSize="12"
-                                         IsChecked="{Binding DateHintSchemeIndex, Converter={x:Static json:IntEqualsConverter.Instance}, ConverterParameter=1}" />
+                                         IsChecked="{Binding DateHintSchemeIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=1}" />
                             <RadioButton GroupName="dateHintScheme"
                                          Content="JS seconds"
                                          FontSize="12"
-                                         IsChecked="{Binding DateHintSchemeIndex, Converter={x:Static json:IntEqualsConverter.Instance}, ConverterParameter=2}" />
+                                         IsChecked="{Binding DateHintSchemeIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=2}" />
                             <RadioButton GroupName="dateHintScheme"
                                          Content="Keepa minutes"
                                          FontSize="12"
-                                         IsChecked="{Binding DateHintSchemeIndex, Converter={x:Static json:IntEqualsConverter.Instance}, ConverterParameter=3}" />
+                                         IsChecked="{Binding DateHintSchemeIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=3}" />
                         </StackPanel>
                         <Border Height="1" Background="{DynamicResource AppBorderBrush}" />
                         <StackPanel Spacing="2">
-                            <TextBlock Text="Time format"
-                                       FontSize="11"
-                                       FontWeight="SemiBold"
-                                       Margin="8,0,0,4"
-                                       Foreground="{DynamicResource AppMutedTextBrush}" />
+                            <TextBlock Classes="flyouthead" Text="Time format" />
                             <RadioButton GroupName="dateHintTimeZone"
                                          Content="Local time"
                                          FontSize="12"
-                                         IsChecked="{Binding TimeZoneModeIndex, Converter={x:Static json:IntEqualsConverter.Instance}, ConverterParameter=0}" />
+                                         IsChecked="{Binding TimeZoneModeIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=0}" />
                             <RadioButton GroupName="dateHintTimeZone"
                                          Content="UTC"
                                          FontSize="12"
-                                         IsChecked="{Binding TimeZoneModeIndex, Converter={x:Static json:IntEqualsConverter.Instance}, ConverterParameter=1}" />
+                                         IsChecked="{Binding TimeZoneModeIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=1}" />
                         </StackPanel>
                     </StackPanel>
                 </Flyout>
@@ -79,18 +67,12 @@
                 Classes="tool"
                 ToolTip.Tip="JSON Schema used to label values in the tree, and which type in it describes this document">
             <StackPanel Orientation="Horizontal" Spacing="6">
-                <Viewbox Width="13" Height="13" VerticalAlignment="Center">
-                    <!-- Material "account_tree" -->
-                    <Path Fill="{DynamicResource AppMutedTextBrush}"
-                          Data="M22 11V3h-7v3H9V3H2v8h7V8h2v10h4v3h7v-8h-7v3h-2V8h2v3z" />
-                </Viewbox>
+                <icons:LucideIcon Data="{StaticResource Icon.Schema}" />
                 <TextBlock Text="{Binding SchemaButtonText}"
                            VerticalAlignment="Center"
                            TextTrimming="CharacterEllipsis"
                            MaxWidth="220" />
-                <Viewbox Width="8" Height="8" VerticalAlignment="Center">
-                    <Path Fill="{DynamicResource AppSubtleIconBrush}" Data="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z" />
-                </Viewbox>
+                <icons:LucideIcon Classes="chevron" Data="{StaticResource Icon.ChevronDown}" />
             </StackPanel>
             <Button.Flyout>
                 <Flyout Placement="BottomEdgeAlignedLeft"
@@ -214,16 +196,46 @@
                 </Flyout>
             </Button.Flyout>
         </Button>
-        <ComboBox x:Name="ExpandDepthCombo"
-                  Classes="tool"
-                  SelectedIndex="{Binding ExpandDepthIndex, Mode=TwoWay}"
-                  ToolTip.Tip="How many levels to auto-expand when a file opens">
-            <ComboBoxItem Content="Start collapsed" />
-            <ComboBoxItem Content="Expand 1 level" />
-            <ComboBoxItem Content="Expand 2 levels" />
-            <ComboBoxItem Content="Expand 3 levels" />
-            <ComboBoxItem Content="Expand 4 levels" />
-            <ComboBoxItem Content="Expand 5 levels" />
-        </ComboBox>
+        <!-- The value is the depth itself; 0 is "start collapsed". -->
+        <Button x:Name="ExpandDepthButton"
+                Classes="tool"
+                ToolTip.Tip="Auto-expand: how many levels open when a file opens">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+                <icons:LucideIcon Data="{StaticResource Icon.ExpandDepth}" />
+                <TextBlock Classes="toolvalue" Text="{Binding ExpandDepthIndex}" />
+                <icons:LucideIcon Classes="chevron" Data="{StaticResource Icon.ChevronDown}" />
+            </StackPanel>
+            <Button.Flyout>
+                <Flyout Placement="BottomEdgeAlignedLeft">
+                    <StackPanel Margin="12" Spacing="2" MinWidth="150">
+                        <TextBlock Classes="flyouthead" Text="Auto-expand on open" />
+                        <RadioButton GroupName="expandDepth"
+                                     Content="Start collapsed"
+                                     FontSize="12"
+                                     IsChecked="{Binding ExpandDepthIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=0}" />
+                        <RadioButton GroupName="expandDepth"
+                                     Content="1 level"
+                                     FontSize="12"
+                                     IsChecked="{Binding ExpandDepthIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=1}" />
+                        <RadioButton GroupName="expandDepth"
+                                     Content="2 levels"
+                                     FontSize="12"
+                                     IsChecked="{Binding ExpandDepthIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=2}" />
+                        <RadioButton GroupName="expandDepth"
+                                     Content="3 levels"
+                                     FontSize="12"
+                                     IsChecked="{Binding ExpandDepthIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=3}" />
+                        <RadioButton GroupName="expandDepth"
+                                     Content="4 levels"
+                                     FontSize="12"
+                                     IsChecked="{Binding ExpandDepthIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=4}" />
+                        <RadioButton GroupName="expandDepth"
+                                     Content="5 levels"
+                                     FontSize="12"
+                                     IsChecked="{Binding ExpandDepthIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=5}" />
+                    </StackPanel>
+                </Flyout>
+            </Button.Flyout>
+        </Button>
     </StackPanel>
 </UserControl>

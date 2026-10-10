@@ -76,13 +76,31 @@ public sealed class RawToolbarColoursTests : IDisposable
     public void AutoLabel_NamesWhatItChose()
     {
         var toolbar = new RawToolbarViewModel(160, _ => { }, _ => { });
-        Assert.Equal("Colours: Auto (none)", toolbar.AutoColoursLabel);
+        Assert.Equal("Auto (none)", toolbar.AutoColoursLabel);
 
         toolbar.SetAutoColours("JSON");
-        Assert.Equal("Colours: Auto (JSON)", toolbar.AutoColoursLabel);
+        Assert.Equal("Auto (JSON)", toolbar.AutoColoursLabel);
 
         toolbar.SetAutoColours(null);
-        Assert.Equal("Colours: Auto (none)", toolbar.AutoColoursLabel);
+        Assert.Equal("Auto (none)", toolbar.AutoColoursLabel);
+    }
+
+    [Fact]
+    public void ColoursText_IsTheShortNameOfWhatIsDrawing()
+    {
+        using var ui = new DeferredUiScope();
+        var toolbar = new RawToolbarViewModel(160, _ => { }, _ => { });
+        Assert.Equal("Auto", toolbar.ColoursText);
+
+        toolbar.SetAutoColours("JSON");
+        Assert.Equal("JSON", toolbar.ColoursText);
+
+        toolbar.ColoursIndex = (int)RawColourChoice.Off;
+        Assert.Equal("Off", toolbar.ColoursText);
+
+        toolbar.ColoursIndex = (int)RawColourChoice.Config;
+        Assert.Equal("Config", toolbar.ColoursText);
+        ui.Pump();
     }
 
     [Fact]
@@ -91,7 +109,7 @@ public sealed class RawToolbarColoursTests : IDisposable
         using var vm = await LoadAsync(WriteFile("settings.yaml", "x: 1\n"));
 
         Assert.Same(RawLexerChoice.Config, vm.Lexer);
-        Assert.Equal("Colours: Auto (Config)", ((RawToolbarViewModel)vm.Toolbar!).AutoColoursLabel);
+        Assert.Equal("Auto (Config)", ((RawToolbarViewModel)vm.Toolbar!).AutoColoursLabel);
     }
 
     [Fact]
@@ -102,7 +120,7 @@ public sealed class RawToolbarColoursTests : IDisposable
 
         using var plain = await LoadAsync(WriteFile("notes.txt", "hello there\nnothing to see\n"));
         Assert.Null(plain.Lexer);
-        Assert.Equal("Colours: Auto (none)", ((RawToolbarViewModel)plain.Toolbar!).AutoColoursLabel);
+        Assert.Equal("Auto (none)", ((RawToolbarViewModel)plain.Toolbar!).AutoColoursLabel);
     }
 
     [Fact]

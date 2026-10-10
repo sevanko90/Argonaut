@@ -34,15 +34,6 @@ namespace Argonaut.Shell;
 /// </summary>
 public partial class MainWindow : Window
 {
-    // Material "desktop_windows" / "wb_sunny" / "brightness_2" glyphs (24x24 viewBox),
-    // cycled by the status bar's theme toggle button.
-    private const string SystemThemeIconData =
-        "M21 2H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h7l-2 3v1h8v-1l-2-3h7c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H3V4h18v12z";
-    private const string LightThemeIconData =
-        "M6.76 4.84l-1.8-1.79-1.41 1.41 1.79 1.79 1.42-1.41zM4 10.5H1v2h3v-2zm9-9.95h-2V3.5h2V.55zm7.45 3.91l-1.41-1.41-1.79 1.79 1.41 1.41 1.79-1.79zm-3.21 13.7l1.79 1.8 1.41-1.41-1.8-1.79-1.4 1.4zM20 10.5v2h3v-2h-3zm-8-5c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm-1 16.95h2V19.5h-2v2.95zm-7.45-3.91l1.41 1.41 1.79-1.8-1.41-1.41-1.79 1.8z";
-    private const string DarkThemeIconData =
-        "M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z";
-
     private readonly MainWindowViewModel viewModel;
     private readonly UpdateService updateService;
     private readonly ISettingsStore settings;
@@ -428,12 +419,12 @@ public partial class MainWindow : Window
             _ => ThemeVariant.Default
         };
 
-        ThemeToggleIcon.Data = Geometry.Parse(mode switch
+        ThemeToggleIcon.Data = this.FindResource(mode switch
         {
-            ThemeMode.Light => LightThemeIconData,
-            ThemeMode.Dark => DarkThemeIconData,
-            _ => SystemThemeIconData
-        });
+            ThemeMode.Light => "Icon.ThemeLight",
+            ThemeMode.Dark => "Icon.ThemeDark",
+            _ => "Icon.ThemeSystem"
+        }) as Geometry;
 
         ToolTip.SetTip(ThemeToggleButton, mode switch
         {

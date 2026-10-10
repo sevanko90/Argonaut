@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:arrayTable="clr-namespace:Argonaut.Features.Json.ArrayTable"
+             xmlns:icons="clr-namespace:Argonaut.Ui.Icons"
              x:Class="Argonaut.Features.Json.ArrayTable.JsonArrayTableToolbarView"
              x:DataType="arrayTable:JsonArrayTableToolbarViewModel">
     <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
@@ -13,10 +14,11 @@
                    FontSize="12"
                    ToolTip.Tip="{Binding OriginDescription}" />
 
-        <Button Content="Back to JSON"
-                Click="OnBack"
-                Classes="tool"
-                ToolTip.Tip="Reopen the file as JSON and select this array" />
+        <Button Click="OnBack"
+                Classes="tool icononly"
+                ToolTip.Tip="Back to JSON: reopen the file as JSON and select this array">
+            <icons:LucideIcon Data="{StaticResource Icon.Back}" />
+        </Button>
 
         <!-- Hidden for an array of objects: its columns are the property names by definition,
              so there is nothing to re-width into.

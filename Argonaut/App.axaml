@@ -1,5 +1,6 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:icons="clr-namespace:Argonaut.Ui.Icons"
              x:Class="Argonaut.App"
              Name="Argonaut"
              RequestedThemeVariant="Default">
@@ -91,6 +92,38 @@
             <Setter Property="VerticalContentAlignment" Value="Center" />
         </Style>
 
+        <!-- Icons on bar controls are muted so the bar stays quiet; a checked toggle's icon takes
+             the accent along with its background. The chevron marks a control that opens a
+             flyout, and the value beside an icon is the setting it currently holds. -->
+        <Style Selector=":is(Button).tool icons|LucideIcon, Button.iconbutton icons|LucideIcon">
+            <Setter Property="Foreground" Value="{DynamicResource AppMutedTextBrush}" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style Selector="ToggleButton.tool:checked icons|LucideIcon">
+            <Setter Property="Foreground" Value="{DynamicResource AppAccentBrush}" />
+        </Style>
+        <Style Selector="icons|LucideIcon.chevron">
+            <Setter Property="Foreground" Value="{DynamicResource AppSubtleIconBrush}" />
+            <Setter Property="Size" Value="11" />
+        </Style>
+        <Style Selector="TextBlock.toolvalue">
+            <Setter Property="FontWeight" Value="Medium" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <!-- An icon-only bar button: square-ish, so a row of them sits evenly. -->
+        <Style Selector=":is(Button).tool.icononly">
+            <Setter Property="Padding" Value="7,4" />
+        </Style>
+
+        <!-- The heading over a group of choices in a title-bar flyout; it carries the words the
+             button itself no longer shows. -->
+        <Style Selector="TextBlock.flyouthead">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="8,0,0,4" />
+            <Setter Property="Foreground" Value="{DynamicResource AppMutedTextBrush}" />
+        </Style>
+
         <!-- Tables (CSV, the array table): the palette's surfaces rather than Fluent's greys -
              rows on the content background, a header strip on the panel one. -->
         <Style Selector="TableView">
@@ -159,7 +192,7 @@
         <Style Selector="Button.iconbutton:disabled /template/ ContentPresenter, Button.tool:disabled /template/ ContentPresenter">
             <Setter Property="Background" Value="Transparent" />
         </Style>
-        <Style Selector="Button.tool:disabled">
+        <Style Selector=":is(Button).tool:disabled">
             <Setter Property="Opacity" Value="0.45" />
         </Style>
 
@@ -183,6 +216,7 @@
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
                 <ResourceInclude Source="avares://Argonaut/Themes/AppColors.axaml" />
+                <ResourceInclude Source="avares://Argonaut/Ui/Icons/LucideIcons.axaml" />
             </ResourceDictionary.MergedDictionaries>
 
             <FontFamily x:Key="AppMonoFontFamily">Consolas, 'SF Mono', Menlo, Monaco, 'Cascadia Code', 'Courier New', monospace</FontFamily>

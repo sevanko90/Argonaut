@@ -3,6 +3,7 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              mc:Ignorable="d"
+             xmlns:icons="clr-namespace:Argonaut.Ui.Icons"
              x:Class="Argonaut.Ui.Find.FindBar">
     <UserControl.Styles>
         <!-- The field's own buttons: small, borderless, inside the field's edge. -->
@@ -30,11 +31,11 @@
              PlaceholderText="Find"
              FontFamily="{DynamicResource AppContentFontFamily}">
         <TextBox.InnerLeftContent>
-            <Viewbox Width="12" Height="12" Margin="10,0,4,0" VerticalAlignment="Center">
-                <!-- Material "search" -->
-                <Path Fill="{DynamicResource AppSubtleIconBrush}"
-                      Data="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
-            </Viewbox>
+            <icons:LucideIcon Data="{StaticResource Icon.Search}"
+                              Size="13"
+                              Margin="10,0,4,0"
+                              VerticalAlignment="Center"
+                              Foreground="{DynamicResource AppSubtleIconBrush}" />
         </TextBox.InnerLeftContent>
         <TextBox.InnerRightContent>
             <StackPanel Orientation="Horizontal" Spacing="0" Margin="0,0,2,0">
@@ -49,26 +50,17 @@
                 <Button x:Name="PreviousButton"
                         Classes="infield"
                         ToolTip.Tip="Previous match (Shift+Enter)">
-                    <Viewbox Width="10" Height="10">
-                        <Path Fill="{DynamicResource AppMutedTextBrush}"
-                              Data="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z" />
-                    </Viewbox>
+                    <icons:LucideIcon Data="{StaticResource Icon.ChevronUp}" Size="13" Foreground="{DynamicResource AppMutedTextBrush}" />
                 </Button>
                 <Button x:Name="NextButton"
                         Classes="infield"
                         ToolTip.Tip="Next match (Enter)">
-                    <Viewbox Width="10" Height="10">
-                        <Path Fill="{DynamicResource AppMutedTextBrush}"
-                              Data="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z" />
-                    </Viewbox>
+                    <icons:LucideIcon Data="{StaticResource Icon.ChevronDown}" Size="13" Foreground="{DynamicResource AppMutedTextBrush}" />
                 </Button>
                 <Button x:Name="CloseButton"
                         Classes="infield"
                         ToolTip.Tip="Clear search (Esc)">
-                    <Viewbox Width="9" Height="9">
-                        <Path Fill="{DynamicResource AppMutedTextBrush}"
-                              Data="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
-                    </Viewbox>
+                    <icons:LucideIcon Data="{StaticResource Icon.Close}" Size="12" Foreground="{DynamicResource AppMutedTextBrush}" />
                 </Button>
             </StackPanel>
         </TextBox.InnerRightContent>

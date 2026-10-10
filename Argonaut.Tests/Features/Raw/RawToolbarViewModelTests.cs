@@ -3,7 +3,7 @@ using Argonaut.Features.Raw;
 namespace Argonaut.Tests.Features.Raw;
 
 /// <summary>
-/// Exercises the raw toolbar's wrap-width combo in isolation: index↔width mapping, the
+/// Exercises the raw toolbar's wrap-width picker in isolation: index↔width mapping, the
 /// ComboBox-teardown guard, and the apply callback. Remembering the choice is the document's job
 /// (see RawViewModelTests).
 /// </summary>
@@ -22,6 +22,21 @@ public sealed class RawToolbarViewModelTests
     {
         var toolbar = new RawToolbarViewModel(999, _ => { }, _ => { });
         Assert.Equal(Array.IndexOf(RawViewSettings.Widths, RawViewSettings.DefaultWrapWidth), toolbar.WrapWidthIndex);
+    }
+
+    [Fact]
+    public void WrapWidthText_FollowsTheChosenWidth()
+    {
+        var toolbar = new RawToolbarViewModel(80, _ => { }, _ => { });
+        var changed = new List<string?>();
+        toolbar.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        Assert.Equal("80", toolbar.WrapWidthText);
+
+        toolbar.WrapWidthIndex = 2;
+
+        Assert.Equal("512", toolbar.WrapWidthText);
+        Assert.Contains(nameof(RawToolbarViewModel.WrapWidthText), changed);
     }
 
     [Fact]

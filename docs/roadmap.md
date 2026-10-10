@@ -56,32 +56,19 @@ it in (see "Saving" in architecture.md).
 
 ## JSON tree
 
-- **More value hints, beside the date chips.** Each classified from the value alone, by its shape
-  (a regex or a fixed format), never by the property's name - there are too many names to key
-  on. Each is an `IValueHintProvider`, so it sees only rows on screen. ISO 8601 dates, colours
-  (`#RRGGBB`, `#RRGGBBAA`, `rgb()`, `hsl()` - not the rare three- and four-digit hex, which is as
-  often an issue number), JWTs, web and mail addresses (`http`, `https` and `mailto` only), cron
-  expressions, JSON inside a string and Base64 have one. Still to do: a URL inside longer text,
-  which needs a link over part of the text.
-
-  Timestamps inside IDs (ObjectId, UUID v7, ULID, Snowflake) were considered and dropped: too
-  much inference to be reliable, for little use.
-
-- **Expanding a hint into what it encodes.** One idea common to the hints that hide a document
-  inside a value: a JWT's header and claims, Base64's decoded bytes, JSON inside a string. The
-  chip offers to expand it, and what is decoded opens as a document of its own kind - JSON as a
-  tree, text in the raw view, an image as itself - over bytes decoded on demand rather than at
-  classification, in the background when large. A hint would say whether it expands and how to
-  get the bytes; whether they open as child rows under the value, in a side pane like the array
-  table's cell detail, or as a document of their own is the design question, and wants mocking
-  up before it is built.
+- **A URL inside longer text.** Value hints read a whole value, so `"see https://… for details"`
+  gets no link. It needs a link over part of a row's text (`TreeRun` links already cover a span),
+  found on rows on screen only, and possibly several in one value. Like every hint it is classified
+  by shape, never by the property's name. Timestamps inside IDs (ObjectId, UUID v7, ULID,
+  Snowflake) were considered as a hint and dropped: too much inference to be reliable, for little
+  use.
 
 - **Value hints beyond the JSON tree.** The parsers are already plain functions over bytes
-  (`IsoDateHintClassifier`, `ColourHintClassifier`, `CronHintClassifier`, `DateHintClassifier`); what ties hints to the
-  tree is the provider contract - it takes a `JsonTokenKind` and returns the tree's chip icon,
-  link and style. The split: what a value *is* and what it reads as (a time, a colour, an
-  address, an expiry) moves down to `Engine`, free of Avalonia and of JSON, the JWT and URL checks
-  with it, and each view renders that its own way.
+  (`IsoDateHintClassifier`, `ColourHintClassifier`, `CronHintClassifier`, `DateHintClassifier`);
+  what ties hints to the tree is the provider contract - it takes a `JsonTokenKind` and returns
+  the tree's chip icon, link and style. The split: what a value *is* and what it reads as (a time,
+  a colour, an address, an expiry) moves down to `Engine`, free of Avalonia and of JSON, the JWT,
+  URL, embedded-JSON and Base64 checks with it, and each view renders that its own way.
 
   The raw view is the first other user. Classifying is not every word on the page: the raw
   view's lexers already split the rows on screen into tokens for colouring, so it is their strings
@@ -91,7 +78,9 @@ it in (see "Saving" in architecture.md).
   chip at the end of the line, as the tree does; anything else - no lexer, a comment, a long
   wrapped line - needs inline marks, a swatch before a colour or an underlined address with a
   card on hover, drawn by `RawTextSurface` without disturbing the row's text, wrapping or caret.
-  Wants a mock-up first.
+  Wants a mock-up first. A hint that hides a document opens the same card the tree's do - a
+  `ValuePreviewView` over `HintExpansion`'s decoded bytes, anchored to the mark or chip - which is
+  the raw view composing the JSON feature's preview, as NDJSON composes its tree.
 
 - **Per-depth row counts**, only if the estimated scrollbar proves not good enough in use. They
   would give the tree the exact scroll model the raw view has, under the same `RowSurface`

@@ -212,9 +212,28 @@ def _jwt(claims):
     return f"{header}.{payload}.{_b64url(bytes(range(32)))}"
 
 
-# The first bytes of a PNG and of a gzip stream, which is all a Base64 hint looks at to say what
-# the payload is; the rest is filler of the right length.
-PNG_HEADER = bytes.fromhex("89504e470d0a1a0a0000000d49484452") + (32).to_bytes(4, "big") * 2 + bytes([8, 6, 0, 0, 0])
+def _png(width, height, pixel, level=9):
+    """A real PNG - RGBA, one filter byte per row - with pixel(x, y) giving each (r, g, b, a), so
+    a hint's card can show it, not just name it."""
+    import struct, zlib
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+    rows = b"".join(b"\x00" + b"".join(bytes(pixel(x, y)) for x in range(width)) for y in range(height))
+    header = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(rows, level)) + chunk(b"IEND", b"")
+
+
+def _icon_pixel(x, y):
+    """A 32x32 badge: a blue-to-green field with a white ring."""
+    d = ((x - 15.5) ** 2 + (y - 15.5) ** 2) ** 0.5
+    if 9 <= d <= 12:
+        return (255, 255, 255, 255)
+    return (37 + x * 2, 99 + y * 3, 235 - x * 3, 255 if d < 15.5 else 0)
+
+
+SMALL_PNG = _png(32, 32, _icon_pixel)
+# The first bytes of a gzip stream, which is all a Base64 hint looks at to say what the payload is;
+# the rest is filler of the right length.
 GZIP_HEADER = bytes([0x1F, 0x8B, 0x08, 0x00])
 HINT_LARGE_BASE64_OBJECT_INDEX = 2
 HINT_LARGE_BASE64_BYTES = 3 * 1024**2
@@ -241,8 +260,8 @@ def hint_samples(i):
     embedded = json.dumps({"event": "order.created", "id": f"ord_{88000 + i}",
                            "lines": [{"sku": f"A-{100 + i}", "qty": i % 4 + 1}], "paid": i % 2 == 0},
                           separators=(",", ":"))
-    payload = PNG_HEADER if i % 2 == 0 else GZIP_HEADER
-    small_base64 = base64.b64encode(payload + bytes((i * 7 + k) % 256 for k in range(96))).decode()
+    payload = SMALL_PNG if i % 2 == 0 else GZIP_HEADER + bytes((i * 7 + k) % 256 for k in range(96))
+    small_base64 = base64.b64encode(payload).decode()
 
     members = {
         "isoInstant": iso(past),
@@ -266,7 +285,10 @@ def hint_samples(i):
         "notBase64": "Zm9v!YmFy",
     }
     if i == HINT_LARGE_BASE64_OBJECT_INDEX:
-        members["base64Large"] = base64.b64encode(PNG_HEADER + bytes(k % 251 for k in range(HINT_LARGE_BASE64_BYTES))).decode()
+        # Stored rather than compressed, so the picture is as big as the payload it stands for.
+        side = int((HINT_LARGE_BASE64_BYTES / 4) ** 0.5)
+        members["base64Large"] = base64.b64encode(
+            _png(side, side, lambda x, y: (x % 256, y % 256, (x ^ y) % 256, 255), level=0)).decode()
     return json.dumps(members, ensure_ascii=False, separators=(",", ":"))
 
 

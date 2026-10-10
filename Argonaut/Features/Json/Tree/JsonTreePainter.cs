@@ -10,14 +10,10 @@ namespace Argonaut.Features.Json.Tree;
 /// <summary>
 /// What a JSON tree row says: a member's name, then its value - a scalar coloured by type, or a
 /// container's bracket or collapsed summary - then any notes: a decoded date, a truncation notice,
-/// a "view as table" link. An array element's index is its marker.
+/// a "View as table" action. An array element's index is its marker.
 /// </summary>
 public sealed class JsonTreePainter(JsonTreeText text, IReadOnlyList<IValueHintProvider>? hintProviders, bool offerArrayTable) : ITreeRowPainter
 {
-    /// <summary>Between the value and a note after it, standing in for the gap the row template
-    /// used to leave.</summary>
-    private const string NoteGap = "   ";
-
     public void AppendRuns(in TreeRow row, List<TreeRun> runs)
     {
         bool isObject = row.Node.FormatKind == (byte)JsonTokenKind.StartObject;
@@ -35,9 +31,9 @@ public sealed class JsonTreePainter(JsonTreeText text, IReadOnlyList<IValueHintP
         {
             runs.Add(new TreeRun(text.Summary(row), TreeRunStyle.Plain));
             if (nameTruncated)
-                runs.Add(new TreeRun(NoteGap + NameTruncatedNote(nameLength), TreeRunStyle.Hint));
+                runs.Add(new TreeRun(NameTruncatedNote(nameLength), TreeRunStyle.Note));
             if (offerArrayTable && !isObject && text.HasChildren(row.Node.ValueStart, row.Node.FormatKind))
-                runs.Add(new TreeRun(NoteGap + "view as table", TreeRunStyle.Link, new ViewAsTableLink(row.Node.ValueStart)));
+                runs.Add(new TreeRun("View as table", TreeRunStyle.Action, new ViewAsTableLink(row.Node.ValueStart), TreeRunIcon.Table));
             return;
         }
 
@@ -45,13 +41,18 @@ public sealed class JsonTreePainter(JsonTreeText text, IReadOnlyList<IValueHintP
         string value = text.Scalar(row, out bool valueTruncated, out long contentOffset, out long valueLength);
         runs.Add(new TreeRun(value, StyleOf(kind)));
 
+        // Notes, then chips, then actions: information first, and what appears on hover last, so
+        // showing it moves nothing.
+        if (nameTruncated)
+            runs.Add(new TreeRun(NameTruncatedNote(nameLength), TreeRunStyle.Note));
         if (valueTruncated)
-            runs.Add(new TreeRun(NoteGap + $"(truncated — full length {FormatByteLength(valueLength)})", TreeRunStyle.Link, new ViewInRawLink(contentOffset)));
-        else if (nameTruncated)
-            runs.Add(new TreeRun(NoteGap + NameTruncatedNote(nameLength), TreeRunStyle.Hint));
+            runs.Add(new TreeRun(FormatByteLength(valueLength), TreeRunStyle.Note));
 
         if (Hint(row, kind) is { } hint)
-            runs.Add(new TreeRun(NoteGap + hint, TreeRunStyle.Link, new DateSchemeLink(row.Node.ValueStart)));
+            runs.Add(new TreeRun(hint, TreeRunStyle.Chip, new DateSchemeLink(row.Node.ValueStart), TreeRunIcon.Time));
+
+        if (valueTruncated)
+            runs.Add(new TreeRun("Open in raw", TreeRunStyle.Action, new ViewInRawLink(contentOffset), TreeRunIcon.FullText));
     }
 
     public string? Marker(in TreeRow row)
@@ -86,7 +87,7 @@ public sealed class JsonTreePainter(JsonTreeText text, IReadOnlyList<IValueHintP
         _ => TreeRunStyle.Plain,
     };
 
-    private static string NameTruncatedNote(long length) => $"(name truncated — full length {FormatByteLength(length)})";
+    private static string NameTruncatedNote(long length) => $"name truncated, full length {FormatByteLength(length)}";
 
     private static string FormatByteLength(long bytes) => bytes switch
     {

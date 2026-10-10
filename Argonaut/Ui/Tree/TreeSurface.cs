@@ -77,9 +77,30 @@ public class TreeSurface : RowSurface
     /// <summary>A gap left between two panes, split either side of the line drawn between them.</summary>
     private const double PaneGap = 8;
 
-    /// <summary>One pane of a row as laid out: its text, the marker before its arrow, and where
-    /// its links are in the text.</summary>
-    private sealed record PaneLayout(TextLayout Layout, string Text, TextLayout? Marker, List<(int Start, int Length, object Link)>? Links);
+    /// <summary>Space between a row's text and what trails it, and between trailing items.</summary>
+    private const double TrailingGap = 12;
+    private const double TrailingSpacing = 6;
+
+    // A chip: its inner padding, height and corner, and the icon it leads with - sized and
+    // weighted (on Lucide's 24-unit grid) to sit with the smaller interface text inside it.
+    private const double ChipPadding = 6;
+    private const double ChipHeight = 17;
+    private const double ChipRadius = 4;
+    private const double ChipIconSize = 11;
+    private const double ChipIconGap = 5;
+    private const double ChipIconStroke = 2;
+
+    /// <summary>One note or chip after a pane's text, at <paramref name="X"/> from the text's
+    /// start.</summary>
+    private sealed record TrailingItem(TextLayout Label, IBrush Brush, TreeRunStyle Style, TreeRunIcon Icon, double X, double Width, object? Link)
+    {
+        public bool IsChip => Style != TreeRunStyle.Note;
+    }
+
+    /// <summary>One pane of a row as laid out: its text, the marker before its arrow, where its
+    /// links are in the text, what trails the text, and how wide the whole is.</summary>
+    private sealed record PaneLayout(TextLayout Layout, string Text, TextLayout? Marker,
+        List<(int Start, int Length, object Link)>? Links, List<TrailingItem>? Trailing, double Width);
 
     /// <summary>One row as laid out: a pane per side the painter draws, one for a plain tree.</summary>
     private sealed record RowLayout(PaneLayout[] Panes)
@@ -110,6 +131,13 @@ public class TreeSurface : RowSurface
     private string? highlightTerm;
     private IReadOnlyDictionary<TreeRunStyle, IBrush>? runBrushes;
     private IReadOnlyDictionary<TreeRowTint, IBrush>? tintBrushes;
+    private IReadOnlyDictionary<TreeRunIcon, Geometry>? runIcons;
+    private readonly Dictionary<IBrush, Pen> iconPens = new();
+
+    // The row under the pointer, and which of its trailing items, if any: actions show on the
+    // hovered row, and a clickable chip darkens under the pointer.
+    private (long, bool)? hoveredKey;
+    private int hoveredItem = -1;
 
     /// <summary>The rows shown. Setting them resets the view to the top.</summary>
     public ITreeRowSource? Document
@@ -155,6 +183,20 @@ public class TreeSurface : RowSurface
         set
         {
             runBrushes = value;
+            iconPens.Clear();
+            DropLayouts();
+            InvalidateVisual();
+        }
+    }
+
+    /// <summary>The glyph per <see cref="TreeRunIcon"/>, on a 24x24 grid and drawn stroked; an
+    /// icon with none leaves its chip as text alone.</summary>
+    public IReadOnlyDictionary<TreeRunIcon, Geometry>? RunIcons
+    {
+        get => runIcons;
+        set
+        {
+            runIcons = value;
             DropLayouts();
             InvalidateVisual();
         }
@@ -206,9 +248,47 @@ public class TreeSurface : RowSurface
         set => SetValue(DividerBrushProperty, value);
     }
 
+    /// <summary>The font of notes and chips after a row's text - the interface font, where the
+    /// rows are set in the content font. Null uses the rows' own.</summary>
+    public static readonly StyledProperty<FontFamily?> ChipFontFamilyProperty =
+        AvaloniaProperty.Register<TreeSurface, FontFamily?>(nameof(ChipFontFamily));
+
+    /// <summary>Behind a chip.</summary>
+    public static readonly StyledProperty<IBrush?> ChipBackgroundProperty =
+        AvaloniaProperty.Register<TreeSurface, IBrush?>(nameof(ChipBackground));
+
+    /// <summary>Behind a clickable chip under the pointer.</summary>
+    public static readonly StyledProperty<IBrush?> ChipHoverBackgroundProperty =
+        AvaloniaProperty.Register<TreeSurface, IBrush?>(nameof(ChipHoverBackground));
+
+    public FontFamily? ChipFontFamily
+    {
+        get => GetValue(ChipFontFamilyProperty);
+        set => SetValue(ChipFontFamilyProperty, value);
+    }
+
+    public IBrush? ChipBackground
+    {
+        get => GetValue(ChipBackgroundProperty);
+        set => SetValue(ChipBackgroundProperty, value);
+    }
+
+    public IBrush? ChipHoverBackground
+    {
+        get => GetValue(ChipHoverBackgroundProperty);
+        set => SetValue(ChipHoverBackgroundProperty, value);
+    }
+
     static TreeSurface()
     {
-        AffectsRender<TreeSurface>(GutterBackgroundProperty, DividerBrushProperty);
+        AffectsRender<TreeSurface>(GutterBackgroundProperty, DividerBrushProperty, ChipBackgroundProperty, ChipHoverBackgroundProperty);
+    }
+
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+        if (change.Property == ChipFontFamilyProperty)
+            OnTextStyleChanged();
     }
 
     /// <summary>A gutter changed width or what it shows - a schema bound or unbound.</summary>
@@ -244,8 +324,17 @@ public class TreeSurface : RowSurface
                 return rect.Translate(new Vector(textX, textTop));
         }
 
+        for (int pane = 0; pane < laid.Panes.Length; pane++)
+        {
+            if (laid.Panes[pane].Trailing?.Find(item => item.Link is not null) is { } item)
+                return new Rect(ArrowLeft(index, pane) + ToggleWidth + item.X, ChipTop(index * RowHeight - anchorPixel), item.Width, ChipHeight);
+        }
+
         return null;
     }
+
+    /// <summary>Whether realized row <paramref name="index"/> shows its actions, for tests.</summary>
+    internal bool ShowsActions(int index) => ShowsActions(realized[index]);
 
     /// <summary>The text layout of one pane of realized row <paramref name="index"/>, for tests.</summary>
     internal TextLayout PaneTextLayout(int index, int pane = 0)
@@ -554,7 +643,7 @@ public class TreeSurface : RowSurface
         {
             var row = realized[i];
             var laid = LayoutFor(row, typeface, FontSize).First;
-            widest = Math.Max(widest, row.Depth * IndentWidth + insets[i][0] + ToggleWidth + laid.Layout.WidthIncludingTrailingWhitespace);
+            widest = Math.Max(widest, row.Depth * IndentWidth + insets[i][0] + ToggleWidth + laid.Width);
         }
 
         RecordRowWidth(widest);
@@ -586,10 +675,17 @@ public class TreeSurface : RowSurface
         var text = new StringBuilder();
         var overrides = new List<ValueSpan<TextRunProperties>>(runs.Count);
         List<(int, int, object)>? links = null;
+        List<TreeRun>? trailingRuns = null;
         foreach (var run in runs)
         {
             if (run.Text.Length == 0)
                 continue;
+
+            if (run.Style is TreeRunStyle.Note or TreeRunStyle.Chip or TreeRunStyle.Action)
+            {
+                (trailingRuns ??= new()).Add(run);
+                continue;
+            }
 
             var brush = runBrushes is not null && runBrushes.TryGetValue(run.Style, out var styled) ? styled : foreground;
             overrides.Add(new ValueSpan<TextRunProperties>(text.Length, run.Text.Length,
@@ -613,7 +709,34 @@ public class TreeSurface : RowSurface
             marker = new TextLayout(label, typeface, Math.Max(6, fontSize * 0.75), markerBrush);
         }
 
-        return new PaneLayout(layout, content, marker, links);
+        double textWidth = layout.WidthIncludingTrailingWhitespace;
+        var trailing = trailingRuns is null ? null : LayOutTrailing(trailingRuns, textWidth, fontSize, foreground);
+        double width = trailing is { Count: > 0 } ? trailing[^1].X + trailing[^1].Width : textWidth;
+        return new PaneLayout(layout, content, marker, links, trailing, width);
+    }
+
+    /// <summary>Lays the notes and chips after a pane's text out in a row, a gap after it.</summary>
+    private List<TrailingItem> LayOutTrailing(List<TreeRun> trailingRuns, double textWidth, double fontSize, IBrush foreground)
+    {
+        var typeface = new Typeface(ChipFontFamily ?? FontFamily);
+        double labelSize = Math.Max(6, fontSize - 1);
+        var items = new List<TrailingItem>(trailingRuns.Count);
+        double x = textWidth + TrailingGap;
+        foreach (var run in trailingRuns)
+        {
+            var brush = runBrushes is not null && runBrushes.TryGetValue(run.Style, out var styled) ? styled : foreground;
+            var label = new TextLayout(ControlGlyphs.ForDisplay(run.Text), typeface, labelSize, brush);
+            bool isChip = run.Style != TreeRunStyle.Note;
+            var icon = isChip && runIcons is not null && runIcons.ContainsKey(run.Icon) ? run.Icon : TreeRunIcon.None;
+            double width = label.WidthIncludingTrailingWhitespace
+                + (isChip ? 2 * ChipPadding : 0)
+                + (icon != TreeRunIcon.None ? ChipIconSize + ChipIconGap : 0);
+
+            items.Add(new TrailingItem(label, brush, run.Style, icon, x, width, run.Link));
+            x += width + TrailingSpacing;
+        }
+
+        return items;
     }
 
     /// <summary>What the row says, every pane's text in order.</summary>
@@ -766,7 +889,57 @@ public class TreeSurface : RowSurface
         double textX = arrowX + ToggleWidth;
         DrawHighlights(context, laid.Layout, laid.Text, textX, textTop);
         laid.Layout.Draw(context, new Point(textX, textTop));
+
+        if (laid.Trailing is { } trailing)
+            DrawTrailing(context, row, trailing, textX, y);
     }
+
+    /// <summary>The notes and chips after a pane's text; actions only where they show.</summary>
+    private void DrawTrailing(DrawingContext context, in TreeRow row, List<TrailingItem> trailing, double textX, double y)
+    {
+        bool showsActions = ShowsActions(row);
+        bool isHovered = row.Key == hoveredKey;
+        for (int i = 0; i < trailing.Count; i++)
+        {
+            var item = trailing[i];
+            if (item.Style == TreeRunStyle.Action && !showsActions)
+                continue;
+
+            double labelX = textX + item.X;
+            if (item.IsChip)
+            {
+                bool isHot = isHovered && i == hoveredItem && item.Link is not null;
+                if ((isHot ? ChipHoverBackground ?? ChipBackground : ChipBackground) is { } fill)
+                    context.DrawRectangle(fill, null, new RoundedRect(new Rect(labelX, ChipTop(y), item.Width, ChipHeight), ChipRadius));
+
+                labelX += ChipPadding;
+                if (item.Icon != TreeRunIcon.None && runIcons!.TryGetValue(item.Icon, out var glyph))
+                {
+                    double scale = ChipIconSize / 24;
+                    var at = Matrix.CreateScale(scale, scale) * Matrix.CreateTranslation(labelX, y + (RowHeight - ChipIconSize) / 2);
+                    using (context.PushTransform(at))
+                        context.DrawGeometry(null, IconPen(item.Brush), glyph);
+                    labelX += ChipIconSize + ChipIconGap;
+                }
+            }
+
+            item.Label.Draw(context, new Point(labelX, CentreInRow(item.Label, y)));
+        }
+    }
+
+    private static double ChipTop(double rowTop) => rowTop + (RowHeight - ChipHeight) / 2;
+
+    private Pen IconPen(IBrush brush)
+    {
+        if (!iconPens.TryGetValue(brush, out var pen))
+            iconPens[brush] = pen = new Pen(brush, ChipIconStroke, lineCap: PenLineCap.Round, lineJoin: PenLineJoin.Round);
+        return pen;
+    }
+
+    /// <summary>Whether a row shows its actions: the row under the pointer, and the selected one -
+    /// so a row picked from the keyboard offers them too.</summary>
+    private bool ShowsActions(in TreeRow row)
+        => row.Key == hoveredKey || (selection is { } selected && row.Key == selected.Current.Key);
 
     private void DrawHighlights(DrawingContext context, TextLayout layout, string text, double x, double y)
     {
@@ -968,10 +1141,19 @@ public class TreeSurface : RowSurface
 
         bool overEdge = GutterEdgeAt(point.X) is not null;
         int pane = PaneAt(point.X);
-        bool overLink = !overEdge && RowAt(point.Y) is { } hovered
-            && LayoutFor(hovered.Row, new Typeface(FontFamily), FontSize).Panes[pane] is var laid
-            && LinkAt(laid, point.X - ArrowLeft(hovered.Index, pane) - ToggleWidth,
-                point.Y - CentreInRow(laid.Layout, hovered.Index * RowHeight - anchorPixel)) is not null;
+        bool overLink = false;
+        if (!overEdge && document is not null && RowAt(point.Y) is { } hovered)
+        {
+            var laid = LayoutFor(hovered.Row, new Typeface(FontFamily), FontSize).Panes[pane];
+            double x = point.X - ArrowLeft(hovered.Index, pane) - ToggleWidth;
+            overLink = LinkAt(laid, x, point.Y - CentreInRow(laid.Layout, hovered.Index * RowHeight - anchorPixel)) is not null;
+            SetHover(hovered.Row.Key, TrailingAt(laid, x));
+        }
+        else
+        {
+            SetHover(null, -1);
+        }
+
         Cursor = overEdge ? new Cursor(StandardCursorType.SizeWestEast)
             : overLink ? new Cursor(StandardCursorType.Hand)
             : null;
@@ -995,6 +1177,7 @@ public class TreeSurface : RowSurface
     {
         base.OnPointerExited(e);
         SetToolTip(null);
+        SetHover(null, -1);
     }
 
     private (TreeRow Row, int Index)? RowAt(double y)
@@ -1026,6 +1209,9 @@ public class TreeSurface : RowSurface
     /// <summary>The link under a point given in the row text's own coordinates.</summary>
     private static object? LinkAt(PaneLayout laid, double x, double y)
     {
+        if (TrailingAt(laid, x) is var item and >= 0)
+            return laid.Trailing![item].Link;
+
         if (laid.Links is null || x < 0 || x > laid.Layout.WidthIncludingTrailingWhitespace)
             return null;
 
@@ -1037,6 +1223,32 @@ public class TreeSurface : RowSurface
         }
 
         return null;
+    }
+
+    /// <summary>The trailing item under an x given from the row text's start, or -1. An action is
+    /// hit whether or not it is drawn: the pointer being there makes its row the hovered one.</summary>
+    private static int TrailingAt(PaneLayout laid, double x)
+    {
+        if (laid.Trailing is not { } trailing)
+            return -1;
+
+        for (int i = 0; i < trailing.Count; i++)
+        {
+            if (x >= trailing[i].X && x < trailing[i].X + trailing[i].Width)
+                return i;
+        }
+
+        return -1;
+    }
+
+    private void SetHover((long, bool)? key, int item)
+    {
+        if (key == hoveredKey && item == hoveredItem)
+            return;
+
+        hoveredKey = key;
+        hoveredItem = item;
+        InvalidateVisual();
     }
 
     /// <summary>Shows the tooltip of the gutter cell under the pointer, or none.</summary>

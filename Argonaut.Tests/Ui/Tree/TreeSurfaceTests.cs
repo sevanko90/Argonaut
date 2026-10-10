@@ -504,6 +504,84 @@ public sealed class TreeSurfaceTests
         Assert.Equal(leaf.Key, h.Surface.SelectedRow!.Value.Key);
     }, painter: bytes => new LinkingPainter(bytes));
 
+    /// <summary>Atoms get a chip, a note and an action after their text - the trailing kinds a
+    /// format can ask for.</summary>
+    private sealed class ChippingPainter(byte[] bytes) : ITreeRowPainter
+    {
+        private readonly SExpressionTreeFormat.Painter inner = new(bytes);
+
+        public void AppendRuns(in TreeRow row, List<TreeRun> runs)
+        {
+            inner.AppendRuns(row, runs);
+            if (row.Shape != TreeRowShape.Leaf)
+                return;
+
+            runs.Add(new TreeRun("12 bytes", TreeRunStyle.Note));
+            runs.Add(new TreeRun("info", TreeRunStyle.Chip, Icon: TreeRunIcon.Time));
+            runs.Add(new TreeRun("act", TreeRunStyle.Action, Link: row.Node.ValueStart, Icon: TreeRunIcon.Table));
+        }
+
+        public string? Marker(in TreeRow row) => null;
+    }
+
+    [Fact]
+    public Task ClickingAnActionRaisesItsLink() => WithSurface(defaultDepth: 9, async h =>
+    {
+        int leafIndex = h.Surface.RealizedRows.ToList().FindIndex(r => r.Shape == TreeRowShape.Leaf);
+        var leaf = h.Surface.RealizedRows[leafIndex];
+        TreeLinkClickedEventArgs? clicked = null;
+        h.Surface.LinkClicked += (_, e) => clicked = e;
+
+        var bounds = h.Surface.LinkBounds(leafIndex)!.Value;
+        Assert.True(bounds.Width > 0);
+        Assert.True(bounds.Left > h.Surface.PaneTextLayout(leafIndex).WidthIncludingTrailingWhitespace,
+            "the action sits after the row's text");
+        var point = h.Surface.TranslatePoint(bounds.Center, h.Window)!.Value;
+
+        h.Window.MouseDown(point, MouseButton.Left);
+        h.Window.MouseUp(point, MouseButton.Left);
+        await PumpAsync();
+
+        Assert.Equal(leaf.Node.ValueStart, clicked?.Link);
+    }, painter: bytes => new ChippingPainter(bytes));
+
+    [Fact]
+    public Task AnActionShowsOnlyOnTheHoveredOrSelectedRow() => WithSurface(defaultDepth: 9, async h =>
+    {
+        var rows = h.Surface.RealizedRows.ToList();
+        int first = rows.FindIndex(r => r.Shape == TreeRowShape.Leaf);
+        int second = rows.FindIndex(first + 1, r => r.Shape == TreeRowShape.Leaf);
+        Assert.False(h.Surface.ShowsActions(first));
+        Assert.False(h.Surface.ShowsActions(second));
+
+        Point RowPoint(int index) => h.Surface.TranslatePoint(
+            new Point(h.Surface.ArrowX(index) + TreeSurface.ToggleWidth + 2, index * RowSurface.RowHeight + RowSurface.RowHeight / 2), h.Window)!.Value;
+
+        h.Window.MouseMove(RowPoint(second));
+        await PumpAsync();
+        Assert.True(h.Surface.ShowsActions(second));
+        Assert.False(h.Surface.ShowsActions(first));
+
+        // Selecting the first row moves the pointer there too; leaving it keeps its actions.
+        h.Window.MouseDown(RowPoint(first), MouseButton.Left);
+        h.Window.MouseUp(RowPoint(first), MouseButton.Left);
+        h.Window.MouseMove(RowPoint(second));
+        await PumpAsync();
+        Assert.True(h.Surface.ShowsActions(first));
+        Assert.True(h.Surface.ShowsActions(second));
+    }, painter: bytes => new ChippingPainter(bytes));
+
+    [Fact]
+    public Task TheChipsAreInTheRowsWidth() => WithSurface(defaultDepth: 9, h =>
+    {
+        int leafIndex = h.Surface.RealizedRows.ToList().FindIndex(r => r.Shape == TreeRowShape.Leaf);
+        var bounds = h.Surface.LinkBounds(leafIndex)!.Value;
+        var leaf = h.Surface.RealizedRows[leafIndex];
+        Assert.True(h.Surface.WidestRowWidth >= bounds.Right - h.Surface.ArrowX(leafIndex) + leaf.Depth * TreeSurface.IndentWidth,
+            "panning must be able to reach the last chip");
+        return Task.CompletedTask;
+    }, painter: bytes => new ChippingPainter(bytes));
+
     [Fact]
     public Task AltExpandOpensTheWholeSubtreeAndAltCollapseForgetsIt() => WithSurface(defaultDepth: 1, async h =>
     {

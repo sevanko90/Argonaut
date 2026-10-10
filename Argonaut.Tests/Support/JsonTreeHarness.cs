@@ -23,13 +23,13 @@ internal sealed class JsonTreeHarness
         public string? Name => Runs.FirstOrDefault(r => r.Style == TreeRunStyle.Name).Text is { } name ? name[..^2] : null;
 
         /// <summary>The value's text: a scalar, a bracket or a collapsed summary.</summary>
-        public string Value => Runs.First(r => r.Style is not (TreeRunStyle.Name or TreeRunStyle.Hint or TreeRunStyle.Link)).Text;
+        public string Value => Runs.First(r => r.Style is not (TreeRunStyle.Name or TreeRunStyle.Note or TreeRunStyle.Chip or TreeRunStyle.Action)).Text;
 
         /// <summary>The decoded date after the value, or null.</summary>
-        public string? DateHint => Runs.FirstOrDefault(r => r.Link is DateSchemeLink).Text?.Trim();
+        public string? DateHint => Runs.FirstOrDefault(r => r.Link is DateSchemeLink).Text;
 
         /// <summary>A plain note after the value (a cut name), or null.</summary>
-        public string? Note => Runs.FirstOrDefault(r => r.Style == TreeRunStyle.Hint).Text?.Trim();
+        public string? Note => Runs.FirstOrDefault(r => r.Style == TreeRunStyle.Note).Text;
 
         public TreeRun? LinkOf<TLink>() => Runs.Any(r => r.Link is TLink) ? Runs.First(r => r.Link is TLink) : null;
     }

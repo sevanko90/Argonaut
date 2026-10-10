@@ -276,10 +276,6 @@ Measure against [index-benchmarks.md](index-benchmarks.md), rerun the same way.
 - **Nicer expanders in the JSON tree.** The plain triangles read as a default. A chevron that
   rotates on expand, sized and weighted to sit with the text, drawn by `TreeSurface` like the
   rest of the row.
-- **Designed inline hints in the JSON tree.** "view as table" and the date decoding sit on rows
-  as plain text and look added on. Options to try: smaller text, a pill or chip background, a
-  subtler colour that strengthens on row hover, or showing "view as table" only on hover or for
-  the selected row. Drawn by the surface, so whatever is chosen must stay cheap per row.
 - **Chrome detail polish.** Chevron animation, indent guides, row hover restyling, a
   search-highlight pill - deferred over rendering-speed concerns on the drawn tree. The compact
   density (22px rows, 16px indent) is settled and not part of this.

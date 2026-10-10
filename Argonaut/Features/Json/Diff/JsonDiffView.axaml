@@ -27,7 +27,10 @@
                               GutterForeground="{DynamicResource AppMutedTextBrush}"
                               DividerBrush="{DynamicResource AppBorderBrush}"
                               HighlightBrush="{DynamicResource AppSearchHighlightBrush}"
-                              SelectionBrush="{DynamicResource AppAccentSurfaceBrush}" />
+                              SelectionBrush="{DynamicResource AppAccentSurfaceBrush}"
+                              ChipFontFamily="{DynamicResource AppSansFontFamily}"
+                              ChipBackground="{DynamicResource AppChipBrush}"
+                              ChipHoverBackground="{DynamicResource AppChipHoverBrush}" />
 
             <ScrollBar x:Name="VerticalScrollBar"
                        Grid.Column="1"

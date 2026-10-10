@@ -65,9 +65,10 @@ public static class DateHintDecoder
         string timestamp = local.ToString($"{format.ShortDatePattern} {format.LongTimePattern}", CultureInfo.CurrentCulture);
 
         // The UTC offset is resolved for the decoded instant itself (correctly DST-aware for
-        // that date), not for "now" - e.g. a December date shows +00:00 even if the viewer is
-        // currently in BST. Shown explicitly so that isn't mistaken for a conversion bug.
-        return $"{timestamp} [local, UTC{FormatOffset(local.Offset)}]";
+        // that date), not for "now" - e.g. a December date shows UTC+0 even if the viewer is
+        // currently in BST. Shown explicitly so that isn't mistaken for a conversion bug; the
+        // sign is what tells it from a UTC-mode hint, which ends in a bare "UTC".
+        return $"{timestamp} UTC{FormatOffset(local.Offset)}";
     }
 
     private static string FormatUtc(long unixMs)
@@ -77,7 +78,7 @@ public static class DateHintDecoder
         // viewer's machine settings.
         string timestamp = DateTimeOffset.FromUnixTimeMilliseconds(unixMs)
             .ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
-        return $"{timestamp} [UTC]";
+        return $"{timestamp} UTC";
     }
 
     private static string FormatOffset(TimeSpan offset)

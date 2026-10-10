@@ -32,6 +32,8 @@
             <SolidColorBrush x:Key="AppSearchHighlightBrush" Color="#FDE68A" />
             <SolidColorBrush x:Key="AppTextSelectionBrush" Color="#C2D9FF" />
             <SolidColorBrush x:Key="AppEditMarkBrush" Color="#F59E0B" />
+            <SolidColorBrush x:Key="AppChipBrush" Color="#EEEFF2" />
+            <SolidColorBrush x:Key="AppChipHoverBrush" Color="#E2E4E9" />
             <SolidColorBrush x:Key="AppJsonStringBrush" Color="#047857" />
             <SolidColorBrush x:Key="AppJsonNumberBrush" Color="#7C3AED" />
             <SolidColorBrush x:Key="AppJsonBoolBrush" Color="#C2410C" />
@@ -154,6 +156,8 @@
             <SolidColorBrush x:Key="AppSearchHighlightBrush" Color="#7A5B00" />
             <SolidColorBrush x:Key="AppTextSelectionBrush" Color="#2F5F9F" />
             <SolidColorBrush x:Key="AppEditMarkBrush" Color="#F59E0B" />
+            <SolidColorBrush x:Key="AppChipBrush" Color="#25262C" />
+            <SolidColorBrush x:Key="AppChipHoverBrush" Color="#30323A" />
             <SolidColorBrush x:Key="AppJsonStringBrush" Color="#34D399" />
             <SolidColorBrush x:Key="AppJsonNumberBrush" Color="#A78BFA" />
             <SolidColorBrush x:Key="AppJsonBoolBrush" Color="#FB923C" />

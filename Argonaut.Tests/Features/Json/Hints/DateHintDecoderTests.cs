@@ -88,7 +88,7 @@ public class DateHintDecoderTests
         var winterUtc = new DateTimeOffset(2023, 12, 10, 23, 40, 0, TimeSpan.Zero);
         string? formatted = DateHintDecoder.Format(winterUtc.ToUnixTimeSeconds(), DateDecodingScheme.JsSeconds, DateHintTimeZoneMode.Utc);
 
-        Assert.Equal("2023-12-10 23:40:00 [UTC]", formatted);
+        Assert.Equal("2023-12-10 23:40:00 UTC", formatted);
     }
 
     [Fact]
@@ -99,7 +99,7 @@ public class DateHintDecoderTests
         var summerUtc = new DateTimeOffset(2024, 6, 15, 14, 5, 9, TimeSpan.Zero);
         string? formatted = DateHintDecoder.Format(summerUtc.ToUnixTimeSeconds(), DateDecodingScheme.JsSeconds, DateHintTimeZoneMode.Utc);
 
-        Assert.Equal("2024-06-15 14:05:09 [UTC]", formatted);
+        Assert.Equal("2024-06-15 14:05:09 UTC", formatted);
     }
 
     [Fact]

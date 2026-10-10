@@ -34,12 +34,14 @@ public sealed class JsonToolbarViewModel : ObservableObject
     private readonly DateHintSettings settings;
     private readonly JsonSchemaSettings schemaSettings;
     private readonly Action<int> applyExpandDepth;
+    private readonly Action<bool>? applyIndentGuides;
     private readonly Func<string, Task>? navigateToPath;
     private readonly Func<Task>? refreshSchemaEntries;
     private readonly Action? openSchemaFolder;
     private int dateHintSchemeIndex;
     private int timeZoneModeIndex;
     private int expandDepthIndex;
+    private bool showIndentGuides;
     private string jsonPathInput = string.Empty;
     private IReadOnlyList<string> schemaItems = Array.Empty<string>();
     private int selectedSchemaIndex;
@@ -51,7 +53,7 @@ public sealed class JsonToolbarViewModel : ObservableObject
     // has since reopened to browse.
     private bool awaitingSchemaCloseDecision;
 
-    public JsonToolbarViewModel(DateHintSettings settings, JsonSchemaSettings schemaSettings, int initialExpandDepthIndex, Action<int> applyExpandDepth, Func<string, Task>? navigateToPath = null, Func<Task>? refreshSchemaEntries = null, Action? openSchemaFolder = null)
+    public JsonToolbarViewModel(DateHintSettings settings, JsonSchemaSettings schemaSettings, int initialExpandDepthIndex, Action<int> applyExpandDepth, Func<string, Task>? navigateToPath = null, Func<Task>? refreshSchemaEntries = null, Action? openSchemaFolder = null, bool showIndentGuides = false, Action<bool>? applyIndentGuides = null)
     {
         this.settings = settings;
         this.schemaSettings = schemaSettings;
@@ -59,6 +61,8 @@ public sealed class JsonToolbarViewModel : ObservableObject
         this.navigateToPath = navigateToPath;
         this.refreshSchemaEntries = refreshSchemaEntries;
         this.openSchemaFolder = openSchemaFolder;
+        this.showIndentGuides = showIndentGuides;
+        this.applyIndentGuides = applyIndentGuides;
 
         dateHintSchemeIndex = (int)settings.FileDefaultScheme;
         timeZoneModeIndex = (int)settings.TimeZoneMode;
@@ -251,6 +255,20 @@ public sealed class JsonToolbarViewModel : ObservableObject
                 return;
 
             applyExpandDepth(value);
+        }
+    }
+
+    /// <summary>Bound two-way to the indent-guides toggle. Reports the choice to the owning
+    /// document, which remembers it and applies it live to its tree.</summary>
+    public bool ShowIndentGuides
+    {
+        get => showIndentGuides;
+        set
+        {
+            if (!SetField(ref showIndentGuides, value))
+                return;
+
+            applyIndentGuides?.Invoke(value);
         }
     }
 

@@ -30,7 +30,9 @@
                               SelectionBrush="{DynamicResource AppAccentSurfaceBrush}"
                               ChipFontFamily="{DynamicResource AppSansFontFamily}"
                               ChipBackground="{DynamicResource AppChipBrush}"
-                              ChipHoverBackground="{DynamicResource AppChipHoverBrush}" />
+                              ChipHoverBackground="{DynamicResource AppChipHoverBrush}"
+                              ExpanderBrush="{DynamicResource AppSubtleIconBrush}"
+                              ExpanderRowHoverBrush="{DynamicResource AppMutedTextBrush}" />
 
             <ScrollBar x:Name="VerticalScrollBar"
                        Grid.Column="1"

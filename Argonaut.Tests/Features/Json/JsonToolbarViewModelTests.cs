@@ -576,4 +576,18 @@ public sealed class JsonToolbarViewModelTests : IDisposable
 
         Assert.Equal(new[] { 4 }, applied);
     }
+
+    [Fact]
+    public void ShowIndentGuides_Set_InvokesCallback()
+    {
+        var applied = new List<bool>();
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), new JsonSchemaSettings(), 0, _ => { },
+            showIndentGuides: true, applyIndentGuides: applied.Add);
+        Assert.True(toolbar.ShowIndentGuides);
+
+        toolbar.ShowIndentGuides = false;
+        toolbar.ShowIndentGuides = false;
+
+        Assert.Equal(new[] { false }, applied);
+    }
 }

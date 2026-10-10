@@ -316,6 +316,54 @@ public sealed class TreeSurfaceTests
     });
 
     [Fact]
+    public Task ClickingTheIndentJustBeforeTheArrowToggles() => WithSurface(defaultDepth: 9, async h =>
+    {
+        var rows = h.Surface.RealizedRows.ToList();
+        int index = rows.FindIndex(r => r is { Shape: TreeRowShape.Open, IsExpanded: true, Depth: > 0 });
+        var point = h.Surface.TranslatePoint(
+            new Point(h.Surface.ArrowX(index) - TreeSurface.ExpanderReach + 1, index * RowSurface.RowHeight + RowSurface.RowHeight / 2), h.Window)!.Value;
+
+        h.Window.MouseDown(point, MouseButton.Left);
+        h.Window.MouseUp(point, MouseButton.Left);
+        await PumpAsync();
+
+        Assert.False(h.Surface.RealizedRows[index].IsExpanded);
+    });
+
+    [Fact]
+    public Task AToggledExpanderTurnsFromWhereItWas() => WithSurface(defaultDepth: 9, h =>
+    {
+        Assert.Equal(90, h.Surface.ExpanderTurnAt(0));
+
+        h.Surface.Toggle(h.Surface.RealizedRows[0]);
+        Assert.True(h.Surface.IsExpanderTurning);
+        Assert.InRange(h.Surface.ExpanderTurnAt(0), 0, 90);
+
+        h.Surface.EndExpanderTurn();
+        Assert.Equal(0, h.Surface.ExpanderTurnAt(0));
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task IndentGuidesRunDownFromEachOpenAncestorsArrow() => WithSurface(defaultDepth: 9, h =>
+    {
+        var rows = h.Surface.RealizedRows.ToList();
+        int index = rows.FindIndex(r => r.Depth >= 2 && r.Shape != TreeRowShape.Close);
+        Assert.Empty(h.Surface.IndentGuideXs(index));
+
+        h.Surface.ShowIndentGuides = true;
+        var expected = new List<double>();
+        for (int depth = 0; depth < rows[index].Depth; depth++)
+        {
+            int ancestor = rows.FindLastIndex(index, r => r.Depth == depth && r.Shape == TreeRowShape.Open);
+            expected.Add(Math.Floor(h.Surface.ArrowX(ancestor) + TreeSurface.ToggleWidth / 2));
+        }
+
+        Assert.Equal(expected, h.Surface.IndentGuideXs(index));
+        return Task.CompletedTask;
+    });
+
+    [Fact]
     public Task AssistiveTechnologySeesATreeNamedByItsSelection() => WithSurface(defaultDepth: 9, h =>
     {
         var peer = ControlAutomationPeer.CreatePeerForElement(h.Surface);

@@ -218,13 +218,23 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
         SetDefaultExpandDepth(depth);
     }
 
+    /// <summary>The toolbar's indent-guides choice: remembered, which is where each line's tree
+    /// reads it, then applied to the line open now.</summary>
+    private void ChooseIndentGuides(bool show)
+    {
+        viewSettings.ShowIndentGuides = show;
+        if (selectedLineJsonViewModel is not null)
+            selectedLineJsonViewModel.ShowIndentGuides = show;
+    }
+
     public async Task LoadAsync(IByteOrigin origin, IProgressReporter? progressReporter = null)
     {
         Origin = origin;
         FilePath = origin.Path ?? origin.DisplayName;
         DefaultExpandDepth = viewSettings.ExpandDepth;
         toolbar = new JsonToolbarViewModel(HintSettings, SchemaSettings, DefaultExpandDepth, ChooseExpandDepth,
-            refreshSchemaEntries: () => RefreshSchemaEntriesAsync(origin.Path), openSchemaFolder: schemaCatalog.OpenUserDirectory);
+            refreshSchemaEntries: () => RefreshSchemaEntriesAsync(origin.Path), openSchemaFolder: schemaCatalog.OpenUserDirectory,
+            showIndentGuides: viewSettings.ShowIndentGuides, applyIndentGuides: ChooseIndentGuides);
 
         // Alongside indexing, not blocking it - see JsonViewModel.ApplyInitialSchemaAsync.
         _ = ApplyInitialSchemaAsync(origin.Path);

@@ -273,11 +273,10 @@ Measure against [index-benchmarks.md](index-benchmarks.md), rerun the same way.
 - **Skip the progress bar for work about to finish.** `ProgressBoard` shows anything still
   running after 450ms; it could also project the time left and stay hidden when that is under
   ~300ms. Only if a pointless bar is seen in practice.
-- **Nicer expanders in the JSON tree.** The plain triangles read as a default. A chevron that
-  rotates on expand, sized and weighted to sit with the text, drawn by `TreeSurface` like the
-  rest of the row.
-- **Chrome detail polish.** Chevron animation, indent guides, row hover restyling, a
-  search-highlight pill - deferred over rendering-speed concerns on the drawn tree. The compact
+- **Indent guides in compare and the array table's cell tree.** The JSON and NDJSON trees have
+  them behind a toolbar toggle; those two surfaces do not see the JSON view settings yet.
+- **Chrome detail polish.** Row hover restyling and a search-highlight pill - deferred over
+  rendering-speed concerns on the drawn tree. The compact
   density (22px rows, 16px indent) is settled and not part of this.
 
 ## Distribution

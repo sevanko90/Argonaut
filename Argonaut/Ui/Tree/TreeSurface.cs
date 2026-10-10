@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Text;
 using Avalonia;
 using Avalonia.Automation.Peers;
@@ -47,14 +48,24 @@ public class TreeSurface : RowSurface
     public const double ToggleWidth = 16;
 
     /// <summary>
-    /// The expand arrows, as geometry rather than text: a ▸/▾ glyph picks up font-fallback metrics
-    /// that differ by platform (and by glyph within one fallback chain on Windows), so the two
-    /// states drew at visibly different sizes. A path is the same size everywhere.
+    /// The expander: Lucide's chevron-right on its 24-unit grid, stroked like the toolbar's icons
+    /// and turned a quarter to point down when open. Geometry rather than a ▸/▾ glyph, which picks
+    /// up font-fallback metrics that differ by platform, so the two states drew at visibly
+    /// different sizes.
     /// </summary>
-    private const double ArrowSize = 7;
+    private static readonly Geometry ExpanderShape = Geometry.Parse("M9 18 l6-6-6-6");
+    private const double ExpanderSize = 12;
+    private const double ExpanderStroke = 2.2;
 
-    private static readonly Geometry CollapsedArrowShape = Geometry.Parse("M 0,0 L 7,3.5 L 0,7 Z");
-    private static readonly Geometry ExpandedArrowShape = Geometry.Parse("M 0,0 L 7,0 L 3.5,7 Z");
+    /// <summary>How long a clicked expander takes to turn.</summary>
+    private static readonly TimeSpan ExpanderTurnDuration = TimeSpan.FromMilliseconds(120);
+
+    /// <summary>How far the expander's click target reaches into the indent before its column -
+    /// the chevron is small, and the space left of it holds nothing else to click.</summary>
+    public const double ExpanderReach = 8;
+
+    /// <summary>The square drawn behind the expander under the pointer.</summary>
+    private const double ExpanderPatchSize = 18;
 
     /// <summary>Width of the slot a row's marker (see <see cref="ITreeRowPainter.Marker"/>) takes
     /// before its arrow, including the gap after it.</summary>
@@ -141,6 +152,20 @@ public class TreeSurface : RowSurface
     // hovered row, and a clickable chip darkens under the pointer.
     private (long, bool)? hoveredKey;
     private int hoveredItem = -1;
+
+    // The pane whose expander is under the pointer, on the hovered row, or -1.
+    private int hoveredExpanderPane = -1;
+
+    // The expander turning after a toggle: its row, when it started and the angle it started at.
+    private (long, bool)? turningKey;
+    private long turnStarted;
+    private double turnFrom;
+    private readonly Dictionary<IBrush, Pen> expanderPens = new();
+
+    // Per realized row, the open containers its indent guides run down from: a span of
+    // guideAncestors, each an ancestor's depth and inset (the inset arrays are shared with insets).
+    private readonly List<(int Depth, double[] Inset)> guideAncestors = new();
+    private readonly List<(int Start, int Count)> guideSpans = new();
 
     /// <summary>The rows shown. Setting them resets the view to the top.</summary>
     public ITreeRowSource? Document
@@ -282,9 +307,51 @@ public class TreeSurface : RowSurface
         set => SetValue(ChipHoverBackgroundProperty, value);
     }
 
+    /// <summary>The expander at rest. Null uses <see cref="RowSurface.Foreground"/>.</summary>
+    public static readonly StyledProperty<IBrush?> ExpanderBrushProperty =
+        AvaloniaProperty.Register<TreeSurface, IBrush?>(nameof(ExpanderBrush));
+
+    /// <summary>The expander on the row under the pointer; under the pointer itself it takes
+    /// <see cref="RowSurface.Foreground"/>.</summary>
+    public static readonly StyledProperty<IBrush?> ExpanderRowHoverBrushProperty =
+        AvaloniaProperty.Register<TreeSurface, IBrush?>(nameof(ExpanderRowHoverBrush));
+
+    /// <summary>Whether a faint line runs down each open container's contents, from its expander.</summary>
+    public static readonly StyledProperty<bool> ShowIndentGuidesProperty =
+        AvaloniaProperty.Register<TreeSurface, bool>(nameof(ShowIndentGuides));
+
+    /// <summary>The indent guides' line.</summary>
+    public static readonly StyledProperty<IBrush?> GuideBrushProperty =
+        AvaloniaProperty.Register<TreeSurface, IBrush?>(nameof(GuideBrush));
+
+    public IBrush? ExpanderBrush
+    {
+        get => GetValue(ExpanderBrushProperty);
+        set => SetValue(ExpanderBrushProperty, value);
+    }
+
+    public IBrush? ExpanderRowHoverBrush
+    {
+        get => GetValue(ExpanderRowHoverBrushProperty);
+        set => SetValue(ExpanderRowHoverBrushProperty, value);
+    }
+
+    public bool ShowIndentGuides
+    {
+        get => GetValue(ShowIndentGuidesProperty);
+        set => SetValue(ShowIndentGuidesProperty, value);
+    }
+
+    public IBrush? GuideBrush
+    {
+        get => GetValue(GuideBrushProperty);
+        set => SetValue(GuideBrushProperty, value);
+    }
+
     static TreeSurface()
     {
-        AffectsRender<TreeSurface>(GutterBackgroundProperty, DividerBrushProperty, ChipBackgroundProperty, ChipHoverBackgroundProperty);
+        AffectsRender<TreeSurface>(GutterBackgroundProperty, DividerBrushProperty, ChipBackgroundProperty, ChipHoverBackgroundProperty,
+            ExpanderBrushProperty, ExpanderRowHoverBrushProperty, ShowIndentGuidesProperty, GuideBrushProperty);
     }
 
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
@@ -292,6 +359,8 @@ public class TreeSurface : RowSurface
         base.OnPropertyChanged(change);
         if (change.Property == ChipFontFamilyProperty)
             OnTextStyleChanged();
+        else if (change.Property == ExpanderBrushProperty || change.Property == ExpanderRowHoverBrushProperty || change.Property == ForegroundProperty)
+            expanderPens.Clear();
     }
 
     /// <summary>A gutter changed width or what it shows - a schema bound or unbound.</summary>
@@ -350,6 +419,33 @@ public class TreeSurface : RowSurface
 
     /// <summary>Where realized row <paramref name="index"/>'s arrow is drawn in a pane, for tests.</summary>
     internal double ArrowX(int index, int pane = 0) => ArrowLeft(index, pane);
+
+    /// <summary>Test hook: where realized row <paramref name="index"/>'s indent guides run, or
+    /// none while guides are off.</summary>
+    internal IReadOnlyList<double> IndentGuideXs(int index, int pane = 0)
+    {
+        if (!ShowIndentGuides)
+            return [];
+
+        var (start, count) = guideSpans[index];
+        var xs = new double[count];
+        for (int i = 0; i < count; i++)
+            xs[i] = GuideX(guideAncestors[start + i], pane);
+        return xs;
+    }
+
+    /// <summary>Test hook: the angle realized row <paramref name="index"/>'s chevron is drawn at.</summary>
+    internal double ExpanderTurnAt(int index) => ExpanderTurn(realized[index]);
+
+    /// <summary>Test hook: whether a chevron is turning.</summary>
+    internal bool IsExpanderTurning => turningKey is not null;
+
+    /// <summary>Test hook: finishes a turn the headless platform has no frames to run.</summary>
+    internal void EndExpanderTurn()
+    {
+        turningKey = null;
+        InvalidateVisual();
+    }
 
     /// <summary>Pixels of the top row scrolled off the top.</summary>
     internal double AnchorPixel => anchorPixel;
@@ -420,6 +516,8 @@ public class TreeSurface : RowSurface
     private void ComputeInsets()
     {
         insets.Clear();
+        guideAncestors.Clear();
+        guideSpans.Clear();
         if (realized.Count == 0 || document is null || anchor is null)
             return;
 
@@ -447,6 +545,9 @@ public class TreeSurface : RowSurface
         {
             while (open.Count > 0 && open[^1].Depth >= row.Depth)
                 open.RemoveAt(open.Count - 1);
+
+            guideSpans.Add((guideAncestors.Count, open.Count));
+            guideAncestors.AddRange(open);
 
             var parent = open.Count > 0 ? open[^1].Inset : none;
             var inset = Inset(parent, row.Shape == TreeRowShape.Close ? row with { Shape = TreeRowShape.Open } : row);
@@ -516,6 +617,7 @@ public class TreeSurface : RowSurface
         if (document is null || row.Shape == TreeRowShape.Leaf)
             return;
 
+        StartTurn(row);
         document.Toggle(row);
         Reseat();
         ExpansionChanged?.Invoke(this, EventArgs.Empty);
@@ -882,16 +984,14 @@ public class TreeSurface : RowSurface
             context.DrawRectangle(wash, null, new RoundedRect(new Rect(arrowX, y + 1, Math.Max(0, paneRight - arrowX), RowHeight - 2), 4));
         }
 
+        if (ShowIndentGuides && GuideBrush is { } guideBrush)
+            DrawGuides(context, guideBrush, index, pane, y);
+
         if (laid.Marker is { } marker)
             marker.Draw(context, new Point(arrowX - 2 - marker.WidthIncludingTrailingWhitespace, CentreInRow(marker, y)));
 
         if (DrawsArrow(row, laid))
-        {
-            var shape = row.IsExpanded ? ExpandedArrowShape : CollapsedArrowShape;
-            var at = Matrix.CreateTranslation(arrowX + (ToggleWidth - ArrowSize) / 2, y + (RowHeight - ArrowSize) / 2);
-            using (context.PushTransform(at))
-                context.DrawGeometry(foreground, null, shape);
-        }
+            DrawExpander(context, row, pane, arrowX, y, foreground);
 
         double textTop = CentreInRow(laid.Layout, y);
         double textX = arrowX + ToggleWidth;
@@ -931,6 +1031,100 @@ public class TreeSurface : RowSurface
         if (SelectionBrush is { } selected && selection is { } cursor && row.Key == cursor.Current.Key)
             context.FillRectangle(selected, area);
     }
+
+    /// <summary>A row's share of its indent guides: a line through it below each open ancestor's
+    /// expander.</summary>
+    private void DrawGuides(DrawingContext context, IBrush brush, int index, int pane, double y)
+    {
+        var (start, count) = guideSpans[index];
+        for (int i = start; i < start + count; i++)
+            context.FillRectangle(brush, new Rect(GuideX(guideAncestors[i], pane), y, 1, RowHeight));
+    }
+
+    /// <summary>Where a guide runs: down the middle of the ancestor's expander, on a whole pixel.</summary>
+    private double GuideX((int Depth, double[] Inset) ancestor, int pane)
+        => Math.Floor(PaneLeft(pane) + ancestor.Depth * IndentWidth + ancestor.Inset[pane] - Pan + ToggleWidth / 2);
+
+    /// <summary>The chevron, faint at rest, stronger on the hovered row and strongest under the
+    /// pointer, where a patch behind it shows how far its click target reaches.</summary>
+    private void DrawExpander(DrawingContext context, in TreeRow row, int pane, double arrowX, double y, IBrush foreground)
+    {
+        bool isHovered = row.Key == hoveredKey;
+        bool isHot = isHovered && pane == hoveredExpanderPane;
+        double centreX = arrowX + ToggleWidth / 2;
+        double centreY = y + RowHeight / 2;
+
+        if (isHot && ChipBackground is { } patch)
+        {
+            var area = new Rect(centreX - ExpanderPatchSize / 2, centreY - ExpanderPatchSize / 2, ExpanderPatchSize, ExpanderPatchSize);
+            context.DrawRectangle(patch, null, new RoundedRect(area, ChipRadius));
+        }
+
+        var brush = isHot ? foreground
+            : isHovered ? ExpanderRowHoverBrush ?? ExpanderBrush ?? foreground
+            : ExpanderBrush ?? foreground;
+
+        double scale = ExpanderSize / 24;
+        var at = Matrix.CreateTranslation(-12, -12)
+            * Matrix.CreateRotation(ExpanderTurn(row) * Math.PI / 180)
+            * Matrix.CreateScale(scale, scale)
+            * Matrix.CreateTranslation(centreX, centreY);
+        using (context.PushTransform(at))
+            context.DrawGeometry(null, ExpanderPen(brush), ExpanderShape);
+    }
+
+    private Pen ExpanderPen(IBrush brush)
+    {
+        if (!expanderPens.TryGetValue(brush, out var pen))
+            expanderPens[brush] = pen = new Pen(brush, ExpanderStroke, lineCap: PenLineCap.Round, lineJoin: PenLineJoin.Round);
+        return pen;
+    }
+
+    /// <summary>The angle a row's chevron is drawn at, in degrees: 0 pointing right, 90 down,
+    /// and between the two while it turns.</summary>
+    private double ExpanderTurn(in TreeRow row)
+    {
+        double rest = row.IsExpanded ? 90 : 0;
+        if (row.Key != turningKey)
+            return rest;
+
+        double t = Math.Min(1, Stopwatch.GetElapsedTime(turnStarted) / ExpanderTurnDuration);
+        double eased = 1 - Math.Pow(1 - t, 3);
+        return turnFrom + (rest - turnFrom) * eased;
+    }
+
+    /// <summary>Turns a row's chevron from where it is now, ahead of the row toggling. Only that
+    /// row moves: the rows it opens or closes appear and go at once.</summary>
+    private void StartTurn(in TreeRow row)
+    {
+        if (row.Shape != TreeRowShape.Open)
+            return;
+
+        turnFrom = ExpanderTurn(row);
+        turningKey = row.Key;
+        turnStarted = Stopwatch.GetTimestamp();
+        RequestTurnFrame();
+    }
+
+    /// <summary>Frames rather than a timer, as the raw view's arrival flash: the turn redraws in
+    /// step with the display, and asks for nothing once it is over.</summary>
+    private void RequestTurnFrame() => TopLevel.GetTopLevel(this)?.RequestAnimationFrame(_ =>
+    {
+        if (turningKey is null)
+            return;
+
+        if (Stopwatch.GetElapsedTime(turnStarted) >= ExpanderTurnDuration)
+            turningKey = null;
+        else
+            RequestTurnFrame();
+
+        InvalidateVisual();
+    });
+
+    /// <summary>The expander's click target in a pane: its column, and the indent before it up
+    /// to a marker, whose label sits just left of the column.</summary>
+    private static bool IsOnExpander(PaneLayout laid, double arrowX, double x)
+        => x >= arrowX - (laid.Marker is null ? ExpanderReach : 2) && x < arrowX + ToggleWidth;
 
     /// <summary>The notes and chips after a pane's text; actions only where they show.</summary>
     private void DrawTrailing(DrawingContext context, in TreeRow row, List<TrailingItem> trailing, double textX, double y)
@@ -1154,7 +1348,7 @@ public class TreeSurface : RowSurface
 
         Select(row);
 
-        bool onArrow = DrawsArrow(row, laid) && point.X >= arrowX && point.X < arrowX + ToggleWidth;
+        bool onArrow = DrawsArrow(row, laid) && IsOnExpander(laid, arrowX, point.X);
         if (row.Shape == TreeRowShape.Open && (onArrow || e.ClickCount == 2))
         {
             if ((e.KeyModifiers & KeyModifiers.Alt) != 0)
@@ -1184,15 +1378,17 @@ public class TreeSurface : RowSurface
         if (!overEdge && document is not null && RowAt(point.Y) is { } hovered)
         {
             var laid = LayoutFor(hovered.Row, new Typeface(FontFamily), FontSize).Panes[pane];
-            double textX = ArrowLeft(hovered.Index, pane) + ToggleWidth;
+            double arrowX = ArrowLeft(hovered.Index, pane);
+            double textX = arrowX + ToggleWidth;
             double x = point.X - textX;
             double shift = TrailingShift(laid, textX, PaneLeft(pane) + PaneWidth);
             overLink = LinkAt(laid, x, point.Y - CentreInRow(laid.Layout, hovered.Index * RowHeight - anchorPixel), shift) is not null;
-            SetHover(hovered.Row.Key, TrailingAt(laid, x, shift));
+            bool overExpander = DrawsArrow(hovered.Row, laid) && IsOnExpander(laid, arrowX, point.X);
+            SetHover(hovered.Row.Key, TrailingAt(laid, x, shift), overExpander ? pane : -1);
         }
         else
         {
-            SetHover(null, -1);
+            SetHover(null, -1, -1);
         }
 
         Cursor = overEdge ? new Cursor(StandardCursorType.SizeWestEast)
@@ -1218,7 +1414,7 @@ public class TreeSurface : RowSurface
     {
         base.OnPointerExited(e);
         SetToolTip(null);
-        SetHover(null, -1);
+        SetHover(null, -1, -1);
     }
 
     private (TreeRow Row, int Index)? RowAt(double y)
@@ -1288,13 +1484,14 @@ public class TreeSurface : RowSurface
         return -1;
     }
 
-    private void SetHover((long, bool)? key, int item)
+    private void SetHover((long, bool)? key, int item, int expanderPane)
     {
-        if (key == hoveredKey && item == hoveredItem)
+        if (key == hoveredKey && item == hoveredItem && expanderPane == hoveredExpanderPane)
             return;
 
         hoveredKey = key;
         hoveredItem = item;
+        hoveredExpanderPane = expanderPane;
         InvalidateVisual();
     }
 
@@ -1368,6 +1565,7 @@ public class TreeSurface : RowSurface
         if (document is null || row.Shape == TreeRowShape.Leaf)
             return;
 
+        StartTurn(row);
         if (row.IsExpanded || row.Shape == TreeRowShape.Close)
             document.CollapseDeep(row);
         else if (!document.ExpandDeep(row, DeepExpandRowBudget))

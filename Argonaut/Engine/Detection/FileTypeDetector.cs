@@ -78,6 +78,10 @@ public static class FileTypeDetector
         if (firstChar is not (byte)'{' and not (byte)'[')
             return DetectDelimitedOrUnknown(mmap, length);
 
+        // An INI or TOML file opens with a [section] header, which is a bracket too.
+        if (firstChar == (byte)'[' && !OpensJsonArray(mmap, firstCharOffset + 1, length))
+            return DetectDelimitedOrUnknown(mmap, length);
+
         // 3. Probably JSON, but could be NDJSON. Read second line to check
         long firstLineEnd = FindNewline(mmap, firstCharOffset, length);
         if (firstLineEnd < 0)
@@ -243,6 +247,49 @@ public static class FileTypeDetector
     // The chunked-scan loops in these three helpers (and in FileOffsetIndex/SearchSession)
     // are deliberately duplicated, not abstracted: they're hot paths, and the indirection an
     // abstraction would add costs more than the ~15 shared lines save.
+    /// <summary>
+    /// Whether what follows an opening <c>[</c> at <paramref name="start"/> begins a JSON array:
+    /// past blanks, a value - an object, an array, a string, a number - or the array's end, or a
+    /// whole <c>true</c>, <c>false</c> or <c>null</c>. A name, as in <c>[service]</c> or
+    /// <c>[nullable]</c>, is a section header instead. Nothing after the bracket yet is given the
+    /// benefit of the doubt.
+    /// </summary>
+    private static bool OpensJsonArray(IByteSource file, long start, long end)
+    {
+        long at = FindNonWhitespace(file, start, end);
+        if (at < 0)
+            return true;
+
+        byte next = file.ByteAt(at);
+        if (next is (byte)'{' or (byte)'[' or (byte)'"' or (byte)']' or (byte)'-' or >= (byte)'0' and <= (byte)'9')
+            return true;
+
+        foreach (var literal in (ReadOnlySpan<string>)["true", "false", "null"])
+        {
+            if (!MatchesAt(file, at, end, literal))
+                continue;
+
+            long after = at + literal.Length;
+            return after >= end || file.ByteAt(after) is (byte)',' or (byte)']' or (byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n';
+        }
+
+        return false;
+    }
+
+    private static bool MatchesAt(IByteSource file, long at, long end, string text)
+    {
+        if (at + text.Length > end)
+            return false;
+
+        for (int i = 0; i < text.Length; i++)
+        {
+            if (file.ByteAt(at + i) != text[i])
+                return false;
+        }
+
+        return true;
+    }
+
     private static long FindNonWhitespace(IByteSource file, long start, long end)
     {
         for (long offset = start; offset < end;)

@@ -220,6 +220,54 @@ public sealed class TreeSurfaceTests
         Assert.True(previous < h.Rows.Count - FullRows - 20);
     });
 
+    /// <summary>
+    /// The reported bounce: a trackpad scrolling on past the end let the view drift up to a row's
+    /// height past the last row, then snapped it back a whole row, over and over. At the end the
+    /// last row sits on the bottom edge and further steps down change nothing.
+    /// </summary>
+    [Fact]
+    public Task ScrollingDownPastTheEndStaysPut() => WithSurface(defaultDepth: 9, async h =>
+    {
+        h.Surface.ScrollToEnd();
+        await PumpAsync();
+        var top = h.Surface.RealizedRows[0].Key;
+        double pixel = h.Surface.AnchorPixel;
+        Assert.Equal(h.Rows[^1].Key, h.Surface.RealizedRows[^1].Key);
+        Assert.Equal(h.Surface.Bounds.Height, h.Surface.RealizedRows.Count * RowSurface.RowHeight - pixel, 3);
+
+        for (int step = 0; step < 200; step++)
+        {
+            h.Surface.ScrollByPixels(3);
+            Assert.Equal(top, h.Surface.RealizedRows[0].Key);
+            Assert.Equal(pixel, h.Surface.AnchorPixel, 3);
+            Assert.True(h.Surface.ShowsEnd);
+        }
+
+        await PumpAsync();
+    });
+
+    /// <summary>Coming down to the end in small steps, the view only ever moves down, and stops.</summary>
+    [Fact]
+    public Task ScrollingDownSlowlyToTheEndNeverSnapsBack() => WithSurface(defaultDepth: 9, async h =>
+    {
+        h.Surface.ScrollToEnd();
+        h.Surface.ScrollByPixels(-5 * RowSurface.RowHeight);
+        await PumpAsync();
+
+        double previous = double.MinValue;
+        for (int step = 0; step < 200; step++)
+        {
+            h.Surface.ScrollByPixels(3);
+            int topIndex = h.Rows.FindIndex(r => r.Key == h.Surface.RealizedRows[0].Key);
+            double position = topIndex * RowSurface.RowHeight + h.Surface.AnchorPixel;
+            Assert.True(position >= previous - 0.001, $"step {step}: moved back from {previous} to {position}");
+            previous = position;
+        }
+
+        Assert.True(h.Surface.ShowsEnd);
+        await PumpAsync();
+    });
+
     [Fact]
     public Task KeyboardMovesTheSelectionAndKeepsItOnScreen() => WithSurface(defaultDepth: 9, async h =>
     {

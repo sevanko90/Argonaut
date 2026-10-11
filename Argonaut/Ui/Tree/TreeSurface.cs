@@ -695,8 +695,8 @@ public class TreeSurface : RowSurface
 
     /// <summary>
     /// Walks from the anchor to fill the viewport. At the end of the document the anchor is
-    /// pulled back so the last row sits at the bottom rather than the view running out under a
-    /// half-empty screen.
+    /// pulled back so the last row sits on the bottom edge rather than the view running out under
+    /// a half-empty screen.
     /// </summary>
     private void Realize()
     {
@@ -719,12 +719,21 @@ public class TreeSurface : RowSurface
             more = walker.MoveNext();
         showsEnd = !more && realized.Count * RowHeight - anchorPixel <= Bounds.Height + 0.5;
 
-        int fitting = Math.Max(1, (int)(Bounds.Height / RowHeight));
-        if (realized.Count < needed && realized.Count < fitting)
+        // At the end the last row sits on the bottom edge, exactly: the view is pulled back by the
+        // gap under it, so a trackpad's small steps past the end land where they began, rather
+        // than drifting up to a row past it and snapping back a whole row.
+        double gap = Bounds.Height - (realized.Count * RowHeight - anchorPixel);
+        if (!more && gap > 0)
         {
-            anchorPixel = 0;
-            while (realized.Count < fitting && anchor.MovePrevious())
+            anchorPixel -= gap;
+            while (anchorPixel < 0 && anchor.MovePrevious())
+            {
                 realized.Insert(0, anchor.Current);
+                anchorPixel += RowHeight;
+            }
+
+            anchorPixel = Math.Max(0, anchorPixel);
+            showsEnd = true;
         }
 
         // Asked only at the end, so scrolling through the middle never pays for the step back.

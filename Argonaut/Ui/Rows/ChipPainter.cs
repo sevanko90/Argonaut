@@ -23,21 +23,28 @@ public sealed class ChipPainter
     private const double IconStroke = 2;
     private const double SwatchRadius = 2.5;
 
+    // What clicking does, after the label: smaller than the leading icon, so it reads as a hint
+    // about the chip rather than part of what it says.
+    private const double AffordanceSize = 9;
+    private const double AffordanceGap = 4;
+
     private readonly Dictionary<IBrush, Pen> iconPens = new();
     private Pen? swatchEdgePen;
 
     /// <summary>A chip's whole width for its label, leading with a glyph (an icon or a swatch) or not.</summary>
-    public static double WidthOf(TextLayout label, bool hasGlyph)
-        => label.WidthIncludingTrailingWhitespace + 2 * Padding + (hasGlyph ? IconSize + IconGap : 0);
+    public static double WidthOf(TextLayout label, bool hasGlyph, bool hasAffordance = false)
+        => label.WidthIncludingTrailingWhitespace + 2 * Padding + (hasGlyph ? IconSize + IconGap : 0)
+           + (hasAffordance ? AffordanceGap + AffordanceSize : 0);
 
     /// <summary>Where a chip's fill sits in a row band.</summary>
     public static double TopIn(double rowTop) => rowTop + (RowSurface.RowHeight - Height) / 2;
 
     /// <summary>A chip at <paramref name="x"/> in the row band at <paramref name="rowTop"/>, filled
     /// with <paramref name="fill"/> when given, leading with <paramref name="swatch"/> or else
-    /// <paramref name="icon"/> drawn in the label's <paramref name="brush"/>.</summary>
+    /// <paramref name="icon"/> drawn in the label's <paramref name="brush"/>, and ending with
+    /// <paramref name="affordance"/> - what clicking it does - when it does something.</summary>
     public void Draw(DrawingContext context, double x, double rowTop, double width, TextLayout label, IBrush brush,
-        IBrush? fill, Geometry? icon, IBrush? swatch)
+        IBrush? fill, Geometry? icon, IBrush? swatch, Geometry? affordance = null)
     {
         if (fill is not null)
             context.DrawRectangle(fill, null, new RoundedRect(new Rect(x, TopIn(rowTop), width, Height), Radius));
@@ -58,6 +65,15 @@ public sealed class ChipPainter
         }
 
         label.Draw(context, new Point(labelX, rowTop + Math.Max(0, (RowSurface.RowHeight - label.Height) / 2)));
+
+        if (affordance is not null)
+        {
+            double scale = AffordanceSize / 24;
+            double affordanceX = x + width - Padding - AffordanceSize;
+            double affordanceTop = rowTop + (RowSurface.RowHeight - AffordanceSize) / 2;
+            using (context.PushTransform(Matrix.CreateScale(scale, scale) * Matrix.CreateTranslation(affordanceX, affordanceTop)))
+                context.DrawGeometry(null, IconPen(brush), affordance);
+        }
     }
 
     /// <summary>The pens are per brush, and a theme change replaces the brushes.</summary>

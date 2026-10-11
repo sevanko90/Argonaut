@@ -26,6 +26,7 @@ public static class TreeRunIcons
         Add(TreeRunIcon.Json, "Icon.Json");
         Add(TreeRunIcon.Binary, "Icon.Binary");
         Add(TreeRunIcon.Image, "Icon.Image");
+        Add(TreeRunIcon.ChevronDown, "Icon.ChevronDown");
         return icons;
     }
 }

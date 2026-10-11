@@ -67,6 +67,8 @@ public enum TreeRunIcon : byte
     Binary,
     /// <summary>A picture.</summary>
     Image,
+    /// <summary>The cue at the end of a chip that opens something when clicked.</summary>
+    ChevronDown,
 }
 
 /// <summary>One stretch of a row's text in one style.</summary>
@@ -76,4 +78,7 @@ public enum TreeRunIcon : byte
 /// leads with; ignored for other styles.</param>
 /// <param name="Swatch">A colour a chip leads with in place of its icon - the colour a value
 /// names.</param>
-public readonly record struct TreeRun(string Text, TreeRunStyle Style, object? Link = null, TreeRunIcon Icon = TreeRunIcon.None, Color? Swatch = null);
+/// <param name="Opens">Whether clicking a chip opens something - a menu, a card - which it shows
+/// with a chevron at its end; ignored for other styles.</param>
+public readonly record struct TreeRun(string Text, TreeRunStyle Style, object? Link = null, TreeRunIcon Icon = TreeRunIcon.None, Color? Swatch = null,
+    bool Opens = false);

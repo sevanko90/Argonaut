@@ -22,5 +22,9 @@ public static class ValueHintLook
 
     public static Color? SwatchOf(ValueHint hint) => hint.Colour is { } argb ? Color.FromUInt32(argb) : null;
 
+    /// <summary>Whether clicking a hint's chip opens something: a value hiding a document opens a
+    /// card, a date the ways to read it. An address's chip says "Open" itself.</summary>
+    public static bool Opens(ValueHint hint) => hint.Expands || hint.Kind == ValueHintKind.Date;
+
     public static TreeRunStyle StyleOf(ValueHint hint) => hint.Emphasis == ValueHintEmphasis.Action ? TreeRunStyle.Action : TreeRunStyle.Chip;
 }

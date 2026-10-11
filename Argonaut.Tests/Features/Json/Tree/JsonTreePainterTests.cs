@@ -210,6 +210,15 @@ public sealed class JsonTreePainterTests
         Assert.Equal(Avalonia.Media.Color.FromUInt32(0xFF1E90FF), chip.Swatch);
     }
 
+    /// <summary>A chip that opens something when clicked says so; one that only informs does not.</summary>
+    [Fact]
+    public void OnlyChipsThatOpenSomething_CarryTheCue()
+    {
+        Assert.True(new JsonTreeHarness(DateJson, JsSeconds()).Member("ts").LinkOf<DateSchemeLink>()!.Value.Opens);
+        var colour = new JsonTreeHarness("{\"c\":\"#1E90FF\"}"u8.ToArray(), [new ColourHintProvider()]).Member("c");
+        Assert.False(colour.Runs.Single(r => r.Style == TreeRunStyle.Chip).Opens);
+    }
+
     [Fact]
     public void NotesThenChipsThenActionsComeAfterTheText()
     {

@@ -53,7 +53,8 @@ public sealed class JsonTreePainter(JsonTreeText text, IReadOnlyList<IValueHintP
 
         if (hint is not null)
         {
-            runs.Add(new TreeRun(hint.Text, ValueHintLook.StyleOf(hint), LinkOf(row, hint), ValueHintLook.IconOf(hint.Symbol), ValueHintLook.SwatchOf(hint)));
+            runs.Add(new TreeRun(hint.Text, ValueHintLook.StyleOf(hint), LinkOf(row, hint), ValueHintLook.IconOf(hint.Symbol), ValueHintLook.SwatchOf(hint),
+                ValueHintLook.Opens(hint)));
         }
 
         if (valueTruncated)

@@ -100,7 +100,8 @@ public class TreeSurface : RowSurface
 
     /// <summary>One note or chip after a pane's text, at <paramref name="X"/> from the text's
     /// start.</summary>
-    private sealed record TrailingItem(TextLayout Label, IBrush Brush, TreeRunStyle Style, TreeRunIcon Icon, IBrush? Swatch, double X, double Width, object? Link)
+    private sealed record TrailingItem(TextLayout Label, IBrush Brush, TreeRunStyle Style, TreeRunIcon Icon, IBrush? Swatch, double X, double Width, object? Link,
+        TreeRunIcon Affordance = TreeRunIcon.None)
     {
         public bool IsChip => Style != TreeRunStyle.Note;
     }
@@ -851,11 +852,14 @@ public class TreeSurface : RowSurface
             bool isChip = run.Style != TreeRunStyle.Note;
             var swatch = isChip && run.Swatch is { } colour ? new ImmutableSolidColorBrush(colour) : null;
             var icon = swatch is null && isChip && runIcons is not null && runIcons.ContainsKey(run.Icon) ? run.Icon : TreeRunIcon.None;
+            var affordance = isChip && run.Opens && runIcons is not null && runIcons.ContainsKey(TreeRunIcon.ChevronDown)
+                ? TreeRunIcon.ChevronDown
+                : TreeRunIcon.None;
             double width = isChip
-                ? ChipPainter.WidthOf(label, icon != TreeRunIcon.None || swatch is not null)
+                ? ChipPainter.WidthOf(label, icon != TreeRunIcon.None || swatch is not null, affordance != TreeRunIcon.None)
                 : label.WidthIncludingTrailingWhitespace;
 
-            items.Add(new TrailingItem(label, brush, run.Style, icon, swatch, x, width, run.Link));
+            items.Add(new TrailingItem(label, brush, run.Style, icon, swatch, x, width, run.Link, affordance));
             x += width + TrailingSpacing;
         }
 
@@ -1164,7 +1168,8 @@ public class TreeSurface : RowSurface
                 bool isHot = isHovered && i == hoveredItem && item.Link is not null;
                 var fill = isHot ? ChipHoverBackground ?? ChipBackground : ChipBackground;
                 var glyph = item.Icon != TreeRunIcon.None && runIcons!.TryGetValue(item.Icon, out var found) ? found : null;
-                chips.Draw(context, labelX, y, item.Width, item.Label, item.Brush, fill, glyph, item.Swatch);
+                var affordanceGlyph = item.Affordance != TreeRunIcon.None ? runIcons![item.Affordance] : null;
+                chips.Draw(context, labelX, y, item.Width, item.Label, item.Brush, fill, glyph, item.Swatch, affordanceGlyph);
                 continue;
             }
 

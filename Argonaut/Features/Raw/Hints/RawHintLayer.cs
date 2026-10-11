@@ -33,7 +33,7 @@ public sealed class RawHintLayer
     private const double ChipSpacing = 6;
     private const double SwatchUnderline = 3;
 
-    private sealed record Chip(RawHintMark Mark, TextLayout Label, double X, double Width, Geometry? Icon, IBrush? Swatch);
+    private sealed record Chip(RawHintMark Mark, TextLayout Label, double X, double Width, Geometry? Icon, IBrush? Swatch, Geometry? Affordance);
 
     private sealed record RowHints(List<RawHintMark> Marks, List<Chip>? Chips);
 
@@ -177,8 +177,9 @@ public sealed class RawHintLayer
             var label = new TextLayout(hint.Text, typeface, Math.Max(6, fontSize - 1), brush);
             var swatch = ValueHintLook.SwatchOf(hint) is { } colour ? new ImmutableSolidColorBrush(colour) : null;
             var icon = swatch is null && Icons is not null && Icons.TryGetValue(ValueHintLook.IconOf(hint.Symbol), out var glyph) ? glyph : null;
-            double width = ChipPainter.WidthOf(label, swatch is not null || icon is not null);
-            (laid ??= new()).Add(new Chip(mark, label, x, width, icon, swatch));
+            var affordance = ValueHintLook.Opens(hint) && Icons is not null && Icons.TryGetValue(TreeRunIcon.ChevronDown, out var cue) ? cue : null;
+            double width = ChipPainter.WidthOf(label, swatch is not null || icon is not null, affordance is not null);
+            (laid ??= new()).Add(new Chip(mark, label, x, width, icon, swatch, affordance));
             x += width + ChipSpacing;
         }
 
@@ -227,7 +228,7 @@ public sealed class RawHintLayer
 
             bool isHot = hovered is { IsChip: true } hit && hit.RowIndex == rowIndex && hit.Value == chip.Mark.Value;
             var fill = isHot ? ChipHoverBackground ?? ChipBackground : ChipBackground;
-            chips.Draw(context, textEnd + chip.X, rowTop, chip.Width, chip.Label, brush, fill, chip.Icon, chip.Swatch);
+            chips.Draw(context, textEnd + chip.X, rowTop, chip.Width, chip.Label, brush, fill, chip.Icon, chip.Swatch, chip.Affordance);
         }
     }
 

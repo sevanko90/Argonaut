@@ -118,10 +118,13 @@ public sealed class HintChip : Control
         => Hint is { } hint && ValueHintLook.SwatchOf(hint) is null && Icons is not null
            && Icons.TryGetValue(ValueHintLook.IconOf(hint.Symbol), out var glyph) ? glyph : null;
 
+    private Geometry? Affordance()
+        => Hint is { } hint && ValueHintLook.Opens(hint) && Icons is not null && Icons.TryGetValue(TreeRunIcon.ChevronDown, out var cue) ? cue : null;
+
     private IBrush? Swatch() => Hint is { } hint && ValueHintLook.SwatchOf(hint) is { } colour ? new ImmutableSolidColorBrush(colour) : null;
 
     protected override Size MeasureOverride(Size availableSize)
-        => Label() is { } text ? new Size(ChipPainter.WidthOf(text, Icon() is not null || Swatch() is not null), RowSurface.RowHeight) : default;
+        => Label() is { } text ? new Size(ChipPainter.WidthOf(text, Icon() is not null || Swatch() is not null, Affordance() is not null), RowSurface.RowHeight) : default;
 
     public override void Render(DrawingContext context)
     {
@@ -129,7 +132,7 @@ public sealed class HintChip : Control
             return;
 
         var fill = isHovered ? ChipHoverBackground ?? ChipBackground : ChipBackground;
-        painter.Draw(context, 0, 0, Bounds.Width, text, Foreground ?? Brushes.Gray, fill, Icon(), Swatch());
+        painter.Draw(context, 0, 0, Bounds.Width, text, Foreground ?? Brushes.Gray, fill, Icon(), Swatch(), Affordance());
     }
 
     protected override void OnPointerEntered(PointerEventArgs e)

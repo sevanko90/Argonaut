@@ -42,11 +42,14 @@ public sealed class RawViewHintsTests : IDisposable
     }
 
     private Task WithView(string json, Func<Window, RawViewModel, RawTextSurface, Task> body)
+        => WithView("doc.json", json, body);
+
+    private Task WithView(string name, string json, Func<Window, RawViewModel, RawTextSurface, Task> body)
     {
         var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(RawViewHintsTests).Assembly);
         return session.Dispatch(async () =>
         {
-            string path = Path.Combine(tempDir, "doc.json");
+            string path = Path.Combine(tempDir, name);
             File.WriteAllBytes(path, Encoding.UTF8.GetBytes(json));
             var vm = new RawViewModel(new RawViewSettings());
             Window? window = null;
@@ -83,10 +86,12 @@ public sealed class RawViewHintsTests : IDisposable
     });
 
     [Fact]
-    public Task WithoutALexer_NothingIsHinted() => WithView("{\n  \"colour\": \"#336699\"\n}\n", async (_, _, surface) =>
+    public Task WithoutALexer_ValuesAreReadAsWords_MarkedInPlace() => WithView("{\n  \"colour\": \"#336699\"\n}\n", async (_, _, surface) =>
     {
         surface.Lexer = null;
-        Assert.Empty(surface.HintMarksFor(1));
+        var mark = Assert.Single(surface.HintMarksFor(1));
+        Assert.False(mark.IsChip);
+        Assert.Equal(ValueHintKind.Colour, mark.Hint.Kind);
         await Task.CompletedTask;
     });
 
@@ -156,5 +161,15 @@ public sealed class RawViewHintsTests : IDisposable
 
         Assert.Empty(surface.HintMarksFor(1));
         Assert.Equal(ValueHintKind.Colour, Assert.Single(surface.HintMarksFor(2)).Hint.Kind);
+    });
+
+    [Fact]
+    public Task AFileNoLexerReads_HintsItsUnambiguousWords() => WithView("notes.txt", "deploy log\nsee https://example.com/runs/42 at 2026-10-08T09:12:03Z, id 1709305509\n", async (_, _, surface) =>
+    {
+        Assert.Null(surface.Lexer);
+        var marks = surface.HintMarksFor(1);
+        Assert.Equal([ValueHintKind.Url, ValueHintKind.IsoDate], marks.Select(m => m.Hint.Kind));
+        Assert.All(marks, m => Assert.False(m.IsChip));
+        await Task.CompletedTask;
     });
 }

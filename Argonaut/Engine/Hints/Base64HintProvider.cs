@@ -28,6 +28,11 @@ public sealed class Base64HintProvider : IValueHintProvider
 
     private enum Payload : byte { Text, Png, Jpeg, Gif, WebP, Pdf, Zip, Gzip }
 
+    /// <summary>Whether a candidate decodes to a known format - a picture, a PDF, an archive -
+    /// rather than to text, which plenty of ordinary words also decode to.</summary>
+    public static bool NamesAFormat(in ValueHintCandidate candidate)
+        => candidate.Kind == ValueHintKind.Base64 && (Payload)candidate.SchemeHint != Payload.Text;
+
     public bool IsActive => true;
 
     public bool ReadsPrefixes => true;

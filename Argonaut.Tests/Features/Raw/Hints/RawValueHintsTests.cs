@@ -21,7 +21,7 @@ public sealed class RawValueHintsTests
         public IEnumerable<string> Marked => Marks.Select(m => Text[m.Start..m.End]);
     }
 
-    private static List<MarkedRow> Mark(string document, int width = 200, IRawLexer? lexer = null, DateHintSettings? dates = null)
+    private static List<MarkedRow> Mark(string document, int width = 200, IRawLexer? lexer = null, DateHintSettings? dates = null, bool noLexer = false)
     {
         byte[] bytes = Encoding.UTF8.GetBytes(document);
         var source = new MemoryByteSource(bytes);
@@ -32,7 +32,7 @@ public sealed class RawValueHintsTests
         {
             Source = source,
         };
-        lexer ??= new JsonRawLexer();
+        lexer ??= noLexer ? null : new JsonRawLexer();
 
         var rows = new List<MarkedRow>();
         long lineStart = 0;
@@ -46,10 +46,19 @@ public sealed class RawValueHintsTests
                 int end = Math.Min(at + width, lineBytes);
                 bool wraps = end < lineBytes;
                 var decoded = RawRowDecoder.Decode(source, lineStart + at, lineStart + end, wraps);
-                var spans = new List<RawStyledSpan>();
-                lexState = lexer.Lex(decoded.Text, lexState, spans);
                 var marks = new List<RawHintMark>();
-                carry = hints.MarkRow(new RawHintRow(decoded, at == 0, wraps), carry, spans, marks);
+                var hintRow = new RawHintRow(decoded, at == 0, wraps);
+                if (lexer is null)
+                {
+                    hints.MarkWords(hintRow, null, marks);
+                }
+                else
+                {
+                    var spans = new List<RawStyledSpan>();
+                    lexState = lexer.Lex(decoded.Text, lexState, spans);
+                    carry = hints.MarkRow(hintRow, carry, spans, marks);
+                    hints.MarkWords(hintRow, spans, marks);
+                }
                 rows.Add(new MarkedRow(decoded.Text, marks));
             }
 
@@ -185,5 +194,52 @@ public sealed class RawValueHintsTests
 
         Assert.Equal(DateDecodingScheme.Off, dates.FileDefaultScheme);
         Assert.Empty(rows[1].Marks);
+    }
+
+    // ── Words, where no lexer reads values ─────────────────────────────────────────────
+
+    [Fact]
+    public void Prose_HintsUnambiguousWords_LessThePunctuationAroundThem()
+    {
+        var rows = Mark($"see https://example.com/a. or (#1E90FF), with {Jwt} sent 2026-10-08T09:12:03Z.", noLexer: true);
+
+        Assert.Equal(["https://example.com/a", "#1E90FF", Jwt, "2026-10-08T09:12:03Z"], rows[0].Marked);
+        Assert.All(rows[0].Marks, m => Assert.False(m.IsChip));
+    }
+
+    /// <summary>Numbers, short colours, words and Base64 that decodes to text could all be
+    /// something; in prose they are left alone.</summary>
+    [Fact]
+    public void Prose_LeavesAnythingAmbiguousAlone()
+        => Assert.Empty(Mark("sent 1709305509 bytes in #fff red Zm9vYmFyYmF6cXV4cXV1eA== at 0 9 * * 1-5 to javascript:alert(1)", noLexer: true)[0].Marks);
+
+    [Fact]
+    public void Prose_HintsBase64ThatDecodesToAKnownFormat()
+    {
+        // The first bytes of a PNG, with the rest of a plausible header.
+        string png = Convert.ToBase64String([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 32, 0, 0, 0, 32, 8, 6, 0, 0, 0]);
+        var mark = Assert.Single(Mark($"logo {png} here", noLexer: true)[0].Marks);
+
+        Assert.Equal(ValueHintKind.Base64, mark.Hint.Kind);
+    }
+
+    [Fact]
+    public void AWordWrappedOverRows_IsReadWhole()
+    {
+        string url = "https://example.com/" + new string('a', 40);
+        var rows = Mark($"go to {url} now", width: 16, noLexer: true);
+
+        Assert.Equal(url, string.Concat(rows.SelectMany(r => r.Marked)));
+        Assert.All(rows.SelectMany(r => r.Marks), m => Assert.Equal(ValueHintKind.Url, m.Hint.Kind));
+    }
+
+    [Fact]
+    public void CommentsInLexedFiles_AreReadAsWords()
+    {
+        var json = Mark("{\"a\": 1} // docs at https://example.com/a")[0];
+        var config = Mark("port = 80 # see https://example.com/b", lexer: new ConfigRawLexer())[0];
+
+        Assert.Equal(["https://example.com/a"], json.Marked);
+        Assert.Equal(["https://example.com/b"], config.Marked);
     }
 }

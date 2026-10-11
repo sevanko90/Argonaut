@@ -740,6 +740,8 @@ public class RawTextSurface : RowSurface
         IReadOnlyList<ValueSpan<TextRunProperties>>? overrides = null;
         if (ColouringEnabled && (row ?? RowAt(rowIndex)) is { } source)
             overrides = StyleOverridesFor(rowIndex, source, text, typeface, fontSize, foreground);
+        else if ((row ?? RowAt(rowIndex)) is { } plain)
+            MarkWordHints(rowIndex, plain);
 
         // No wrapping and no width constraint: the row is already byte-capped by the index, and
         // laying it out at its natural width is what lets it be panned rather than re-flowed.
@@ -810,6 +812,18 @@ public class RawTextSurface : RowSurface
 
         var entry = row.LineNumber is not null ? RawHintCarry.None : this.hints.CarryAfter(rowIndex - 1) ?? RawHintCarry.Unknown;
         this.hints.MarkRow(rowIndex, new RawHintRow(decodedRow, row.LineNumber is not null, row.IsSoftWrapped), entry, this.rowSpans, typeface, fontSize);
+    }
+
+    /// <summary>The hints of a row no lexer reads: its words, taken strictly.</summary>
+    private void MarkWordHints(int rowIndex, RawVisibleRow row)
+    {
+        if (this.hints.Hints is not { } valueHints || DecodedRow(rowIndex) is not { } decodedRow)
+            return;
+
+        if (!ReferenceEquals(valueHints.Source, Source))
+            valueHints.Source = Source;
+
+        this.hints.MarkWords(rowIndex, new RawHintRow(decodedRow, row.LineNumber is not null, row.IsSoftWrapped));
     }
 
     /// <summary>

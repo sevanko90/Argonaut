@@ -87,7 +87,19 @@ public sealed class RawHintLayer
 
         var marks = new List<RawHintMark>();
         carries[rowIndex] = hints.MarkRow(row, entry, spans, marks);
+        hints.MarkWords(row, spans, marks);
         rows[rowIndex] = new RowHints(marks, LayOutChips(marks, typeface, fontSize));
+    }
+
+    /// <summary>Works out a row's hints word by word, for a row no lexer reads.</summary>
+    public void MarkWords(int rowIndex, in RawHintRow row)
+    {
+        if (Hints is not { } hints)
+            return;
+
+        var marks = new List<RawHintMark>();
+        hints.MarkWords(row, null, marks);
+        rows[rowIndex] = new RowHints(marks, null);
     }
 
     /// <summary>Works out only what a row hands on, for a row lexed to reach a later one.</summary>

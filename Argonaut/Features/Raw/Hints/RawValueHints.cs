@@ -56,6 +56,12 @@ public readonly record struct RawHintMark(int Start, int End, RawValue Value, bo
 /// A hint is a chip at the end of the line when its value is the line's only one and nothing but
 /// punctuation follows it - a pretty-printed member, a config pair - the way the tree shows it;
 /// anywhere else (a minified line, several values) it marks the value itself.
+///
+/// Text no lexer reads as values - a file with no lexer, a comment - is read word by word
+/// (<see cref="MarkWords"/>), and more strictly: a word is only offered when it starts the way an
+/// unambiguous kind must (a scheme, <c>#</c>, <c>eyJ</c>, a year, a known Base64 header), and only
+/// an address, an ISO date, a JWT, a hex colour or Base64 that decodes to a known format is
+/// hinted. Prose is full of numbers and words that would otherwise read as something.
 /// </summary>
 public sealed class RawValueHints
 {
@@ -69,6 +75,7 @@ public sealed class RawValueHints
     private readonly IReadOnlyList<IValueHintProvider> providers;
     private readonly DateHintSettings dates;
     private readonly Dictionary<long, RawValue?> resolved = new();
+    private readonly Dictionary<long, RawValue?> words = new();
     private IByteSource? source;
 
     public RawValueHints(IReadOnlyList<IValueHintProvider> providers, DateHintSettings dates)
@@ -90,6 +97,7 @@ public sealed class RawValueHints
         {
             source = value;
             resolved.Clear();
+            words.Clear();
         }
     }
 
@@ -97,7 +105,11 @@ public sealed class RawValueHints
     public event EventHandler? HintsChanged;
 
     /// <summary>Forgets every value read so far - the bytes changed under them.</summary>
-    public void Forget() => resolved.Clear();
+    public void Forget()
+    {
+        resolved.Clear();
+        words.Clear();
+    }
 
     /// <summary>
     /// Appends the hint marks of one row to <paramref name="marks"/> (which the caller clears)
@@ -150,6 +162,183 @@ public sealed class RawValueHints
         }
 
         return carry;
+    }
+
+    /// <summary>
+    /// Appends marks for the hinted words of a row: every word when <paramref name="spans"/> is
+    /// null (no lexer), else only those in comments. A word the row starts in the middle of - one
+    /// wrapped from the row above - is traced back to its start in the bytes. Words are marked in
+    /// place, never as chips.
+    /// </summary>
+    public void MarkWords(in RawHintRow row, List<RawStyledSpan>? spans, List<RawHintMark> marks)
+    {
+        string text = row.Text;
+        for (int i = 0; i < text.Length;)
+        {
+            if (char.IsWhiteSpace(text[i]))
+            {
+                i++;
+                continue;
+            }
+
+            int start = i;
+            while (i < text.Length && !char.IsWhiteSpace(text[i]))
+                i++;
+
+            if (spans is not null && !InComment(spans, start))
+                continue;
+
+            long wordStart = row.Start + row.Decoded.ByteOffsetForChar(start);
+            if (start == 0 && !row.IsLineStart && source is { } bytes && wordStart > 0 && !IsBlank(bytes.ByteAt(wordStart - 1)))
+                wordStart = WordStartBefore(bytes, wordStart);
+
+            if (ResolveWord(wordStart) is { Hint: not null } value)
+                AddMark(row, value, firstOnLine: false, marks);
+        }
+    }
+
+    private static bool InComment(List<RawStyledSpan> spans, int index)
+    {
+        foreach (var span in spans)
+        {
+            if (span.Style == RawTextStyle.Comment && index >= span.Start && index < span.Start + span.Length)
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsBlank(byte b) => b is (byte)' ' or (byte)'\t' or (byte)'\n' or (byte)'\r' or (byte)'\f' or (byte)'\v';
+
+    /// <summary>Where the word running into <paramref name="at"/> from before it starts, looking
+    /// back no further than <see cref="MaxValueBytes"/>.</summary>
+    private static long WordStartBefore(IByteSource bytes, long at)
+    {
+        long floor = Math.Max(0, at - MaxValueBytes);
+        while (at > floor)
+        {
+            int length = (int)Math.Min(at - floor, 64 * 1024);
+            var chunk = bytes.GetContiguousSpan(at - length, length);
+            if (chunk.IsEmpty)
+                break;
+
+            int blank = chunk.LastIndexOfAny(" \t\n\r\f\v"u8);
+            if (blank >= 0)
+                return at - chunk.Length + blank + 1;
+            at -= chunk.Length;
+        }
+
+        return at;
+    }
+
+    /// <summary>The word starting at <paramref name="wordStart"/>, read once and kept; null when
+    /// it does not start like anything hinted, which is most words and costs a few byte reads.</summary>
+    private RawValue? ResolveWord(long wordStart)
+    {
+        if (words.TryGetValue(wordStart, out var known))
+            return known;
+        if (source is not { } bytes)
+            return null;
+
+        long contentStart = wordStart;
+        while (contentStart < bytes.AvailableLength && bytes.ByteAt(contentStart) is (byte)'(' or (byte)'[' or (byte)'{' or (byte)'<' or (byte)'"' or (byte)'\'')
+            contentStart++;
+        if (!StartsLikeAHint(bytes, contentStart))
+            return null;
+
+        if (words.Count >= CacheCapacity)
+            words.Clear();
+
+        var value = ReadWord(bytes, wordStart, contentStart);
+        words[wordStart] = value;
+        return value;
+    }
+
+    /// <summary>The cheap gate: the first bytes an unambiguous hint must start with.</summary>
+    private static bool StartsLikeAHint(IByteSource bytes, long at)
+    {
+        Span<byte> head = stackalloc byte[8];
+        int read = bytes.CopyTo(at, head);
+        var start = head[..read];
+        if (start.Length < 4)
+            return false;
+
+        return StartsWithIgnoringCase(start, "http"u8) || StartsWithIgnoringCase(start, "mailto:"u8)
+            || (start[0] == (byte)'#' && Uri.IsHexDigit((char)start[1]))
+            || start.StartsWith("eyJ"u8)
+            || (char.IsAsciiDigit((char)start[0]) && char.IsAsciiDigit((char)start[1]) && char.IsAsciiDigit((char)start[2]) && char.IsAsciiDigit((char)start[3]))
+            || start.StartsWith("iVBOR"u8) || start.StartsWith("/9j/"u8) || start.StartsWith("R0lGOD"u8) || start.StartsWith("UklGR"u8)
+            || start.StartsWith("JVBER"u8) || start.StartsWith("UEsDB"u8) || start.StartsWith("H4sI"u8);
+    }
+
+    private static bool StartsWithIgnoringCase(ReadOnlySpan<byte> text, ReadOnlySpan<byte> prefix)
+        => text.Length >= prefix.Length && System.Text.Ascii.EqualsIgnoreCase(text[..prefix.Length], prefix);
+
+    /// <summary>A word's content - to the next blank, less the punctuation prose wraps around it -
+    /// read through the unambiguous kinds only.</summary>
+    private RawValue? ReadWord(IByteSource bytes, long wordStart, long contentStart)
+    {
+        long end = contentStart;
+        long limit = Math.Min(bytes.AvailableLength, contentStart + MaxValueBytes);
+        while (end < limit)
+        {
+            var chunk = bytes.GetContiguousSpan(end, (int)Math.Min(limit - end, 64 * 1024));
+            if (chunk.IsEmpty)
+                break;
+            int blank = chunk.IndexOfAny(" \t\n\r\f\v"u8);
+            if (blank >= 0)
+            {
+                end += blank;
+                break;
+            }
+            end += chunk.Length;
+        }
+
+        long wordEnd = end;
+        while (end > contentStart && bytes.ByteAt(end - 1) is (byte)')' or (byte)']' or (byte)'}' or (byte)'>' or (byte)'"' or (byte)'\''
+                   or (byte)'.' or (byte)',' or (byte)';' or (byte)':' or (byte)'!' or (byte)'?')
+            end--;
+
+        long length = end - contentStart;
+        if (length <= 0)
+            return null;
+
+        int shown = (int)Math.Min(length, DisplayText.MaxLength);
+        byte[] rented = ArrayPool<byte>.Shared.Rent(shown);
+        try
+        {
+            var raw = rented.AsSpan(0, shown);
+            bytes.CopyTo(contentStart, raw);
+            return new RawValue(wordStart, contentStart, end, wordEnd, ReadUnambiguous(raw, length, contentStart));
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(rented);
+        }
+    }
+
+    /// <summary>The first provider's reading of a word, if it is one of the kinds a word in prose
+    /// can be taken for without doubt.</summary>
+    private ValueHint? ReadUnambiguous(ReadOnlySpan<byte> raw, long length, long offset)
+    {
+        bool isWhole = length == raw.Length;
+        foreach (var provider in providers)
+        {
+            if (!provider.IsActive || !(isWhole || provider.ReadsPrefixes) || !provider.TryClassify(ValueShape.String, raw, length, out var candidate))
+                continue;
+
+            bool unambiguous = candidate.Kind switch
+            {
+                ValueHintKind.Url or ValueHintKind.IsoDate or ValueHintKind.Jwt => true,
+                ValueHintKind.Colour => candidate.SchemeHint == 1,
+                ValueHintKind.Base64 => Base64HintProvider.NamesAFormat(candidate),
+                _ => false,
+            };
+            if (unambiguous)
+                return provider.FormatHint(in candidate, raw, length, offset);
+        }
+
+        return null;
     }
 
     /// <summary>The mark for a value's share of a row: its content's characters on this row, and

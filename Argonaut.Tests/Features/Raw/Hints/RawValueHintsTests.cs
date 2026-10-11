@@ -28,7 +28,7 @@ public sealed class RawValueHintsTests
         dates ??= new DateHintSettings();
         var hints = new RawValueHints(
             [new DateHintProvider(dates), new IsoDateHintProvider(dates, TimeProvider.System), new ColourHintProvider(),
-             new JwtHintProvider(TimeProvider.System), new UrlHintProvider(), new Base64HintProvider()], dates)
+             new JwtHintProvider(TimeProvider.System), new UrlHintProvider(), new CronHintProvider(dates, TimeProvider.System), new Base64HintProvider()], dates)
         {
             Source = source,
         };
@@ -85,16 +85,28 @@ public sealed class RawValueHintsTests
         => Assert.Empty(Mark("{\"https://example.com\": 1}")[0].Marks);
 
     [Fact]
-    public void AValueWrappedOverRows_IsReadWhole_AndMarkedOnEachRow_WithItsChipOnTheLast()
+    public void AValueWrappedOverRows_IsReadWhole_AndIsAChip_EndingOnItsLastRow()
     {
         string url = "https://example.com/" + new string('a', 40);
         var rows = Mark($"  \"u\": \"{url}\",", width: 16);
 
         Assert.Equal(url, string.Concat(rows.SelectMany(r => r.Marked)));
-        Assert.All(rows.SkipWhile(r => r.Marks.Count == 0), r => Assert.Single(r.Marks));
-        Assert.All(rows.Where(r => r.Marks.Count > 0).SkipLast(1), r => Assert.False(r.Marks[0].IsChip));
-        Assert.True(rows[^1].Marks.Single().IsChip);
+        var marked = rows.SkipWhile(r => r.Marks.Count == 0).ToList();
+        Assert.All(marked, r => Assert.True(Assert.Single(r.Marks).IsChip));
+        Assert.All(marked.SkipLast(1), r => Assert.False(r.Marks[0].EndsHere));
+        Assert.True(rows[^1].Marks.Single().EndsHere);
         Assert.Equal(ValueHintKind.Url, rows[^1].Marks[0].Hint.Kind);
+    }
+
+    /// <summary>A wrapped value with more on its line after it is marked in place on every row.</summary>
+    [Fact]
+    public void AWrappedValueWithMoreAfterIt_IsMarkedInPlace()
+    {
+        string url = "https://example.com/" + new string('a', 40);
+        var rows = Mark($"[\"{url}\", 1]", width: 16);
+
+        Assert.All(rows.SelectMany(r => r.Marks), m => Assert.False(m.IsChip));
+        Assert.Equal(url, string.Concat(rows.SelectMany(r => r.Marked)));
     }
 
     /// <summary>A value closing exactly at a row's end hands nothing on, so a value the next row
@@ -126,11 +138,32 @@ public sealed class RawValueHintsTests
     }
 
     [Fact]
-    public void ABareValue_EndsBeforeItsComment()
+    public void ABareValue_EndsBeforeItsComment_AndIsStillItsLinesChip()
     {
         var rows = Mark("link = https://example.com/a # where", lexer: new ConfigRawLexer());
 
         Assert.Equal(["https://example.com/a"], rows[0].Marked);
+        Assert.True(rows[0].Marks[0].IsChip);
+    }
+
+    /// <summary>The lexer colours "0 2 * * *" as a number and four words; the value is all of it.</summary>
+    [Fact]
+    public void ABareValueOfSeveralWords_IsOneValue()
+    {
+        var rows = Mark("nightly = 0 2 * * *\nport: 8080", lexer: new ConfigRawLexer());
+
+        Assert.Equal(ValueHintKind.Cron, Assert.Single(rows[0].Marks).Hint.Kind);
+        Assert.Equal(["0 2 * * *"], rows[0].Marked);
+        Assert.Empty(rows[1].Marks);
+    }
+
+    [Fact]
+    public void ANumberInJson_EndsAtItsSeparator()
+    {
+        var dates = new DateHintSettings();
+        var rows = Mark("[1709305509, 1709305510 ]", dates: dates);
+
+        Assert.Equal(["1709305509", "1709305510"], rows[0].Marked);
     }
 
     [Fact]

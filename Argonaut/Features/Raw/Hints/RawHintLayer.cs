@@ -154,7 +154,7 @@ public sealed class RawHintLayer
         var typeface = ChipFontFamily is { } family ? new Typeface(family) : textTypeface;
         foreach (var mark in marks)
         {
-            if (!mark.IsChip)
+            if (!mark.IsChip || !mark.EndsHere)
                 continue;
 
             var hint = mark.Hint;

@@ -3,6 +3,7 @@ using Argonaut.Engine.Hints;
 using Argonaut.Ui.Documents.Navigation;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 
@@ -64,6 +65,10 @@ public partial class HintCard : UserControl
         Preview.MaxHeight = TreeHeight;
         Preview.DataContext = preview.Preview;
 
+        // Hung from the side of the chip nearer the middle, so the card opens over the view
+        // rather than off the edge of the window.
+        bool leftHalf = Anchor is { } target && anchor.Center.X < target.Bounds.Width / 2;
+        Card.Placement = leftHalf ? PlacementMode.BottomEdgeAlignedLeft : PlacementMode.BottomEdgeAlignedRight;
         Card.PlacementTarget = Anchor;
         Card.PlacementRect = anchor;
         Card.IsOpen = true;

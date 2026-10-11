@@ -34,13 +34,14 @@ public readonly record struct RawHintCarry(long ValueStart, bool FirstOnLine)
 }
 
 /// <summary>A value as read from the document: where it starts (at its opening quote, if any),
-/// where its content runs, where it ends, and what it reads as - <see cref="Hint"/> null when
-/// nothing.</summary>
-public sealed record RawValue(long ValueStart, long ContentStart, long ContentEnd, long ValueEnd, ValueHint? Hint);
+/// where its content runs, where it ends, what it reads as - <see cref="Hint"/> null when
+/// nothing - and whether only punctuation follows it to the end of its line.</summary>
+public sealed record RawValue(long ValueStart, long ContentStart, long ContentEnd, long ValueEnd, ValueHint? Hint, bool EndsLine = false);
 
 /// <summary>A hinted value's share of one row, in the row's characters. <see cref="IsChip"/>
-/// when the hint is drawn as a chip after the row's text rather than as a mark on the value.</summary>
-public readonly record struct RawHintMark(int Start, int End, RawValue Value, bool IsChip)
+/// when the value's hint is a chip after its line's text rather than a mark on the value - drawn
+/// on the row it <see cref="EndsHere"/>, and nothing on the rows before.</summary>
+public readonly record struct RawHintMark(int Start, int End, RawValue Value, bool IsChip, bool EndsHere)
 {
     public ValueHint Hint => Value.Hint!;
 }
@@ -110,10 +111,16 @@ public sealed class RawValueHints
         var carry = RawHintCarry.None;
         bool seenValue = false;
         long rowEnd = row.Start + row.Decoded.DisplayByteLength;
+        long coveredUntil = row.Start;
         for (int i = 0; i < spans.Count; i++)
         {
             var span = spans[i];
             if (span.Style is not (RawTextStyle.String or RawTextStyle.Number))
+                continue;
+
+            // A bare config value is the rest of its line, which the lexer may colour as several
+            // words: the first one stands for the value, and the rest are inside it.
+            if (row.Start + row.Decoded.ByteOffsetForChar(span.Start) < coveredUntil)
                 continue;
 
             bool reachesEnd = span.Start + span.Length >= row.Text.Length && row.IsSoftWrapped;
@@ -133,6 +140,8 @@ public sealed class RawValueHints
             seenValue = true;
 
             var value = Resolve(valueStart, span.Style == RawTextStyle.Number ? ValueShape.Number : ValueShape.String);
+            if (value is not null)
+                coveredUntil = Math.Max(coveredUntil, value.ValueEnd);
             if (reachesEnd)
                 carry = value is null ? RawHintCarry.Unknown : value.ValueEnd > rowEnd ? new RawHintCarry(valueStart, firstOnLine) : RawHintCarry.None;
 
@@ -144,7 +153,7 @@ public sealed class RawValueHints
     }
 
     /// <summary>The mark for a value's share of a row: its content's characters on this row, and
-    /// whether it is the line's one hinted value, ending here with only punctuation after it.</summary>
+    /// whether it is its line's one value, with only punctuation after it.</summary>
     private static void AddMark(in RawHintRow row, RawValue value, bool firstOnLine, List<RawHintMark> marks)
     {
         long rowEnd = row.Start + row.Decoded.DisplayByteLength;
@@ -157,20 +166,7 @@ public sealed class RawValueHints
         int end = to >= rowEnd ? row.Text.Length : row.Decoded.CharIndexForByte((int)(to - row.Start));
 
         bool endsHere = value.ValueEnd <= rowEnd;
-        bool isChip = endsHere && firstOnLine && !row.IsSoftWrapped
-            && OnlyPunctuationFrom(row.Text, value.ValueEnd >= rowEnd ? row.Text.Length : row.Decoded.CharIndexForByte((int)(value.ValueEnd - row.Start)));
-        marks.Add(new RawHintMark(start, end, value, isChip));
-    }
-
-    private static bool OnlyPunctuationFrom(string text, int index)
-    {
-        for (int i = index; i < text.Length; i++)
-        {
-            if (text[i] is not (' ' or '\t' or ',' or ';' or ']' or '}' or '\r'))
-                return false;
-        }
-
-        return true;
+        marks.Add(new RawHintMark(start, end, value, firstOnLine && value.EndsLine, endsHere));
     }
 
     /// <summary>The value starting at <paramref name="valueStart"/>, read once and kept; null
@@ -190,7 +186,7 @@ public sealed class RawValueHints
 
     private RawValue? Read(IByteSource bytes, long valueStart, ValueShape shape)
     {
-        if (!FindExtent(bytes, valueStart, shape, out long contentStart, out long contentEnd, out long valueEnd))
+        if (!FindExtent(bytes, valueStart, ref shape, out long contentStart, out long contentEnd, out long valueEnd))
             return null;
 
         long length = contentEnd - contentStart;
@@ -206,12 +202,34 @@ public sealed class RawValueHints
             if (shape == ValueShape.Number)
                 InferDateScheme(raw);
 
-            return new RawValue(valueStart, contentStart, contentEnd, valueEnd, ValueHints.Read(providers, shape, raw, length, valueStart));
+            var hint = ValueHints.Read(providers, shape, raw, length, valueStart);
+            return new RawValue(valueStart, contentStart, contentEnd, valueEnd, hint, hint is not null && OnlyPunctuationToLineEnd(bytes, valueEnd));
         }
         finally
         {
             ArrayPool<byte>.Shared.Return(rented);
         }
+    }
+
+    /// <summary>Whether nothing but blanks, closing punctuation and a comment follow a value on its line -
+    /// what lets its hint sit at the line's end as the tree's would. A long tail is not looked through.</summary>
+    private static bool OnlyPunctuationToLineEnd(IByteSource bytes, long from)
+    {
+        long limit = Math.Min(bytes.AvailableLength, from + 256);
+        for (long at = from; at < limit; at++)
+        {
+            byte b = bytes.ByteAt(at);
+            if (b == (byte)'\n')
+                return true;
+
+            // A comment closing the line is still the line's end, as far as the value is concerned.
+            if (b is (byte)'#' or (byte)';' or (byte)'/' && at > from && bytes.ByteAt(at - 1) is (byte)' ' or (byte)'\t')
+                return true;
+            if (b is not ((byte)' ' or (byte)'\t' or (byte)',' or (byte)';' or (byte)']' or (byte)'}' or (byte)'\r'))
+                return false;
+        }
+
+        return limit == bytes.AvailableLength;
     }
 
     /// <summary>The first number on screen that reads as a date sets the document's scheme, the
@@ -229,9 +247,10 @@ public sealed class RawValueHints
     /// Where a value's content runs, read from its first byte: a double-quoted string to its
     /// closing unescaped quote, a single-quoted one to its next quote, a number while it reads as
     /// one, and a bare config value to the line's end, less a trailing comment and blanks. False
-    /// when it does not end on its line within <see cref="MaxValueBytes"/>.
+    /// when it does not end on its line within <see cref="MaxValueBytes"/>. A number that turns out
+    /// to begin a bare value comes back as a <see cref="ValueShape.String"/>.
     /// </summary>
-    internal static bool FindExtent(IByteSource bytes, long valueStart, ValueShape shape,
+    internal static bool FindExtent(IByteSource bytes, long valueStart, ref ValueShape shape,
         out long contentStart, out long contentEnd, out long valueEnd)
     {
         contentStart = contentEnd = valueEnd = valueStart;
@@ -253,14 +272,32 @@ public sealed class RawValueHints
             long at = valueStart;
             while (at < bytes.AvailableLength && at - valueStart < 64 && IsNumberByte(bytes.ByteAt(at)))
                 at++;
-            contentEnd = valueEnd = at;
-            return true;
+            if (EndsNumber(bytes, at))
+            {
+                contentEnd = valueEnd = at;
+                return true;
+            }
+
+            // Not a number after all but the start of a bare value - "0 2 * * *" - which runs
+            // to the line's end.
+            shape = ValueShape.String;
         }
 
         if (!FindLineEnd(bytes, valueStart, out long lineEnd))
             return false;
         contentEnd = valueEnd = TrimBareValue(bytes, valueStart, lineEnd);
         return true;
+    }
+
+    /// <summary>Whether a number ends at <paramref name="at"/>: what follows it, past blanks, is
+    /// the line's end, a separator, a closing bracket or a comment.</summary>
+    private static bool EndsNumber(IByteSource bytes, long at)
+    {
+        long limit = Math.Min(bytes.AvailableLength, at + 64);
+        while (at < limit && bytes.ByteAt(at) is (byte)' ' or (byte)'\t')
+            at++;
+        return at >= bytes.AvailableLength
+            || bytes.ByteAt(at) is (byte)'\n' or (byte)'\r' or (byte)',' or (byte)']' or (byte)'}' or (byte)'#' or (byte)';' or (byte)'/';
     }
 
     private static bool IsNumberByte(byte b) => b is >= (byte)'0' and <= (byte)'9' or (byte)'-' or (byte)'+' or (byte)'.' or (byte)'e' or (byte)'E';

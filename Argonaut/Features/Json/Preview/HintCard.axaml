@@ -6,7 +6,6 @@
          card by the chip or mark that was clicked. Placed against it from code; closes on a
          click elsewhere or Escape. -->
     <Popup x:Name="Card"
-           Placement="BottomEdgeAlignedRight"
            VerticalOffset="4"
            IsLightDismissEnabled="True"
            Closed="OnClosed">

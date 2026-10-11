@@ -1,5 +1,6 @@
 using Argonaut.Features.Json;
-using Argonaut.Features.Json.Hints;
+using Argonaut.Engine.Hints;
+using Argonaut.Ui.Hints;
 using Argonaut.Features.Json.Schema;
 using Argonaut.Tests.Support;
 using Argonaut.Ui.ViewModels;

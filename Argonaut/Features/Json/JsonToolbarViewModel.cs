@@ -2,7 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Threading.Tasks;
-using Argonaut.Features.Json.Hints;
+using Argonaut.Engine.Hints;
+using Argonaut.Ui.Hints;
 using Argonaut.Features.Json.Schema;
 using Argonaut.Ui.ViewModels;
 

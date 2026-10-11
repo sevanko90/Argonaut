@@ -157,7 +157,7 @@ public sealed class JsonViewTests : IDisposable
     public Task AHintPreviewsWhatItsValueEncodes() => WithView("""{"embedded":"{\"a\":1,\"b\":[2]}","text":"aGVsbG8gdGhlcmUsIHJlYWRlcg==","bad":"{\"a\":"}""", async (_, vm, _) =>
     {
         string json = File.ReadAllText(path);
-        Argonaut.Features.Json.Tree.ExpandHintLink Link(string key, Argonaut.Features.Json.Hints.ValueHintKind kind)
+        Argonaut.Features.Json.Tree.ExpandHintLink Link(string key, Argonaut.Engine.Hints.ValueHintKind kind)
         {
             int start = json.IndexOf('"', json.IndexOf($"\"{key}\":", StringComparison.Ordinal) + key.Length + 3);
             int end = json.IndexOf('"', start + 1);
@@ -166,13 +166,13 @@ public sealed class JsonViewTests : IDisposable
             return new(start, end + 1, kind);
         }
 
-        var embedded = await vm.PreviewHintAsync(Link("embedded", Argonaut.Features.Json.Hints.ValueHintKind.EmbeddedJson));
+        var embedded = await vm.PreviewHintAsync(Link("embedded", Argonaut.Engine.Hints.ValueHintKind.EmbeddedJson));
         Assert.True(embedded!.Preview.IsTree);
 
-        var text = await vm.PreviewHintAsync(Link("text", Argonaut.Features.Json.Hints.ValueHintKind.Base64));
+        var text = await vm.PreviewHintAsync(Link("text", Argonaut.Engine.Hints.ValueHintKind.Base64));
         Assert.Equal("hello there, reader", text!.Preview.Text);
 
-        Assert.Null(await vm.PreviewHintAsync(Link("bad", Argonaut.Features.Json.Hints.ValueHintKind.EmbeddedJson)));
+        Assert.Null(await vm.PreviewHintAsync(Link("bad", Argonaut.Engine.Hints.ValueHintKind.EmbeddedJson)));
         embedded.Preview.Dispose();
         text.Preview.Dispose();
     });

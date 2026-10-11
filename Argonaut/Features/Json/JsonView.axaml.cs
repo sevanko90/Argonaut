@@ -2,7 +2,7 @@ using System;
 using System.ComponentModel;
 using System.Threading.Tasks;
 using Argonaut.Engine.Bytes;
-using Argonaut.Features.Json.Hints;
+using Argonaut.Engine.Hints;
 using Argonaut.Features.Json.Preview;
 using Argonaut.Features.Json.Tree;
 using Argonaut.Ui.Documents.Navigation;

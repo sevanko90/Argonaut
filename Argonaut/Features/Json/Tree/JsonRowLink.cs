@@ -23,7 +23,7 @@ public sealed record ViewAsTableLink(long ArrayStart) : JsonRowLink;
 /// <param name="ValueStart">The value's start, its opening quote.</param>
 /// <param name="ValueEnd">Just past its closing quote.</param>
 /// <param name="Kind">The hint, which says how to decode it.</param>
-public sealed record ExpandHintLink(long ValueStart, long ValueEnd, Hints.ValueHintKind Kind) : JsonRowLink;
+public sealed record ExpandHintLink(long ValueStart, long ValueEnd, Argonaut.Engine.Hints.ValueHintKind Kind) : JsonRowLink;
 
 /// <summary>Open a web or mail address the value holds, in the system's handler for it.</summary>
 /// <param name="Address">An absolute <c>http</c>, <c>https</c> or <c>mailto</c> URI - the only

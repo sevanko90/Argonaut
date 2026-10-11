@@ -12,6 +12,8 @@ using Argonaut.Engine.Indexing.Trees;
 using Argonaut.Engine.Progress;
 using Argonaut.Engine.Search;
 using Argonaut.Engine.Text;
+using Argonaut.Engine.Hints;
+using Argonaut.Ui.Hints;
 using Argonaut.Features.Json.Hints;
 using Argonaut.Features.Json.Indexing;
 using Argonaut.Features.Json.Preview;

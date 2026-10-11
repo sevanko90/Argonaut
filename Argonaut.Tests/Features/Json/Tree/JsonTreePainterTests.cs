@@ -2,7 +2,8 @@ using System.Text;
 using System.Text.Json;
 using Argonaut.Engine.Indexing.Trees;
 using Argonaut.Engine.Text;
-using Argonaut.Features.Json.Hints;
+using Argonaut.Engine.Hints;
+using Argonaut.Ui.Hints;
 using Argonaut.Features.Json.Tree;
 using Argonaut.Tests.Support;
 using Argonaut.Ui.Tree;
@@ -186,6 +187,27 @@ public sealed class JsonTreePainterTests
         var date = row.LinkOf<DateSchemeLink>()!.Value;
         Assert.Equal(TreeRunStyle.Chip, date.Style);
         Assert.Equal(TreeRunIcon.Time, date.Icon);
+    }
+
+    [Fact]
+    public void AnAddress_IsAnActionThatOpensIt_AndItsValueIsTheSameLink()
+    {
+        var row = new JsonTreeHarness("{\"u\":\"https://example.com/a\"}"u8.ToArray(), [new UrlHintProvider()]).Member("u");
+
+        var open = row.Runs.Single(r => r.Style == TreeRunStyle.Action);
+        Assert.Equal(TreeRunStyle.Action, open.Style);
+        Assert.Equal(TreeRunIcon.OpenLink, open.Icon);
+        Assert.Equal(new Uri("https://example.com/a"), ((OpenUrlLink)open.Link!).Address);
+        Assert.Equal(open.Link, row.Runs.Single(r => r.Style == TreeRunStyle.String).Link);
+    }
+
+    [Fact]
+    public void AColour_IsAChipWithItsSwatch()
+    {
+        var row = new JsonTreeHarness("{\"c\":\"#1E90FF\"}"u8.ToArray(), [new ColourHintProvider()]).Member("c");
+
+        var chip = row.Runs.Single(r => r.Style == TreeRunStyle.Chip);
+        Assert.Equal(Avalonia.Media.Color.FromUInt32(0xFF1E90FF), chip.Swatch);
     }
 
     [Fact]

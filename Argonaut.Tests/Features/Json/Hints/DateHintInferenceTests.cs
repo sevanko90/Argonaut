@@ -1,3 +1,4 @@
+using Argonaut.Engine.Hints;
 using Argonaut.Features.Json.Hints;
 using Argonaut.Tests.Support;
 

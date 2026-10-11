@@ -1,7 +1,8 @@
 using System.Text;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Indexing.Trees;
-using Argonaut.Features.Json.Hints;
+using Argonaut.Engine.Hints;
+using Argonaut.Ui.Hints;
 using Argonaut.Features.Json.Indexing;
 using Argonaut.Features.Json.Schema;
 using Argonaut.Features.Json.Tree;
@@ -35,13 +36,18 @@ internal sealed class JsonTreeHarness
     }
 
     public JsonTreeHarness(byte[] json, DateHintSettings? hints = null, int promotionBytes = 64, int checkpointBytes = 16)
+        : this(json, hints is null ? null : new IValueHintProvider[] { new DateHintProvider(hints) }, promotionBytes, checkpointBytes)
+    {
+    }
+
+    public JsonTreeHarness(byte[] json, IReadOnlyList<IValueHintProvider>? hintProviders, int promotionBytes = 64, int checkpointBytes = 16)
     {
         Bytes = new MemoryByteSource(json);
         Index = JsonSparseIndex.StartIndexing(Bytes, promotionBytes, checkpointBytes);
         Index.IndexingTask.GetAwaiter().GetResult();
         Reader = new JsonTreeReader(Bytes);
         Text = new JsonTreeText(Bytes, Index.Structure, Reader);
-        Painter = new JsonTreePainter(Text, hints is null ? null : new IValueHintProvider[] { new DateHintProvider(hints) }, offerArrayTable: true);
+        Painter = new JsonTreePainter(Text, hintProviders, offerArrayTable: true);
         Resolver = new JsonSchemaResolver(Index.Structure, Reader, Text);
         Gutter = new JsonSchemaGutter(Resolver, Text);
     }

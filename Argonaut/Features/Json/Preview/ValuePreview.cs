@@ -5,7 +5,7 @@ using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Indexing;
 using Argonaut.Engine.Indexing.Trees;
 using Argonaut.Engine.Text;
-using Argonaut.Features.Json.Hints;
+using Argonaut.Engine.Hints;
 using Argonaut.Features.Json.Indexing;
 using Argonaut.Features.Json.Tree;
 using Argonaut.Ui.Tree;

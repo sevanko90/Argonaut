@@ -1,3 +1,4 @@
+using Argonaut.Engine.Hints;
 using Argonaut.Engine.Indexing.Trees;
 using Argonaut.Features.Json.Indexing;
 using Argonaut.Features.Json.Tree;

@@ -1,8 +1,9 @@
 using System.Collections.Generic;
 using Argonaut.Engine.Indexing.Trees;
 using Argonaut.Engine.Text;
-using Argonaut.Features.Json.Hints;
+using Argonaut.Engine.Hints;
 using Argonaut.Features.Json.Indexing;
+using Argonaut.Ui.Hints;
 using Argonaut.Ui.Tree;
 
 namespace Argonaut.Features.Json.Tree;
@@ -40,7 +41,8 @@ public sealed class JsonTreePainter(JsonTreeText text, IReadOnlyList<IValueHintP
         var kind = (JsonTokenKind)row.Node.FormatKind;
         string value = text.Scalar(row, out bool valueTruncated, out long contentOffset, out long valueLength);
         var hint = Hint(row, kind);
-        runs.Add(new TreeRun(value, StyleOf(kind), hint?.ValueLink));
+        object? valueLink = hint?.Address is { } valueAddress ? new OpenUrlLink(valueAddress) : null;
+        runs.Add(new TreeRun(value, StyleOf(kind), valueLink));
 
         // Notes, then chips, then actions: information first, and what appears on hover last, so
         // showing it moves nothing.
@@ -51,8 +53,7 @@ public sealed class JsonTreePainter(JsonTreeText text, IReadOnlyList<IValueHintP
 
         if (hint is not null)
         {
-            object? link = hint.Expands is { } expands ? new ExpandHintLink(row.Node.ValueStart, row.Node.ValueEnd, expands) : hint.Link;
-            runs.Add(new TreeRun(hint.Text, hint.Style, link, hint.Icon, hint.Swatch));
+            runs.Add(new TreeRun(hint.Text, ValueHintLook.StyleOf(hint), LinkOf(row, hint), ValueHintLook.IconOf(hint.Symbol), ValueHintLook.SwatchOf(hint)));
         }
 
         if (valueTruncated)
@@ -73,15 +74,23 @@ public sealed class JsonTreePainter(JsonTreeText text, IReadOnlyList<IValueHintP
         if (raw.IsEmpty)
             return null;
 
-        bool isWhole = length == raw.Length;
-        foreach (var provider in hintProviders)
+        return kind switch
         {
-            if (provider.IsActive && (isWhole || provider.ReadsPrefixes) && provider.TryClassify(kind, raw, length, out var candidate)
-                && provider.FormatHint(in candidate, raw, length, row.Node.ValueStart) is { } hint)
-                return hint;
-        }
+            JsonTokenKind.String => ValueHints.Read(hintProviders, ValueShape.String, raw, length, row.Node.ValueStart),
+            JsonTokenKind.Number => ValueHints.Read(hintProviders, ValueShape.Number, raw, length, row.Node.ValueStart),
+            _ => null,
+        };
+    }
 
-        return null;
+    /// <summary>What clicking a hint's chip does: a date's opens its scheme menu, one hiding a
+    /// document shows it, an address opens it.</summary>
+    private static JsonRowLink? LinkOf(in TreeRow row, ValueHint hint)
+    {
+        if (hint.Expands)
+            return new ExpandHintLink(row.Node.ValueStart, row.Node.ValueEnd, hint.Kind);
+        if (hint.Kind == ValueHintKind.Date)
+            return new DateSchemeLink(row.Node.ValueStart);
+        return hint.Address is { } address ? new OpenUrlLink(address) : null;
     }
 
     private static TreeRunStyle StyleOf(JsonTokenKind kind) => kind switch

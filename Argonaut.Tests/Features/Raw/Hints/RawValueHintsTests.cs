@@ -16,12 +16,12 @@ public sealed class RawValueHintsTests
 {
     private const string Jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIn0.c2ln";
 
-    private sealed record MarkedRow(string Text, List<RawHintMark> Marks)
+    internal sealed record MarkedRow(string Text, List<RawHintMark> Marks)
     {
         public IEnumerable<string> Marked => Marks.Select(m => Text[m.Start..m.End]);
     }
 
-    private static List<MarkedRow> Mark(string document, int width = 200, IRawLexer? lexer = null, DateHintSettings? dates = null, bool noLexer = false)
+    internal static List<MarkedRow> Mark(string document, int width = 200, IRawLexer? lexer = null, DateHintSettings? dates = null, bool noLexer = false)
     {
         byte[] bytes = Encoding.UTF8.GetBytes(document);
         var source = new MemoryByteSource(bytes);

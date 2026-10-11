@@ -172,4 +172,25 @@ public sealed class RawViewHintsTests : IDisposable
         Assert.All(marks, m => Assert.False(m.IsChip));
         await Task.CompletedTask;
     });
+
+    [Fact]
+    public Task AWordWrappedOverRows_IsMarkedOnEachRow() => WithView("notes.txt", "head line\nsee https://example.com/" + new string('a', 400) + " done\n", async (_, _, surface) =>
+    {
+        Assert.Equal(ValueHintKind.Url, Assert.Single(surface.HintMarksFor(1)).Hint.Kind);
+        Assert.Equal(ValueHintKind.Url, Assert.Single(surface.HintMarksFor(2)).Hint.Kind);
+        Assert.Equal(ValueHintKind.Url, Assert.Single(surface.HintMarksFor(3)).Hint.Kind);
+        await Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task HoveringAMarkedWord_ShowsWhatItReadsAs() => WithView("notes.txt", "head line\nsee https://example.com/a for more\n", async (window, _, surface) =>
+    {
+        var mark = Assert.Single(surface.HintMarksFor(1));
+        var point = surface.TranslatePoint(surface.HintMarkBounds(1, mark)!.Value.Center, window)!.Value;
+        window.MouseMove(point);
+        await PumpAsync();
+
+        Assert.Equal(mark.Value, surface.HintLayer.Hovered?.Value);
+        Assert.Contains("Open example.com", ToolTip.GetTip(surface) as string);
+    });
 }

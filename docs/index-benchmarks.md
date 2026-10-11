@@ -55,6 +55,7 @@ Index kept:
 
 | Run | Text | Csv | NdJson | JsonRecords | JsonTokenDense | JsonRecordsWithHashes |
 |---|---:|---:|---:|---:|---:|---:|
+| 2026-10-10 `2f5aaeb` UI spike check | 2.5 MB | 259.2 KB | 259.2 KB | 776.8 KB | 776.8 KB | 781.5 KB |
 | 2026-09-26 `07f5cf5` sparse line index | 2.5 MB | 259.2 KB | 259.0 KB | 776.8 KB | 777.3 KB | 781.6 KB |
 | 2026-09-26 `7b3e5e3` baseline | 2.5 MB | 98.0 MB | 95.7 MB | 777.0 KB | 776.8 KB | 781.5 KB |
 
@@ -62,10 +63,35 @@ Speed:
 
 | Run | Text | Csv | NdJson | JsonRecords | JsonTokenDense | JsonRecordsWithHashes |
 |---|---:|---:|---:|---:|---:|---:|
+| 2026-10-10 `2f5aaeb` UI spike check | 6,340 MiB/s | 9,086 MiB/s | 9,109 MiB/s | 563 MiB/s | 429 MiB/s | 472 MiB/s |
 | 2026-09-26 `07f5cf5` sparse line index | 5,864 MiB/s | 8,066 MiB/s | 8,098 MiB/s | 565 MiB/s | 420 MiB/s | 473 MiB/s |
 | 2026-09-26 `7b3e5e3` baseline | 5,701 MiB/s | 7,559 MiB/s | 7,771 MiB/s | 563 MiB/s | 435 MiB/s | 477 MiB/s |
 
 ## Runs
+
+### 2026-10-10 - UI spike check (`2f5aaeb`)
+
+A check after the UI chrome spike (icons, tree hints, expanders, search pills), which changed
+drawing and view models but no indexer.
+
+- Machine: Apple M5, 32 GB, 10 cores
+- Runtime: .NET 10.0.5, macOS 27.0.1, Workstation GC
+- 3 processes per document.
+
+| Document | Indexer | Items | Time | Speed | Speed range | Allocated | Alloc / byte | GCs (0/1/2) | Peak heap | Peak working set | Index kept | Left after release (1st / last) |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Text | RawSegmentIndex (wrap 160) | 9,996,610 | 162 ms | 6,340 MiB/s | 6,195-6,348 | 2.5 MB | 0.0024 | 0/0/0 | 2.5 MB | 1.05 GB | 2.5 MB | 488 B / 952 B |
+| Csv | FileOffsetIndex | 6,414,338 | 113 ms | 9,086 MiB/s | 9,023-9,118 | 266.8 KB | 0.0003 | 0/0/0 | 296.8 KB | 1.05 GB | 259.2 KB | 488 B / 952 B |
+| NdJson | FileOffsetIndex | 6,262,785 | 112 ms | 9,109 MiB/s | 9,085-9,192 | 266.8 KB | 0.0003 | 0/0/0 | 296.8 KB | 1.05 GB | 259.2 KB | 488 B / 952 B |
+| JsonRecords | JsonSparseIndex | 16,370 | 1,818 ms | 563 MiB/s | 559-564 | 774.6 KB | 0.0007 | 0/0/0 | 800.8 KB | 1.06 GB | 776.8 KB | 488 B / 952 B |
+| JsonTokenDense | JsonSparseIndex | 16,384 | 2,386 ms | 429 MiB/s | 422-429 | 774.3 KB | 0.0007 | 0/0/0 | 800.8 KB | 1.06 GB | 776.8 KB | 488 B / 952 B |
+| JsonRecordsWithHashes | JsonSparseIndex + content hashes | 16,371 | 2,168 ms | 472 MiB/s | 471-484 | 779.0 KB | 0.0007 | 0/0/0 | 800.8 KB | 1.06 GB | 781.5 KB | 488 B / 952 B |
+
+- **Memory: identical.** Allocation, peak heap, index kept and what is left after release match
+  the previous run to the byte, give or take a few hundred bytes of noise.
+- **JSON speed: unchanged**, inside the previous ranges.
+- **Text, CSV and NDJSON read 8-13% faster** with no change to their indexers. The macOS point
+  release is the only other difference; treat it as the machine, not the code.
 
 ### 2026-09-26 - sparse line index (`07f5cf5`)
 

@@ -5,11 +5,11 @@
              xmlns:json="clr-namespace:Argonaut.Features.NdJson"
              xmlns:jsonview="clr-namespace:Argonaut.Features.Json"
              xmlns:find="clr-namespace:Argonaut.Ui.Find"
+             xmlns:icons="clr-namespace:Argonaut.Ui.Icons"
              x:Class="Argonaut.Features.NdJson.NdJsonView"
              x:DataType="json:NdJsonViewModel">
     <Border BorderBrush="{DynamicResource AppBorderBrush}"
-            BorderThickness="1"
-            CornerRadius="8"
+            BorderThickness="0"
             Background="{DynamicResource AppWindowBackgroundBrush}"
             ClipToBounds="True">
         <Grid ColumnDefinitions="*,1,*">
@@ -60,10 +60,20 @@
                     <ContentControl IsVisible="{Binding SelectedLineJsonViewModel, Converter={x:Static jsonview:IsNotNullConverter.Instance}}">
                         <jsonview:JsonView DataContext="{Binding SelectedLineJsonViewModel}" />
                     </ContentControl>
-                    <TextBlock Text="Select a line to view its JSON"
-                               Foreground="{DynamicResource AppMutedTextBrush}"
-                               FontFamily="{DynamicResource AppContentFontFamily}"
-                               IsVisible="{Binding SelectedLineJsonViewModel, Converter={x:Static jsonview:IsNullConverter.Instance}}" />
+                    <StackPanel Spacing="8"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                IsVisible="{Binding SelectedLineJsonViewModel, Converter={x:Static jsonview:IsNullConverter.Instance}}">
+                        <icons:LucideIcon Data="{StaticResource Icon.Json}"
+                                          Size="28"
+                                          StrokeWeight="1.5"
+                                          HorizontalAlignment="Center"
+                                          Foreground="{DynamicResource AppSubtleIconBrush}" />
+                        <TextBlock Text="Select a line to see it as a tree"
+                                   FontSize="12"
+                                   HorizontalAlignment="Center"
+                                   Foreground="{DynamicResource AppMutedTextBrush}" />
+                    </StackPanel>
                 </Grid>
             </Border>
         </Grid>

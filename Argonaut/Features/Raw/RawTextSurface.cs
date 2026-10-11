@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Specialized;
+using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
@@ -16,6 +17,7 @@ using Avalonia.Interactivity;
 using Argonaut.Engine.Bytes;
 using Argonaut.Features.Raw.Editing;
 using Argonaut.Features.Raw.Highlighting;
+using Argonaut.Features.Raw.Hints;
 using Argonaut.Features.Raw.Rows;
 using Argonaut.Ui.Find;
 using Argonaut.Ui.Notifications;
@@ -103,6 +105,12 @@ public class RawTextSurface : RowSurface
     /// </summary>
     private const int MaxLookbackRows = 16;
 
+    /// <summary>The value hints of the rows on screen, kept and dropped with the layouts.</summary>
+    private readonly RawHintLayer hints = new();
+
+    /// <summary>The row under the pointer, whose action chips show; null when it is elsewhere.</summary>
+    private int? hoveredRow;
+
     private TextRunProperties?[]? styleProperties;
     private Typeface stylePropertiesTypeface;
     private double stylePropertiesFontSize;
@@ -126,12 +134,29 @@ public class RawTextSurface : RowSurface
     private (long Offset, int ScreenRow)? pendingPlace;
     private double scrollTop;
 
+    // The arrival flash (see RawArrivalFlash): where it is, when it started, and whether it is
+    // still running - which is what keeps animation frames coming.
+    private long arrivalOffset;
+    private long arrivalStarted;
+    private bool isFlashingArrival;
+    private bool arrivalNeedsRoom;
+
     /// <summary>The realized range <see cref="widestRowWidth"/> was last measured over.</summary>
     private (int First, int Last) measuredRange = (0, -1);
 
     static RawTextSurface()
     {
         AffectsRender<RawTextSurface>(CaretBrushProperty);
+    }
+
+    /// <summary>Brush for the flash where a jump in landed.</summary>
+    public static readonly StyledProperty<IBrush?> ArrivalBrushProperty =
+        AvaloniaProperty.Register<RawTextSurface, IBrush?>(nameof(ArrivalBrush));
+
+    public IBrush? ArrivalBrush
+    {
+        get => GetValue(ArrivalBrushProperty);
+        set => SetValue(ArrivalBrushProperty, value);
     }
 
     /// <summary>Brush for the caret itself.</summary>
@@ -170,6 +195,51 @@ public class RawTextSurface : RowSurface
             InvalidateVisual();
         }
     }
+
+    /// <summary>The value hints' drawing: chips, marks and their brushes. Set up by the palette.</summary>
+    public RawHintLayer HintLayer => this.hints;
+
+    /// <summary>The hints' look changed: chips are laid out again.</summary>
+    public void InvalidateHints()
+    {
+        DropRowCaches();
+        InvalidateVisual();
+    }
+
+    /// <summary>A realized row's hint marks, laid out the way drawing lays them out, for tests.</summary>
+    internal IReadOnlyList<RawHintMark> HintMarksFor(int rowIndex)
+    {
+        if (RowAt(rowIndex) is { } row)
+            LayoutFor(rowIndex, row, new Typeface(FontFamily), FontSize, Foreground ?? Brushes.Black);
+        return this.hints.MarksOf(rowIndex);
+    }
+
+    /// <summary>Where a mark on a realized row sits, in surface coordinates, for tests.</summary>
+    internal Rect? HintMarkBounds(int rowIndex, RawHintMark mark)
+    {
+        if (RowAt(rowIndex) is not { } row)
+            return null;
+
+        var layout = LayoutFor(rowIndex, row, new Typeface(FontFamily), FontSize, Foreground ?? Brushes.Black);
+        return RawHintLayer.MarkBounds(layout, new Point(TextOriginX - PanOffset, CentreInRow(layout, rowIndex * RowHeight - scrollTop)), mark);
+    }
+
+    /// <summary>A realized row's first chip, in surface coordinates, for tests.</summary>
+    internal Rect? HintChipBounds(int rowIndex)
+    {
+        if (RowAt(rowIndex) is not { } row)
+            return null;
+
+        var layout = LayoutFor(rowIndex, row, new Typeface(FontFamily), FontSize, Foreground ?? Brushes.Black);
+        return this.hints.ChipBounds(rowIndex, TextOriginX - PanOffset + layout.WidthIncludingTrailingWhitespace, rowIndex * RowHeight - scrollTop);
+    }
+
+    /// <summary>The pointer moved onto a value marked in place, or off one (null) - for the host to
+    /// show what it reads as.</summary>
+    public event EventHandler<RawHintHit?>? MarkHovered;
+
+    /// <summary>A hint's chip was clicked, or a marked value Cmd/Ctrl+clicked.</summary>
+    public event EventHandler<RawHintHit>? HintClicked;
 
     /// <summary>
     /// Rows the surface currently holds materialized, for tests. A surface that realizes rows
@@ -220,7 +290,19 @@ public class RawTextSurface : RowSurface
         }
 
         if (this.viewModel is not null)
+        {
             this.viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+            this.viewModel.Arrived -= OnArrived;
+            this.viewModel.ValueHints.HintsChanged -= OnValueHintsChanged;
+        }
+    }
+
+    /// <summary>A date scheme changed, or the first date on screen chose one: every hint shown
+    /// may read differently.</summary>
+    private void OnValueHintsChanged(object? sender, EventArgs e)
+    {
+        DropRowCaches();
+        InvalidateVisual();
     }
 
     private void Attach(RawViewModel? next)
@@ -229,12 +311,25 @@ public class RawTextSurface : RowSurface
             return;
 
         if (this.viewModel is not null)
+        {
             this.viewModel.PropertyChanged -= OnViewModelPropertyChanged;
-
-        this.viewModel = next;
+            this.viewModel.Arrived -= OnArrived;
+        }
 
         if (this.viewModel is not null)
+            this.viewModel.ValueHints.HintsChanged -= OnValueHintsChanged;
+
+        this.viewModel = next;
+        this.isFlashingArrival = false;
+        this.hints.Hints = next?.ValueHints;
+        if (next is not null)
+            next.ValueHints.HintsChanged += OnValueHintsChanged;
+
+        if (this.viewModel is not null)
+        {
             this.viewModel.PropertyChanged += OnViewModelPropertyChanged;
+            this.viewModel.Arrived += OnArrived;
+        }
 
         SubscribeRows();
         AttachCaret();
@@ -296,12 +391,17 @@ public class RawTextSurface : RowSurface
                 InvalidateVisual();
                 break;
 
+            case nameof(RawViewModel.CurrentMatch):
+                InvalidateVisual();
+                break;
+
             case nameof(RawViewModel.Caret):
                 AttachCaret();
                 InvalidateVisual();
                 break;
 
             case nameof(RawViewModel.EditGeneration):
+                this.viewModel?.ValueHints.Forget();
                 DropRowCaches();
                 InvalidateScrollable();
                 InvalidateVisual();
@@ -335,6 +435,7 @@ public class RawTextSurface : RowSurface
         this.layouts.Clear();
         this.exitStates.Clear();
         this.decoded.Clear();
+        this.hints.Clear();
         this.measuredRange = (0, -1);
     }
 
@@ -431,7 +532,7 @@ public class RawTextSurface : RowSurface
         foreach (var (rowIndex, row) in this.realized)
         {
             var layout = LayoutFor(rowIndex, row, typeface, fontSize, foreground);
-            widest = Math.Max(widest, layout.WidthIncludingTrailingWhitespace);
+            widest = Math.Max(widest, layout.WidthIncludingTrailingWhitespace + this.hints.TrailingWidth(rowIndex));
         }
 
         RecordRowWidth(widest);
@@ -451,6 +552,7 @@ public class RawTextSurface : RowSurface
         var foreground = Foreground ?? Brushes.Black;
         var gutter = GutterForeground ?? foreground;
 
+        int? caretRow = CaretRowIndex();
         foreach (var (rowIndex, row) in this.realized)
         {
             double y = rowIndex * RowHeight - scrollTop;
@@ -467,8 +569,14 @@ public class RawTextSurface : RowSurface
                 double textTop = CentreInRow(layout, y);
 
                 DrawSelection(context, layout, row, rowIndex, textTop);
-                DrawHighlights(context, layout, rowIndex, textTop);
+                var current = CurrentMatchCharsIn(rowIndex);
+                DrawHighlights(context, layout, rowIndex, textTop, y, current);
+                DrawArrival(context, layout, rowIndex, textTop);
                 layout.Draw(context, new Point(TextOriginX - PanOffset, textTop));
+                this.hints.Draw(context, rowIndex, layout, new Point(TextOriginX - PanOffset, textTop), y,
+                    TextOriginX - PanOffset + layout.WidthIncludingTrailingWhitespace, rowIndex == this.hoveredRow || rowIndex == caretRow);
+                if (current is { } currentChars)
+                    DrawCurrentMatch(context, layout, rowIndex, textTop, y, currentChars, overText: true);
                 DrawCaret(context, layout, rowIndex, textTop);
             }
 
@@ -496,40 +604,89 @@ public class RawTextSurface : RowSurface
         layout.Draw(context, new Point(x, CentreInRow(layout, y)));
     }
 
-    /// <summary>
-    /// Paints a background behind every occurrence of the find term. Matching is re-done against
-    /// the row's displayed text rather than mapped from the search's byte offsets: the row is
-    /// decoded and substituted, so re-finding the term in what is actually on screen lights up
-    /// every visible occurrence rather than only the one the search is sitting on.
-    /// </summary>
-    private void DrawHighlights(DrawingContext context, TextLayout layout, int rowIndex, double y)
+    /// <summary>A pill behind every occurrence of the find term in the row (see
+    /// <see cref="HighlightRangesFor"/>); the current match is drawn over the text afterwards.</summary>
+    private void DrawHighlights(DrawingContext context, TextLayout layout, int rowIndex, double textTop, double rowTop, (int Start, int End)? current)
     {
-        if (HighlightBrush is not { } brush)
+        var origin = new Vector(TextOriginX - PanOffset, textTop);
+        foreach (var range in HighlightRangesFor(rowIndex))
+        {
+            if (range == current)
+            {
+                DrawCurrentMatch(context, layout, rowIndex, textTop, rowTop, range, overText: false);
+                continue;
+            }
+
+            foreach (var rect in layout.HitTestTextRange(range.Start, range.End - range.Start))
+                DrawMatchPill(context, rect.Translate(origin), rowTop);
+        }
+    }
+
+    /// <summary>The current match's share of this row - see <see cref="RowSurface.DrawCurrentMatchPill"/>
+    /// for why it is drawn both before and after the text.</summary>
+    private void DrawCurrentMatch(DrawingContext context, TextLayout layout, int rowIndex, double textTop, double rowTop, (int Start, int End) chars, bool overText)
+    {
+        if (RowTextAt(rowIndex) is not { } text || chars.End > text.Length)
             return;
 
-        var origin = new Vector(TextOriginX - PanOffset, y);
-        foreach (var rect in HighlightRectsFor(rowIndex, layout))
-            context.FillRectangle(brush, rect.Translate(origin));
+        var origin = new Vector(TextOriginX - PanOffset, textTop);
+        string matchText = text.Substring(chars.Start, chars.End - chars.Start);
+        foreach (var rect in layout.HitTestTextRange(chars.Start, chars.End - chars.Start))
+            DrawCurrentMatchPill(context, rect.Translate(origin), rowTop, matchText, overText);
     }
 
     /// <summary>
-    /// The highlight rectangles for one row, in layout coordinates.
+    /// The characters of this row the current find match covers, or null when it misses the row.
+    /// From the match's bytes rather than re-found in the text, which is what tells it apart from
+    /// the other occurrences; a match running across a wrap has a share on each row.
+    /// </summary>
+    private (int Start, int End)? CurrentMatchCharsIn(int rowIndex)
+    {
+        if (this.viewModel is not { CurrentMatch: { } match, HighlightTerm.Length: > 0 } || DecodedRow(rowIndex) is not { } row)
+            return null;
+
+        long rowStart = row.RowStart;
+        long start = Math.Max(match.Offset, rowStart);
+        long end = Math.Min(match.Offset + match.Length, rowStart + row.DisplayByteLength);
+        if (end <= start)
+            return null;
+
+        return (row.CharIndexForByte((int)(start - rowStart)), row.CharIndexForByte((int)(end - rowStart)));
+    }
+
+    /// <summary>Test hook: the characters of a row the current find match covers.</summary>
+    internal (int Start, int End)? CurrentMatchChars(int rowIndex) => CurrentMatchCharsIn(rowIndex);
+
+    /// <summary>The highlight rectangles for one row, in layout coordinates, for tests.</summary>
+    internal IReadOnlyList<Rect> HighlightRectsFor(int rowIndex, TextLayout layout)
+    {
+        var rects = new List<Rect>();
+        foreach (var range in HighlightRangesFor(rowIndex))
+            rects.AddRange(layout.HitTestTextRange(range.Start, range.End - range.Start));
+        return rects;
+    }
+
+    /// <summary>
+    /// The find term's occurrences in one row's displayed text, as character ranges. Matching is
+    /// re-done against the text on screen rather than mapped from the search's byte offsets: the
+    /// row is decoded and substituted, so re-finding the term in what is shown lights up every
+    /// visible occurrence rather than only the one the search is sitting on.
     ///
     /// A match that straddles a soft-wrap boundary is the case worth describing. The row is only
     /// part of its line, so half the term sits here and half on the row below - and searching
     /// either row's text alone finds neither half. So the term is looked for in a window that
-    /// reaches one term-length into the neighbouring rows, and each row paints whatever part of a
+    /// reaches one term-length into the neighbouring rows, and each row gets whatever part of a
     /// match falls inside it. Both halves light up, in their own rows.
     ///
     /// The reach only crosses soft-wrap boundaries, never a real line ending: a line break is a
     /// place a match genuinely cannot span, and reaching across one would highlight text that
     /// merely happens to adjoin.
     /// </summary>
-    internal IReadOnlyList<Rect> HighlightRectsFor(int rowIndex, TextLayout layout)
+    private IEnumerable<(int Start, int End)> HighlightRangesFor(int rowIndex)
     {
         string? term = this.viewModel?.HighlightTerm;
         if (string.IsNullOrEmpty(term) || RowTextAt(rowIndex) is not { } text)
-            return Array.Empty<Rect>();
+            yield break;
 
         // One less than the term: any more cannot contribute to a match overlapping this row.
         int reach = term.Length - 1;
@@ -538,9 +695,8 @@ public class RawTextSurface : RowSurface
 
         var segments = SearchTextSplitter.Split(prefix + text + suffix, term);
         if (segments is null)
-            return Array.Empty<Rect>();
+            yield break;
 
-        List<Rect>? rects = null;
         foreach (var segment in segments)
         {
             if (!segment.IsMatch)
@@ -550,14 +706,9 @@ public class RawTextSurface : RowSurface
             // a neighbour paints only the part that is actually here.
             int start = Math.Max(segment.Start - prefix.Length, 0);
             int end = Math.Min(segment.Start - prefix.Length + segment.Length, text.Length);
-            if (end <= start)
-                continue;
-
-            rects ??= new List<Rect>();
-            rects.AddRange(layout.HitTestTextRange(start, end - start));
+            if (end > start)
+                yield return (start, end);
         }
-
-        return (IReadOnlyList<Rect>?)rects ?? Array.Empty<Rect>();
     }
 
     private string? RowTextAt(int rowIndex)
@@ -593,6 +744,8 @@ public class RawTextSurface : RowSurface
         IReadOnlyList<ValueSpan<TextRunProperties>>? overrides = null;
         if (ColouringEnabled && (row ?? RowAt(rowIndex)) is { } source)
             overrides = StyleOverridesFor(rowIndex, source, text, typeface, fontSize, foreground);
+        else if ((row ?? RowAt(rowIndex)) is { } plain)
+            MarkWordHints(rowIndex, plain);
 
         // No wrapping and no width constraint: the row is already byte-capped by the index, and
         // laying it out at its natural width is what lets it be panned rather than re-flowed.
@@ -619,6 +772,7 @@ public class RawTextSurface : RowSurface
     {
         this.rowSpans.Clear();
         LexRow(rowIndex, row, text, this.rowSpans);
+        MarkHints(rowIndex, row, typeface, fontSize);
         if (this.rowSpans.Count == 0)
             return null;
 
@@ -646,6 +800,34 @@ public class RawTextSurface : RowSurface
         var face = style == RawTextStyle.Section ? new Typeface(typeface.FontFamily, typeface.Style, FontWeight.Bold) : typeface;
         return this.styleProperties[(int)style] ??= new GenericTextRunProperties(face, fontSize,
             foregroundBrush: this.styleBrushes is not null && this.styleBrushes.TryGetValue(style, out var brush) ? brush : foreground);
+    }
+
+    /// <summary>
+    /// The value hints of a row just lexed into <see cref="rowSpans"/>, from what the row above
+    /// handed on: nothing at a line start, and unknown when the line's start was out of reach.
+    /// </summary>
+    private void MarkHints(int rowIndex, RawVisibleRow row, Typeface typeface, double fontSize)
+    {
+        if (this.hints.Hints is not { } valueHints || DecodedRow(rowIndex) is not { } decodedRow)
+            return;
+
+        if (!ReferenceEquals(valueHints.Source, Source))
+            valueHints.Source = Source;
+
+        var entry = row.LineNumber is not null ? RawHintCarry.None : this.hints.CarryAfter(rowIndex - 1) ?? RawHintCarry.Unknown;
+        this.hints.MarkRow(rowIndex, new RawHintRow(decodedRow, row.LineNumber is not null, row.IsSoftWrapped), entry, this.rowSpans, typeface, fontSize);
+    }
+
+    /// <summary>The hints of a row no lexer reads: its words, taken strictly.</summary>
+    private void MarkWordHints(int rowIndex, RawVisibleRow row)
+    {
+        if (this.hints.Hints is not { } valueHints || DecodedRow(rowIndex) is not { } decodedRow)
+            return;
+
+        if (!ReferenceEquals(valueHints.Source, Source))
+            valueHints.Source = Source;
+
+        this.hints.MarkWords(rowIndex, new RawHintRow(decodedRow, row.LineNumber is not null, row.IsSoftWrapped));
     }
 
     /// <summary>
@@ -692,8 +874,14 @@ public class RawTextSurface : RowSurface
         for (int i = lineStart; i < rowIndex; i++)
         {
             this.lookbackSpans.Clear();
-            state = this.lexer!.Lex(((RawVisibleRow)vm.Rows[i]!).Text, state, this.lookbackSpans);
+            var lineRow = (RawVisibleRow)vm.Rows[i]!;
+            state = this.lexer!.Lex(lineRow.Text, state, this.lookbackSpans);
             this.exitStates[i] = state;
+            if (this.hints.Hints is not null && DecodedRow(i) is { } decodedAbove)
+            {
+                var carry = i == lineStart ? RawHintCarry.None : this.hints.CarryAfter(i - 1) ?? RawHintCarry.Unknown;
+                this.hints.CarryRow(i, new RawHintRow(decodedAbove, i == lineStart, lineRow.IsSoftWrapped), carry, this.lookbackSpans);
+            }
         }
 
         return state;
@@ -715,6 +903,8 @@ public class RawTextSurface : RowSurface
 
     private void PruneLayouts(int firstRow, int lastRow)
     {
+        this.hints.Prune(firstRow, lastRow, MaxLookbackRows);
+
         // Lookback leaves states for rows above the viewport that no layout accounts for, so the
         // states are bounded on their own: the viewport plus the band a lookback can reach.
         if (this.exitStates.Count > (lastRow - firstRow + 1) * 2 + MaxLookbackRows)
@@ -848,6 +1038,152 @@ public class RawTextSurface : RowSurface
 
         double x = TextOriginX - PanOffset + XForOffset(rowIndex, layout, this.caret.Caret.Offset);
         return new Rect(Math.Floor(x), textTop, CaretWidth, layout.Height);
+    }
+
+    // ---- arrival flash ----------------------------------------------------------------------
+
+    private void OnArrived(long offset)
+    {
+        this.arrivalOffset = offset;
+        this.arrivalStarted = Stopwatch.GetTimestamp();
+        this.isFlashingArrival = true;
+        this.arrivalNeedsRoom = true;
+        RequestArrivalFrame();
+        InvalidateVisual();
+    }
+
+    /// <summary>
+    /// Pans so the whole flash is on screen, once, on the first frame after arrival - by then the
+    /// reveal has laid its rows out. The caret's own scroll-into-view stops as soon as the caret
+    /// is visible, which can leave it at the right edge with what it points at cut off, or leave
+    /// the part of the flash that wrapped onto the next row off to the left. Where the flash is
+    /// wider than the window, the landing point wins.
+    /// </summary>
+    private void MakeRoomForArrival()
+    {
+        this.arrivalNeedsRoom = false;
+
+        // The flash's extent in text coordinates, independent of the current pan.
+        double left = double.MaxValue, right = double.MinValue, landing = 0;
+        for (int rowsAfter = 0; ArrivalRect(rowsAfter) is { } rect; rowsAfter++)
+        {
+            double rectLeft = rect.Left - TextOriginX + PanOffset;
+            if (rowsAfter == 0)
+                landing = rectLeft;
+            left = Math.Min(left, rectLeft);
+            right = Math.Max(right, rect.Right - TextOriginX + PanOffset);
+        }
+
+        if (left > right)
+            return;
+
+        double margin = FontSize;
+        double width = TextViewportWidth;
+        double pan = PanOffset;
+        if (right + margin > pan + width)
+            pan = right + margin - width;
+        if (left - margin < pan)
+            pan = left - margin;
+        if (landing < pan || landing + margin > pan + width)
+            pan = landing - margin;
+
+        pan = Math.Max(0, pan);
+        if (pan != PanOffset)
+            RequestPan(pan);
+    }
+
+    /// <summary>The edges of the text area, in surface coordinates, for tests.</summary>
+    internal double TextViewportLeft => TextOriginX;
+
+    internal double TextViewportRight => TextOriginX + TextViewportWidth;
+
+    private TimeSpan ArrivalElapsed => Stopwatch.GetElapsedTime(this.arrivalStarted);
+
+    /// <summary>Frames rather than a timer: the flash redraws in step with the display while it
+    /// runs, and asks for nothing once it is over.</summary>
+    private void RequestArrivalFrame() => TopLevel.GetTopLevel(this)?.RequestAnimationFrame(_ =>
+    {
+        if (!this.isFlashingArrival)
+            return;
+
+        if (this.arrivalNeedsRoom)
+            MakeRoomForArrival();
+
+        if (ArrivalElapsed >= RawArrivalFlash.Duration)
+            this.isFlashingArrival = false;
+        else
+            RequestArrivalFrame();
+
+        InvalidateVisual();
+    });
+
+    private void DrawArrival(DrawingContext context, TextLayout layout, int rowIndex, double textTop)
+    {
+        if (ArrivalBrush is not { } brush || ArrivalRectFor(rowIndex, layout, textTop) is not { } rect)
+            return;
+
+        var elapsed = ArrivalElapsed;
+        var wash = rect.Inflate(new Thickness(2, 1));
+        using (context.PushOpacity(0.3 * RawArrivalFlash.StrengthAt(elapsed)))
+            context.DrawRectangle(brush, null, new RoundedRect(wash, 3));
+
+        var (spread, opacity) = RawArrivalFlash.RingAt(elapsed);
+        if (opacity > 0)
+        {
+            using (context.PushOpacity(0.5 * opacity))
+                context.DrawRectangle(null, new Pen(brush, 1.5), new RoundedRect(wash.Inflate(spread), 3 + spread));
+        }
+    }
+
+    /// <summary>
+    /// Where the flash is drawn on this row, or null when it is not running or misses the row:
+    /// its share of the bytes from the landing point on, which may run across a wrap onto the
+    /// next row. The landing row's share is at least a glyph wide, so a landing at the very end
+    /// of a row still shows there.
+    /// </summary>
+    private Rect? ArrivalRectFor(int rowIndex, TextLayout layout, double textTop)
+    {
+        if (!this.isFlashingArrival || RowIndex is not { } index || DecodedRow(rowIndex) is not { } row)
+            return null;
+
+        int landingRow = index.RowForOffset(this.arrivalOffset) ?? -1;
+        if (rowIndex < landingRow)
+            return null;
+
+        long rowStart = row.RowStart;
+        long drawnEnd = rowStart + row.DisplayByteLength;
+        long start = Math.Max(this.arrivalOffset, rowStart);
+        long end = Math.Min(this.arrivalOffset + RawArrivalFlash.Bytes, drawnEnd);
+        bool isLanding = rowIndex == landingRow;
+        if (end <= start && !isLanding)
+            return null;
+
+        int startChar = row.CharIndexForByte((int)(start - rowStart));
+        double left = layout.HitTestTextPosition(startChar).X;
+        double right = end > start ? layout.HitTestTextPosition(row.CharIndexForByte((int)(end - rowStart))).X : left;
+        return new Rect(TextOriginX - PanOffset + left, textTop, Math.Max(right - left, FontSize * 0.6), layout.Height);
+    }
+
+    /// <summary>The flash's rectangle on the landing row, or <paramref name="rowsAfter"/> rows
+    /// below it, in surface coordinates, for tests; null when none is drawn there.</summary>
+    internal Rect? ArrivalRect(int rowsAfter = 0)
+    {
+        if (!this.isFlashingArrival || RowIndex?.RowForOffset(this.arrivalOffset) is not int landingRow
+            || DecodedRow(landingRow + rowsAfter) is not { } row)
+            return null;
+
+        int rowIndex = landingRow + rowsAfter;
+
+        var layout = LayoutFor(rowIndex, new Typeface(FontFamily), FontSize, Foreground ?? Brushes.Black, row.Text);
+        double y = rowIndex * RowHeight - scrollTop;
+        return ArrivalRectFor(rowIndex, layout, CentreInRow(layout, y));
+    }
+
+    /// <summary>Ends a running flash at once, for tests - as the clock would.</summary>
+    internal void EndArrivalFlash()
+    {
+        this.isFlashingArrival = false;
+        InvalidateVisual();
     }
 
     /// <summary>
@@ -995,6 +1331,15 @@ public class RawTextSurface : RowSurface
 
         Focus();
 
+        // A chip is a button; a marked value is text first, and follows its hint only with the
+        // command modifier, so a plain click still places the caret in it.
+        if (HintAt(e.GetPosition(this)) is { } hint && (hint.IsChip || HasCommandModifier(e.KeyModifiers)))
+        {
+            HintClicked?.Invoke(this, hint);
+            e.Handled = true;
+            return;
+        }
+
         if (OffsetAt(e.GetPosition(this)) is not long offset)
             return;
 
@@ -1037,6 +1382,9 @@ public class RawTextSurface : RowSurface
     {
         base.OnPointerMoved(e);
 
+        if (!this.dragging)
+            UpdateHintHover(e.GetPosition(this), e.KeyModifiers);
+
         if (!this.dragging || this.caret is null)
             return;
 
@@ -1053,6 +1401,58 @@ public class RawTextSurface : RowSurface
 
         e.Handled = true;
     }
+
+    protected override void OnPointerExited(PointerEventArgs e)
+    {
+        base.OnPointerExited(e);
+        this.hoveredRow = null;
+        if (this.hints.ClearHover())
+            MarkHovered?.Invoke(this, null);
+        InvalidateVisual();
+    }
+
+    /// <summary>
+    /// The hint under the pointer, if any, laying its row out to find it. The row under the
+    /// pointer shows its actions, so an action chip there can be hit.
+    /// </summary>
+    private RawHintHit? HintAt(Point position)
+    {
+        int rowIndex = (int)Math.Floor((position.Y + scrollTop) / RowHeight);
+        if (RowAt(rowIndex) is not { } row || position.X < TextOriginX || position.X > TextOriginX + TextViewportWidth)
+            return null;
+
+        var layout = LayoutFor(rowIndex, row, new Typeface(FontFamily), FontSize, Foreground ?? Brushes.Black);
+        double y = rowIndex * RowHeight - scrollTop;
+        var origin = new Point(TextOriginX - PanOffset, CentreInRow(layout, y));
+        this.hints.HitTest(rowIndex, layout, origin, y, origin.X + layout.WidthIncludingTrailingWhitespace, true, position, out var hit);
+        return hit;
+    }
+
+    /// <summary>Lights the hint under the pointer, says when a value marked in place is hovered,
+    /// and points the cursor at what can be clicked.</summary>
+    private void UpdateHintHover(Point position, KeyModifiers modifiers)
+    {
+        int rowIndex = (int)Math.Floor((position.Y + scrollTop) / RowHeight);
+        bool rowChanged = rowIndex != this.hoveredRow;
+        this.hoveredRow = rowIndex;
+
+        var before = this.hints.Hovered;
+        var hit = HintAt(position);
+        bool hintChanged = hit?.Value != before?.Value || hit?.IsChip != before?.IsChip;
+
+        bool clickable = hit is { IsChip: true } || (hit is not null && HasCommandModifier(modifiers) && IsActionable(hit.Value.Hint!));
+        Cursor = clickable ? HandCursor : null;
+
+        if (hintChanged)
+            MarkHovered?.Invoke(this, hit is { IsChip: false } ? hit : null);
+        if (rowChanged || hintChanged)
+            InvalidateVisual();
+    }
+
+    private static readonly Cursor HandCursor = new(StandardCursorType.Hand);
+
+    private static bool IsActionable(Engine.Hints.ValueHint hint)
+        => hint.Expands || hint.Address is not null || hint.Kind == Engine.Hints.ValueHintKind.Date;
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
     {

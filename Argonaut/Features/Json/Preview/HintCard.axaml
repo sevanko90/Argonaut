@@ -1,0 +1,41 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:preview="clr-namespace:Argonaut.Features.Json.Preview"
+             x:Class="Argonaut.Features.Json.Preview.HintCard">
+    <!-- What a hint's value encodes - a JWT's claims, JSON in a string, a Base64 picture - in a
+         card by the chip or mark that was clicked. Placed against it from code; closes on a
+         click elsewhere or Escape. -->
+    <Popup x:Name="Card"
+           VerticalOffset="4"
+           IsLightDismissEnabled="True"
+           Closed="OnClosed">
+        <Border Width="440"
+                Padding="10,8,10,10"
+                CornerRadius="8"
+                BorderThickness="1"
+                BorderBrush="{DynamicResource AppBorderBrush}"
+                Background="{DynamicResource AppWindowBackgroundBrush}"
+                BoxShadow="0 8 28 0 #29000000"
+                KeyDown="OnKeyDown">
+            <Grid RowDefinitions="Auto,Auto">
+                <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,6">
+                    <TextBlock x:Name="Title"
+                               FontWeight="SemiBold"
+                               FontSize="12"
+                               TextTrimming="CharacterEllipsis"
+                               VerticalAlignment="Center" />
+                    <Button x:Name="OpenButton"
+                            Grid.Column="1"
+                            Classes="tool"
+                            Padding="6,2"
+                            FontSize="12"
+                            Click="OnOpen"
+                            ToolTip.Tip="Open what this value encodes as a document of its own">
+                        Open as document
+                    </Button>
+                </Grid>
+                <preview:ValuePreviewView x:Name="Preview" Grid.Row="1" />
+            </Grid>
+        </Border>
+    </Popup>
+</UserControl>

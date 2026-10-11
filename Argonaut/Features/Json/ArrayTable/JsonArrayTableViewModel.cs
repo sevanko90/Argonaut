@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Detection;
 using Argonaut.Engine.Indexing;
+using Argonaut.Features.Json.Preview;
 using Argonaut.Ui.Documents;
 using Argonaut.Ui.Find;
 using Argonaut.Ui.Notifications;
@@ -54,9 +55,35 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
     private readonly OpenColumns openColumns = new();
 
     private int arrayColumns = JsonArrayColumnDiscovery.DefaultArrayColumns;
-    private JsonArrayCellDetail? cellDetail;
+    private ValuePreview? cellDetail;
+    private bool showIndentGuides;
+    private readonly JsonViewSettings viewSettings;
+
+    /// <param name="viewSettings">Where the indent-guides choice is remembered, shared with the
+    /// JSON tree; the cell detail's tree draws them.</param>
+    public JsonArrayTableViewModel(JsonViewSettings viewSettings)
+    {
+        this.viewSettings = viewSettings;
+        showIndentGuides = viewSettings.ShowIndentGuides;
+    }
 
     protected override IDocumentSession? Session => this.session;
+
+    /// <summary>Whether the tree draws indent guides - the remembered choice.</summary>
+    public bool ShowIndentGuides
+    {
+        get => this.showIndentGuides;
+        private set => SetField(ref this.showIndentGuides, value);
+    }
+
+    /// <summary>The toolbar's indent-guides choice: remembered for the next document, then
+    /// applied to this one.</summary>
+    private void ChooseIndentGuides(bool show)
+    {
+        this.viewSettings.ShowIndentGuides = show;
+        ShowIndentGuides = show;
+    }
+
 
     protected override IDisposable? MappedRows => this.rows;
 
@@ -94,7 +121,7 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
     /// each new cell shown and disposed with the document - a container cell holds its own tree
     /// over the file, so it must not outlive it.
     /// </summary>
-    public JsonArrayCellDetail? CellDetail
+    public ValuePreview? CellDetail
     {
         get => this.cellDetail;
         private set
@@ -255,7 +282,9 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
             canReshape: !elementsAreObjects,
             setColumnMode: ApplyColumnMode,
             setArrayColumns: columns => ArrayColumns = columns,
-            back: () => navigateBack?.Invoke(arrayPath) ?? Task.CompletedTask);
+            back: () => navigateBack?.Invoke(arrayPath) ?? Task.CompletedTask,
+            showIndentGuides: ShowIndentGuides,
+            applyIndentGuides: ChooseIndentGuides);
 
         this.toolbar.ShowArrayColumns(HasArrayColumns);
 
@@ -266,7 +295,7 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
         OnPropertyChanged(nameof(ColumnCount));
         OnPropertyChanged(nameof(RowCount));
 
-        StatusText = $"{FilePath} — {RowCount:N0} rows indexed so far";
+        StatusText = DocumentStatusLine.Compose(FilePath, $"{RowCount:N0} rows indexed so far");
         MonitorIndexing();
     }
 
@@ -281,8 +310,12 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
     protected override void OnIndexingCompleted()
     {
         OnPropertyChanged(nameof(RowCount));
-        StatusText = $"{FilePath} — {RowCount:N0} rows";
+        ReportRowCount();
     }
+
+    /// <summary>The finished table's row count in the status line - which a re-shape changes, so
+    /// it is said again then: three columns of 300 numbers is 100 rows.</summary>
+    private void ReportRowCount() => StatusText = DocumentStatusLine.Compose(FilePath, $"{RowCount:N0} rows");
 
     protected override void OnIndexingFailed(IndexFailure? failure)
     {
@@ -368,6 +401,8 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
         OnPropertyChanged(nameof(Structure));
         OnPropertyChanged(nameof(ColumnCount));
         OnPropertyChanged(nameof(RowCount));
+        if (IndexingTask.IsCompletedSuccessfully)
+            ReportRowCount();
     }
 
     /// <summary>Headers for columns that are not routes into an element - the reshape modes'

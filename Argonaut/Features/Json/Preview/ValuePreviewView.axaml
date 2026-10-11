@@ -1,0 +1,85 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:tree="clr-namespace:Argonaut.Ui.Tree"
+             xmlns:preview="clr-namespace:Argonaut.Features.Json.Preview"
+             x:Class="Argonaut.Features.Json.Preview.ValuePreviewView"
+             x:DataType="preview:ValuePreview">
+    <!-- One value in full: text, a tree, a picture or a message - whichever the preview is. The
+         header around it (a title, copy, close, open as document) is the host's. -->
+    <Grid RowDefinitions="*,Auto">
+        <!-- Its own scroll: reading a value must never move what the reader came from. -->
+        <ScrollViewer IsVisible="{Binding IsText}"
+                      HorizontalScrollBarVisibility="Disabled"
+                      VerticalScrollBarVisibility="Auto">
+            <SelectableTextBlock Text="{Binding WrappableText}"
+                                 TextWrapping="Wrap"
+                                 FontFamily="{DynamicResource AppContentFontFamily}" />
+        </ScrollViewer>
+
+        <!-- Drawn by the same surface as the JSON view, over just this value's bytes. -->
+        <Grid RowDefinitions="*,Auto"
+              ColumnDefinitions="*,Auto"
+              IsVisible="{Binding IsTree}">
+            <tree:TreeSurface x:Name="Surface"
+                              Background="{DynamicResource AppWindowBackgroundBrush}"
+                              FontFamily="{DynamicResource AppContentFontFamily}"
+                              FontSize="{DynamicResource AppContentFontSize}"
+                              Foreground="{DynamicResource AppTextBrush}"
+                              GutterForeground="{DynamicResource AppMutedTextBrush}"
+                              HighlightBrush="{DynamicResource AppSearchMatchBrush}"
+                              HighlightEdgeBrush="{DynamicResource AppSearchMatchEdgeBrush}"
+                              CurrentHighlightBrush="{DynamicResource AppSearchCurrentBrush}"
+                              CurrentHighlightForeground="{DynamicResource AppSearchCurrentTextBrush}"
+                              SelectionBrush="{DynamicResource AppAccentSurfaceBrush}"
+                              ChipFontFamily="{DynamicResource AppSansFontFamily}"
+                              ChipBackground="{DynamicResource AppChipBrush}"
+                              ChipHoverBackground="{DynamicResource AppChipHoverBrush}"
+                              ExpanderBrush="{DynamicResource AppSubtleIconBrush}"
+                              ExpanderRowHoverBrush="{DynamicResource AppMutedTextBrush}"
+                              GuideBrush="{DynamicResource AppIndentGuideBrush}" />
+
+            <ScrollBar x:Name="VerticalScrollBar"
+                       Grid.Column="1"
+                       Orientation="Vertical"
+                       IsVisible="False"
+                       Minimum="0" />
+
+            <ScrollBar x:Name="PanScrollBar"
+                       Grid.Row="1"
+                       Orientation="Horizontal"
+                       AllowAutoHide="False"
+                       IsVisible="False"
+                       Minimum="0" />
+        </Grid>
+
+        <!-- Sized from code: an icon scaled up by whole steps with hard edges, a large picture
+             fitted down smoothly. -->
+        <Image x:Name="Picture"
+               IsVisible="{Binding IsImage}"
+               Stretch="Uniform"
+               StretchDirection="DownOnly"
+               HorizontalAlignment="Left"
+               VerticalAlignment="Top" />
+
+        <TextBlock x:Name="PictureUnreadable"
+                   IsVisible="False"
+                   Text="This picture can't be read - its first bytes say it is one, but the rest does not decode."
+                   TextWrapping="Wrap"
+                   FontSize="12"
+                   Foreground="{DynamicResource AppMutedTextBrush}" />
+
+        <TextBlock IsVisible="{Binding IsMessage}"
+                   Text="{Binding Message}"
+                   TextWrapping="Wrap"
+                   FontSize="12"
+                   Foreground="{DynamicResource AppMutedTextBrush}" />
+
+        <TextBlock Grid.Row="1"
+                   Text="Value truncated — open the file in the raw view to see all of it"
+                   IsVisible="{Binding Truncated}"
+                   Foreground="{DynamicResource AppMutedTextBrush}"
+                   TextWrapping="Wrap"
+                   FontSize="11"
+                   Margin="0,6,0,0" />
+    </Grid>
+</UserControl>

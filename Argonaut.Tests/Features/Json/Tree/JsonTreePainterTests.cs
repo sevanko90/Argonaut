@@ -2,9 +2,11 @@ using System.Text;
 using System.Text.Json;
 using Argonaut.Engine.Indexing.Trees;
 using Argonaut.Engine.Text;
-using Argonaut.Features.Json.Hints;
+using Argonaut.Engine.Hints;
+using Argonaut.Ui.Hints;
 using Argonaut.Features.Json.Tree;
 using Argonaut.Tests.Support;
+using Argonaut.Ui.Tree;
 
 namespace Argonaut.Tests.Features.Json.Tree;
 
@@ -100,9 +102,9 @@ public sealed class JsonTreePainterTests
         Assert.StartsWith("\"", row.Value);
         Assert.EndsWith("…", row.Value);
 
+        Assert.Equal("4.9 KB", row.Note);
         var link = row.LinkOf<ViewInRawLink>()!.Value;
-        Assert.Contains("truncated", link.Text);
-        Assert.Contains("4.9 KB", link.Text);
+        Assert.Equal("Open in raw", link.Text);
         Assert.Equal(row.Row.Node.ValueStart + 1, ((ViewInRawLink)link.Link!).Offset);
     }
 
@@ -155,6 +157,83 @@ public sealed class JsonTreePainterTests
         Assert.NotNull(row.LinkOf<ViewInRawLink>());
     }
 
+    [Fact]
+    public void ACutValueNotesItsSizeAndOffersTheRawViewAsAnAction()
+    {
+        var json = new StringBuilder("{\"n\":1").Append('2', 3000).Append('}').ToString();
+        var row = new JsonTreeHarness(json).Member("n");
+
+        Assert.Equal("2.9 KB", row.Note);
+        var raw = row.LinkOf<ViewInRawLink>()!.Value;
+        Assert.Equal(TreeRunStyle.Action, raw.Style);
+        Assert.Equal(TreeRunIcon.FullText, raw.Icon);
+    }
+
+    [Fact]
+    public void AnArrayOffersItsTableAsAnAction()
+    {
+        var row = new JsonTreeHarness("{\"list\":[1,2]}").Member("list");
+
+        var table = row.LinkOf<ViewAsTableLink>()!.Value;
+        Assert.Equal(TreeRunStyle.Action, table.Style);
+        Assert.Equal(TreeRunIcon.Table, table.Icon);
+    }
+
+    [Fact]
+    public void ADecodedDateIsAChip()
+    {
+        var row = new JsonTreeHarness(DateJson, JsSeconds()).Member("ts");
+
+        var date = row.LinkOf<DateSchemeLink>()!.Value;
+        Assert.Equal(TreeRunStyle.Chip, date.Style);
+        Assert.Equal(TreeRunIcon.Time, date.Icon);
+    }
+
+    [Fact]
+    public void AnAddress_IsAnActionThatOpensIt_AndItsValueIsTheSameLink()
+    {
+        var row = new JsonTreeHarness("{\"u\":\"https://example.com/a\"}"u8.ToArray(), [new UrlHintProvider()]).Member("u");
+
+        var open = row.Runs.Single(r => r.Style == TreeRunStyle.Action);
+        Assert.Equal(TreeRunStyle.Action, open.Style);
+        Assert.Equal(TreeRunIcon.OpenLink, open.Icon);
+        Assert.Equal(new Uri("https://example.com/a"), ((OpenUrlLink)open.Link!).Address);
+        Assert.Equal(open.Link, row.Runs.Single(r => r.Style == TreeRunStyle.String).Link);
+    }
+
+    [Fact]
+    public void AColour_IsAChipWithItsSwatch()
+    {
+        var row = new JsonTreeHarness("{\"c\":\"#1E90FF\"}"u8.ToArray(), [new ColourHintProvider()]).Member("c");
+
+        var chip = row.Runs.Single(r => r.Style == TreeRunStyle.Chip);
+        Assert.Equal(Avalonia.Media.Color.FromUInt32(0xFF1E90FF), chip.Swatch);
+    }
+
+    /// <summary>A chip that opens something when clicked says so; one that only informs does not.</summary>
+    [Fact]
+    public void OnlyChipsThatOpenSomething_CarryTheCue()
+    {
+        Assert.True(new JsonTreeHarness(DateJson, JsSeconds()).Member("ts").LinkOf<DateSchemeLink>()!.Value.Opens);
+        var colour = new JsonTreeHarness("{\"c\":\"#1E90FF\"}"u8.ToArray(), [new ColourHintProvider()]).Member("c");
+        Assert.False(colour.Runs.Single(r => r.Style == TreeRunStyle.Chip).Opens);
+    }
+
+    [Fact]
+    public void NotesThenChipsThenActionsComeAfterTheText()
+    {
+        // A long name over a long value: two notes and an action.
+        string name = new('k', 4000);
+        var json = new StringBuilder($"{{\"{name}\":1").Append('2', 3000).Append('}').ToString();
+        var runs = new JsonTreeHarness(json, JsSeconds()).Rows()[1].Runs;
+
+        var trailing = runs.SkipWhile(r => r.Style is not (TreeRunStyle.Note or TreeRunStyle.Chip or TreeRunStyle.Action)).ToList();
+        Assert.All(trailing, r => Assert.True(r.Style is TreeRunStyle.Note or TreeRunStyle.Chip or TreeRunStyle.Action));
+        var order = trailing.Select(r => r.Style).ToList();
+        Assert.Equal(order.OrderBy(s => s == TreeRunStyle.Note ? 0 : s == TreeRunStyle.Chip ? 1 : 2), order);
+        Assert.Equal(TreeRunStyle.Action, order[^1]);
+    }
+
     // ── Decoded dates ──────────────────────────────────────────────────────────────────
 
     private const string DateJson = "{\"name\":\"x\",\"short\":123,\"ts\":1709305509,\"list\":[1600000000,\"y\"]}";
@@ -196,12 +275,12 @@ public sealed class JsonTreePainterTests
         var settings = JsSeconds(); // local time by default
         var tree = new JsonTreeHarness(DateJson, settings);
         string? local = tree.Member("ts").DateHint;
-        Assert.Contains("[local", local);
+        Assert.Matches(@" UTC[+-]\d", local);
 
         settings.SetTimeZoneMode(DateHintTimeZoneMode.Utc);
 
         string? utc = tree.Member("ts").DateHint;
-        Assert.EndsWith("[UTC]", utc);
+        Assert.EndsWith(" UTC", utc);
         Assert.NotEqual(local, utc);
     }
 

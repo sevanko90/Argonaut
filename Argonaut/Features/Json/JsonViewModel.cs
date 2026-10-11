@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.ComponentModel;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Engine.Bytes;
@@ -9,8 +11,12 @@ using Argonaut.Engine.Indexing;
 using Argonaut.Engine.Indexing.Trees;
 using Argonaut.Engine.Progress;
 using Argonaut.Engine.Search;
+using Argonaut.Engine.Text;
+using Argonaut.Engine.Hints;
+using Argonaut.Ui.Hints;
 using Argonaut.Features.Json.Hints;
 using Argonaut.Features.Json.Indexing;
+using Argonaut.Features.Json.Preview;
 using Argonaut.Features.Json.Schema;
 using Argonaut.Features.Json.Tree;
 using Argonaut.Ui.Documents;
@@ -92,6 +98,17 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable, IB
     public int DefaultExpandDepth { get; set; } = 2;
 
     private JsonToolbarViewModel? toolbar;
+    private bool showIndentGuides;
+
+    // What reads the values on rows for hints; the previews a hint opens use the same ones.
+    private IReadOnlyList<IValueHintProvider>? hintProviders;
+
+    // The find match last revealed, until a reveal of anything else.
+    private long? currentMatchOffset;
+
+    /// <summary>How far into a row a current match is looked for: past what a row's text shows,
+    /// so a match further in has nothing to draw.</summary>
+    private const int CurrentMatchReach = 64 * 1024;
 
     /// <summary>This document's header toolbar (see <see cref="IDocumentViewModel.Toolbar"/>).
     /// Null until LoadAsync creates it; always null for the nested per-NDJSON-line instances,
@@ -123,6 +140,14 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable, IB
     {
         get => selectedValueText;
         private set => SetField(ref selectedValueText, value);
+    }
+
+    /// <summary>Whether the tree draws indent guides - the remembered choice, or the owning
+    /// NDJSON document's for a line's tree.</summary>
+    public bool ShowIndentGuides
+    {
+        get => showIndentGuides;
+        set => SetField(ref showIndentGuides, value);
     }
 
     /// <summary>
@@ -168,6 +193,7 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable, IB
         this.viewSettings = viewSettings;
         this.schemaBindings = schemaBindings;
         this.schemaCatalog = schemaCatalog;
+        showIndentGuides = viewSettings.ShowIndentGuides;
 
         SchemaSettings.SchemaChanged += OnSchemaChanged;
         SchemaSettings.PropertyChanged += OnSchemaSettingsPropertyChanged;
@@ -233,8 +259,16 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable, IB
     /// a multi-GB scan - waits for it: seeking there sooner would read every sibling from the
     /// last indexed point to the target on the UI thread.
     /// </summary>
-    public void Reveal(long offset)
+    public void Reveal(long offset) => Reveal(offset, isMatch: false);
+
+    /// <summary>Reveals a find match, which the tree then draws as the current one (see
+    /// <see cref="CurrentMatchIn"/>).</summary>
+    public void RevealMatch(long offset) => Reveal(offset, isMatch: true);
+
+    private void Reveal(long offset, bool isMatch)
     {
+        // Set first: the view may show the reveal before this returns.
+        currentMatchOffset = isMatch ? offset : null;
         if (IsCovered(offset))
         {
             ShowWhenReady(offset);
@@ -244,6 +278,57 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable, IB
         PendingReveal = null;
         revealAwaitingIndex = offset;
         _ = RevealWhenCoveredAsync(offset);
+    }
+
+    /// <summary>
+    /// Which of the find term's occurrences in <paramref name="row"/>'s text is the match last
+    /// revealed: the occurrences in the row's bytes before it, counted as the tree counts them in
+    /// its text. Null when the row does not hold it, or holds it further in than a row shows.
+    /// </summary>
+    public TreeCurrentMatch? CurrentMatchIn(TreeRow? row)
+    {
+        if (currentMatchOffset is not { } offset || row is not { } shown || string.IsNullOrEmpty(HighlightTerm) || Bytes is not { } bytes)
+            return null;
+
+        long before = offset - shown.Node.RowStart;
+        if (before < 0 || before > CurrentMatchReach)
+            return null;
+
+        string preceding = Encoding.UTF8.GetString(bytes.RequireContiguous(shown.Node.RowStart, (int)before));
+        int occurrence = 0;
+        for (int at = preceding.IndexOf(HighlightTerm, StringComparison.OrdinalIgnoreCase); at >= 0;
+             at = preceding.IndexOf(HighlightTerm, at + HighlightTerm.Length, StringComparison.OrdinalIgnoreCase))
+        {
+            occurrence++;
+        }
+
+        return new TreeCurrentMatch(shown.Key, occurrence);
+    }
+
+    /// <summary>
+    /// What a hint's value encodes, ready to show: decoded off the UI thread from the value's
+    /// bytes, which are copied out first so nothing reads the document from another thread. Null
+    /// when it does not decode after all, or the document closed meanwhile.
+    /// </summary>
+    public async Task<HintPreview?> PreviewHintAsync(ExpandHintLink link)
+    {
+        if (Bytes is not { } bytes)
+            return null;
+
+        long start = link.ValueStart + 1;
+        long length = link.ValueEnd - 1 - start;
+        if (HintPreviews.TooLarge(length) is { } tooLarge)
+            return tooLarge;
+
+        byte[] raw = bytes.RequireContiguous(start, (int)length).ToArray();
+        var shown = await HintPreviews.DecodeAsync(link.Kind, raw, hintProviders, HintSettings.TimeZoneMode);
+        if (IsDisposed)
+        {
+            shown?.Preview.Dispose();
+            return null;
+        }
+
+        return shown;
     }
 
     private void ShowWhenReady(long offset)
@@ -476,6 +561,14 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable, IB
         SetDefaultExpandDepth(depth);
     }
 
+    /// <summary>The toolbar's indent-guides choice: remembered for the next document, then
+    /// applied to this one.</summary>
+    private void ChooseIndentGuides(bool show)
+    {
+        viewSettings.ShowIndentGuides = show;
+        ShowIndentGuides = show;
+    }
+
     public Task LoadAsync(IByteOrigin origin, IProgressReporter? progressReporter = null)
     {
         Origin = origin;
@@ -483,7 +576,8 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable, IB
         ScanTarget = new ScanTarget(origin);
         DefaultExpandDepth = viewSettings.ExpandDepth;
         toolbar = new JsonToolbarViewModel(HintSettings, SchemaSettings, DefaultExpandDepth, ChooseExpandDepth, NavigateToPathAsync,
-            refreshSchemaEntries: () => RefreshSchemaEntriesAsync(origin.Path), openSchemaFolder: schemaCatalog.OpenUserDirectory);
+            refreshSchemaEntries: () => RefreshSchemaEntriesAsync(origin.Path), openSchemaFolder: schemaCatalog.OpenUserDirectory,
+            showIndentGuides: ShowIndentGuides, applyIndentGuides: ChooseIndentGuides);
 
         indexBasis = IndexBasis.Of(origin);
         var loadTask = LoadCore(origin.Open(), progressReporter, indexBasis?.FindKept<JsonKeptStructure>(JsonKeptStructure.Key));
@@ -553,7 +647,13 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable, IB
         text = new JsonTreeText(session.Bytes, session.Index.Structure, reader);
         schemaResolver = new JsonSchemaResolver(session.Index.Structure, reader, text) { Schema = SchemaSettings.Document };
         expand = new TreeExpandState(DefaultExpandDepth);
-        var painter = new JsonTreePainter(text, new IValueHintProvider[] { new DateHintProvider(HintSettings) }, SupportsArrayTable);
+        hintProviders = new IValueHintProvider[]
+        {
+            new DateHintProvider(HintSettings), new IsoDateHintProvider(HintSettings, TimeProvider.System), new ColourHintProvider(),
+            new JwtHintProvider(TimeProvider.System), new UrlHintProvider(), new CronHintProvider(HintSettings, TimeProvider.System),
+            new EmbeddedJsonHintProvider(), new Base64HintProvider(),
+        };
+        var painter = new JsonTreePainter(text, hintProviders, SupportsArrayTable);
         var gutters = new ITreeGutter[] { new JsonSchemaGutter(schemaResolver, text) };
         var sourceBytes = session.Bytes;
         tree = new TreeDocument(session.Index.Structure, reader, painter, expand, () => sourceBytes.AvailableLength, gutters);
@@ -570,7 +670,7 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable, IB
         // Inference dereferences the mapping, so the session must join it before unmapping.
         _ = InferDefaultDateSchemeAsync(session, reader, text);
 
-        StatusText = $"{FilePath} — indexing…";
+        StatusText = DocumentStatusLine.Compose(FilePath, "indexing…");
         MonitorIndexing();
         return Task.CompletedTask;
     }
@@ -587,7 +687,7 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable, IB
     protected override void OnIndexingCompleted()
     {
         indexBasis?.Keep(JsonKeptStructure.Key, session?.Index.DetachStructure());
-        StatusText = $"{FilePath} — {FormatByteLength(session?.Bytes.AvailableLength ?? 0)}";
+        StatusText = DocumentStatusLine.Compose(FilePath, ByteLengthText.Format(session?.Bytes.AvailableLength ?? 0));
         tree?.NotifyGrew();
         UpdateSchemaRootMatches();
     }
@@ -624,13 +724,6 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable, IB
         }
     }
 
-    private static string FormatByteLength(long bytes) => bytes switch
-    {
-        < 1024 => $"{bytes:N0} bytes",
-        < 1024 * 1024 => $"{bytes / 1024.0:0.#} KB",
-        < 1024 * 1024 * 1024 => $"{bytes / (1024.0 * 1024.0):0.#} MB",
-        _ => $"{bytes / (1024.0 * 1024.0 * 1024.0):0.#} GB",
-    };
 
     /// <summary>
     /// What the base disposes before releasing the session: the growth monitor stops, and every

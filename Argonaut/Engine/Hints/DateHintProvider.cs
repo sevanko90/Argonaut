@@ -1,16 +1,15 @@
 using System;
-using Argonaut.Features.Json.Indexing;
 
-namespace Argonaut.Features.Json.Hints;
+namespace Argonaut.Engine.Hints;
 
 /// <summary>
 /// Composes DateHintClassifier + DateHintDecoder + DateHintSettings into an IValueHintProvider.
 /// </summary>
 public sealed class DateHintProvider : IValueHintProvider
 {
-    private readonly DateHintSettings settings;
+    private readonly IDateHintSettings settings;
 
-    public DateHintProvider(DateHintSettings settings)
+    public DateHintProvider(IDateHintSettings settings)
     {
         this.settings = settings;
         settings.HintsChanged += (_, e) => HintsChanged?.Invoke(this, e);
@@ -18,11 +17,11 @@ public sealed class DateHintProvider : IValueHintProvider
 
     public bool IsActive => settings.FileDefaultScheme != DateDecodingScheme.Off;
 
-    public bool TryClassify(JsonTokenKind kind, ReadOnlySpan<byte> rawValue, out ValueHintCandidate candidate)
+    public bool TryClassify(ValueShape shape, ReadOnlySpan<byte> rawValue, long valueLength, out ValueHintCandidate candidate)
     {
         candidate = default;
 
-        if (kind != JsonTokenKind.Number)
+        if (shape != ValueShape.Number)
             return false;
 
         if (!DateHintClassifier.TryClassify(rawValue, out long value, out var scheme))
@@ -32,16 +31,18 @@ public sealed class DateHintProvider : IValueHintProvider
         return true;
     }
 
-    public string? FormatHint(in ValueHintCandidate candidate, long valueOffset)
+    public ValueHint? FormatHint(in ValueHintCandidate candidate, ReadOnlySpan<byte> rawValue, long valueLength, long valueOffset)
     {
         if (settings.FileDefaultScheme == DateDecodingScheme.Off)
             return null;
 
+        // The chip opens the scheme menu for this value, so it stays clickable even when the
+        // value's own scheme is Off - an em dash keeps the menu reachable.
         var effective = settings.GetEffectiveScheme(valueOffset);
-        if (effective == DateDecodingScheme.Off)
-            return "—"; // em dash - a clickable placeholder so the flyout stays reachable
-
-        return DateHintDecoder.Format(candidate.Payload, effective, settings.TimeZoneMode) ?? "out of range";
+        string text = effective == DateDecodingScheme.Off
+            ? "—"
+            : DateHintDecoder.Format(candidate.Payload, effective, settings.TimeZoneMode) ?? "out of range";
+        return new ValueHint(ValueHintKind.Date, text, ValueHintSymbol.Time);
     }
 
     public event EventHandler? HintsChanged;

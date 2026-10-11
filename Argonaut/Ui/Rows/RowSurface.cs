@@ -37,8 +37,15 @@ public abstract class RowSurface : Control
     /// <summary>Padding inside the surface, matching the ListBox padding the surfaces replace.</summary>
     public const double ContentPaddingX = 8;
 
+    // A find match's pill: as tall as a chip, centred in the row, rounded, and a little wider
+    // than its text either side.
+    private const double MatchPillHeight = 17;
+    private const double MatchPillRadius = 4;
+    private const double MatchPillPadding = 2;
+
     private double panOffset;
     private double widestRowWidth;
+    private Pen? matchEdgePen;
 
     static RowSurface()
     {
@@ -52,6 +59,9 @@ public abstract class RowSurface : Control
             ForegroundProperty,
             GutterForegroundProperty,
             HighlightBrushProperty,
+            HighlightEdgeBrushProperty,
+            CurrentHighlightBrushProperty,
+            CurrentHighlightForegroundProperty,
             SelectionBrushProperty,
             BackgroundProperty);
     }
@@ -72,6 +82,19 @@ public abstract class RowSurface : Control
     /// <summary>Brush behind occurrences of the find term.</summary>
     public static readonly StyledProperty<IBrush?> HighlightBrushProperty =
         AvaloniaProperty.Register<RowSurface, IBrush?>(nameof(HighlightBrush));
+
+    /// <summary>The fine edge around a find match's pill; null draws none.</summary>
+    public static readonly StyledProperty<IBrush?> HighlightEdgeBrushProperty =
+        AvaloniaProperty.Register<RowSurface, IBrush?>(nameof(HighlightEdgeBrush));
+
+    /// <summary>The pill behind the match find is on.</summary>
+    public static readonly StyledProperty<IBrush?> CurrentHighlightBrushProperty =
+        AvaloniaProperty.Register<RowSurface, IBrush?>(nameof(CurrentHighlightBrush));
+
+    /// <summary>The text of the match find is on, which sits on its own solid pill rather than
+    /// the row's colours.</summary>
+    public static readonly StyledProperty<IBrush?> CurrentHighlightForegroundProperty =
+        AvaloniaProperty.Register<RowSurface, IBrush?>(nameof(CurrentHighlightForeground));
 
     /// <summary>Brush behind what is selected.</summary>
     public static readonly StyledProperty<IBrush?> SelectionBrushProperty =
@@ -112,6 +135,24 @@ public abstract class RowSurface : Control
     {
         get => GetValue(HighlightBrushProperty);
         set => SetValue(HighlightBrushProperty, value);
+    }
+
+    public IBrush? HighlightEdgeBrush
+    {
+        get => GetValue(HighlightEdgeBrushProperty);
+        set => SetValue(HighlightEdgeBrushProperty, value);
+    }
+
+    public IBrush? CurrentHighlightBrush
+    {
+        get => GetValue(CurrentHighlightBrushProperty);
+        set => SetValue(CurrentHighlightBrushProperty, value);
+    }
+
+    public IBrush? CurrentHighlightForeground
+    {
+        get => GetValue(CurrentHighlightForegroundProperty);
+        set => SetValue(CurrentHighlightForegroundProperty, value);
     }
 
     public IBrush? SelectionBrush
@@ -291,4 +332,45 @@ public abstract class RowSurface : Control
 
         e.Handled = true;
     }
+
+    /// <summary>A pill behind one find match, <paramref name="text"/> being where its text is
+    /// drawn, in a row whose top is <paramref name="rowTop"/>.</summary>
+    protected void DrawMatchPill(DrawingContext context, Rect text, double rowTop)
+    {
+        if (HighlightBrush is not { } brush)
+            return;
+
+        if (HighlightEdgeBrush is { } edge && matchEdgePen?.Brush != edge)
+            matchEdgePen = new Pen(edge, 1);
+        context.DrawRectangle(brush, HighlightEdgeBrush is null ? null : matchEdgePen, MatchPill(text, rowTop));
+    }
+
+    /// <summary>
+    /// The match find is on: a solid pill drawn over the row's text, then the match's own text,
+    /// <paramref name="matchText"/>, again on top in <see cref="CurrentHighlightForeground"/> -
+    /// the row's colours do not all read on the pill, and a row's layout is cached, so it is not
+    /// restyled for one match. Without a <see cref="CurrentHighlightBrush"/> it is an ordinary pill,
+    /// drawn behind the text, so a surface calls this before the text as well as after.
+    /// </summary>
+    /// <param name="overText">Whether the row's text has been drawn yet.</param>
+    protected void DrawCurrentMatchPill(DrawingContext context, Rect text, double rowTop, string matchText, bool overText)
+    {
+        if (CurrentHighlightBrush is not { } brush)
+        {
+            if (!overText)
+                DrawMatchPill(context, text, rowTop);
+            return;
+        }
+
+        if (!overText)
+            return;
+
+        context.DrawRectangle(brush, null, MatchPill(text, rowTop));
+        using var label = new TextLayout(matchText, new Typeface(FontFamily), FontSize, CurrentHighlightForeground ?? Foreground);
+        label.Draw(context, new Point(text.X, text.Y));
+    }
+
+    private static RoundedRect MatchPill(Rect text, double rowTop)
+        => new(new Rect(text.X - MatchPillPadding, rowTop + (RowHeight - MatchPillHeight) / 2,
+            text.Width + 2 * MatchPillPadding, MatchPillHeight), MatchPillRadius);
 }

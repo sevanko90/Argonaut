@@ -10,7 +10,8 @@ using Argonaut.Engine.Progress;
 using Argonaut.Engine.Search;
 using Argonaut.Engine.Settings;
 using Argonaut.Features.Json;
-using Argonaut.Features.Json.Hints;
+using Argonaut.Engine.Hints;
+using Argonaut.Ui.Hints;
 using Argonaut.Features.Json.Schema;
 using Argonaut.Ui.Documents;
 using Argonaut.Ui.Documents.Navigation;
@@ -218,13 +219,23 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
         SetDefaultExpandDepth(depth);
     }
 
+    /// <summary>The toolbar's indent-guides choice: remembered, which is where each line's tree
+    /// reads it, then applied to the line open now.</summary>
+    private void ChooseIndentGuides(bool show)
+    {
+        viewSettings.ShowIndentGuides = show;
+        if (selectedLineJsonViewModel is not null)
+            selectedLineJsonViewModel.ShowIndentGuides = show;
+    }
+
     public async Task LoadAsync(IByteOrigin origin, IProgressReporter? progressReporter = null)
     {
         Origin = origin;
         FilePath = origin.Path ?? origin.DisplayName;
         DefaultExpandDepth = viewSettings.ExpandDepth;
         toolbar = new JsonToolbarViewModel(HintSettings, SchemaSettings, DefaultExpandDepth, ChooseExpandDepth,
-            refreshSchemaEntries: () => RefreshSchemaEntriesAsync(origin.Path), openSchemaFolder: schemaCatalog.OpenUserDirectory);
+            refreshSchemaEntries: () => RefreshSchemaEntriesAsync(origin.Path), openSchemaFolder: schemaCatalog.OpenUserDirectory,
+            showIndentGuides: viewSettings.ShowIndentGuides, applyIndentGuides: ChooseIndentGuides);
 
         // Alongside indexing, not blocking it - see JsonViewModel.ApplyInitialSchemaAsync.
         _ = ApplyInitialSchemaAsync(origin.Path);
@@ -324,8 +335,8 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
     private void UpdateStatusText()
     {
         StatusText = SelectedLineNumber is { } line
-            ? $"{FilePath} — {LineCount:N0} lines — Selected line: {line:N0}"
-            : $"{FilePath} — {LineCount:N0} lines";
+            ? DocumentStatusLine.Compose(FilePath, $"{LineCount:N0} lines · Selected line: {line:N0}")
+            : DocumentStatusLine.Compose(FilePath, $"{LineCount:N0} lines");
     }
 
     /// <summary>Indexing finished: keeps the "Selected line" suffix if one is selected by then.</summary>

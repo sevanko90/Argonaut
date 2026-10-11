@@ -14,6 +14,7 @@
         xmlns:csv="clr-namespace:Argonaut.Features.Csv"
         xmlns:raw="clr-namespace:Argonaut.Features.Raw"
         xmlns:progress="clr-namespace:Argonaut.Ui.Progress"
+        xmlns:icons="clr-namespace:Argonaut.Ui.Icons"
         Title="{Binding Title}"
         Background="{DynamicResource AppPanelBackgroundBrush}"
         Width="1000" Height="700">
@@ -61,108 +62,141 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
+        <!-- On macOS the title bar and the toolbar are one strip, as in a native unified
+             toolbar: MainWindow extends the client area under the window controls, makes the
+             strip's background the drag region, and pads it clear of the traffic lights.
+             Elsewhere the platform keeps its own title bar and this is the toolbar below it.
+
+             Left to right: what is open, then the open view's own options, the document
+             actions, and search last, where a desktop app keeps it. -->
         <Border Grid.Row="0"
-                x:Name="ToolbarBar"
-                IsVisible="{Binding IsFileOpen}"
-                Background="{DynamicResource AppPanelBackgroundBrush}"
+                x:Name="TitleBar"
+                Height="52"
+                Background="{DynamicResource AppChromeBackgroundBrush}"
                 BorderBrush="{DynamicResource AppBorderBrush}"
                 BorderThickness="0,0,0,1"
-                Padding="16,8">
-            <!-- The document toolbar takes the star column, not an Auto one. An Auto column is
-                 given its full desired width, and the toolbar's panel reports the sum of its
-                 children, so it used to squeeze the star spacer to zero and push the close
-                 button off the right edge - losing the escape hatch first, which is backwards.
-                 Constrained here instead, the toolbar wraps internally and close stays put. -->
-            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto">
-                <find:FindBar Grid.Column="0"
-                                x:Name="FindBarControl"
-                                IsVisible="{Binding IsFindAvailable}"
-                                VerticalAlignment="Center" />
+                Padding="12,0">
+            <Grid ColumnDefinitions="*,Auto,Auto,Auto">
+                <!-- What is open, with its close button beside the name as a tab's would be. The
+                     one column that gives way when the strip is short: the name truncates before
+                     any control is clipped. The badge and name are hit-test transparent so they drag
+                     the window like the rest of the strip; the full path and size stay in the
+                     status bar. -->
+                <DockPanel Grid.Column="0"
+                           LastChildFill="True"
+                           VerticalAlignment="Center"
+                           Margin="0,0,16,0">
+                    <Border DockPanel.Dock="Left"
+                            IsHitTestVisible="False"
+                            Background="{DynamicResource AppAccentSurfaceBrush}"
+                            CornerRadius="6"
+                            Margin="0,0,8,0"
+                            Width="24" Height="24">
+                        <Path Width="12" Height="12" Stretch="Uniform"
+                              Stroke="{DynamicResource AppAccentBrush}" StrokeThickness="1.8"
+                              Data="M8 3H5V9L2 12L5 15V21H8 M16 3H19V9L22 12L19 15V21H16" />
+                    </Border>
+                    <!-- Left-aligned, so the close button sits right after the name rather than at
+                         the far end of the column, and the name's star column truncates it. -->
+                    <Grid ColumnDefinitions="*,Auto" HorizontalAlignment="Left">
+                        <TextBlock Text="{Binding HeaderTitle}"
+                                   IsVisible="{Binding IsFileOpen}"
+                                   IsHitTestVisible="False"
+                                   FontSize="13"
+                                   FontWeight="SemiBold"
+                                   TextTrimming="CharacterEllipsis"
+                                   VerticalAlignment="Center" />
+                        <TextBlock Text="Argonaut"
+                                   IsVisible="{Binding !IsFileOpen}"
+                                   IsHitTestVisible="False"
+                                   FontSize="13"
+                                   FontWeight="SemiBold"
+                                   VerticalAlignment="Center" />
+                        <Button Grid.Column="1"
+                                x:Name="CloseFileButton"
+                                Classes="tool"
+                                IsVisible="{Binding IsFileOpen}"
+                                Click="OnCloseFile"
+                                MinHeight="0"
+                                Width="22" Height="22"
+                                Padding="0"
+                                Margin="6,0,0,0"
+                                HorizontalContentAlignment="Center"
+                                ToolTip.Tip="Close file">
+                            <icons:LucideIcon Data="{StaticResource Icon.Close}" Size="13" />
+                        </Button>
+                    </Grid>
+                </DockPanel>
+
+                <!-- The open view's own options (expand depth, schema, wrap width...). -->
                 <ContentControl Grid.Column="1"
                                 x:Name="DocumentToolbarArea"
+                                IsVisible="{Binding IsFileOpen}"
                                 Content="{Binding CurrentDocument.Toolbar, FallbackValue={x:Null}}"
-                                HorizontalAlignment="Left"
                                 VerticalAlignment="Center" />
-                <Border Grid.Column="2"
-                        Width="1"
-                        Margin="12,2,12,2"
-                        Background="{DynamicResource AppBorderBrush}" />
-                <!-- A split button made of two, rather than Avalonia's SplitButton: that control
-                     disables its dropdown along with its primary half, and here the halves must
-                     differ - Save needs unsaved changes, Save As only a document ready to write. -->
-                <StackPanel Grid.Column="3"
-                            x:Name="SaveButtons"
+
+                <StackPanel Grid.Column="2"
                             Orientation="Horizontal"
                             VerticalAlignment="Center"
-                            IsVisible="{Binding IsSaveAvailable}"
-                            Margin="0,0,8,0">
-                    <Button x:Name="SaveFileButton"
-                            IsEnabled="{Binding CanSave}"
-                            Click="OnSaveFile"
-                            MinHeight="32"
-                            CornerRadius="6,0,0,6"
-                            FontSize="12"
-                            Padding="10,5"
-                            ToolTip.Tip="Save changes (Ctrl+S / Cmd+S)">
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Viewbox Width="14" Height="14">
-                                <!-- Material "save" -->
-                                <Path Fill="{DynamicResource AppMutedTextBrush}"
-                                      Data="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z" />
-                            </Viewbox>
-                            <TextBlock Text="Save" VerticalAlignment="Center" />
-                        </StackPanel>
+                            IsVisible="{Binding IsFileOpen}">
+                    <Border Classes="toolseparator"
+                            IsVisible="{Binding CurrentDocument.Toolbar, Converter={x:Static ObjectConverters.IsNotNull}, FallbackValue=False}" />
+                    <Button x:Name="CompareFileButton"
+                            Classes="tool icononly"
+                            IsVisible="{Binding CanCompare}"
+                            Click="OnCompareFile"
+                            ToolTip.Tip="Compare with another JSON file…">
+                        <icons:LucideIcon Data="{StaticResource Icon.Compare}" />
                     </Button>
-                    <Button x:Name="SaveOptionsButton"
-                            IsEnabled="{Binding CanSaveAs}"
-                            MinHeight="32"
-                            CornerRadius="0,6,6,0"
-                            BorderThickness="0,1,1,1"
-                            Padding="6,5"
-                            ToolTip.Tip="More ways to save">
-                        <Viewbox Width="10" Height="10">
-                            <!-- Material "expand_more" -->
-                            <Path Fill="{DynamicResource AppMutedTextBrush}"
-                                  Data="M16.59 8.59L12 13.17 7.41 8.59 6 10l6 6 6-6z" />
-                        </Viewbox>
-                        <Button.Flyout>
-                            <MenuFlyout Placement="BottomEdgeAlignedRight">
-                                <MenuItem Header="Save As…" Click="OnSaveFileAs" />
-                            </MenuFlyout>
-                        </Button.Flyout>
-                    </Button>
-                </StackPanel>
-                <Button Grid.Column="4"
-                        x:Name="CompareFileButton"
-                        VerticalAlignment="Center"
-                        IsVisible="{Binding CanCompare}"
-                        Click="OnCompareFile"
-                        MinHeight="32"
-                        CornerRadius="6"
-                        FontSize="12"
-                        Padding="10,5"
-                        Margin="0,0,8,0"
-                        ToolTip.Tip="Compare with another JSON file…">
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                        <Viewbox Width="14" Height="14">
-                            <!-- Material "compare_arrows" -->
-                            <Path Fill="{DynamicResource AppMutedTextBrush}"
-                                  Data="M9.01 14H2v2h7.01v3L13 15l-3.99-4v3zm5.98-1v-3H22V8h-7.01V5L11 9l3.99 4z" />
-                        </Viewbox>
-                        <TextBlock Text="Compare" VerticalAlignment="Center" />
+                    <!-- A split button made of two, rather than Avalonia's SplitButton: that control
+                         disables its dropdown along with its primary half, and here the halves must
+                         differ - Save needs unsaved changes, Save As only a document ready to write. -->
+                    <StackPanel x:Name="SaveButtons"
+                                Orientation="Horizontal"
+                                VerticalAlignment="Center"
+                                IsVisible="{Binding IsSaveAvailable}">
+                        <Button x:Name="SaveFileButton"
+                                Classes="tool icononly"
+                                IsEnabled="{Binding CanSave}"
+                                Click="OnSaveFile"
+                                CornerRadius="6,0,0,6"
+                                ToolTip.Tip="Save changes (Ctrl+S / Cmd+S)">
+                            <icons:LucideIcon Data="{StaticResource Icon.Save}" />
+                        </Button>
+                        <Button x:Name="SaveOptionsButton"
+                                Classes="tool"
+                                IsEnabled="{Binding CanSaveAs}"
+                                CornerRadius="0,6,6,0"
+                                Padding="4,4"
+                                ToolTip.Tip="More ways to save">
+                            <icons:LucideIcon Classes="chevron" Data="{StaticResource Icon.ChevronDown}" />
+                            <Button.Flyout>
+                                <MenuFlyout Placement="BottomEdgeAlignedRight">
+                                    <MenuItem Header="Save As…" Click="OnSaveFileAs" />
+                                </MenuFlyout>
+                            </Button.Flyout>
+                        </Button>
                     </StackPanel>
-                </Button>
-                <Button Grid.Column="5"
-                        x:Name="CloseFileButton"
-                        VerticalAlignment="Center"
-                        Click="OnCloseFile"
-                        Classes="iconbutton"
-                        ToolTip.Tip="Close file">
-                    <Viewbox Width="14" Height="14">
-                        <Path Fill="{DynamicResource AppMutedTextBrush}"
-                              Data="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
-                    </Viewbox>
-                </Button>
+                    <!-- Before search only when something sits to its left to divide it from. -->
+                    <Border Classes="toolseparator">
+                        <Border.IsVisible>
+                            <MultiBinding Converter="{x:Static BoolConverters.And}">
+                                <Binding Path="IsFindAvailable" />
+                                <MultiBinding Converter="{x:Static BoolConverters.Or}">
+                                    <Binding Path="CurrentDocument.Toolbar" Converter="{x:Static ObjectConverters.IsNotNull}" FallbackValue="False" />
+                                    <Binding Path="CanCompare" />
+                                    <Binding Path="IsSaveAvailable" />
+                                </MultiBinding>
+                            </MultiBinding>
+                        </Border.IsVisible>
+                    </Border>
+                </StackPanel>
+
+                <find:FindBar Grid.Column="3"
+                              x:Name="FindBarControl"
+                              Margin="6,0,0,0"
+                              IsVisible="{Binding IsFindAvailable}"
+                              VerticalAlignment="Center" />
             </Grid>
         </Border>
 
@@ -286,57 +320,47 @@
         </Border>
 
         <Border Grid.Row="2"
-                Background="{DynamicResource AppPanelBackgroundBrush}"
+                Background="{DynamicResource AppChromeBackgroundBrush}"
                 BorderBrush="{DynamicResource AppBorderBrush}"
                 BorderThickness="0,1,0,0"
-                Padding="16,6">
+                Height="30"
+                Padding="12,0,8,0">
             <Grid ColumnDefinitions="*,Auto">
                 <TextBlock Grid.Column="0"
                            x:Name="StatusText"
                            Text="{Binding StatusText}"
-                           FontSize="12"
+                           ToolTip.Tip="{Binding FilePath}"
+                           FontSize="11"
+                           TextTrimming="CharacterEllipsis"
                            VerticalAlignment="Center"
                            Foreground="{DynamicResource AppMutedTextBrush}" />
-                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="2">
                     <ComboBox x:Name="ViewSwitcherComboBox"
                               IsVisible="{Binding IsFileOpen}"
                               ItemsSource="{Binding AvailableViews}"
                               SelectedItem="{Binding SelectedView, Mode=TwoWay}"
                               DisplayMemberBinding="{Binding DisplayName}"
-                              FontSize="12"
-                              MinWidth="110"
-                              Padding="8,2"
-                              MinHeight="0"
+                              Classes="tool"
+                              FontSize="11"
+                              MinHeight="22"
+                              Height="22"
+                              Padding="8,0,0,0"
                               ToolTip.Tip="Change how this file is displayed" />
                     <Button x:Name="FontToggleButton"
                             Click="OnToggleContentFont"
-                            Classes="iconbutton compact"
-                            Margin="8,0,0,0">
-                        <Viewbox Width="14" Height="14">
-                            <!-- Material "text_fields" -->
-                            <Path Fill="{DynamicResource AppMutedTextBrush}"
-                                  Data="M2.5 4v3h5v12h3V7h5V4h-13zm19 5h-9v3h3v7h3v-7h3V9z" />
-                        </Viewbox>
+                            Classes="iconbutton compact">
+                        <icons:LucideIcon Data="{StaticResource Icon.ContentFont}" Size="14" />
                     </Button>
                     <Button x:Name="ThemeToggleButton"
                             Click="OnToggleTheme"
-                            Classes="iconbutton compact"
-                            Margin="8,0,0,0">
-                        <Viewbox Width="14" Height="14">
-                            <Path x:Name="ThemeToggleIcon"
-                                  Fill="{DynamicResource AppMutedTextBrush}" />
-                        </Viewbox>
+                            Classes="iconbutton compact">
+                        <icons:LucideIcon x:Name="ThemeToggleIcon" Size="14" />
                     </Button>
                     <Button x:Name="CheckForUpdatesButton"
                             Click="OnCheckForUpdates"
                             Classes="iconbutton compact"
-                            Margin="8,0,0,0"
                             ToolTip.Tip="Check for updates">
-                        <Viewbox Width="14" Height="14">
-                            <!-- Material "cloud_download" -->
-                            <Path Fill="{DynamicResource AppMutedTextBrush}"
-                                  Data="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z" />
-                        </Viewbox>
+                        <icons:LucideIcon Data="{StaticResource Icon.Download}" Size="14" />
                     </Button>
                     <!-- Debug builds only: shown when App hands the window a way to open the log
                          folder (see MainWindow's constructor). -->
@@ -344,24 +368,14 @@
                             Click="OnOpenLogFolder"
                             IsVisible="False"
                             Classes="iconbutton compact"
-                            Margin="8,0,0,0"
                             ToolTip.Tip="Open the debug log folder">
-                        <Viewbox Width="14" Height="14">
-                            <!-- Material "folder_open" -->
-                            <Path Fill="{DynamicResource AppMutedTextBrush}"
-                                  Data="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z" />
-                        </Viewbox>
+                        <icons:LucideIcon Data="{StaticResource Icon.Folder}" Size="14" />
                     </Button>
                     <Button x:Name="AboutButton"
                             Click="OnShowAbout"
                             Classes="iconbutton compact"
-                            Margin="8,0,0,0"
                             ToolTip.Tip="About Argonaut">
-                        <Viewbox Width="14" Height="14">
-                            <!-- Material "info_outline" -->
-                            <Path Fill="{DynamicResource AppMutedTextBrush}"
-                                  Data="M11 7h2v2h-2zm0 4h2v6h-2zm1-9C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z" />
-                        </Viewbox>
+                        <icons:LucideIcon Data="{StaticResource Icon.About}" Size="14" />
                     </Button>
                 </StackPanel>
             </Grid>

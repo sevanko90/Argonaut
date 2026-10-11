@@ -148,7 +148,7 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
         OnPropertyChanged(nameof(ColumnCount));
         OnPropertyChanged(nameof(RowCount));
 
-        StatusText = $"{FilePath} — {RowCount:N0} rows indexed so far";
+        StatusText = DocumentStatusLine.Compose(FilePath, $"{RowCount:N0} rows indexed so far");
         MonitorIndexing();
     }
 
@@ -168,7 +168,7 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
     protected override void OnIndexingCompleted()
     {
         this.indexBasis?.Keep(FileLineAnchors.Key, this.session?.Index.DetachAnchors());
-        StatusText = $"{FilePath} — {RowCount:N0} rows";
+        StatusText = DocumentStatusLine.Compose(FilePath, $"{RowCount:N0} rows");
     }
 
     /// <summary>Indexing stopped early (failure, or cancellation on <paramref name="failure"/> null).</summary>

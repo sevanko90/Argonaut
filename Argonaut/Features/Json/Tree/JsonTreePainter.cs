@@ -1,8 +1,9 @@
 using System.Collections.Generic;
 using Argonaut.Engine.Indexing.Trees;
 using Argonaut.Engine.Text;
-using Argonaut.Features.Json.Hints;
+using Argonaut.Engine.Hints;
 using Argonaut.Features.Json.Indexing;
+using Argonaut.Ui.Hints;
 using Argonaut.Ui.Tree;
 
 namespace Argonaut.Features.Json.Tree;
@@ -10,14 +11,10 @@ namespace Argonaut.Features.Json.Tree;
 /// <summary>
 /// What a JSON tree row says: a member's name, then its value - a scalar coloured by type, or a
 /// container's bracket or collapsed summary - then any notes: a decoded date, a truncation notice,
-/// a "view as table" link. An array element's index is its marker.
+/// a "View as table" action. An array element's index is its marker.
 /// </summary>
 public sealed class JsonTreePainter(JsonTreeText text, IReadOnlyList<IValueHintProvider>? hintProviders, bool offerArrayTable) : ITreeRowPainter
 {
-    /// <summary>Between the value and a note after it, standing in for the gap the row template
-    /// used to leave.</summary>
-    private const string NoteGap = "   ";
-
     public void AppendRuns(in TreeRow row, List<TreeRun> runs)
     {
         bool isObject = row.Node.FormatKind == (byte)JsonTokenKind.StartObject;
@@ -35,46 +32,66 @@ public sealed class JsonTreePainter(JsonTreeText text, IReadOnlyList<IValueHintP
         {
             runs.Add(new TreeRun(text.Summary(row), TreeRunStyle.Plain));
             if (nameTruncated)
-                runs.Add(new TreeRun(NoteGap + NameTruncatedNote(nameLength), TreeRunStyle.Hint));
+                runs.Add(new TreeRun(NameTruncatedNote(nameLength), TreeRunStyle.Note));
             if (offerArrayTable && !isObject && text.HasChildren(row.Node.ValueStart, row.Node.FormatKind))
-                runs.Add(new TreeRun(NoteGap + "view as table", TreeRunStyle.Link, new ViewAsTableLink(row.Node.ValueStart)));
+                runs.Add(new TreeRun("View as table", TreeRunStyle.Action, new ViewAsTableLink(row.Node.ValueStart), TreeRunIcon.Table));
             return;
         }
 
         var kind = (JsonTokenKind)row.Node.FormatKind;
         string value = text.Scalar(row, out bool valueTruncated, out long contentOffset, out long valueLength);
-        runs.Add(new TreeRun(value, StyleOf(kind)));
+        var hint = Hint(row, kind);
+        object? valueLink = hint?.Address is { } valueAddress ? new OpenUrlLink(valueAddress) : null;
+        runs.Add(new TreeRun(value, StyleOf(kind), valueLink));
+
+        // Notes, then chips, then actions: information first, and what appears on hover last, so
+        // showing it moves nothing.
+        if (nameTruncated)
+            runs.Add(new TreeRun(NameTruncatedNote(nameLength), TreeRunStyle.Note));
+        if (valueTruncated)
+            runs.Add(new TreeRun(ByteLengthText.Format(valueLength), TreeRunStyle.Note));
+
+        if (hint is not null)
+        {
+            runs.Add(new TreeRun(hint.Text, ValueHintLook.StyleOf(hint), LinkOf(row, hint), ValueHintLook.IconOf(hint.Symbol), ValueHintLook.SwatchOf(hint),
+                ValueHintLook.Opens(hint)));
+        }
 
         if (valueTruncated)
-            runs.Add(new TreeRun(NoteGap + $"(truncated — full length {FormatByteLength(valueLength)})", TreeRunStyle.Link, new ViewInRawLink(contentOffset)));
-        else if (nameTruncated)
-            runs.Add(new TreeRun(NoteGap + NameTruncatedNote(nameLength), TreeRunStyle.Hint));
-
-        if (Hint(row, kind) is { } hint)
-            runs.Add(new TreeRun(NoteGap + hint, TreeRunStyle.Link, new DateSchemeLink(row.Node.ValueStart)));
+            runs.Add(new TreeRun("Open in raw", TreeRunStyle.Action, new ViewInRawLink(contentOffset), TreeRunIcon.FullText));
     }
 
     public string? Marker(in TreeRow row)
         => row.ParentKind == (byte)JsonTokenKind.StartArray && row.Shape != TreeRowShape.Close ? row.Ordinal.ToString() : null;
 
-    private string? Hint(in TreeRow row, JsonTokenKind kind)
+    private ValueHint? Hint(in TreeRow row, JsonTokenKind kind)
     {
         if (hintProviders is null)
             return null;
 
-        // No classifiable value (a date in some encoding) is anywhere near the display cap.
-        var raw = text.ScalarBytes(row, DisplayText.MaxLength);
+        // Most hints read whole values, which are never near the display cap; past it, only the
+        // ones that classify from a prefix (Base64, an embedded document) are asked.
+        var raw = text.ScalarBytes(row, DisplayText.MaxLength, out long length);
         if (raw.IsEmpty)
             return null;
 
-        foreach (var provider in hintProviders)
+        return kind switch
         {
-            if (provider.IsActive && provider.TryClassify(kind, raw, out var candidate)
-                && provider.FormatHint(in candidate, row.Node.ValueStart) is { } hint)
-                return hint;
-        }
+            JsonTokenKind.String => ValueHints.Read(hintProviders, ValueShape.String, raw, length, row.Node.ValueStart),
+            JsonTokenKind.Number => ValueHints.Read(hintProviders, ValueShape.Number, raw, length, row.Node.ValueStart),
+            _ => null,
+        };
+    }
 
-        return null;
+    /// <summary>What clicking a hint's chip does: a date's opens its scheme menu, one hiding a
+    /// document shows it, an address opens it.</summary>
+    private static JsonRowLink? LinkOf(in TreeRow row, ValueHint hint)
+    {
+        if (hint.Expands)
+            return new ExpandHintLink(row.Node.ValueStart, row.Node.ValueEnd, hint.Kind);
+        if (hint.Kind == ValueHintKind.Date)
+            return new DateSchemeLink(row.Node.ValueStart);
+        return hint.Address is { } address ? new OpenUrlLink(address) : null;
     }
 
     private static TreeRunStyle StyleOf(JsonTokenKind kind) => kind switch
@@ -86,13 +103,6 @@ public sealed class JsonTreePainter(JsonTreeText text, IReadOnlyList<IValueHintP
         _ => TreeRunStyle.Plain,
     };
 
-    private static string NameTruncatedNote(long length) => $"(name truncated — full length {FormatByteLength(length)})";
+    private static string NameTruncatedNote(long length) => $"name truncated, full length {ByteLengthText.Format(length)}";
 
-    private static string FormatByteLength(long bytes) => bytes switch
-    {
-        < 1024 => $"{bytes:N0} bytes",
-        < 1024 * 1024 => $"{bytes / 1024.0:0.#} KB",
-        < 1024 * 1024 * 1024 => $"{bytes / (1024.0 * 1024.0):0.#} MB",
-        _ => $"{bytes / (1024.0 * 1024.0 * 1024.0):0.#} GB",
-    };
 }

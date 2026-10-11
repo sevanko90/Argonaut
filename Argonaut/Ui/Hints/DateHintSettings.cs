@@ -1,8 +1,9 @@
 using System;
 using System.Collections.Generic;
+using Argonaut.Engine.Hints;
 using Argonaut.Ui.ViewModels;
 
-namespace Argonaut.Features.Json.Hints;
+namespace Argonaut.Ui.Hints;
 
 /// <summary>
 /// Per-document session state for date hints: the file-level default decoding scheme (either
@@ -10,7 +11,7 @@ namespace Argonaut.Features.Json.Hints;
 /// owning JsonViewModel/NdJsonViewModel. UI-thread only; background code must marshal through
 /// Dispatcher.UIThread before touching this.
 /// </summary>
-public sealed class DateHintSettings : ObservableObject
+public sealed class DateHintSettings : ObservableObject, IDateHintSettings
 {
     private readonly Dictionary<long, DateDecodingScheme> valueOverrides = new();
     private DateDecodingScheme fileDefaultScheme = DateDecodingScheme.Off;

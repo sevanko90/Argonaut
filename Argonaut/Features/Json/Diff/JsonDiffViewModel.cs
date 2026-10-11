@@ -33,7 +33,10 @@ namespace Argonaut.Features.Json.Diff;
 /// <see cref="IndexFailure"/> with the side named in the message - the shell's existing
 /// zero-progress/partial-progress handling then applies unchanged.
 /// </summary>
-public sealed class JsonDiffViewModel : IndexedDocumentViewModel
+// IDocumentViewModel is listed again so WindowTitle and HeaderTitle below implement its
+// default members: a derived class's public member does not, unless the class re-implements
+// the interface.
+public sealed class JsonDiffViewModel : IndexedDocumentViewModel, IDocumentViewModel
 {
     /// <summary>How often the rows are told the comparison has more to show.</summary>
     private static readonly TimeSpan GrowthInterval = TimeSpan.FromMilliseconds(500);
@@ -56,6 +59,16 @@ public sealed class JsonDiffViewModel : IndexedDocumentViewModel
     private string? sourcePlaceholder;
     private string? targetPlaceholder;
     private string? highlightTerm;
+    private bool showIndentGuides;
+    private readonly JsonViewSettings viewSettings;
+
+    /// <param name="viewSettings">Where the indent-guides choice is remembered, shared with the
+    /// JSON tree.</param>
+    public JsonDiffViewModel(JsonViewSettings viewSettings)
+    {
+        this.viewSettings = viewSettings;
+        showIndentGuides = viewSettings.ShowIndentGuides;
+    }
 
     protected override IDocumentSession? Session => session;
 
@@ -77,6 +90,21 @@ public sealed class JsonDiffViewModel : IndexedDocumentViewModel
     private JsonDiffToolbarViewModel? toolbar;
 
     public override JsonDiffToolbarViewModel? Toolbar => toolbar;
+
+    /// <summary>Whether the tree draws indent guides - the remembered choice.</summary>
+    public bool ShowIndentGuides
+    {
+        get => showIndentGuides;
+        private set => SetField(ref showIndentGuides, value);
+    }
+
+    /// <summary>The toolbar's indent-guides choice: remembered for the next document, then
+    /// applied to this one.</summary>
+    private void ChooseIndentGuides(bool show)
+    {
+        viewSettings.ShowIndentGuides = show;
+        ShowIndentGuides = show;
+    }
 
     /// <summary>
     /// The active find term, highlighted in both panes. Null when no find is active.
@@ -385,6 +413,9 @@ public sealed class JsonDiffViewModel : IndexedDocumentViewModel
     public string WindowTitle =>
         $"{AppInfo.Name} Diff ({Path.GetFileName(FilePath)} ↔ {Path.GetFileName(RightFilePath)})";
 
+    /// <summary>Both file names, as the title bar shows them.</summary>
+    public string HeaderTitle => $"{Path.GetFileName(FilePath)} ↔ {Path.GetFileName(RightFilePath)}";
+
     /// <summary>
     /// Opens both files and starts the pipeline. Returns once the rows exist - the left document
     /// shows at once; indexing and the diff continue in the background, monitored for
@@ -423,7 +454,9 @@ public sealed class JsonDiffViewModel : IndexedDocumentViewModel
         toolbar = new JsonDiffToolbarViewModel(
             setChangesOnly: SetChangesOnly,
             goToPreviousDiff: GoToPreviousDiff,
-            goToNextDiff: GoToNextDiff);
+            goToNextDiff: GoToNextDiff,
+            showIndentGuides: ShowIndentGuides,
+            applyIndentGuides: ChooseIndentGuides);
 
         diffTree = new JsonDiffTree(started);
 

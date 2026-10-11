@@ -5,23 +5,33 @@ Layout (tags are grep-able, all wrapped in ### ... ###):
   - line 1..2: comma-free prose header (so FileTypeDetector yields Unidentified)
   - ###TAG_START### near the top
   - the Unicode catalogue: one tagged line per editor-tripping case (see UNICODE_CASES)
+  - the hint catalogue: JSON and config lines whose values the raw view's hints read (see
+    hint_catalogue) - the file is prose, so they show once JSON or Config colours are picked
   - normal lines 60-200 chars, with ###TAG_CHECKPOINT_NNN### every ~100MB
   - at ~1GB:   one ~100MB line: ###TAG_BIGLINE_A_START### ... ###TAG_BIGLINE_A_MID### ... ###TAG_BIGLINE_A_END###
   - at ~2GB:   ###TAG_BINARY### then ~10MB of random binary bytes (invalid UTF-8, control chars)
   - at ~3GB:   the second ~100MB line (BIGLINE_B, same start/mid/end tags)
-  - the Unicode catalogue again, so the cases exist deep into a huge file too
+  - the Unicode and hint catalogues again, so the cases exist deep into a huge file too
   - last line: ###TAG_END###
 
 Usage:
   make-raw-sample.py                      # the full ~4GB file
   make-raw-sample.py --size 50M           # a smaller one, same shape
   make-raw-sample.py --unicode-only       # just the catalogue, a few KB, opens instantly
+  make-raw-sample.py --hints-only         # just the hint catalogue, opens instantly
   make-raw-sample.py --out ~/some/file.txt --size 2G
 """
-import argparse, os, random, sys, time
+import argparse, base64, importlib.util, json, os, random, sys, time
+
+# The hint values are make-test-json.py's, so the tree and the raw view are checked against the
+# same cases. Loaded before seeding: loading it seeds the shared generator too.
+_spec = importlib.util.spec_from_file_location("make_test_json", os.path.join(os.path.dirname(os.path.abspath(__file__)), "make-test-json.py"))
+TEST_JSON = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(TEST_JSON)
 
 DEFAULT_OUT = os.path.expanduser("~/testData/raw-sample-4gb.dat")
 UNICODE_ONLY_OUT = os.path.expanduser("~/testData/raw-unicode-sample.txt")
+HINTS_ONLY_OUT = os.path.expanduser("~/testData/raw-hints-sample.txt")
 DEFAULT_TARGET = 4 * 1024**3
 CHECKPOINT_EVERY = 100 * 1024**2
 BIGLINE_SIZE = 100 * 1024**2
@@ -175,6 +185,51 @@ def unicode_catalogue():
     return b"\n".join(lines) + b"\n"
 
 
+def hint_catalogue():
+    """Lines whose values the raw view hints, each block under a ###H_...### tag:
+      - PRETTY: every hint kind as an indented JSON member, one value a line - chips at line ends
+      - MINIFIED: the same kinds on one line - marks on the values in place
+      - WRAPPED: values longer than a wrapped row (a JWT with many claims, a Base64 picture), so
+        one value runs over several rows and is still read whole
+      - EPOCH: numbers that read as dates once the scheme is inferred or picked
+      - CONFIG: key = value / key: value pairs, bare and quoted, with a trailing comment - shown
+        with Config colours rather than JSON
+    Near misses from the JSON sample come along in each block and must stay plain."""
+    pretty = json.dumps(json.loads(TEST_JSON.hint_samples(0)), indent=2, ensure_ascii=False)
+    minified = TEST_JSON.hint_samples(1)
+    now_s = TEST_JSON.NOW_MS // 1000
+    long_jwt = TEST_JSON._jwt({"sub": "user-4242", "iat": now_s - 600, "exp": now_s + 3600,
+                               "scope": " ".join(f"read:resource-{k}" for k in range(24)),
+                               "roles": [f"role-{k}" for k in range(12)]})
+    picture = base64.b64encode(TEST_JSON.SMALL_PNG).decode()
+    wrapped = json.dumps({"session": long_jwt, "avatar": picture,
+                          "callback": "https://hooks.example.com/v1/notify/" + "segment/" * 30 + "end"}, indent=2)
+    epoch = json.dumps({"createdAt": TEST_JSON.NOW_MS, "updatedAt": TEST_JSON.NOW_MS - 86_400_000,
+                        "count": 42, "port": 8080}, indent=2)
+    config = "\n".join([
+        "[service]",
+        "name = orders",
+        "colour = #1E90FF",
+        "accent: \"rgb(255, 99, 71)\"",
+        "homepage = https://example.com/orders  # public site",
+        "support: mailto:support@example.com",
+        f"TOKEN={TEST_JSON._jwt({'sub': 'svc-orders', 'exp': now_s + 7200})}",
+        "schedule: \"*/15 * * * *\"",
+        "nightly = 0 2 * * *",
+        "released: 2024-03-01T15:04:05Z",
+        f"logo = {picture}",
+        "not_a_colour = #12345",
+        "not_a_url = javascript:alert(1)",
+    ])
+    blocks = [("PRETTY", pretty), ("MINIFIED", minified), ("WRAPPED", wrapped), ("EPOCH", epoch), ("CONFIG", config)]
+    lines = [b"###HINT_CATALOGUE_START### pick JSON colours for the JSON blocks, Config for the last"]
+    for tag, text in blocks:
+        lines.append(f"###H_{tag}###".encode())
+        lines.append(text.encode())
+    lines.append(b"###HINT_CATALOGUE_END###")
+    return b"\n".join(lines) + b"\n"
+
+
 def normal_batch(first_line_no, n_lines):
     """n_lines pseudo-random prose lines, 60-200 chars each, numbered."""
     lines = []
@@ -230,6 +285,7 @@ def write_sample(out, target):
         put(b"second header line without structure so detection stays unidentified\n")
         put(b"###TAG_START###\n")
         put(unicode_catalogue())
+        put(hint_catalogue())
 
         while written < target - 64:
             # landmarks due?
@@ -257,6 +313,7 @@ def write_sample(out, target):
                 print(f"{written / 1024**3:.2f} GiB written ({time.time() - start:.0f}s)", flush=True)
 
         put(unicode_catalogue())
+        put(hint_catalogue())
         put(b"###TAG_END###\n")
 
     print(f"DONE: {written:,} bytes in {time.time() - start:.0f}s -> {out}", flush=True)
@@ -270,20 +327,32 @@ def write_unicode_only(out):
     print(f"DONE: {os.path.getsize(out):,} bytes, {len(UNICODE_CASES)} cases -> {out}", flush=True)
 
 
+def write_hints_only(out):
+    with open(out, "wb") as f:
+        f.write(b"HINT SAMPLE for the Argonaut raw viewer - pick JSON or Config colours to see the hints\n")
+        f.write(hint_catalogue())
+
+    print(f"DONE: {os.path.getsize(out):,} bytes -> {out}", flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--out", help="output path")
     parser.add_argument("--size", default=str(DEFAULT_TARGET), help="target size, e.g. 4G, 50M (default 4G)")
     parser.add_argument("--unicode-only", action="store_true",
                         help="write only the Unicode catalogue - a few hundred KB, no prose, no landmarks")
+    parser.add_argument("--hints-only", action="store_true",
+                        help="write only the hint catalogue - a few KB of JSON and config lines")
     args = parser.parse_args()
 
-    out = args.out or (UNICODE_ONLY_OUT if args.unicode_only else DEFAULT_OUT)
+    out = args.out or (UNICODE_ONLY_OUT if args.unicode_only else HINTS_ONLY_OUT if args.hints_only else DEFAULT_OUT)
     out = os.path.expanduser(out)
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
 
     if args.unicode_only:
         write_unicode_only(out)
+    elif args.hints_only:
+        write_hints_only(out)
     else:
         write_sample(out, parse_size(args.size))
 

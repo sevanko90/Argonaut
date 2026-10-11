@@ -9,16 +9,6 @@ Two decision records hold the reasoning behind items here that is too long to re
 [markdown-options.md](markdown-options.md) and
 [store-distribution-comparison.md](store-distribution-comparison.md).
 
-## Waiting on a check by hand
-
-- **The array table on the sparse index.** Open "view as table" on arrays of objects and of
-  scalars, expand and collapse column headers, reshape, click cells (scalar and container) and use
-  the cell pane's tree.
-- **The diff on the tree surface.** Both panes line up while scrolling, with tints, change marks,
-  array indices and badges; expand unchanged, added, removed, moved and moved-and-changed rows and
-  a range; the context bar's values and paths; next/previous change; "changes only"; find across
-  both files; the scrollbar over a long diff.
-
 ## Editing
 
 The raw view edits through a piece table and saves by staging a copy beside the file and swapping
@@ -59,6 +49,13 @@ it in (see "Saving" in architecture.md).
   may make it unnecessary.
 
 ## JSON tree
+
+- **A URL inside longer text.** Value hints read a whole value, so `"see https://… for details"`
+  gets no link. It needs a link over part of a row's text (`TreeRun` links already cover a span),
+  found on rows on screen only, and possibly several in one value. Like every hint it is classified
+  by shape, never by the property's name. Timestamps inside IDs (ObjectId, UUID v7, ULID,
+  Snowflake) were considered as a hint and dropped: too much inference to be reliable, for little
+  use.
 
 - **Per-depth row counts**, only if the estimated scrollbar proves not good enough in use. They
   would give the tree the exact scroll model the raw view has, under the same `RowSurface`
@@ -230,6 +227,10 @@ format keeps it honest. An XML view adds a scanner, a reader and a painter.
 
 ## Input sources
 
+- **A log read as CSV.** `FileTypeDetector` takes a file whose first two lines hold the same
+  non-zero count of unquoted commas for CSV, so a log whose first lines happen to match opens
+  in the table. A second signal - the same count on a few more lines, or no line much longer
+  than the others - would keep prose out.
 - **Load from URL.** An `HttpByteOrigin`: the download on the background with progress and
   cancellation, reporting `AvailableLength` as bytes land and `LengthSettled` when the response
   completes. The indexers already consume growth, so the work is in the origin. An in-flight source
@@ -273,11 +274,6 @@ Measure against [index-benchmarks.md](index-benchmarks.md), rerun the same way.
 - **Skip the progress bar for work about to finish.** `ProgressBoard` shows anything still
   running after 450ms; it could also project the time left and stay hidden when that is under
   ~300ms. Only if a pointless bar is seen in practice.
-- **Toolbar UX pass.** Behaviour and layout, on its own branch. Distinct from toolbar *styling*,
-  which was tried and rejected: the default Fluent bordered combos stay.
-- **Chrome detail polish.** Chevron animation, indent guides, row hover restyling, a
-  search-highlight pill - deferred over rendering-speed concerns on the drawn tree. The compact
-  density (22px rows, 16px indent) is settled and not part of this.
 
 ## Distribution
 

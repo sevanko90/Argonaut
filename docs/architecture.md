@@ -370,6 +370,38 @@ The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLeng
   merged order and find orders its stops by them. The scrollbar is estimated over the left
   document: each record carries a left anchor, and anchors never decrease along the log.
 
+## Value hints
+
+- **What a value reads as is the engine's; how it shows is the view's.** The providers
+  (`Engine/Hints`, behind `IValueHintProvider`) classify a scalar's raw bytes - a string's
+  content as written, or a number - by a `ValueShape`, never by its format's token kinds or a
+  property's name, and return a `ValueHint`: its text, a symbol, chip or action, and any colour,
+  address or hidden document it carries. `ValueHints.Read` runs a value past a list of them, the
+  first to read it winning. Date-shaped providers read their scheme from `IDateHintSettings`,
+  which `DateHintSettings` (`Ui/Hints`) implements per document. `ValueHintLook` turns a hint's
+  symbol and colour into the icon and swatch every view draws, and `ChipPainter` (`Ui/Rows`)
+  draws the chip itself.
+- **The tree hints a row's scalar.** `JsonTreePainter` offers a leaf's value to the providers and
+  adds the hint as a chip or action run after the text, with the link that clicking it follows.
+- **The raw view hints what its lexer finds.** `RawValueHints` (`Features/Raw/Hints`) takes a
+  row's string and number spans as the starts of values and reads each value whole from the
+  document's bytes - to its closing quote, the end of its number, or for a bare config value the
+  end of its line less a comment - so a value wrapped over rows is classified once. Values are
+  kept by where they start and forgotten on an edit. A value continuing onto the next row is
+  carried there beside the lexer state, by the same lookback. A value that is its line's only one,
+  with only punctuation or a comment after it, is a chip after the line's text, as the tree shows
+  it; any other is marked in place by a line under it. `RawHintLayer` keeps each row's marks and
+  chips with the surface's layouts, draws them, and finds the one under the pointer.
+- **Text no lexer reads is taken word by word, strictly.** A file with no lexer, and the
+  comments of one with a lexer, are read as words (`RawValueHints.MarkWords`). A word is
+  classified only when it starts as an unambiguous kind must, and only an address, an ISO date
+  (not one opening a line - a log's timestamp), a JWT, a hex colour or Base64 of a known format
+  is hinted. Words are always marked in place; hovering one shows its chip in a popup under it
+  (`HintChip`, `Ui/Hints`), which follows the hint when clicked.
+- **One card.** A hint that hides a document opens `HintCard` (`Features/Json/Preview`), which
+  decodes through `HintPreviews` off the UI thread and shows a `ValuePreview`. The raw view
+  composes it as NDJSON composes the tree.
+
 ## Virtualized ItemsSources
 
 - `VirtualizingItemsSourceBase` (`Ui/Documents/VirtualizingItemsSourceBase.cs`) is the shared

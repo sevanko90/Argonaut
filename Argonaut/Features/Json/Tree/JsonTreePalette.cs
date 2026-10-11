@@ -7,7 +7,7 @@ namespace Argonaut.Features.Json.Tree;
 
 /// <summary>
 /// The JSON tree's colours: which theme brush each run style draws in - names in the accent,
-/// values by type, notes and links muted. Looked up from the theme so a theme change is one call
+/// values by type, notes and links muted - and the icons chips lead with. Looked up from the theme so a theme change is one call
 /// again; every surface showing JSON uses this, so the tree and the table's cell pane agree.
 /// </summary>
 public static class JsonTreePalette
@@ -29,6 +29,11 @@ public static class JsonTreePalette
         Add(TreeRunStyle.Hint, "AppMutedTextBrush");
         Add(TreeRunStyle.Link, "AppMutedTextBrush");
         Add(TreeRunStyle.Comment, "AppMutedTextBrush");
+        Add(TreeRunStyle.Note, "AppSubtleIconBrush");
+        Add(TreeRunStyle.Chip, "AppMutedTextBrush");
+        Add(TreeRunStyle.Action, "AppMutedTextBrush");
         surface.RunBrushes = brushes;
+
+        surface.RunIcons = TreeRunIcons.Load(resourceHost);
     }
 }

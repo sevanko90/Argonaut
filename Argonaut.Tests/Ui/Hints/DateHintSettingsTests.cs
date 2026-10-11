@@ -1,6 +1,7 @@
-using Argonaut.Features.Json.Hints;
+using Argonaut.Engine.Hints;
+using Argonaut.Ui.Hints;
 
-namespace Argonaut.Tests.Features.Json.Hints;
+namespace Argonaut.Tests.Ui.Hints;
 
 public class DateHintSettingsTests
 {

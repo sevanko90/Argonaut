@@ -1,4 +1,4 @@
-namespace Argonaut.Features.Json.Hints;
+namespace Argonaut.Engine.Hints;
 
 // Values are JsonToolbarView's DateHintSchemeCombo item indices - keep in sync.
 public enum DateDecodingScheme

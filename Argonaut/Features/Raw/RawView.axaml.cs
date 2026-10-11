@@ -1,9 +1,14 @@
 using System;
 using System.ComponentModel;
+using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Reactive;
+using Avalonia.Threading;
+using Argonaut.Engine.Hints;
 using Argonaut.Features.Raw.Highlighting;
+using Argonaut.Features.Raw.Hints;
+using Argonaut.Ui.Notifications;
 using Argonaut.Ui.Rows;
 using Argonaut.Ui.ViewModels;
 
@@ -21,6 +26,11 @@ public partial class RawView : UserControl
     private readonly RowScrollBars scrollBars;
     private RawViewModel? subscribedViewModel;
 
+    /// <summary>The marked value whose chip is showing, and the grace the pointer has to cross from
+    /// the word onto the chip before it goes.</summary>
+    private RawHintHit? markChipFor;
+    private readonly DispatcherTimer markChipClose = new() { Interval = TimeSpan.FromMilliseconds(400) };
+
     public RawView()
     {
         InitializeComponent();
@@ -31,6 +41,14 @@ public partial class RawView : UserControl
         ActualThemeVariantChanged += OnThemeChanged;
         scrollBars = new RowScrollBars(Surface, VerticalScrollBar, PanScrollBar);
         EditOverview.EditChosen += OnEditChosen;
+        Surface.HintClicked += OnHintClicked;
+        Surface.MarkHovered += OnMarkHovered;
+        MarkChip.Click += OnMarkChipClick;
+        // On the popup's content, not the popup: the content is in a window of its own, so the
+        // Popup control in this tree never sees the pointer arrive.
+        MarkChipFrame.PointerEntered += (_, _) => markChipClose.Stop();
+        MarkChipFrame.PointerExited += (_, _) => markChipClose.Start();
+        markChipClose.Tick += (_, _) => CloseMarkChip();
         fontResourceSubscription = this.GetResourceObservable("AppContentFontFamily")
             .Subscribe(new AnonymousObserver<object?>(OnContentFontChanged));
     }
@@ -54,8 +72,100 @@ public partial class RawView : UserControl
 
     private void OnThemeChanged(object? sender, EventArgs e) => ApplyTextBrushes();
 
+    /// <summary>
+    /// What a hint does when clicked: a date offers the ways to read the document's dates, an
+    /// address opens, and a value hiding a document opens the card showing it.
+    /// </summary>
+    private void OnHintClicked(object? sender, RawHintHit hit)
+    {
+        if (hit.Value.Hint is not { } hint || subscribedViewModel is not { } vm)
+            return;
+
+        if (hint.Expands)
+            _ = ShowHintCardAsync(vm, hit);
+        else if (hint.Kind == ValueHintKind.Date)
+            DateSchemeMenu(vm).ShowAt(Surface, showAtPointer: true);
+        else if (hint.Address is { } address && UrlHintProvider.IsSafe(address))
+            _ = TopLevel.GetTopLevel(this)?.Launcher.LaunchUriAsync(address);
+    }
+
+    private async Task ShowHintCardAsync(RawViewModel vm, RawHintHit hit)
+    {
+        var shown = await vm.PreviewHintAsync(hit.Value);
+        if (shown is null)
+        {
+            ToastService.Show("That value doesn't decode after all.");
+            return;
+        }
+
+        HintCard.Show(shown, hit.Bounds);
+    }
+
+    /// <summary>The ways a number can read as a date, for the whole document: a raw view has no
+    /// per-value choice, since an edit moves every value after it.</summary>
+    private static MenuFlyout DateSchemeMenu(RawViewModel vm)
+    {
+        var menu = new MenuFlyout();
+        void Add(string header, DateDecodingScheme scheme)
+        {
+            var item = new MenuItem
+            {
+                Header = header,
+                Icon = vm.HintSettings.FileDefaultScheme == scheme ? new TextBlock { Text = "✓" } : null,
+            };
+            item.Click += (_, _) => vm.HintSettings.SetUserDefault(scheme);
+            menu.Items.Add(item);
+        }
+
+        Add("Off", DateDecodingScheme.Off);
+        Add("JS milliseconds", DateDecodingScheme.JsMilliseconds);
+        Add("JS seconds", DateDecodingScheme.JsSeconds);
+        Add("Keepa minutes", DateDecodingScheme.KeepaMinutes);
+        return menu;
+    }
+
     /// <summary>The text palette, from the theme - again whenever the theme changes.</summary>
-    private void ApplyTextBrushes() => RawTextPalette.Apply(Surface, this);
+    private void ApplyTextBrushes()
+    {
+        RawTextPalette.Apply(Surface, this);
+        MarkChip.Icons = Surface.HintLayer.Icons;
+        MarkChip.InvalidateVisual();
+    }
+
+    /// <summary>
+    /// Shows the chip of the value under the pointer just below it, or - when the pointer has left
+    /// it - closes the chip after a moment, long enough to reach it.
+    /// </summary>
+    private void OnMarkHovered(object? sender, RawHintHit? hit)
+    {
+        if (hit?.Value.Hint is not { } hint)
+        {
+            markChipClose.Start();
+            return;
+        }
+
+        markChipClose.Stop();
+        markChipFor = hit;
+        MarkChip.Hint = hint;
+        MarkChipPopup.PlacementRect = hit.Bounds;
+        MarkChipPopup.IsOpen = false;
+        MarkChipPopup.IsOpen = true;
+    }
+
+    private void OnMarkChipClick(object? sender, EventArgs e)
+    {
+        var hit = markChipFor;
+        CloseMarkChip();
+        if (hit is not null)
+            OnHintClicked(Surface, hit);
+    }
+
+    private void CloseMarkChip()
+    {
+        markChipClose.Stop();
+        MarkChipPopup.IsOpen = false;
+        markChipFor = null;
+    }
 
     private void OnDataContextChanged(object? sender, EventArgs e)
     {

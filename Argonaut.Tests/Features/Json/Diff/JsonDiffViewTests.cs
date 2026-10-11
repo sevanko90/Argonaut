@@ -1,4 +1,5 @@
 using System.Text;
+using Argonaut.Features.Json;
 using Argonaut.Features.Json.Diff;
 using Argonaut.Tests.Support;
 using Argonaut.Ui.Tree;
@@ -39,7 +40,7 @@ public sealed class JsonDiffViewTests : IDisposable
         var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(JsonDiffViewTests).Assembly);
         return session.Dispatch(async () =>
         {
-            var vm = new JsonDiffViewModel();
+            var vm = new JsonDiffViewModel(new JsonViewSettings());
             var window = new Window { Width = 900, Height = 500 };
             try
             {

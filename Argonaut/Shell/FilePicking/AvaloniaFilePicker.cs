@@ -12,7 +12,7 @@ public sealed class AvaloniaFilePicker : IFilePicker
 
     public AvaloniaFilePicker(TopLevel owner) => this.owner = owner;
 
-    public async Task<string?> PickFileAsync(string title, string? startFolder = null)
+    public async Task<string?> PickFileAsync(string title, string? startFolder = null, bool showsHiddenFiles = true)
     {
         var options = new FilePickerOpenOptions { Title = title, AllowMultiple = false };
         if (startFolder is not null)

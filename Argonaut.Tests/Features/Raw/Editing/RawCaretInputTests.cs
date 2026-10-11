@@ -1,4 +1,5 @@
 using System.Text;
+using Argonaut.Engine.Bytes;
 using Argonaut.Features.Raw;
 using Argonaut.Tests.Support;
 using Avalonia;
@@ -241,29 +242,101 @@ public sealed class RawCaretInputTests : IDisposable
     /// 22px row - which overhangs the glyphs by the row's leading and reads as a caret that is
     /// too long and hangs below the line.
     /// </summary>
+    /// <summary>A jump in flashes where it landed: starting at the caret, on the caret's row,
+    /// over the text after it - and only until the flash is over.</summary>
     [Fact]
-    public Task TheCaretIsTextHeightAndCentredInItsRow()
-        => WithView("abcdef\nghijkl\n", async (window, vm, surface) =>
+    public Task AnArrivalFlashesAtTheCaret()
+        => WithView("abcdef\nghijkl mnopqr stuvwx\n", async (window, vm, surface) =>
         {
-            Press(window, Key.Right);
+            Assert.Null(surface.ArrivalRect());
+
+            await vm.RevealByteRangeAsync(ByteRange.At(9));
             await PumpAsync();
 
-            var rect = surface.CaretRect();
-            double? rowTop = surface.CaretRowTop();
+            var flash = surface.ArrivalRect();
+            var caret = surface.CaretRect();
+            Assert.NotNull(flash);
+            Assert.NotNull(caret);
+            Assert.True(Math.Abs(flash!.Value.Left - caret!.Value.Left) <= 3, $"flash starts at {flash.Value.Left}, caret at {caret.Value.Left}");
+            Assert.True(flash.Value.Width > caret.Value.Width * 4, "the flash covers the text after the caret, not just the caret");
+            Assert.True(flash.Value.Top < caret.Value.Bottom && flash.Value.Bottom > caret.Value.Top, "the flash is on the caret's row");
 
-            Assert.NotNull(rect);
-            Assert.NotNull(rowTop);
-
-            // Shorter than the row, and not by a token amount.
-            Assert.InRange(rect!.Value.Height, 8, RawTextSurface.RowHeight - 2);
-
-            // Centred: the gap above equals the gap below.
-            double above = rect.Value.Top - rowTop!.Value;
-            double below = rowTop.Value + RawTextSurface.RowHeight - rect.Value.Bottom;
-            Assert.True(Math.Abs(above - below) <= 1.0,
-                $"caret sits {above:F1}px from the top of its row and {below:F1}px from the bottom");
-            Assert.True(above > 0, "caret starts at the very top of the row band");
+            surface.EndArrivalFlash();
+            Assert.Null(surface.ArrivalRect());
         });
+
+    /// <summary>
+    /// With the view panned right from earlier, a landing near the end of a short line whose
+    /// flash runs on into the next line pans back so the part at that line's start shows too -
+    /// the caret alone, being on screen already, would not move the view.
+    /// </summary>
+    [Fact]
+    public Task AnArrivalPansToShowTheWholeFlash()
+        => WithView(new string('b', 30) + "\n" + new string('c', 50) + "\n" + new string('a', 200) + "\n", async (window, vm, surface) =>
+        {
+            // Panned a little right, as a long row elsewhere allows: the start of each line is
+            // just off the left, while the end of the b line is well on screen.
+            var panBar = window.GetVisualDescendants().OfType<Avalonia.Controls.Primitives.ScrollBar>()
+                .Single(bar => bar.Orientation == Avalonia.Layout.Orientation.Horizontal);
+            Assert.True(panBar.IsVisible, "the long row should make the view pannable");
+            panBar.Value = 20;
+            await PumpAsync();
+            Assert.Equal(20, surface.PanOffset, 1);
+
+            // Four b's from the end: the flash runs over them, the newline, then the c line's start.
+            await vm.RevealByteRangeAsync(ByteRange.At(26));
+            await PumpAsync(60);
+
+            var landing = surface.ArrivalRect();
+            var rest = surface.ArrivalRect(rowsAfter: 1);
+            Assert.NotNull(landing);
+            Assert.NotNull(rest);
+            foreach (var rect in new[] { landing!.Value, rest!.Value })
+            {
+                Assert.True(rect.Left >= surface.TextViewportLeft - 0.5, $"flash starts at {rect.Left}, left of {surface.TextViewportLeft}");
+                Assert.True(rect.Right <= surface.TextViewportRight + 0.5, $"flash ends at {rect.Right}, past {surface.TextViewportRight}");
+            }
+        });
+
+    /// <summary>Landing at the end of a wrapped row, the flash runs on at the start of the next -
+    /// where the text it points at actually continues.</summary>
+    [Fact]
+    public Task AnArrivalAtTheEndOfARowFlashesOnIntoTheNext()
+        => WithView(new string('a', 200) + "\n", async (window, vm, surface) =>
+        {
+            long wrap = vm.RowIndex!.GetRowInfo(0).End;
+            await vm.RevealByteRangeAsync(ByteRange.At(wrap - 4));
+            await PumpAsync();
+
+            var landing = surface.ArrivalRect();
+            var next = surface.ArrivalRect(rowsAfter: 1);
+            Assert.NotNull(landing);
+            Assert.NotNull(next);
+            Assert.True(next!.Value.Left < landing!.Value.Left, "the rest starts back at the row's start");
+            Assert.True(next.Value.Width > landing.Value.Width, "most of the flash is on the next row");
+            Assert.Null(surface.ArrivalRect(rowsAfter: 2));
+        });
+
+    /// <summary>Landing near the right edge of a row wider than the window pans just enough to
+    /// show what the flash points at, without losing the landing point off the left.</summary>
+    [Fact]
+    public Task AnArrivalAtTheRightEdgePansToShowTheFlash()
+        => WithView(new string('a', 150) + "\n", async (window, vm, surface) =>
+        {
+            // Every landing along a row wider than the window, the right-hand ones included.
+            for (long offset = 60; offset <= 140; offset += 10)
+            {
+                await vm.RevealByteRangeAsync(ByteRange.At(offset));
+                await PumpAsync(60);
+
+                var shown = surface.ArrivalRect();
+                Assert.NotNull(shown);
+                Assert.True(shown!.Value.Right <= surface.TextViewportRight + 0.5,
+                    $"landing at {offset}: flash ends at {shown.Value.Right}, past {surface.TextViewportRight}");
+                Assert.True(shown.Value.Left > 0, $"landing at {offset} went off the left");
+            }
+        });
+
     /// <summary>
     /// The whole jump path, as the failure-location link drives it: resolve a byte offset, reveal
     /// it, place the caret. Exercised end to end rather than by calling the surface's reveal

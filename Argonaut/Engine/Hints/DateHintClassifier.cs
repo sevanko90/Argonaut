@@ -1,7 +1,7 @@
 using System;
 using System.Buffers.Text;
 
-namespace Argonaut.Features.Json.Hints;
+namespace Argonaut.Engine.Hints;
 
 /// <summary>
 /// Classifies a JSON number's raw digit text as a date candidate purely from its length:

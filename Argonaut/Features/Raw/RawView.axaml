@@ -4,11 +4,12 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:raw="clr-namespace:Argonaut.Features.Raw"
              xmlns:editing="clr-namespace:Argonaut.Features.Raw.Editing"
+             xmlns:preview="clr-namespace:Argonaut.Features.Json.Preview"
+             xmlns:hints="clr-namespace:Argonaut.Ui.Hints"
              x:Class="Argonaut.Features.Raw.RawView"
              x:DataType="raw:RawViewModel">
     <Border BorderBrush="{DynamicResource AppBorderBrush}"
-            BorderThickness="1"
-            CornerRadius="8"
+            BorderThickness="0"
             Background="{DynamicResource AppWindowBackgroundBrush}"
             ClipToBounds="True">
         <Grid RowDefinitions="*,Auto,Auto" ColumnDefinitions="*,Auto,Auto">
@@ -24,9 +25,13 @@
                                 FontSize="{DynamicResource AppContentFontSize}"
                                 Foreground="{DynamicResource AppTextBrush}"
                                 GutterForeground="{DynamicResource AppMutedTextBrush}"
-                                HighlightBrush="{DynamicResource AppSearchHighlightBrush}"
+                                HighlightBrush="{DynamicResource AppSearchMatchBrush}"
+                                HighlightEdgeBrush="{DynamicResource AppSearchMatchEdgeBrush}"
+                                CurrentHighlightBrush="{DynamicResource AppSearchCurrentBrush}"
+                                CurrentHighlightForeground="{DynamicResource AppSearchCurrentTextBrush}"
                                 SelectionBrush="{DynamicResource AppTextSelectionBrush}"
-                                CaretBrush="{DynamicResource AppTextBrush}" />
+                                CaretBrush="{DynamicResource AppTextBrush}"
+                                ArrivalBrush="{DynamicResource AppAccentBrush}" />
 
             <ScrollBar x:Name="VerticalScrollBar"
                        Grid.Row="0"
@@ -100,6 +105,32 @@
                     </StackPanel>
                 </Grid>
             </Border>
+
+            <!-- The card a value hint opens - the JSON view's, composed here as NDJSON composes its tree. -->
+            <preview:HintCard x:Name="HintCard" Anchor="{Binding #Surface}" />
+
+            <!-- What a value marked in place reads as: its chip, just under the word while the
+                 pointer is on it or on the chip. Clicking the chip follows the hint, as a chip at
+                 a line's end does. Opened and placed from code. -->
+            <Popup x:Name="MarkChipPopup"
+                   PlacementTarget="{Binding #Surface}"
+                   Placement="BottomEdgeAlignedLeft"
+                   VerticalOffset="2"
+                   IsLightDismissEnabled="False">
+                <Border x:Name="MarkChipFrame"
+                        Padding="3"
+                        CornerRadius="6"
+                        BorderThickness="1"
+                        BorderBrush="{DynamicResource AppBorderBrush}"
+                        Background="{DynamicResource AppWindowBackgroundBrush}"
+                        BoxShadow="0 4 14 0 #22000000">
+                    <hints:HintChip x:Name="MarkChip"
+                                    ChipBackground="{DynamicResource AppChipBrush}"
+                                    ChipHoverBackground="{DynamicResource AppChipHoverBrush}"
+                                    Foreground="{DynamicResource AppMutedTextBrush}"
+                                    FontFamily="{DynamicResource AppSansFontFamily}" />
+                </Border>
+            </Popup>
         </Grid>
     </Border>
 </UserControl>

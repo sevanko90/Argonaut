@@ -28,7 +28,7 @@ public sealed class JsonSearchNavigator : ISearchNavigator
     public Task RevealAsync(SearchMatch match, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        viewModel.Reveal(match.Offset);
+        viewModel.RevealMatch(match.Offset);
         return Task.CompletedTask;
     }
 }

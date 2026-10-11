@@ -5,16 +5,21 @@ using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Detection;
+using Argonaut.Engine.Hints;
 using Argonaut.Engine.Indexing;
 using Argonaut.Engine.Progress;
 using Argonaut.Engine.Saving;
+using Argonaut.Engine.Search;
 using Argonaut.Engine.Settings;
+using Argonaut.Features.Json.Preview;
 using Argonaut.Features.Raw.Editing;
 using Argonaut.Features.Raw.Highlighting;
+using Argonaut.Features.Raw.Hints;
 using Argonaut.Features.Raw.Rows;
 using Argonaut.Ui.Documents;
 using Argonaut.Ui.Documents.Navigation;
 using Argonaut.Ui.Find;
+using Argonaut.Ui.Hints;
 using Argonaut.Ui.Notifications;
 using Argonaut.Ui.Progress;
 
@@ -48,6 +53,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     private RawRowCollection? rows;
     private RawToolbarViewModel? toolbar;
     private string? highlightTerm;
+    private SearchMatch? currentMatch;
     private int? selectedRowIndex;
     private RawCaretController? caret;
     private RawCaretReadout? caretReadout;
@@ -113,6 +119,48 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     /// <see cref="Bytes"/>.
     /// </summary>
     internal IByteSource? Document => this.editor?.Document ?? this.session?.Bytes;
+
+    /// <summary>How this document's dates read: the scheme the first date-shaped number on screen
+    /// suggests, unless one is picked from a date chip.</summary>
+    public DateHintSettings HintSettings { get; } = new();
+
+    /// <summary>What the values the lexer finds read as - the tree's hints, over raw rows.</summary>
+    internal RawValueHints ValueHints => this.valueHints ??= new RawValueHints(
+    [
+        new DateHintProvider(HintSettings), new IsoDateHintProvider(HintSettings, TimeProvider.System), new ColourHintProvider(),
+        new JwtHintProvider(TimeProvider.System), new UrlHintProvider(), new CronHintProvider(HintSettings, TimeProvider.System),
+        new EmbeddedJsonHintProvider(), new Base64HintProvider(),
+    ], HintSettings);
+
+    private RawValueHints? valueHints;
+
+    /// <summary>
+    /// What a hinted value encodes, ready for a card: its content copied out of the document on
+    /// the UI thread, decoded on a background one. Null when it does not decode after all, or the
+    /// document closed meanwhile.
+    /// </summary>
+    internal async Task<HintPreview?> PreviewHintAsync(RawValue value)
+    {
+        if (Document is not { } bytes || value.Hint is not { } hint)
+            return null;
+
+        long length = value.ContentEnd - value.ContentStart;
+        if (HintPreviews.TooLarge(length) is { } tooLarge)
+            return tooLarge;
+
+        byte[] raw = new byte[length];
+        if (bytes.CopyTo(value.ContentStart, raw) != raw.Length)
+            return null;
+
+        var shown = await HintPreviews.DecodeAsync(hint.Kind, raw, ValueHints.Providers, HintSettings.TimeZoneMode);
+        if (IsDisposed)
+        {
+            shown?.Preview.Dispose();
+            return null;
+        }
+
+        return shown;
+    }
 
     /// <summary>The rows of <see cref="Document"/>.</summary>
     internal IRawRowIndex? RowIndex => (IRawRowIndex?)this.editor?.RowIndex ?? this.session?.Index;
@@ -452,7 +500,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         // it), so its own notification cannot be relied on to refresh what is under it.
         RefreshCaretReadout();
 
-        StatusText = $"{FilePath} — {RowCount:N0} rows — edited, not saved";
+        StatusText = DocumentStatusLine.Compose(FilePath, $"{RowCount:N0} rows · edited, not saved");
     }
 
     private void SyncToolbarEditing()
@@ -519,7 +567,26 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     public string? HighlightTerm
     {
         get => this.highlightTerm;
-        set => SetField(ref this.highlightTerm, value);
+        set
+        {
+            if (SetField(ref this.highlightTerm, value))
+                CurrentMatch = null;
+        }
+    }
+
+    /// <summary>The find match last revealed, which the view draws stronger than the others,
+    /// until a reveal of anything else or a new term.</summary>
+    public SearchMatch? CurrentMatch
+    {
+        get => this.currentMatch;
+        private set => SetField(ref this.currentMatch, value);
+    }
+
+    /// <summary>Reveals a find match, which then becomes <see cref="CurrentMatch"/>.</summary>
+    public void RevealMatch(SearchMatch match, int rowIndex)
+    {
+        RevealOffset(match.Offset, rowIndex);
+        CurrentMatch = match;
     }
 
     /// <summary>Row index a search reveal wants scrolled/selected into view; the view mirrors
@@ -546,6 +613,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         // and the centred reveal that follows then finds it already on screen and leaves it
         // there. Ordering is load-bearing here, which is why the jump is tested end to end
         // rather than by calling the surface's reveal directly.
+        CurrentMatch = null;
         SelectRow(rowIndex);
         Caret?.PlaceAt(byteOffset);
     }
@@ -639,7 +707,16 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     /// selection is anchored at the end and extended back to the start so the caret - which the
     /// view scrolls to - sits where the reveal is, not at the far end of a large node.
     /// </summary>
-    public async Task RevealByteRangeAsync(ByteRange range)
+    public Task RevealByteRangeAsync(ByteRange range) => RevealRangeAsync(range, announceArrival: true);
+
+    /// <summary>
+    /// A jump in from elsewhere landed at this offset: the view flashes it, since in a wall of
+    /// packed text the caret alone is easy to lose. Not raised for a reveal from inside the raw
+    /// view - a find step, the edit overview - or for putting the caret back after a save.
+    /// </summary>
+    public event Action<long>? Arrived;
+
+    private async Task RevealRangeAsync(ByteRange range, bool announceArrival)
     {
         if (this.session is null)
             return;
@@ -667,6 +744,9 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
                 caret.PlaceAt(range.End);
                 caret.ExtendTo(range.Offset);
             }
+
+            if (announceArrival)
+                Arrived?.Invoke(range.Offset);
         }
         catch (ObjectDisposedException)
         {
@@ -709,7 +789,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         OnPropertyChanged(nameof(RowCount));
         OnPropertyChanged(nameof(Lexer));
 
-        StatusText = $"{FilePath} — {RowCount:N0} rows indexed so far";
+        StatusText = DocumentStatusLine.Compose(FilePath, $"{RowCount:N0} rows indexed so far");
         MonitorIndexing();
     }
 
@@ -857,7 +937,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         OnPropertyChanged(nameof(Rows));
         OnPropertyChanged(nameof(RowCount));
 
-        StatusText = $"{FilePath} — {RowCount:N0} rows indexed so far";
+        StatusText = DocumentStatusLine.Compose(FilePath, $"{RowCount:N0} rows indexed so far");
         MonitorIndexing();
     }
 
@@ -946,7 +1026,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         Caret = editor.Caret;
 
         OnPropertyChanged(nameof(RowCount));
-        StatusText = IsDirty ? $"{FilePath} — {RowCount:N0} rows — edited, not saved" : $"{FilePath} — {RowCount:N0} rows";
+        StatusText = DocumentStatusLine.Compose(FilePath, IsDirty ? $"{RowCount:N0} rows · edited, not saved" : $"{RowCount:N0} rows");
     }
 
     /// <summary>Opens <paramref name="origin"/> and starts scanning it, reading through a
@@ -1215,7 +1295,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         OnPropertyChanged(nameof(CanEdit));
         OnPropertyChanged(nameof(CanSave));
 
-        StatusText = $"{FilePath} — saved — {RowCount:N0} rows indexed so far";
+        StatusText = DocumentStatusLine.Compose(FilePath, $"saved · {RowCount:N0} rows indexed so far");
         MonitorIndexing();
 
         _ = RestoreAfterReopenAsync(caretOffset, wasEditing);
@@ -1228,7 +1308,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     /// </summary>
     private async Task RestoreAfterReopenAsync(long caretOffset, bool resumeEditing)
     {
-        await JumpToByteOffsetAsync(caretOffset);
+        await RevealRangeAsync(ByteRange.At(caretOffset), announceArrival: false);
         if (!resumeEditing || IsDisposed)
             return;
 
@@ -1272,7 +1352,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     /// covering a wrap-width restart retiring this index mid-monitor.</summary>
     protected override void OnIndexingCompleted()
     {
-        StatusText = $"{FilePath} — {RowCount:N0} rows";
+        StatusText = DocumentStatusLine.Compose(FilePath, $"{RowCount:N0} rows");
         KeepAnchors();
 
         // Editing waits for the scan, so this is the moment the toggle becomes usable.

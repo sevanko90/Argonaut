@@ -80,6 +80,15 @@ SECTIONS = [
         ],
     },
     {
+        "component": "Lucide icons",
+        "homepage": "https://lucide.dev",
+        "packages": [],
+        "parts": [
+            ("literal", "Interface icons are converted from Lucide's SVGs (see Argonaut/Ui/Icons/LucideIcons.axaml).\n"),
+            ("fetch", "https://raw.githubusercontent.com/lucide-icons/lucide/main/LICENSE"),
+        ],
+    },
+    {
         "component": "SkiaSharp and HarfBuzzSharp",
         "homepage": "https://github.com/mono/SkiaSharp",
         "packages": ["SkiaSharp", "SkiaSharp.", "HarfBuzzSharp", "HarfBuzzSharp."],

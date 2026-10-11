@@ -3,43 +3,85 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:raw="clr-namespace:Argonaut.Features.Raw"
+             xmlns:icons="clr-namespace:Argonaut.Ui.Icons"
+             xmlns:conv="clr-namespace:Argonaut.Ui.Converters"
              mc:Ignorable="d"
              x:Class="Argonaut.Features.Raw.RawToolbarView"
              x:DataType="raw:RawToolbarViewModel">
-    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-        <Border Width="1"
-                Margin="0,2,12,2"
-                Background="{DynamicResource AppBorderBrush}" />
+    <!-- Icons with the current value beside them; the words live in the tooltips and in the
+         flyout headings. -->
+    <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
         <ToggleButton x:Name="EditToggle"
                       IsChecked="{Binding IsEditing, Mode=TwoWay}"
                       IsEnabled="{Binding CanEdit}"
-                      Content="Edit"
-                      FontSize="12"
-                      Margin="0,0,8,0"
-                      VerticalAlignment="Center"
-                      ToolTip.Tip="Type to change the document. Changes are held in memory until you save (Ctrl+S or Cmd+S)." />
-        <ComboBox x:Name="WrapWidthCombo"
-                  SelectedIndex="{Binding WrapWidthIndex, Mode=TwoWay}"
-                  IsEnabled="{Binding CanChangeWrapWidth}"
-                  FontSize="12"
-                  MinWidth="130"
-                  VerticalAlignment="Center"
-                  ToolTip.Tip="Force line breaks at this many bytes (re-indexes the file)">
-            <ComboBoxItem Content="Wrap: 80 bytes" />
-            <ComboBoxItem Content="Wrap: 160 bytes" />
-            <ComboBoxItem Content="Wrap: 512 bytes" />
-        </ComboBox>
-        <ComboBox x:Name="ColoursCombo"
-                  SelectedIndex="{Binding ColoursIndex, Mode=TwoWay}"
-                  FontSize="12"
-                  MinWidth="130"
-                  Margin="8,0,0,0"
-                  VerticalAlignment="Center"
-                  ToolTip.Tip="Syntax colours for this document">
-            <ComboBoxItem Content="{Binding AutoColoursLabel}" />
-            <ComboBoxItem Content="Off" />
-            <ComboBoxItem Content="JSON" />
-            <ComboBoxItem Content="Config" />
-        </ComboBox>
+                      Classes="tool icononly"
+                      ToolTip.Tip="Edit: type to change the document. Changes are held in memory until you save (Ctrl+S or Cmd+S).">
+            <icons:LucideIcon Data="{StaticResource Icon.Edit}" />
+        </ToggleButton>
+        <Button x:Name="WrapWidthButton"
+                IsEnabled="{Binding CanChangeWrapWidth}"
+                Classes="tool"
+                ToolTip.Tip="Wrap: force line breaks at this many bytes (re-indexes the file)">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+                <icons:LucideIcon Data="{StaticResource Icon.Wrap}" />
+                <TextBlock Classes="toolvalue" Text="{Binding WrapWidthText}" />
+                <icons:LucideIcon Classes="chevron" Data="{StaticResource Icon.ChevronDown}" />
+            </StackPanel>
+            <Button.Flyout>
+                <Flyout Placement="BottomEdgeAlignedLeft">
+                    <StackPanel Margin="12" Spacing="2" MinWidth="150">
+                        <TextBlock Classes="flyouthead" Text="Wrap lines at" />
+                        <RadioButton GroupName="wrapWidth"
+                                     Content="80 bytes"
+                                     FontSize="12"
+                                     IsChecked="{Binding WrapWidthIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=0}" />
+                        <RadioButton GroupName="wrapWidth"
+                                     Content="160 bytes"
+                                     FontSize="12"
+                                     IsChecked="{Binding WrapWidthIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=1}" />
+                        <RadioButton GroupName="wrapWidth"
+                                     Content="512 bytes"
+                                     FontSize="12"
+                                     IsChecked="{Binding WrapWidthIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=2}" />
+                        <TextBlock Text="Changing this re-indexes the file."
+                                   FontSize="11"
+                                   Margin="8,6,0,0"
+                                   Foreground="{DynamicResource AppMutedTextBrush}" />
+                    </StackPanel>
+                </Flyout>
+            </Button.Flyout>
+        </Button>
+        <Button x:Name="ColoursButton"
+                Classes="tool"
+                ToolTip.Tip="Syntax colours for this document">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+                <icons:LucideIcon Data="{StaticResource Icon.Colours}" />
+                <TextBlock Classes="toolvalue" Text="{Binding ColoursText}" />
+                <icons:LucideIcon Classes="chevron" Data="{StaticResource Icon.ChevronDown}" />
+            </StackPanel>
+            <Button.Flyout>
+                <Flyout Placement="BottomEdgeAlignedLeft">
+                    <StackPanel Margin="12" Spacing="2" MinWidth="150">
+                        <TextBlock Classes="flyouthead" Text="Syntax colours" />
+                        <RadioButton GroupName="colours"
+                                     Content="{Binding AutoColoursLabel}"
+                                     FontSize="12"
+                                     IsChecked="{Binding ColoursIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=0}" />
+                        <RadioButton GroupName="colours"
+                                     Content="Off"
+                                     FontSize="12"
+                                     IsChecked="{Binding ColoursIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=1}" />
+                        <RadioButton GroupName="colours"
+                                     Content="JSON"
+                                     FontSize="12"
+                                     IsChecked="{Binding ColoursIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=2}" />
+                        <RadioButton GroupName="colours"
+                                     Content="Config"
+                                     FontSize="12"
+                                     IsChecked="{Binding ColoursIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=3}" />
+                    </StackPanel>
+                </Flyout>
+            </Button.Flyout>
+        </Button>
     </StackPanel>
 </UserControl>

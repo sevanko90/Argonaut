@@ -22,6 +22,9 @@ public sealed class JsonViewSettings : ISettingsBlock<JsonViewSettings>
         get;
         set => field = Math.Clamp(value, MinExpandDepth, MaxExpandDepth);
     } = DefaultExpandDepth;
+
+    /// <summary>Whether the tree draws a faint line down each open container's children.</summary>
+    public bool ShowIndentGuides { get; set; }
 }
 
 [JsonSerializable(typeof(JsonViewSettings))]

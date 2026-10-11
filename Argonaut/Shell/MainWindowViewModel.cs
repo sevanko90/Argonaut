@@ -14,6 +14,7 @@ using Argonaut.Engine.Logging;
 using Argonaut.Engine.Progress;
 using Argonaut.Engine.Saving;
 using Argonaut.Engine.Settings;
+using Argonaut.Features.Json;
 using Argonaut.Features.Json.Schema;
 using Argonaut.Features.Json.ArrayTable;
 using Argonaut.Features.Json.Diff;
@@ -70,6 +71,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly AppearanceSettings appearance;
     private readonly RecentFileHistory recentFileHistory;
     private readonly FavouriteFiles favouriteFiles;
+    private readonly JsonViewSettings jsonViewSettings;
     private readonly IConfigLocationSource? configLocations;
     private readonly Func<string, Task<bool>> confirmReplace;
     private readonly Func<Task<byte[]?>>? readClipboardBytes;
@@ -120,7 +122,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private long publishedRequest = -1;
 
     /// <summary>Raised when the find bar's status text should change (null clears it).</summary>
-    public event Action<string?>? FindStatusChanged;
+    public event Action<FindStatus?>? FindStatusChanged;
 
     /// <summary>Raised when the find bar should clear its term/status (file open, switch, or close).</summary>
     public event Action? FindBarResetRequested;
@@ -167,6 +169,7 @@ public sealed class MainWindowViewModel : ObservableObject
         this.appearance = settings.Get<AppearanceSettings>();
         this.recentFileHistory = settings.Get<RecentFileHistory>();
         this.favouriteFiles = settings.Get<FavouriteFiles>();
+        this.jsonViewSettings = settings.Get<JsonViewSettings>();
         this.configLocations = configLocations;
         this.confirmReplace = confirmReplace;
         this.readClipboardBytes = readClipboardBytes;
@@ -206,8 +209,17 @@ public sealed class MainWindowViewModel : ObservableObject
     public string Title
     {
         get => title;
-        private set => SetField(ref title, value);
+        private set
+        {
+            if (SetField(ref title, value))
+                OnPropertyChanged(nameof(HeaderTitle));
+        }
     }
+
+    /// <summary>What the title bar names the open document by: the file name, or the document's
+    /// own <see cref="IDocumentViewModel.HeaderTitle"/>. Raised alongside <see cref="Title"/>, which
+    /// changes whenever the document or its file does.</summary>
+    public string HeaderTitle => currentDocument?.HeaderTitle ?? FileName;
 
     /// <summary>True when a document is loaded; drives the toolbar's visibility.</summary>
     public bool IsFileOpen => currentFilePath is not null;
@@ -387,7 +399,7 @@ public sealed class MainWindowViewModel : ObservableObject
         loadProgress?.Finish();
         StatusText = $"Comparing {leftPath} with {rightPath}…";
 
-        var document = new JsonDiffViewModel();
+        var document = new JsonDiffViewModel(jsonViewSettings);
         try
         {
             await document.LoadAsync(leftOrigin, rightOrigin);
@@ -441,7 +453,7 @@ public sealed class MainWindowViewModel : ObservableObject
         string sourceName = request.Origin.Path ?? request.Origin.DisplayName;
         StatusText = $"Opening {request.ArrayPath} as a table…";
 
-        var document = new JsonArrayTableViewModel();
+        var document = new JsonArrayTableViewModel(jsonViewSettings);
         try
         {
             await document.LoadAsync(request.Origin, request.Offset, request.Length, request.ArrayPath,
@@ -683,22 +695,33 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
+        await OpenBytesAsync(bytes, PastedDocumentName, "the clipboard contents");
+    }
+
+    /// <summary>
+    /// Opens bytes that are not a file as the document - a paste, or a value a hint decoded - once
+    /// whatever is open now has been let go of: unsaved changes resolved, or the replace confirmed.
+    /// </summary>
+    /// <param name="description">What is being opened, for the questions asked first ("the
+    /// clipboard contents").</param>
+    public async Task OpenBytesAsync(byte[] bytes, string displayName, string description)
+    {
         if (RefusedWhileSaving())
             return;
 
         if (HasUnsavedChanges)
         {
-            if (!await ResolveUnsavedChangesAsync("opening the clipboard contents"))
+            if (!await ResolveUnsavedChangesAsync($"opening {description}"))
                 return;
         }
         else if (IsFileOpen)
         {
-            var confirmed = await confirmReplace("Replace the currently loaded file with the clipboard contents?");
+            var confirmed = await confirmReplace($"Replace the currently loaded file with {description}?");
             if (!confirmed)
                 return;
         }
 
-        await OpenOriginAsync(new MemoryByteOrigin(bytes, PastedDocumentName), addToRecents: false);
+        await OpenOriginAsync(new MemoryByteOrigin(bytes, displayName), addToRecents: false);
     }
 
     /// <summary>

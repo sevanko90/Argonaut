@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Text;
 using Avalonia;
 using Avalonia.Automation.Peers;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
+using Avalonia.Media.Immutable;
 using Avalonia.Media.TextFormatting;
 using Avalonia.Threading;
 using Avalonia.Utilities;
@@ -47,14 +49,24 @@ public class TreeSurface : RowSurface
     public const double ToggleWidth = 16;
 
     /// <summary>
-    /// The expand arrows, as geometry rather than text: a ▸/▾ glyph picks up font-fallback metrics
-    /// that differ by platform (and by glyph within one fallback chain on Windows), so the two
-    /// states drew at visibly different sizes. A path is the same size everywhere.
+    /// The expander: Lucide's chevron-right on its 24-unit grid, stroked like the toolbar's icons
+    /// and turned a quarter to point down when open. Geometry rather than a ▸/▾ glyph, which picks
+    /// up font-fallback metrics that differ by platform, so the two states drew at visibly
+    /// different sizes.
     /// </summary>
-    private const double ArrowSize = 7;
+    private static readonly Geometry ExpanderShape = Geometry.Parse("M9 18 l6-6-6-6");
+    private const double ExpanderSize = 12;
+    private const double ExpanderStroke = 2.2;
 
-    private static readonly Geometry CollapsedArrowShape = Geometry.Parse("M 0,0 L 7,3.5 L 0,7 Z");
-    private static readonly Geometry ExpandedArrowShape = Geometry.Parse("M 0,0 L 7,0 L 3.5,7 Z");
+    /// <summary>How long a clicked expander takes to turn.</summary>
+    private static readonly TimeSpan ExpanderTurnDuration = TimeSpan.FromMilliseconds(120);
+
+    /// <summary>How far the expander's click target reaches into the indent before its column -
+    /// the chevron is small, and the space left of it holds nothing else to click.</summary>
+    public const double ExpanderReach = 8;
+
+    /// <summary>The square drawn behind the expander under the pointer.</summary>
+    private const double ExpanderPatchSize = 18;
 
     /// <summary>Width of the slot a row's marker (see <see cref="ITreeRowPainter.Marker"/>) takes
     /// before its arrow, including the gap after it.</summary>
@@ -77,9 +89,27 @@ public class TreeSurface : RowSurface
     /// <summary>A gap left between two panes, split either side of the line drawn between them.</summary>
     private const double PaneGap = 8;
 
-    /// <summary>One pane of a row as laid out: its text, the marker before its arrow, and where
-    /// its links are in the text.</summary>
-    private sealed record PaneLayout(TextLayout Layout, string Text, TextLayout? Marker, List<(int Start, int Length, object Link)>? Links);
+    /// <summary>Space between a row's text and what trails it, and between trailing items.</summary>
+    private const double TrailingGap = 12;
+    private const double TrailingSpacing = 6;
+
+    /// <summary>Space kept between pinned trailing items and the pane's right edge.</summary>
+    private const double TrailingPinMargin = 8;
+
+
+
+    /// <summary>One note or chip after a pane's text, at <paramref name="X"/> from the text's
+    /// start.</summary>
+    private sealed record TrailingItem(TextLayout Label, IBrush Brush, TreeRunStyle Style, TreeRunIcon Icon, IBrush? Swatch, double X, double Width, object? Link,
+        TreeRunIcon Affordance = TreeRunIcon.None)
+    {
+        public bool IsChip => Style != TreeRunStyle.Note;
+    }
+
+    /// <summary>One pane of a row as laid out: its text, the marker before its arrow, where its
+    /// links are in the text, what trails the text, and how wide the whole is.</summary>
+    private sealed record PaneLayout(TextLayout Layout, string Text, TextLayout? Marker,
+        List<(int Start, int Length, object Link)>? Links, List<TrailingItem>? Trailing, double Width);
 
     /// <summary>One row as laid out: a pane per side the painter draws, one for a plain tree.</summary>
     private sealed record RowLayout(PaneLayout[] Panes)
@@ -108,8 +138,36 @@ public class TreeSurface : RowSurface
     private double bytesPerRow = InitialBytesPerRow;
     private ITreeRowCursor? selection;
     private string? highlightTerm;
+    private TreeCurrentMatch? currentMatch;
     private IReadOnlyDictionary<TreeRunStyle, IBrush>? runBrushes;
     private IReadOnlyDictionary<TreeRowTint, IBrush>? tintBrushes;
+    private IReadOnlyDictionary<TreeRunIcon, Geometry>? runIcons;
+    private readonly ChipPainter chips = new();
+
+    // The row under the pointer, and which of its trailing items, if any: actions show on the
+    // hovered row, and a clickable chip darkens under the pointer.
+    private (long, bool)? hoveredKey;
+    private int hoveredItem = -1;
+
+    // The link in a row's text under the pointer while the command modifier is held, drawn
+    // underlined; and where the pointer last was, so pressing the modifier shows it.
+    private sealed record UnderlinedLink((long, bool) RowKey, int Pane, int Start, int Length);
+    private UnderlinedLink? underlinedLink;
+    private Point? lastPointer;
+
+    // The pane whose expander is under the pointer, on the hovered row, or -1.
+    private int hoveredExpanderPane = -1;
+
+    // The expander turning after a toggle: its row, when it started and the angle it started at.
+    private (long, bool)? turningKey;
+    private long turnStarted;
+    private double turnFrom;
+    private readonly Dictionary<IBrush, Pen> expanderPens = new();
+
+    // Per realized row, the open containers its indent guides run down from: a span of
+    // guideAncestors, each an ancestor's depth and inset (the inset arrays are shared with insets).
+    private readonly List<(int Depth, double[] Inset)> guideAncestors = new();
+    private readonly List<(int Start, int Count)> guideSpans = new();
 
     /// <summary>The rows shown. Setting them resets the view to the top.</summary>
     public ITreeRowSource? Document
@@ -137,6 +195,17 @@ public class TreeSurface : RowSurface
         }
     }
 
+    /// <summary>The match find is on, drawn stronger than the others, or null.</summary>
+    public TreeCurrentMatch? CurrentMatch
+    {
+        get => currentMatch;
+        set
+        {
+            currentMatch = value;
+            InvalidateVisual();
+        }
+    }
+
     /// <summary>The find term to highlight in rows on screen, or null.</summary>
     public string? HighlightTerm
     {
@@ -155,6 +224,20 @@ public class TreeSurface : RowSurface
         set
         {
             runBrushes = value;
+            chips.ForgetPens();
+            DropLayouts();
+            InvalidateVisual();
+        }
+    }
+
+    /// <summary>The glyph per <see cref="TreeRunIcon"/>, on a 24x24 grid and drawn stroked; an
+    /// icon with none leaves its chip as text alone.</summary>
+    public IReadOnlyDictionary<TreeRunIcon, Geometry>? RunIcons
+    {
+        get => runIcons;
+        set
+        {
+            runIcons = value;
             DropLayouts();
             InvalidateVisual();
         }
@@ -206,9 +289,91 @@ public class TreeSurface : RowSurface
         set => SetValue(DividerBrushProperty, value);
     }
 
+    /// <summary>The font of notes and chips after a row's text - the interface font, where the
+    /// rows are set in the content font. Null uses the rows' own.</summary>
+    public static readonly StyledProperty<FontFamily?> ChipFontFamilyProperty =
+        AvaloniaProperty.Register<TreeSurface, FontFamily?>(nameof(ChipFontFamily));
+
+    /// <summary>Behind a chip.</summary>
+    public static readonly StyledProperty<IBrush?> ChipBackgroundProperty =
+        AvaloniaProperty.Register<TreeSurface, IBrush?>(nameof(ChipBackground));
+
+    /// <summary>Behind a clickable chip under the pointer.</summary>
+    public static readonly StyledProperty<IBrush?> ChipHoverBackgroundProperty =
+        AvaloniaProperty.Register<TreeSurface, IBrush?>(nameof(ChipHoverBackground));
+
+    public FontFamily? ChipFontFamily
+    {
+        get => GetValue(ChipFontFamilyProperty);
+        set => SetValue(ChipFontFamilyProperty, value);
+    }
+
+    public IBrush? ChipBackground
+    {
+        get => GetValue(ChipBackgroundProperty);
+        set => SetValue(ChipBackgroundProperty, value);
+    }
+
+    public IBrush? ChipHoverBackground
+    {
+        get => GetValue(ChipHoverBackgroundProperty);
+        set => SetValue(ChipHoverBackgroundProperty, value);
+    }
+
+    /// <summary>The expander at rest. Null uses <see cref="RowSurface.Foreground"/>.</summary>
+    public static readonly StyledProperty<IBrush?> ExpanderBrushProperty =
+        AvaloniaProperty.Register<TreeSurface, IBrush?>(nameof(ExpanderBrush));
+
+    /// <summary>The expander on the row under the pointer; under the pointer itself it takes
+    /// <see cref="RowSurface.Foreground"/>.</summary>
+    public static readonly StyledProperty<IBrush?> ExpanderRowHoverBrushProperty =
+        AvaloniaProperty.Register<TreeSurface, IBrush?>(nameof(ExpanderRowHoverBrush));
+
+    /// <summary>Whether a faint line runs down each open container's contents, from its expander.</summary>
+    public static readonly StyledProperty<bool> ShowIndentGuidesProperty =
+        AvaloniaProperty.Register<TreeSurface, bool>(nameof(ShowIndentGuides));
+
+    /// <summary>The indent guides' line.</summary>
+    public static readonly StyledProperty<IBrush?> GuideBrushProperty =
+        AvaloniaProperty.Register<TreeSurface, IBrush?>(nameof(GuideBrush));
+
+    public IBrush? ExpanderBrush
+    {
+        get => GetValue(ExpanderBrushProperty);
+        set => SetValue(ExpanderBrushProperty, value);
+    }
+
+    public IBrush? ExpanderRowHoverBrush
+    {
+        get => GetValue(ExpanderRowHoverBrushProperty);
+        set => SetValue(ExpanderRowHoverBrushProperty, value);
+    }
+
+    public bool ShowIndentGuides
+    {
+        get => GetValue(ShowIndentGuidesProperty);
+        set => SetValue(ShowIndentGuidesProperty, value);
+    }
+
+    public IBrush? GuideBrush
+    {
+        get => GetValue(GuideBrushProperty);
+        set => SetValue(GuideBrushProperty, value);
+    }
+
     static TreeSurface()
     {
-        AffectsRender<TreeSurface>(GutterBackgroundProperty, DividerBrushProperty);
+        AffectsRender<TreeSurface>(GutterBackgroundProperty, DividerBrushProperty, ChipBackgroundProperty, ChipHoverBackgroundProperty,
+            ExpanderBrushProperty, ExpanderRowHoverBrushProperty, ShowIndentGuidesProperty, GuideBrushProperty);
+    }
+
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+        if (change.Property == ChipFontFamilyProperty)
+            OnTextStyleChanged();
+        else if (change.Property == ExpanderBrushProperty || change.Property == ExpanderRowHoverBrushProperty || change.Property == ForegroundProperty)
+            expanderPens.Clear();
     }
 
     /// <summary>A gutter changed width or what it shows - a schema bound or unbound.</summary>
@@ -244,8 +409,22 @@ public class TreeSurface : RowSurface
                 return rect.Translate(new Vector(textX, textTop));
         }
 
+        for (int pane = 0; pane < laid.Panes.Length; pane++)
+        {
+            var laidPane = laid.Panes[pane];
+            if (laidPane.Trailing?.Find(item => item.Link is not null) is { } item)
+            {
+                double textX = ArrowLeft(index, pane) + ToggleWidth;
+                double shift = TrailingShift(laidPane, textX, PaneLeft(pane) + PaneWidth);
+                return new Rect(textX + shift + item.X, ChipPainter.TopIn(index * RowHeight - anchorPixel), item.Width, ChipPainter.Height);
+            }
+        }
+
         return null;
     }
+
+    /// <summary>Whether realized row <paramref name="index"/> shows its actions, for tests.</summary>
+    internal bool ShowsActions(int index) => ShowsActions(realized[index]);
 
     /// <summary>The text layout of one pane of realized row <paramref name="index"/>, for tests.</summary>
     internal TextLayout PaneTextLayout(int index, int pane = 0)
@@ -253,6 +432,33 @@ public class TreeSurface : RowSurface
 
     /// <summary>Where realized row <paramref name="index"/>'s arrow is drawn in a pane, for tests.</summary>
     internal double ArrowX(int index, int pane = 0) => ArrowLeft(index, pane);
+
+    /// <summary>Test hook: where realized row <paramref name="index"/>'s indent guides run, or
+    /// none while guides are off.</summary>
+    internal IReadOnlyList<double> IndentGuideXs(int index, int pane = 0)
+    {
+        if (!ShowIndentGuides)
+            return [];
+
+        var (start, count) = guideSpans[index];
+        var xs = new double[count];
+        for (int i = 0; i < count; i++)
+            xs[i] = GuideX(guideAncestors[start + i], pane);
+        return xs;
+    }
+
+    /// <summary>Test hook: the angle realized row <paramref name="index"/>'s chevron is drawn at.</summary>
+    internal double ExpanderTurnAt(int index) => ExpanderTurn(realized[index]);
+
+    /// <summary>Test hook: whether a chevron is turning.</summary>
+    internal bool IsExpanderTurning => turningKey is not null;
+
+    /// <summary>Test hook: finishes a turn the headless platform has no frames to run.</summary>
+    internal void EndExpanderTurn()
+    {
+        turningKey = null;
+        InvalidateVisual();
+    }
 
     /// <summary>Pixels of the top row scrolled off the top.</summary>
     internal double AnchorPixel => anchorPixel;
@@ -323,6 +529,8 @@ public class TreeSurface : RowSurface
     private void ComputeInsets()
     {
         insets.Clear();
+        guideAncestors.Clear();
+        guideSpans.Clear();
         if (realized.Count == 0 || document is null || anchor is null)
             return;
 
@@ -350,6 +558,9 @@ public class TreeSurface : RowSurface
         {
             while (open.Count > 0 && open[^1].Depth >= row.Depth)
                 open.RemoveAt(open.Count - 1);
+
+            guideSpans.Add((guideAncestors.Count, open.Count));
+            guideAncestors.AddRange(open);
 
             var parent = open.Count > 0 ? open[^1].Inset : none;
             var inset = Inset(parent, row.Shape == TreeRowShape.Close ? row with { Shape = TreeRowShape.Open } : row);
@@ -419,6 +630,7 @@ public class TreeSurface : RowSurface
         if (document is null || row.Shape == TreeRowShape.Leaf)
             return;
 
+        StartTurn(row);
         document.Toggle(row);
         Reseat();
         ExpansionChanged?.Invoke(this, EventArgs.Empty);
@@ -483,8 +695,8 @@ public class TreeSurface : RowSurface
 
     /// <summary>
     /// Walks from the anchor to fill the viewport. At the end of the document the anchor is
-    /// pulled back so the last row sits at the bottom rather than the view running out under a
-    /// half-empty screen.
+    /// pulled back so the last row sits on the bottom edge rather than the view running out under
+    /// a half-empty screen.
     /// </summary>
     private void Realize()
     {
@@ -507,12 +719,21 @@ public class TreeSurface : RowSurface
             more = walker.MoveNext();
         showsEnd = !more && realized.Count * RowHeight - anchorPixel <= Bounds.Height + 0.5;
 
-        int fitting = Math.Max(1, (int)(Bounds.Height / RowHeight));
-        if (realized.Count < needed && realized.Count < fitting)
+        // At the end the last row sits on the bottom edge, exactly: the view is pulled back by the
+        // gap under it, so a trackpad's small steps past the end land where they began, rather
+        // than drifting up to a row past it and snapping back a whole row.
+        double gap = Bounds.Height - (realized.Count * RowHeight - anchorPixel);
+        if (!more && gap > 0)
         {
-            anchorPixel = 0;
-            while (realized.Count < fitting && anchor.MovePrevious())
+            anchorPixel -= gap;
+            while (anchorPixel < 0 && anchor.MovePrevious())
+            {
                 realized.Insert(0, anchor.Current);
+                anchorPixel += RowHeight;
+            }
+
+            anchorPixel = Math.Max(0, anchorPixel);
+            showsEnd = true;
         }
 
         // Asked only at the end, so scrolling through the middle never pays for the step back.
@@ -554,7 +775,7 @@ public class TreeSurface : RowSurface
         {
             var row = realized[i];
             var laid = LayoutFor(row, typeface, FontSize).First;
-            widest = Math.Max(widest, row.Depth * IndentWidth + insets[i][0] + ToggleWidth + laid.Layout.WidthIncludingTrailingWhitespace);
+            widest = Math.Max(widest, row.Depth * IndentWidth + insets[i][0] + ToggleWidth + laid.Width);
         }
 
         RecordRowWidth(widest);
@@ -586,10 +807,17 @@ public class TreeSurface : RowSurface
         var text = new StringBuilder();
         var overrides = new List<ValueSpan<TextRunProperties>>(runs.Count);
         List<(int, int, object)>? links = null;
+        List<TreeRun>? trailingRuns = null;
         foreach (var run in runs)
         {
             if (run.Text.Length == 0)
                 continue;
+
+            if (run.Style is TreeRunStyle.Note or TreeRunStyle.Chip or TreeRunStyle.Action)
+            {
+                (trailingRuns ??= new()).Add(run);
+                continue;
+            }
 
             var brush = runBrushes is not null && runBrushes.TryGetValue(run.Style, out var styled) ? styled : foreground;
             overrides.Add(new ValueSpan<TextRunProperties>(text.Length, run.Text.Length,
@@ -613,7 +841,38 @@ public class TreeSurface : RowSurface
             marker = new TextLayout(label, typeface, Math.Max(6, fontSize * 0.75), markerBrush);
         }
 
-        return new PaneLayout(layout, content, marker, links);
+        double textWidth = layout.WidthIncludingTrailingWhitespace;
+        var trailing = trailingRuns is null ? null : LayOutTrailing(trailingRuns, textWidth, fontSize, foreground);
+        double width = trailing is { Count: > 0 } ? trailing[^1].X + trailing[^1].Width : textWidth;
+        return new PaneLayout(layout, content, marker, links, trailing, width);
+    }
+
+    /// <summary>Lays the notes and chips after a pane's text out in a row, a gap after it.</summary>
+    private List<TrailingItem> LayOutTrailing(List<TreeRun> trailingRuns, double textWidth, double fontSize, IBrush foreground)
+    {
+        var typeface = new Typeface(ChipFontFamily ?? FontFamily);
+        double labelSize = Math.Max(6, fontSize - 1);
+        var items = new List<TrailingItem>(trailingRuns.Count);
+        double x = textWidth + TrailingGap;
+        foreach (var run in trailingRuns)
+        {
+            var brush = runBrushes is not null && runBrushes.TryGetValue(run.Style, out var styled) ? styled : foreground;
+            var label = new TextLayout(ControlGlyphs.ForDisplay(run.Text), typeface, labelSize, brush);
+            bool isChip = run.Style != TreeRunStyle.Note;
+            var swatch = isChip && run.Swatch is { } colour ? new ImmutableSolidColorBrush(colour) : null;
+            var icon = swatch is null && isChip && runIcons is not null && runIcons.ContainsKey(run.Icon) ? run.Icon : TreeRunIcon.None;
+            var affordance = isChip && run.Opens && runIcons is not null && runIcons.ContainsKey(TreeRunIcon.ChevronDown)
+                ? TreeRunIcon.ChevronDown
+                : TreeRunIcon.None;
+            double width = isChip
+                ? ChipPainter.WidthOf(label, icon != TreeRunIcon.None || swatch is not null, affordance != TreeRunIcon.None)
+                : label.WidthIncludingTrailingWhitespace;
+
+            items.Add(new TrailingItem(label, brush, run.Style, icon, swatch, x, width, run.Link, affordance));
+            x += width + TrailingSpacing;
+        }
+
+        return items;
     }
 
     /// <summary>What the row says, every pane's text in order.</summary>
@@ -751,35 +1010,227 @@ public class TreeSurface : RowSurface
             context.DrawRectangle(wash, null, new RoundedRect(new Rect(arrowX, y + 1, Math.Max(0, paneRight - arrowX), RowHeight - 2), 4));
         }
 
+        if (ShowIndentGuides && GuideBrush is { } guideBrush)
+            DrawGuides(context, guideBrush, index, pane, y);
+
         if (laid.Marker is { } marker)
             marker.Draw(context, new Point(arrowX - 2 - marker.WidthIncludingTrailingWhitespace, CentreInRow(marker, y)));
 
         if (DrawsArrow(row, laid))
-        {
-            var shape = row.IsExpanded ? ExpandedArrowShape : CollapsedArrowShape;
-            var at = Matrix.CreateTranslation(arrowX + (ToggleWidth - ArrowSize) / 2, y + (RowHeight - ArrowSize) / 2);
-            using (context.PushTransform(at))
-                context.DrawGeometry(foreground, null, shape);
-        }
+            DrawExpander(context, row, pane, arrowX, y, foreground);
 
         double textTop = CentreInRow(laid.Layout, y);
         double textX = arrowX + ToggleWidth;
-        DrawHighlights(context, laid.Layout, laid.Text, textX, textTop);
+        int current = pane == 0 && currentMatch is { } match && match.RowKey == row.Key ? match.Occurrence : -1;
+        DrawHighlights(context, laid.Layout, laid.Text, textX, textTop, y, current);
         laid.Layout.Draw(context, new Point(textX, textTop));
+        if (underlinedLink is { } underline && underline.RowKey == row.Key && underline.Pane == pane)
+        {
+            foreach (var rect in laid.Layout.HitTestTextRange(underline.Start, underline.Length))
+                context.FillRectangle(foreground, new Rect(textX + rect.X, textTop + rect.Bottom - 1, rect.Width, 1));
+        }
+        if (current >= 0)
+            DrawCurrentMatch(context, laid.Layout, laid.Text, textX, textTop, y, current);
+
+        if (laid.Trailing is { } trailing)
+        {
+            double shift = TrailingShift(laid, textX, paneRight);
+            if (shift < 0)
+                MaskUnderPinned(context, row, textX + shift + trailing[0].X - TrailingGap, paneRight, y);
+            DrawTrailing(context, row, trailing, textX + shift, y);
+        }
     }
 
-    private void DrawHighlights(DrawingContext context, TextLayout layout, string text, double x, double y)
+    /// <summary>
+    /// How far a pane's trailing items move left so they end inside it. A row whose text runs past
+    /// the edge - a value cut at the display cap - keeps its size note and its actions in view,
+    /// over the end of the text, rather than out where only panning would find them.
+    /// </summary>
+    private static double TrailingShift(PaneLayout laid, double textX, double paneRight)
     {
-        if (HighlightBrush is not { } brush || SearchTextSplitter.Split(text, highlightTerm) is not { } segments)
+        if (laid.Trailing is not { Count: > 0 } trailing)
+            return 0;
+
+        double overflow = textX + laid.Width + TrailingPinMargin - paneRight;
+        return overflow <= 0 ? 0 : -Math.Min(overflow, trailing[0].X);
+    }
+
+    /// <summary>Covers the text pinned trailing items sit over, in whatever the row shows behind
+    /// its text, so the two do not draw through each other.</summary>
+    private void MaskUnderPinned(DrawingContext context, in TreeRow row, double left, double paneRight, double y)
+    {
+        var area = new Rect(left, y, Math.Max(0, paneRight - left), RowHeight);
+        if (Background is { } background)
+            context.FillRectangle(background, area);
+        if (SelectionBrush is { } selected && selection is { } cursor && row.Key == cursor.Current.Key)
+            context.FillRectangle(selected, area);
+    }
+
+    /// <summary>A row's share of its indent guides: a line through it below each open ancestor's
+    /// expander.</summary>
+    private void DrawGuides(DrawingContext context, IBrush brush, int index, int pane, double y)
+    {
+        var (start, count) = guideSpans[index];
+        for (int i = start; i < start + count; i++)
+            context.FillRectangle(brush, new Rect(GuideX(guideAncestors[i], pane), y, 1, RowHeight));
+    }
+
+    /// <summary>Where a guide runs: down the middle of the ancestor's expander, on a whole pixel.</summary>
+    private double GuideX((int Depth, double[] Inset) ancestor, int pane)
+        => Math.Floor(PaneLeft(pane) + ancestor.Depth * IndentWidth + ancestor.Inset[pane] - Pan + ToggleWidth / 2);
+
+    /// <summary>The chevron, faint at rest, stronger on the hovered row and strongest under the
+    /// pointer, where a patch behind it shows how far its click target reaches.</summary>
+    private void DrawExpander(DrawingContext context, in TreeRow row, int pane, double arrowX, double y, IBrush foreground)
+    {
+        bool isHovered = row.Key == hoveredKey;
+        bool isHot = isHovered && pane == hoveredExpanderPane;
+        double centreX = arrowX + ToggleWidth / 2;
+        double centreY = y + RowHeight / 2;
+
+        if (isHot && ChipBackground is { } patch)
+        {
+            var area = new Rect(centreX - ExpanderPatchSize / 2, centreY - ExpanderPatchSize / 2, ExpanderPatchSize, ExpanderPatchSize);
+            context.DrawRectangle(patch, null, new RoundedRect(area, ChipPainter.Radius));
+        }
+
+        var brush = isHot ? foreground
+            : isHovered ? ExpanderRowHoverBrush ?? ExpanderBrush ?? foreground
+            : ExpanderBrush ?? foreground;
+
+        double scale = ExpanderSize / 24;
+        var at = Matrix.CreateTranslation(-12, -12)
+            * Matrix.CreateRotation(ExpanderTurn(row) * Math.PI / 180)
+            * Matrix.CreateScale(scale, scale)
+            * Matrix.CreateTranslation(centreX, centreY);
+        using (context.PushTransform(at))
+            context.DrawGeometry(null, ExpanderPen(brush), ExpanderShape);
+    }
+
+    private Pen ExpanderPen(IBrush brush)
+    {
+        if (!expanderPens.TryGetValue(brush, out var pen))
+            expanderPens[brush] = pen = new Pen(brush, ExpanderStroke, lineCap: PenLineCap.Round, lineJoin: PenLineJoin.Round);
+        return pen;
+    }
+
+    /// <summary>The angle a row's chevron is drawn at, in degrees: 0 pointing right, 90 down,
+    /// and between the two while it turns.</summary>
+    private double ExpanderTurn(in TreeRow row)
+    {
+        double rest = row.IsExpanded ? 90 : 0;
+        if (row.Key != turningKey)
+            return rest;
+
+        double t = Math.Min(1, Stopwatch.GetElapsedTime(turnStarted) / ExpanderTurnDuration);
+        double eased = 1 - Math.Pow(1 - t, 3);
+        return turnFrom + (rest - turnFrom) * eased;
+    }
+
+    /// <summary>Turns a row's chevron from where it is now, ahead of the row toggling. Only that
+    /// row moves: the rows it opens or closes appear and go at once.</summary>
+    private void StartTurn(in TreeRow row)
+    {
+        if (row.Shape != TreeRowShape.Open)
             return;
 
+        turnFrom = ExpanderTurn(row);
+        turningKey = row.Key;
+        turnStarted = Stopwatch.GetTimestamp();
+        RequestTurnFrame();
+    }
+
+    /// <summary>Frames rather than a timer, as the raw view's arrival flash: the turn redraws in
+    /// step with the display, and asks for nothing once it is over.</summary>
+    private void RequestTurnFrame() => TopLevel.GetTopLevel(this)?.RequestAnimationFrame(_ =>
+    {
+        if (turningKey is null)
+            return;
+
+        if (Stopwatch.GetElapsedTime(turnStarted) >= ExpanderTurnDuration)
+            turningKey = null;
+        else
+            RequestTurnFrame();
+
+        InvalidateVisual();
+    });
+
+    /// <summary>The expander's click target in a pane: its column, and the indent before it up
+    /// to a marker, whose label sits just left of the column.</summary>
+    private static bool IsOnExpander(PaneLayout laid, double arrowX, double x)
+        => x >= arrowX - (laid.Marker is null ? ExpanderReach : 2) && x < arrowX + ToggleWidth;
+
+    /// <summary>The notes and chips after a pane's text; actions only where they show.</summary>
+    private void DrawTrailing(DrawingContext context, in TreeRow row, List<TrailingItem> trailing, double textX, double y)
+    {
+        bool showsActions = ShowsActions(row);
+        bool isHovered = row.Key == hoveredKey;
+        for (int i = 0; i < trailing.Count; i++)
+        {
+            var item = trailing[i];
+            if (item.Style == TreeRunStyle.Action && !showsActions)
+                continue;
+
+            double labelX = textX + item.X;
+            if (item.IsChip)
+            {
+                bool isHot = isHovered && i == hoveredItem && item.Link is not null;
+                var fill = isHot ? ChipHoverBackground ?? ChipBackground : ChipBackground;
+                var glyph = item.Icon != TreeRunIcon.None && runIcons!.TryGetValue(item.Icon, out var found) ? found : null;
+                var affordanceGlyph = item.Affordance != TreeRunIcon.None ? runIcons![item.Affordance] : null;
+                chips.Draw(context, labelX, y, item.Width, item.Label, item.Brush, fill, glyph, item.Swatch, affordanceGlyph);
+                continue;
+            }
+
+            item.Label.Draw(context, new Point(labelX, CentreInRow(item.Label, y)));
+        }
+    }
+
+    /// <summary>Whether a row shows its actions: the row under the pointer, and the selected one -
+    /// so a row picked from the keyboard offers them too.</summary>
+    private bool ShowsActions(in TreeRow row)
+        => row.Key == hoveredKey || (selection is { } selected && row.Key == selected.Current.Key);
+
+    /// <summary>A pill behind each find match in a row's text; the current one is drawn over
+    /// the text afterwards, by <see cref="DrawCurrentMatch"/>.</summary>
+    private void DrawHighlights(DrawingContext context, TextLayout layout, string text, double x, double textTop, double rowTop, int current)
+    {
+        if (SearchTextSplitter.Split(text, highlightTerm) is not { } segments)
+            return;
+
+        int occurrence = 0;
         foreach (var segment in segments)
         {
             if (!segment.IsMatch)
                 continue;
 
+            bool isCurrent = occurrence++ == current;
             foreach (var rect in layout.HitTestTextRange(segment.Start, segment.Length))
-                context.FillRectangle(brush, rect.Translate(new Vector(x, y)));
+            {
+                var at = rect.Translate(new Vector(x, textTop));
+                if (isCurrent)
+                    DrawCurrentMatchPill(context, at, rowTop, text.Substring(segment.Start, segment.Length), overText: false);
+                else
+                    DrawMatchPill(context, at, rowTop);
+            }
+        }
+    }
+
+    /// <summary>The current match, over the row's text.</summary>
+    private void DrawCurrentMatch(DrawingContext context, TextLayout layout, string text, double x, double textTop, double rowTop, int current)
+    {
+        if (SearchTextSplitter.Split(text, highlightTerm) is not { } segments)
+            return;
+
+        int occurrence = 0;
+        foreach (var segment in segments)
+        {
+            if (!segment.IsMatch || occurrence++ != current)
+                continue;
+
+            foreach (var rect in layout.HitTestTextRange(segment.Start, segment.Length))
+                DrawCurrentMatchPill(context, rect.Translate(new Vector(x, textTop)), rowTop, text.Substring(segment.Start, segment.Length), overText: true);
+            return;
         }
     }
 
@@ -932,17 +1383,24 @@ public class TreeSurface : RowSurface
         var laid = LayoutFor(row, new Typeface(FontFamily), FontSize).Panes[pane];
         double arrowX = ArrowLeft(index, pane);
 
-        if (LinkAt(laid, point.X - arrowX - ToggleWidth, point.Y - CentreInRow(laid.Layout, index * RowHeight - anchorPixel)) is { } link)
+        double shift = TrailingShift(laid, arrowX + ToggleWidth, PaneLeft(pane) + PaneWidth);
+        double textX = arrowX + ToggleWidth;
+        if (LinkAt(laid, point.X - textX, point.Y - CentreInRow(laid.Layout, index * RowHeight - anchorPixel), shift,
+                IsCommandHeld(e.KeyModifiers)) is { } link)
         {
+            double rowTop = index * RowHeight - anchorPixel;
+            var bounds = TrailingAt(laid, point.X - textX, shift) is var item and >= 0
+                ? new Rect(textX + shift + laid.Trailing![item].X, ChipPainter.TopIn(rowTop), laid.Trailing[item].Width, ChipPainter.Height)
+                : new Rect(point.X, rowTop, 0, RowHeight);
             Select(row);
-            LinkClicked?.Invoke(this, new TreeLinkClickedEventArgs(row, link));
+            LinkClicked?.Invoke(this, new TreeLinkClickedEventArgs(row, link, bounds));
             e.Handled = true;
             return;
         }
 
         Select(row);
 
-        bool onArrow = DrawsArrow(row, laid) && point.X >= arrowX && point.X < arrowX + ToggleWidth;
+        bool onArrow = DrawsArrow(row, laid) && IsOnExpander(laid, arrowX, point.X);
         if (row.Shape == TreeRowShape.Open && (onArrow || e.ClickCount == 2))
         {
             if ((e.KeyModifiers & KeyModifiers.Alt) != 0)
@@ -966,17 +1424,63 @@ public class TreeSurface : RowSurface
             return;
         }
 
+        lastPointer = point;
+        UpdateHover(point, e.KeyModifiers);
+        UpdateToolTip(point);
+    }
+
+    /// <summary>
+    /// What the pointer is over: the hovered row and chip, the expander, and - with the command
+    /// modifier held - a link in the row's text, underlined to show it will open. Also run when a
+    /// modifier is pressed or let go, so the link shows without the pointer moving.
+    /// </summary>
+    private void UpdateHover(Point point, KeyModifiers modifiers)
+    {
         bool overEdge = GutterEdgeAt(point.X) is not null;
         int pane = PaneAt(point.X);
-        bool overLink = !overEdge && RowAt(point.Y) is { } hovered
-            && LayoutFor(hovered.Row, new Typeface(FontFamily), FontSize).Panes[pane] is var laid
-            && LinkAt(laid, point.X - ArrowLeft(hovered.Index, pane) - ToggleWidth,
-                point.Y - CentreInRow(laid.Layout, hovered.Index * RowHeight - anchorPixel)) is not null;
+        bool overLink = false;
+        UnderlinedLink? underline = null;
+        if (!overEdge && document is not null && RowAt(point.Y) is { } hovered)
+        {
+            var laid = LayoutFor(hovered.Row, new Typeface(FontFamily), FontSize).Panes[pane];
+            double arrowX = ArrowLeft(hovered.Index, pane);
+            double textX = arrowX + ToggleWidth;
+            double x = point.X - textX;
+            double y = point.Y - CentreInRow(laid.Layout, hovered.Index * RowHeight - anchorPixel);
+            double shift = TrailingShift(laid, textX, PaneLeft(pane) + PaneWidth);
+            int trailing = TrailingAt(laid, x, shift);
+            if (trailing < 0 && IsCommandHeld(modifiers) && TextLinkAt(laid, x, y, shift) is { } textLink)
+                underline = new UnderlinedLink(hovered.Row.Key, pane, textLink.Start, textLink.Length);
+            overLink = (trailing >= 0 && laid.Trailing![trailing].Link is not null) || underline is not null;
+            bool overExpander = DrawsArrow(hovered.Row, laid) && IsOnExpander(laid, arrowX, point.X);
+            SetHover(hovered.Row.Key, trailing, overExpander ? pane : -1);
+        }
+        else
+        {
+            SetHover(null, -1, -1);
+        }
+
+        if (underline != underlinedLink)
+        {
+            underlinedLink = underline;
+            InvalidateVisual();
+        }
+
         Cursor = overEdge ? new Cursor(StandardCursorType.SizeWestEast)
             : overLink ? new Cursor(StandardCursorType.Hand)
             : null;
+    }
 
-        UpdateToolTip(point);
+    /// <summary>Whether the platform's command modifier is held - Cmd on macOS, Ctrl elsewhere -
+    /// which is what makes a link in a row's text open rather than select the row.</summary>
+    private static bool IsCommandHeld(KeyModifiers modifiers)
+        => (modifiers & (OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control)) != 0;
+
+    protected override void OnKeyUp(KeyEventArgs e)
+    {
+        base.OnKeyUp(e);
+        if (lastPointer is { } point)
+            UpdateHover(point, e.KeyModifiers);
     }
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
@@ -995,6 +1499,13 @@ public class TreeSurface : RowSurface
     {
         base.OnPointerExited(e);
         SetToolTip(null);
+        SetHover(null, -1, -1);
+        lastPointer = null;
+        if (underlinedLink is not null)
+        {
+            underlinedLink = null;
+            InvalidateVisual();
+        }
     }
 
     private (TreeRow Row, int Index)? RowAt(double y)
@@ -1023,20 +1534,65 @@ public class TreeSurface : RowSurface
         return null;
     }
 
-    /// <summary>The link under a point given in the row text's own coordinates.</summary>
-    private static object? LinkAt(PaneLayout laid, double x, double y)
+    /// <summary>The link under a point given in the row text's own coordinates, with the
+    /// trailing items moved by <paramref name="trailingShift"/> (see <see cref="TrailingShift"/>).</summary>
+    /// <summary>The link under a point given from the row text's start: a chip's, or with the
+    /// command modifier held, one in the row's text - a plain click on the text selects the row,
+    /// which is what clicking a row is for.</summary>
+    private static object? LinkAt(PaneLayout laid, double x, double y, double trailingShift, bool commandHeld)
     {
+        if (TrailingAt(laid, x, trailingShift) is var item and >= 0)
+            return laid.Trailing![item].Link;
+
+        return commandHeld ? TextLinkAt(laid, x, y, trailingShift)?.Link : null;
+    }
+
+    /// <summary>The link in the row's own text under a point, and the characters it covers.</summary>
+    private static (int Start, int Length, object Link)? TextLinkAt(PaneLayout laid, double x, double y, double trailingShift)
+    {
+        // Text covered by pinned trailing items is not there to click.
+        if (trailingShift < 0 && x >= laid.Trailing![0].X + trailingShift - TrailingGap)
+            return null;
+
         if (laid.Links is null || x < 0 || x > laid.Layout.WidthIncludingTrailingWhitespace)
             return null;
 
         int position = laid.Layout.HitTestPoint(new Point(x, Math.Clamp(y, 0, laid.Layout.Height - 1))).TextPosition;
-        foreach (var (start, length, link) in laid.Links)
+        foreach (var textLink in laid.Links)
         {
-            if (position >= start && position < start + length)
-                return link;
+            if (position >= textLink.Start && position < textLink.Start + textLink.Length)
+                return textLink;
         }
 
         return null;
+    }
+
+    /// <summary>The trailing item under an x given from the row text's start, or -1. An action is
+    /// hit whether or not it is drawn: the pointer being there makes its row the hovered one.</summary>
+    private static int TrailingAt(PaneLayout laid, double x, double trailingShift)
+    {
+        if (laid.Trailing is not { } trailing)
+            return -1;
+
+        x -= trailingShift;
+        for (int i = 0; i < trailing.Count; i++)
+        {
+            if (x >= trailing[i].X && x < trailing[i].X + trailing[i].Width)
+                return i;
+        }
+
+        return -1;
+    }
+
+    private void SetHover((long, bool)? key, int item, int expanderPane)
+    {
+        if (key == hoveredKey && item == hoveredItem && expanderPane == hoveredExpanderPane)
+            return;
+
+        hoveredKey = key;
+        hoveredItem = item;
+        hoveredExpanderPane = expanderPane;
+        InvalidateVisual();
     }
 
     /// <summary>Shows the tooltip of the gutter cell under the pointer, or none.</summary>
@@ -1109,6 +1665,7 @@ public class TreeSurface : RowSurface
         if (document is null || row.Shape == TreeRowShape.Leaf)
             return;
 
+        StartTurn(row);
         if (row.IsExpanded || row.Shape == TreeRowShape.Close)
             document.CollapseDeep(row);
         else if (!document.ExpandDeep(row, DeepExpandRowBudget))
@@ -1130,6 +1687,8 @@ public class TreeSurface : RowSurface
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
+        if (lastPointer is { } pointer)
+            UpdateHover(pointer, e.KeyModifiers);
         if (document is null || anchor is null || e.Handled)
             return;
 

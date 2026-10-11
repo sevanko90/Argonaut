@@ -42,6 +42,24 @@ public class FileTypeDetectorTests
     [InlineData("  \n\t {\"a\":1}")]
     public void SingleLineContainer_IsJson(string content) => Assert.Equal(FileTypeDetector.FileKind.Json, Detect(content));
 
+    [Theory]
+    [InlineData("[\n  {\"a\": 1}\n]\n")]
+    [InlineData("[\"a\", \"b\"]\n")]
+    [InlineData("[ -1, 2 ]\n")]
+    [InlineData("[]\n")]
+    [InlineData("[true, false]\n")]
+    [InlineData("[null]\n")]
+    [InlineData("[\n\n  [1]\n]")]
+    public void AnArrayOfAnyValue_IsJson(string content) => Assert.Equal(FileTypeDetector.FileKind.Json, Detect(content));
+
+    /// <summary>An INI or TOML section header opens with a bracket too, but a name follows it.</summary>
+    [Theory]
+    [InlineData("[service]\nname = orders\n")]
+    [InlineData("[nullable]\nenabled = true\n")]
+    [InlineData("[truth]\nx = 1\n")]
+    [InlineData("[ section ]\nkey=value\n")]
+    public void ASectionHeader_IsNotJson(string content) => Assert.Equal(FileTypeDetector.FileKind.Unidentified, Detect(content));
+
     [Fact]
     public void MultiLinePrettyPrintedObject_IsJson()
         => Assert.Equal(FileTypeDetector.FileKind.Json, Detect("{\n  \"a\": 1,\n  \"b\": 2\n}\n"));

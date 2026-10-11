@@ -8,7 +8,8 @@
     string/number/bool/array-of-string/array-of-number/array-of-object properties, an "i18n"
     object of non-ASCII keys and values (scripts, emoji, combining marks, invisible characters,
     U+2028 and JSON unicode escapes), a
-    JS-epoch-ms "date" property, and a 4-object-deep nested hierarchy - for baseline
+    JS-epoch-ms "date" property, a "hints" object of values the tree's value hints recognise
+    (and near misses they must not), and a 4-object-deep nested hierarchy - for baseline
     valid-file rendering. Object[1] (the second object) carries a single ~10MB string
     property to exercise overflow rendering for a pathologically long value.
   - geojson-sample-25mb.json: ~25MB GeoJSON FeatureCollection (RFC 7946) - the companion
@@ -27,7 +28,11 @@
     comment style, `=` and `: ` separators, quoted values, numbers, keywords, inline comments,
     and values that hold a colon or a `#` without either meaning anything (URLs, Windows paths,
     times). Every 50th section carries one ~20KB value, a single line long enough to wrap past
-    the colouring lookback.
+    the colouring lookback. Every section also carries values the raw view hints - a colour, an
+    address, a JWT, a cron schedule, an ISO date - and every 10th a Base64 picture, plus near
+    misses that must stay plain.
+  - config-sample.yaml: ~1MB YAML of services for the same colouring and hints in YAML's shape -
+    nested mappings, lists, quoted and bare scalars, block scalars and comments.
 
   - huge-sample-<N>gb.ndjson: 100GB of NDJSON by default (size set by --huge-gb), far past any laptop's
     RAM, for stress-testing indexing, scrolling, search and memory use on a file that cannot be
@@ -35,11 +40,11 @@
     unique to find; their byte offsets are printed. Only ever written when --huge is passed, never
     by a bare run, and refused when the disk would be left with less than 10GB free.
 
-Run with no arguments to generate the first five. Pass --corrupt, --valid, --geojson, --wide or
---ini to generate just one, or --huge for the 100GB file - the 4GB corrupt file takes minutes, so the others alone are handy for
+Run with no arguments to generate the first five. Pass --corrupt, --valid, --geojson, --wide,
+--ini or --yaml to generate just one, or --huge for the 100GB file - the 4GB corrupt file takes minutes, so the others alone are handy for
 quick UI iteration.
 """
-import argparse, math, os, random, shutil, time
+import argparse, base64, datetime, json, math, os, random, shutil, time
 
 OUT_DIR = os.path.expanduser("~/testData")
 CORRUPT_OUT = os.path.join(OUT_DIR, "corrupt-sample-4gb.json")
@@ -51,6 +56,8 @@ INI_OUT = os.path.join(OUT_DIR, "config-sample.ini")
 INI_SECTIONS = 2_000
 INI_LONG_VALUE_EVERY = 50
 INI_LONG_VALUE_CHARS = 20_000
+YAML_OUT = os.path.join(OUT_DIR, "config-sample.yaml")
+YAML_SERVICES = 1_500
 
 HUGE_DEFAULT_GB = 100
 HUGE_TEMPLATE_LINES = 40_000
@@ -199,12 +206,104 @@ def unicode_object(i):
     return "{" + ",".join(members) + "}"
 
 
+def _b64url(data):
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+
+def _jwt(claims):
+    """A JWT-shaped token: real base64url header and claims, and a signature that is only bytes -
+    nothing verifies it, and a hint only reads the first two parts."""
+    header = _b64url(json.dumps({"alg": "HS256", "typ": "JWT"}, separators=(",", ":")).encode())
+    payload = _b64url(json.dumps(claims, separators=(",", ":")).encode())
+    return f"{header}.{payload}.{_b64url(bytes(range(32)))}"
+
+
+def _png(width, height, pixel, level=9):
+    """A real PNG - RGBA, one filter byte per row - with pixel(x, y) giving each (r, g, b, a), so
+    a hint's card can show it, not just name it."""
+    import struct, zlib
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+    rows = b"".join(b"\x00" + b"".join(bytes(pixel(x, y)) for x in range(width)) for y in range(height))
+    header = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(rows, level)) + chunk(b"IEND", b"")
+
+
+def _icon_pixel(x, y):
+    """A 32x32 badge: a blue-to-green field with a white ring."""
+    d = ((x - 15.5) ** 2 + (y - 15.5) ** 2) ** 0.5
+    if 9 <= d <= 12:
+        return (255, 255, 255, 255)
+    return (37 + x * 2, 99 + y * 3, 235 - x * 3, 255 if d < 15.5 else 0)
+
+
+SMALL_PNG = _png(32, 32, _icon_pixel)
+# The first bytes of a gzip stream, which is all a Base64 hint looks at to say what the payload is;
+# the rest is filler of the right length.
+GZIP_HEADER = bytes([0x1F, 0x8B, 0x08, 0x00])
+HINT_LARGE_BASE64_OBJECT_INDEX = 2
+HINT_LARGE_BASE64_BYTES = 3 * 1024**2
+
+
+def hint_samples(i):
+    """Values for every kind of value hint, varied by i, plus near misses that must stay plain.
+    No random draws, so the seeded stream - and every other file - is unchanged. Dates are
+    relative to when the file is written, so "3 days ago" is true on the day it is made."""
+    now = datetime.datetime.fromtimestamp(NOW_MS / 1000, tz=datetime.timezone.utc).replace(microsecond=0)
+    zones = (datetime.timezone.utc, datetime.timezone(datetime.timedelta(hours=1)),
+             datetime.timezone(datetime.timedelta(hours=-5)), datetime.timezone(datetime.timedelta(hours=5, minutes=30)))
+    zone = zones[i % len(zones)]
+    past = (now - datetime.timedelta(days=3 + i, hours=i)).astimezone(zone)
+    future = (now + datetime.timedelta(days=30 * (i + 1))).astimezone(zone)
+
+    def iso(moment, millis=False):
+        text = moment.isoformat(timespec="milliseconds" if millis else "seconds")
+        return text.replace("+00:00", "Z")
+
+    exp = int((now + datetime.timedelta(hours=1 - 2 * (i % 2))).timestamp())  # odd items expired
+    colours = ("#1E90FF", "#ff8800", "#2E8B57CC", "rgb(255, 99, 71)", "hsl(210, 60%, 45%)")
+    crons = ("*/15 * * * *", "0 9 * * 1-5", "30 2 1 * *", "0 0 * * 0", "15 14 1 1 *")
+    embedded = json.dumps({"event": "order.created", "id": f"ord_{88000 + i}",
+                           "lines": [{"sku": f"A-{100 + i}", "qty": i % 4 + 1}], "paid": i % 2 == 0},
+                          separators=(",", ":"))
+    payload = SMALL_PNG if i % 2 == 0 else GZIP_HEADER + bytes((i * 7 + k) % 256 for k in range(96))
+    small_base64 = base64.b64encode(payload).decode()
+
+    members = {
+        "isoInstant": iso(past),
+        "isoInstantMillis": iso(past + datetime.timedelta(minutes=17), millis=True),
+        "isoFuture": iso(future),
+        "isoDate": future.date().isoformat(),
+        "isoLocalDateTime": past.replace(tzinfo=None).isoformat(sep=" ", timespec="minutes"),
+        "colour": colours[i % len(colours)],
+        "jwt": _jwt({"sub": f"user-{1000 + i}", "iat": exp - 3600, "exp": exp}),
+        "cron": crons[i % len(crons)],
+        "jsonInString": embedded,
+        "base64": small_base64,
+        "url": ("https://example.com/orders", f"https://shop.example.co.uk/basket?item={i}&ref=email#pay",
+                "mailto:support@example.com?subject=Order%20" + str(88000 + i))[i % 3],
+        "urlMisleading": "https://good.example.com@evil.example.net/login",
+        "urlUnsafe": "javascript:alert(1)",
+        "urlInText": f"see https://example.com/help/{i} for details",
+        "notADate": "2026-02-30",
+        "notAColour": ("#12345", "#f80", "#123")[i % 3],
+        "notJson": "{ looks like json, but is not }",
+        "notBase64": "Zm9v!YmFy",
+    }
+    if i == HINT_LARGE_BASE64_OBJECT_INDEX:
+        # Stored rather than compressed, so the picture is as big as the payload it stands for.
+        side = int((HINT_LARGE_BASE64_BYTES / 4) ** 0.5)
+        members["base64Large"] = base64.b64encode(
+            _png(side, side, lambda x, y: (x % 256, y % 256, (x ^ y) % 256, 255), level=0)).decode()
+    return json.dumps(members, ensure_ascii=False, separators=(",", ":"))
+
+
 def render_object(i, fields, extra_key, extra_val):
     name, value, active, date_ms, tags, numbers, objects, nested = fields
     return (
         f'{{"id":{i},"name":"{name}","value":{value},"active":{active},"date":{date_ms},'
         f'"tags":[{tags}],"numbers":[{numbers}],"objects":[{objects}],'
-        f'"nested":{nested},"i18n":{unicode_object(i)},'
+        f'"nested":{nested},"i18n":{unicode_object(i)},"hints":{hint_samples(i)},'
         f'"{extra_key}":{extra_val}}}'
     )
 
@@ -485,6 +584,8 @@ def make_ini_sample():
             f.write(f"  indented_key   =   padded value   ; trailing comment\n")
             f.write(f"empty =\n")
             f.write(f"a line with no separator at all\n")
+            for line in config_hint_lines(i, "ini"):
+                f.write(line + "\n")
             if i % INI_LONG_VALUE_EVERY == 0:
                 # One long line: rows past the colouring lookback show plain until the next line.
                 filler = ",".join(f"item{n}" for n in range(INI_LONG_VALUE_CHARS // 8))
@@ -496,6 +597,60 @@ def make_ini_sample():
 
     size = os.path.getsize(INI_OUT)
     print(f"DONE: ini sample ~{size / 1024**2:.1f} MiB, {INI_SECTIONS:,} sections -> {INI_OUT}  "
+          f"({time.time() - start:.1f}s)", flush=True)
+
+
+def config_hint_lines(i, style):
+    """Config pairs whose values the raw view hints, varied by i, and near misses that must stay
+    plain. INI writes key = value, YAML key: value. A bare #colour is a comment in both, so
+    colours are quoted or written as rgb()."""
+    sep = " = " if style == "ini" else ": "
+    now_s = NOW_MS // 1000
+    colours = ('"#1E90FF"', "rgb(255, 99, 71)", '"#2E8B57CC"', "hsl(210, 60%, 45%)", '"#ff8800"')
+    crons = ('"*/15 * * * *"', '"0 9 * * 1-5"', '"30 2 1 * *"')
+    released = datetime.datetime.fromtimestamp(now_s - 86_400 * (i % 400 + 1), tz=datetime.timezone.utc)
+    lines = [
+        f"colour{sep}{colours[i % len(colours)]}",
+        f"homepage{sep}https://example.com/services/{i}",
+        f"support{sep}mailto:support+{i}@example.com",
+        f"token{sep}{_jwt({'sub': f'svc-{i}', 'exp': now_s + 3600 * (i % 48 - 24)})}",
+        f"schedule{sep}{crons[i % len(crons)]}",
+        f"released{sep}{released.isoformat().replace('+00:00', 'Z')}",
+        f"not_a_colour{sep}\"#12345\"",
+        f"not_a_date{sep}2026-02-30",
+        f"not_a_url{sep}javascript:alert({i})",
+    ]
+    if i % 10 == 0:
+        lines.append(f"logo{sep}{base64.b64encode(SMALL_PNG).decode()}")
+    return lines
+
+
+def make_yaml_sample():
+    """Deterministic - no random draws - so it never shifts the other files' seeded stream.
+
+    A list of services, each the same set of YAML shapes - nested mappings, lists, quoted and bare
+    scalars, a block scalar, comments - with the values the raw view hints among them."""
+    start = time.time()
+    with open(YAML_OUT, "w", buffering=1024 * 1024) as f:
+        f.write("# Argonaut YAML sample - generated by scripts/make-test-json.py --yaml\n")
+        f.write("---\nversion: 2\nservices:\n")
+        for i in range(YAML_SERVICES):
+            f.write(f"  - name: service-{i}  # a trailing comment\n")
+            f.write(f"    port: {8000 + i}\n")
+            f.write(f"    enabled: {'true' if i % 2 else 'false'}\n")
+            f.write(f"    title: 'Service {i}: single quoted, with a colon'\n")
+            for line in config_hint_lines(i, "yaml"):
+                f.write(f"    {line}\n")
+            f.write("    tags:\n")
+            f.write(f"      - tier-{i % 3}\n      - region-{('eu', 'us', 'ap')[i % 3]}\n")
+            f.write("    description: |\n")
+            f.write(f"      Block scalar body for service {i}; see https://example.com/docs/{i}\n")
+            f.write("      key: value lines in here are body text, not pairs\n")
+            f.write("    limits: {cpu: 2, memory: 512Mi}\n")
+        f.write("...\n")
+
+    size = os.path.getsize(YAML_OUT)
+    print(f"DONE: yaml sample ~{size / 1024**2:.1f} MiB, {YAML_SERVICES:,} services -> {YAML_OUT}  "
           f"({time.time() - start:.1f}s)", flush=True)
 
 
@@ -585,6 +740,7 @@ def main():
     parser.add_argument("--geojson", action="store_true", help="generate only the 25MB GeoJSON file")
     parser.add_argument("--wide", action="store_true", help="generate only the ~130MB million-key object file")
     parser.add_argument("--ini", action="store_true", help="generate only the ~2MB INI config file")
+    parser.add_argument("--yaml", action="store_true", help="generate only the ~1MB YAML config file")
     parser.add_argument("--huge", action="store_true",
                         help="generate the 100GB NDJSON stress file (never part of a bare run)")
     parser.add_argument("--huge-gb", type=float, default=HUGE_DEFAULT_GB, metavar="GB",
@@ -594,10 +750,10 @@ def main():
     if args.huge:
         os.makedirs(OUT_DIR, exist_ok=True)
         make_huge_ndjson(args.huge_gb)
-        if not (args.corrupt or args.valid or args.geojson or args.wide or args.ini):
+        if not (args.corrupt or args.valid or args.geojson or args.wide or args.ini or args.yaml):
             return
 
-    everything = not (args.corrupt or args.valid or args.geojson or args.wide or args.ini)
+    everything = not (args.corrupt or args.valid or args.geojson or args.wide or args.ini or args.yaml)
 
     os.makedirs(OUT_DIR, exist_ok=True)
     if args.valid or everything:
@@ -612,6 +768,8 @@ def main():
         make_wide_object_sample()
     if args.ini or everything:
         make_ini_sample()
+    if args.yaml or everything:
+        make_yaml_sample()
 
 
 if __name__ == "__main__":

@@ -31,6 +31,9 @@ public sealed class TreeSurfaceTests
         Dispatcher.UIThread.RunJobs();
     }
 
+    /// <summary>The modifier that makes a link in a row's text open: Cmd on macOS, Ctrl elsewhere.</summary>
+    private static RawInputModifiers Command => OperatingSystem.IsMacOS() ? RawInputModifiers.Meta : RawInputModifiers.Control;
+
     private static void Press(Window window, Key key) => window.KeyPress(key, RawInputModifiers.None, PhysicalKey.None, string.Empty);
 
     private sealed record Harness(Window Window, TreeSurface Surface, byte[] Bytes, List<TreeRow> Rows, TreeDocument Document);
@@ -217,6 +220,54 @@ public sealed class TreeSurfaceTests
         Assert.True(previous < h.Rows.Count - FullRows - 20);
     });
 
+    /// <summary>
+    /// The reported bounce: a trackpad scrolling on past the end let the view drift up to a row's
+    /// height past the last row, then snapped it back a whole row, over and over. At the end the
+    /// last row sits on the bottom edge and further steps down change nothing.
+    /// </summary>
+    [Fact]
+    public Task ScrollingDownPastTheEndStaysPut() => WithSurface(defaultDepth: 9, async h =>
+    {
+        h.Surface.ScrollToEnd();
+        await PumpAsync();
+        var top = h.Surface.RealizedRows[0].Key;
+        double pixel = h.Surface.AnchorPixel;
+        Assert.Equal(h.Rows[^1].Key, h.Surface.RealizedRows[^1].Key);
+        Assert.Equal(h.Surface.Bounds.Height, h.Surface.RealizedRows.Count * RowSurface.RowHeight - pixel, 3);
+
+        for (int step = 0; step < 200; step++)
+        {
+            h.Surface.ScrollByPixels(3);
+            Assert.Equal(top, h.Surface.RealizedRows[0].Key);
+            Assert.Equal(pixel, h.Surface.AnchorPixel, 3);
+            Assert.True(h.Surface.ShowsEnd);
+        }
+
+        await PumpAsync();
+    });
+
+    /// <summary>Coming down to the end in small steps, the view only ever moves down, and stops.</summary>
+    [Fact]
+    public Task ScrollingDownSlowlyToTheEndNeverSnapsBack() => WithSurface(defaultDepth: 9, async h =>
+    {
+        h.Surface.ScrollToEnd();
+        h.Surface.ScrollByPixels(-5 * RowSurface.RowHeight);
+        await PumpAsync();
+
+        double previous = double.MinValue;
+        for (int step = 0; step < 200; step++)
+        {
+            h.Surface.ScrollByPixels(3);
+            int topIndex = h.Rows.FindIndex(r => r.Key == h.Surface.RealizedRows[0].Key);
+            double position = topIndex * RowSurface.RowHeight + h.Surface.AnchorPixel;
+            Assert.True(position >= previous - 0.001, $"step {step}: moved back from {previous} to {position}");
+            previous = position;
+        }
+
+        Assert.True(h.Surface.ShowsEnd);
+        await PumpAsync();
+    });
+
     [Fact]
     public Task KeyboardMovesTheSelectionAndKeepsItOnScreen() => WithSurface(defaultDepth: 9, async h =>
     {
@@ -316,6 +367,54 @@ public sealed class TreeSurfaceTests
     });
 
     [Fact]
+    public Task ClickingTheIndentJustBeforeTheArrowToggles() => WithSurface(defaultDepth: 9, async h =>
+    {
+        var rows = h.Surface.RealizedRows.ToList();
+        int index = rows.FindIndex(r => r is { Shape: TreeRowShape.Open, IsExpanded: true, Depth: > 0 });
+        var point = h.Surface.TranslatePoint(
+            new Point(h.Surface.ArrowX(index) - TreeSurface.ExpanderReach + 1, index * RowSurface.RowHeight + RowSurface.RowHeight / 2), h.Window)!.Value;
+
+        h.Window.MouseDown(point, MouseButton.Left);
+        h.Window.MouseUp(point, MouseButton.Left);
+        await PumpAsync();
+
+        Assert.False(h.Surface.RealizedRows[index].IsExpanded);
+    });
+
+    [Fact]
+    public Task AToggledExpanderTurnsFromWhereItWas() => WithSurface(defaultDepth: 9, h =>
+    {
+        Assert.Equal(90, h.Surface.ExpanderTurnAt(0));
+
+        h.Surface.Toggle(h.Surface.RealizedRows[0]);
+        Assert.True(h.Surface.IsExpanderTurning);
+        Assert.InRange(h.Surface.ExpanderTurnAt(0), 0, 90);
+
+        h.Surface.EndExpanderTurn();
+        Assert.Equal(0, h.Surface.ExpanderTurnAt(0));
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task IndentGuidesRunDownFromEachOpenAncestorsArrow() => WithSurface(defaultDepth: 9, h =>
+    {
+        var rows = h.Surface.RealizedRows.ToList();
+        int index = rows.FindIndex(r => r.Depth >= 2 && r.Shape != TreeRowShape.Close);
+        Assert.Empty(h.Surface.IndentGuideXs(index));
+
+        h.Surface.ShowIndentGuides = true;
+        var expected = new List<double>();
+        for (int depth = 0; depth < rows[index].Depth; depth++)
+        {
+            int ancestor = rows.FindLastIndex(index, r => r.Depth == depth && r.Shape == TreeRowShape.Open);
+            expected.Add(Math.Floor(h.Surface.ArrowX(ancestor) + TreeSurface.ToggleWidth / 2));
+        }
+
+        Assert.Equal(expected, h.Surface.IndentGuideXs(index));
+        return Task.CompletedTask;
+    });
+
+    [Fact]
     public Task AssistiveTechnologySeesATreeNamedByItsSelection() => WithSurface(defaultDepth: 9, h =>
     {
         var peer = ControlAutomationPeer.CreatePeerForElement(h.Surface);
@@ -407,8 +506,8 @@ public sealed class TreeSurfaceTests
         Assert.True(bounds.X >= RightPaneLeft(h.Surface));
         var point = h.Surface.TranslatePoint(new Point(bounds.X + 4, bounds.Center.Y), h.Window)!.Value;
 
-        h.Window.MouseDown(point, MouseButton.Left);
-        h.Window.MouseUp(point, MouseButton.Left);
+        h.Window.MouseDown(point, MouseButton.Left, Command);
+        h.Window.MouseUp(point, MouseButton.Left, Command);
         await PumpAsync();
 
         Assert.Equal(leaf.Node.ValueStart, clicked?.Link);
@@ -483,7 +582,7 @@ public sealed class TreeSurfaceTests
     }, painter: bytes => new MarkedListsPainter(bytes));
 
     [Fact]
-    public Task ClickingALinkRaisesItInsteadOfToggling() => WithSurface(defaultDepth: 9, async h =>
+    public Task CommandClickingALinkInTheTextRaisesIt() => WithSurface(defaultDepth: 9, async h =>
     {
         int leafIndex = h.Surface.RealizedRows.ToList().FindIndex(r => r.Shape == TreeRowShape.Leaf);
         var leaf = h.Surface.RealizedRows[leafIndex];
@@ -495,14 +594,154 @@ public sealed class TreeSurfaceTests
         var point = bounds.Center;
         var translated = h.Surface.TranslatePoint(point, h.Window)!.Value;
 
-        h.Window.MouseDown(translated, MouseButton.Left);
-        h.Window.MouseUp(translated, MouseButton.Left);
+        h.Window.MouseDown(translated, MouseButton.Left, Command);
+        h.Window.MouseUp(translated, MouseButton.Left, Command);
         await PumpAsync();
 
         Assert.NotNull(clicked);
         Assert.Equal(leaf.Node.ValueStart, clicked!.Link);
         Assert.Equal(leaf.Key, h.Surface.SelectedRow!.Value.Key);
     }, painter: bytes => new LinkingPainter(bytes));
+
+    /// <summary>Clicking a row is how it is selected, so a plain click on a link in its text
+    /// selects it and opens nothing.</summary>
+    [Fact]
+    public Task APlainClickOnALinkInTheTextOnlySelects() => WithSurface(defaultDepth: 9, async h =>
+    {
+        int leafIndex = h.Surface.RealizedRows.ToList().FindIndex(r => r.Shape == TreeRowShape.Leaf);
+        var leaf = h.Surface.RealizedRows[leafIndex];
+        TreeLinkClickedEventArgs? clicked = null;
+        h.Surface.LinkClicked += (_, e) => clicked = e;
+
+        var translated = h.Surface.TranslatePoint(h.Surface.LinkBounds(leafIndex)!.Value.Center, h.Window)!.Value;
+        h.Window.MouseDown(translated, MouseButton.Left);
+        h.Window.MouseUp(translated, MouseButton.Left);
+        await PumpAsync();
+
+        Assert.Null(clicked);
+        Assert.Equal(leaf.Key, h.Surface.SelectedRow!.Value.Key);
+    }, painter: bytes => new LinkingPainter(bytes));
+
+    /// <summary>Atoms get a chip, a note and an action after their text - the trailing kinds a
+    /// format can ask for.</summary>
+    private sealed class ChippingPainter(byte[] bytes) : ITreeRowPainter
+    {
+        private readonly SExpressionTreeFormat.Painter inner = new(bytes);
+
+        public void AppendRuns(in TreeRow row, List<TreeRun> runs)
+        {
+            inner.AppendRuns(row, runs);
+            if (row.Shape != TreeRowShape.Leaf)
+                return;
+
+            runs.Add(new TreeRun("12 bytes", TreeRunStyle.Note));
+            runs.Add(new TreeRun("info", TreeRunStyle.Chip, Icon: TreeRunIcon.Time));
+            runs.Add(new TreeRun("act", TreeRunStyle.Action, Link: row.Node.ValueStart, Icon: TreeRunIcon.Table));
+        }
+
+        public string? Marker(in TreeRow row) => null;
+    }
+
+    [Fact]
+    public Task ClickingAnActionRaisesItsLink() => WithSurface(defaultDepth: 9, async h =>
+    {
+        int leafIndex = h.Surface.RealizedRows.ToList().FindIndex(r => r.Shape == TreeRowShape.Leaf);
+        var leaf = h.Surface.RealizedRows[leafIndex];
+        TreeLinkClickedEventArgs? clicked = null;
+        h.Surface.LinkClicked += (_, e) => clicked = e;
+
+        var bounds = h.Surface.LinkBounds(leafIndex)!.Value;
+        Assert.True(bounds.Width > 0);
+        Assert.True(bounds.Left > h.Surface.PaneTextLayout(leafIndex).WidthIncludingTrailingWhitespace,
+            "the action sits after the row's text");
+        var point = h.Surface.TranslatePoint(bounds.Center, h.Window)!.Value;
+
+        h.Window.MouseDown(point, MouseButton.Left);
+        h.Window.MouseUp(point, MouseButton.Left);
+        await PumpAsync();
+
+        Assert.Equal(leaf.Node.ValueStart, clicked?.Link);
+
+        // Where the chip is, so what it opens can be placed against it.
+        Assert.Equal(bounds.Left, clicked!.Bounds.Left, 1);
+        Assert.Equal(bounds.Width, clicked.Bounds.Width, 1);
+    }, painter: bytes => new ChippingPainter(bytes));
+
+    [Fact]
+    public Task AnActionShowsOnlyOnTheHoveredOrSelectedRow() => WithSurface(defaultDepth: 9, async h =>
+    {
+        var rows = h.Surface.RealizedRows.ToList();
+        int first = rows.FindIndex(r => r.Shape == TreeRowShape.Leaf);
+        int second = rows.FindIndex(first + 1, r => r.Shape == TreeRowShape.Leaf);
+        Assert.False(h.Surface.ShowsActions(first));
+        Assert.False(h.Surface.ShowsActions(second));
+
+        Point RowPoint(int index) => h.Surface.TranslatePoint(
+            new Point(h.Surface.ArrowX(index) + TreeSurface.ToggleWidth + 2, index * RowSurface.RowHeight + RowSurface.RowHeight / 2), h.Window)!.Value;
+
+        h.Window.MouseMove(RowPoint(second));
+        await PumpAsync();
+        Assert.True(h.Surface.ShowsActions(second));
+        Assert.False(h.Surface.ShowsActions(first));
+
+        // Selecting the first row moves the pointer there too; leaving it keeps its actions.
+        h.Window.MouseDown(RowPoint(first), MouseButton.Left);
+        h.Window.MouseUp(RowPoint(first), MouseButton.Left);
+        h.Window.MouseMove(RowPoint(second));
+        await PumpAsync();
+        Assert.True(h.Surface.ShowsActions(first));
+        Assert.True(h.Surface.ShowsActions(second));
+    }, painter: bytes => new ChippingPainter(bytes));
+
+    [Fact]
+    public Task TheChipsAreInTheRowsWidth() => WithSurface(defaultDepth: 9, h =>
+    {
+        int leafIndex = h.Surface.RealizedRows.ToList().FindIndex(r => r.Shape == TreeRowShape.Leaf);
+        var bounds = h.Surface.LinkBounds(leafIndex)!.Value;
+        var leaf = h.Surface.RealizedRows[leafIndex];
+        Assert.True(h.Surface.WidestRowWidth >= bounds.Right - h.Surface.ArrowX(leafIndex) + leaf.Depth * TreeSurface.IndentWidth,
+            "panning must be able to reach the last chip");
+        return Task.CompletedTask;
+    }, painter: bytes => new ChippingPainter(bytes));
+
+    /// <summary>Atoms run far past the window, then trail a note and an action.</summary>
+    private sealed class OverlongPainter(byte[] bytes) : ITreeRowPainter
+    {
+        private readonly SExpressionTreeFormat.Painter inner = new(bytes);
+
+        public void AppendRuns(in TreeRow row, List<TreeRun> runs)
+        {
+            inner.AppendRuns(row, runs);
+            if (row.Shape != TreeRowShape.Leaf)
+                return;
+
+            runs.Add(new TreeRun(new string('x', 600), TreeRunStyle.String));
+            runs.Add(new TreeRun("4.9 KB", TreeRunStyle.Note));
+            runs.Add(new TreeRun("Open", TreeRunStyle.Action, Link: row.Node.ValueStart, Icon: TreeRunIcon.FullText));
+        }
+
+        public string? Marker(in TreeRow row) => null;
+    }
+
+    [Fact]
+    public Task WhatTrailsAnOverlongRowIsPinnedInsideTheWindow() => WithSurface(defaultDepth: 9, async h =>
+    {
+        int leafIndex = h.Surface.RealizedRows.ToList().FindIndex(r => r.Shape == TreeRowShape.Leaf);
+        var leaf = h.Surface.RealizedRows[leafIndex];
+        TreeLinkClickedEventArgs? clicked = null;
+        h.Surface.LinkClicked += (_, e) => clicked = e;
+
+        var bounds = h.Surface.LinkBounds(leafIndex)!.Value;
+        Assert.True(bounds.Right <= h.Surface.Bounds.Width, $"the action ends at {bounds.Right}, past the surface's {h.Surface.Bounds.Width}");
+        Assert.True(bounds.Left > h.Surface.Bounds.Width / 2, "pinned to the right, not the left");
+
+        var point = h.Surface.TranslatePoint(bounds.Center, h.Window)!.Value;
+        h.Window.MouseDown(point, MouseButton.Left);
+        h.Window.MouseUp(point, MouseButton.Left);
+        await PumpAsync();
+
+        Assert.Equal(leaf.Node.ValueStart, clicked?.Link);
+    }, painter: bytes => new OverlongPainter(bytes));
 
     [Fact]
     public Task AltExpandOpensTheWholeSubtreeAndAltCollapseForgetsIt() => WithSurface(defaultDepth: 1, async h =>

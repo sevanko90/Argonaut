@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Chrome;
 using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
@@ -34,15 +35,6 @@ namespace Argonaut.Shell;
 /// </summary>
 public partial class MainWindow : Window
 {
-    // Material "desktop_windows" / "wb_sunny" / "brightness_2" glyphs (24x24 viewBox),
-    // cycled by the status bar's theme toggle button.
-    private const string SystemThemeIconData =
-        "M21 2H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h7l-2 3v1h8v-1l-2-3h7c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H3V4h18v12z";
-    private const string LightThemeIconData =
-        "M6.76 4.84l-1.8-1.79-1.41 1.41 1.79 1.79 1.42-1.41zM4 10.5H1v2h3v-2zm9-9.95h-2V3.5h2V.55zm7.45 3.91l-1.41-1.41-1.79 1.79 1.41 1.41 1.79-1.79zm-3.21 13.7l1.79 1.8 1.41-1.41-1.8-1.79-1.4 1.4zM20 10.5v2h3v-2h-3zm-8-5c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm-1 16.95h2V19.5h-2v2.95zm-7.45-3.91l1.41 1.41 1.79-1.8-1.41-1.41-1.79 1.8z";
-    private const string DarkThemeIconData =
-        "M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z";
-
     private readonly MainWindowViewModel viewModel;
     private readonly UpdateService updateService;
     private readonly ISettingsStore settings;
@@ -69,6 +61,20 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
+        // On macOS the title bar is drawn by the app (see TitleBar in the XAML), so it keeps
+        // clear of the traffic lights, which are re-centred in it. Elsewhere the platform's own
+        // title bar stays, and the strip is an ordinary toolbar below it.
+        UnifyTitleBarOnMac();
+        PadTitleBar();
+        Opened += (_, _) =>
+        {
+            Dispatcher.UIThread.Post(RecentreTrafficLights, DispatcherPriority.Background);
+            // Out of AppKit's layout pass, which is where a frame change is reported from.
+            trafficLightWatch = MacUnifiedTitleBar.Watch(this, () => Dispatcher.UIThread.Post(PutBackTrafficLights, DispatcherPriority.Background));
+        };
+        Closed += (_, _) => trafficLightWatch?.Dispose();
+        Resized += (_, _) => RecentreTrafficLights();
+
         this.settings = settings;
         this.log = log;
         var windowPicker = new AvaloniaFilePicker(this);
@@ -94,6 +100,7 @@ public partial class MainWindow : Window
         viewModel.Progress.WorkStarted += (_, _) => StartProgressTicks();
         RawJumpService.Requested += range => _ = viewModel.RevealInTextViewAsync(range);
         ArrayTableService.Requested += request => _ = viewModel.OpenArrayTableAsync(request);
+        OpenDocumentService.Requested += request => _ = viewModel.OpenBytesAsync(request.Bytes, request.DisplayName, request.Description);
 
         // The platform's own modifier, so the menu shows the shortcut the key handler honours.
         // Reached through the button rather than by name: a control named inside a flyout is not
@@ -190,6 +197,94 @@ public partial class MainWindow : Window
         finally
         {
             (transfer as IDisposable)?.Dispose();
+        }
+    }
+
+    /// <summary>Re-centres the traffic lights after AppKit has finished leaving full screen.
+    /// AppKit lays the title bar out again at the end of the transition, after the last resize
+    /// the window hears about, so a re-centre on that resize alone is undone.</summary>
+    private DispatcherTimer? trafficLightSettle;
+    private IDisposable? trafficLightWatch;
+
+    /// <summary>
+    /// Extends the client area under the window controls on macOS only, making the strip the
+    /// title bar as a native unified toolbar does. Windows and Linux keep their own title bar:
+    /// extended there, Avalonia draws caption buttons of its own over the strip, which collide
+    /// with the toolbar and offer no way out of full screen.
+    /// </summary>
+    private void UnifyTitleBarOnMac()
+    {
+        if (!OperatingSystem.IsMacOS())
+            return;
+
+        ExtendClientAreaToDecorationsHint = true;
+        ExtendClientAreaTitleBarHeightHint = TitleBar.Height;
+        WindowDecorationProperties.SetElementRole(TitleBar, WindowDecorationsElementRole.TitleBar);
+    }
+
+    /// <summary>
+    /// Keeps the strip clear of macOS's traffic lights at the left. Full screen hides them in a
+    /// title bar of its own, so the strip takes its normal margin there, as it always does on
+    /// a platform that keeps its own title bar.
+    /// </summary>
+    private void PadTitleBar()
+    {
+        if (!OperatingSystem.IsMacOS())
+            TitleBar.Padding = new Thickness(12, 0, 12, 0);
+        else
+            TitleBar.Padding = WindowState == WindowState.FullScreen ? new Thickness(12, 0, 12, 0) : new Thickness(84, 0, 12, 0);
+    }
+
+    /// <summary>
+    /// AppKit puts the traffic lights back wherever it likes on every resize, title change and
+    /// change of key status, so they are re-centred each time, and once more when that has
+    /// settled. Never in full screen: the
+    /// lights live in AppKit's separate full-screen title bar there, and moving them would push
+    /// them out of it.
+    /// </summary>
+    private void RecentreTrafficLights()
+    {
+        if (!OperatingSystem.IsMacOS() || WindowState == WindowState.FullScreen)
+            return;
+
+        MacUnifiedTitleBar.Apply(this, TitleBar.Height);
+
+        trafficLightSettle ??= new DispatcherTimer(TimeSpan.FromMilliseconds(400), DispatcherPriority.Background, (_, _) =>
+        {
+            trafficLightSettle!.Stop();
+            if (WindowState != WindowState.FullScreen)
+                MacUnifiedTitleBar.Apply(this, TitleBar.Height);
+        });
+        trafficLightSettle.Stop();
+        trafficLightSettle.Start();
+    }
+
+    /// <summary>AppKit moved the title bar container or the buttons; puts them back if they are
+    /// out of place. Checked rather than applied outright, because putting them back is itself
+    /// a frame change that is reported here.</summary>
+    private void PutBackTrafficLights()
+    {
+        if (WindowState != WindowState.FullScreen && !MacUnifiedTitleBar.IsInPlace(this, TitleBar.Height))
+            MacUnifiedTitleBar.Apply(this, TitleBar.Height);
+    }
+
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+
+        if (TitleBar is null)
+            return;
+
+        if (change.Property == WindowStateProperty)
+        {
+            PadTitleBar();
+            RecentreTrafficLights();
+        }
+        else if (change.Property == TitleProperty || change.Property == IsActiveProperty)
+        {
+            // AppKit lays its title bar out again when the title is set (opening or closing a
+            // file) and when the window gains or loses key status, putting the lights back.
+            RecentreTrafficLights();
         }
     }
 
@@ -360,12 +455,12 @@ public partial class MainWindow : Window
             _ => ThemeVariant.Default
         };
 
-        ThemeToggleIcon.Data = Geometry.Parse(mode switch
+        ThemeToggleIcon.Data = this.FindResource(mode switch
         {
-            ThemeMode.Light => LightThemeIconData,
-            ThemeMode.Dark => DarkThemeIconData,
-            _ => SystemThemeIconData
-        });
+            ThemeMode.Light => "Icon.ThemeLight",
+            ThemeMode.Dark => "Icon.ThemeDark",
+            _ => "Icon.ThemeSystem"
+        }) as Geometry;
 
         ToolTip.SetTip(ThemeToggleButton, mode switch
         {
@@ -596,7 +691,7 @@ public partial class MainWindow : Window
 
     private async void OnCompareFile(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        var path = await filePicker.PickFileAsync("Choose the JSON file to compare with");
+        var path = await filePicker.PickFileAsync("Choose the JSON file to compare with", showsHiddenFiles: false);
         if (path is null)
             return;
 

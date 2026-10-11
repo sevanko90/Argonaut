@@ -11,19 +11,21 @@
          TableGridColumns builds them in code-behind from the view model's TableStructure, and
          carries the find-term binding into each cell so matches still highlight. -->
     <Border BorderBrush="{DynamicResource AppBorderBrush}"
-            BorderThickness="1"
-            CornerRadius="8"
+            BorderThickness="0"
             Background="{DynamicResource AppWindowBackgroundBrush}"
             ClipToBounds="True">
         <Grid RowDefinitions="Auto,*">
             <Border Grid.Row="0"
-                    Padding="8,6"
+                    Height="30"
+                    Padding="10,0"
                     BorderBrush="{DynamicResource AppBorderBrush}"
                     BorderThickness="0,0,0,1"
                     Background="{DynamicResource AppPanelBackgroundBrush}">
                 <CheckBox Content="First row is header"
                           IsChecked="{Binding IsHeaderRow}"
-                          FontSize="12" />
+                          MinHeight="0"
+                          VerticalAlignment="Center"
+                          FontSize="11" />
             </Border>
 
             <TableView Grid.Row="1"

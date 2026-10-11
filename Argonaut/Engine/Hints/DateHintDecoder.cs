@@ -1,7 +1,7 @@
 using System;
 using System.Globalization;
 
-namespace Argonaut.Features.Json.Hints;
+namespace Argonaut.Engine.Hints;
 
 /// <summary>
 /// Converts a classified numeric value to a unix-milliseconds timestamp under a given scheme,
@@ -53,10 +53,16 @@ public static class DateHintDecoder
         return mode == DateHintTimeZoneMode.Utc ? FormatUtc(unixMs) : FormatLocal(unixMs);
     }
 
-    private static string FormatLocal(long unixMs)
-    {
-        var local = DateTimeOffset.FromUnixTimeMilliseconds(unixMs).ToLocalTime();
+    /// <summary>An instant as a date chip shows it, in <paramref name="localZone"/> or UTC.</summary>
+    public static string FormatInstant(DateTimeOffset instant, DateHintTimeZoneMode mode, TimeZoneInfo localZone)
+        => mode == DateHintTimeZoneMode.Utc
+            ? FormatUtc(instant.ToUnixTimeMilliseconds())
+            : FormatLocal(TimeZoneInfo.ConvertTime(instant, localZone));
 
+    private static string FormatLocal(long unixMs) => FormatLocal(DateTimeOffset.FromUnixTimeMilliseconds(unixMs).ToLocalTime());
+
+    private static string FormatLocal(DateTimeOffset local)
+    {
         // "Local" means the machine's configured date/time format, not a fixed ISO-ish
         // pattern: short date pattern + long time pattern (with seconds) from the current
         // culture, so a US machine shows 12-hour "6/15/2024 2:05:09 PM" while a UK machine
@@ -65,9 +71,10 @@ public static class DateHintDecoder
         string timestamp = local.ToString($"{format.ShortDatePattern} {format.LongTimePattern}", CultureInfo.CurrentCulture);
 
         // The UTC offset is resolved for the decoded instant itself (correctly DST-aware for
-        // that date), not for "now" - e.g. a December date shows +00:00 even if the viewer is
-        // currently in BST. Shown explicitly so that isn't mistaken for a conversion bug.
-        return $"{timestamp} [local, UTC{FormatOffset(local.Offset)}]";
+        // that date), not for "now" - e.g. a December date shows UTC+0 even if the viewer is
+        // currently in BST. Shown explicitly so that isn't mistaken for a conversion bug; the
+        // sign is what tells it from a UTC-mode hint, which ends in a bare "UTC".
+        return $"{timestamp} UTC{FormatOffset(local.Offset)}";
     }
 
     private static string FormatUtc(long unixMs)
@@ -77,7 +84,7 @@ public static class DateHintDecoder
         // viewer's machine settings.
         string timestamp = DateTimeOffset.FromUnixTimeMilliseconds(unixMs)
             .ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
-        return $"{timestamp} [UTC]";
+        return $"{timestamp} UTC";
     }
 
     private static string FormatOffset(TimeSpan offset)

@@ -10,8 +10,7 @@
     </UserControl.Styles>
 
     <Border BorderBrush="{DynamicResource AppBorderBrush}"
-            BorderThickness="1"
-            CornerRadius="8"
+            BorderThickness="0"
             Background="{DynamicResource AppWindowBackgroundBrush}"
             ClipToBounds="True">
         <Grid RowDefinitions="*,Auto">
@@ -27,8 +26,18 @@
                               Foreground="{DynamicResource AppTextBrush}"
                               GutterForeground="{DynamicResource AppMutedTextBrush}"
                               DividerBrush="{DynamicResource AppBorderBrush}"
-                              HighlightBrush="{DynamicResource AppSearchHighlightBrush}"
-                              SelectionBrush="{DynamicResource AppAccentSurfaceBrush}" />
+                              HighlightBrush="{DynamicResource AppSearchMatchBrush}"
+                              HighlightEdgeBrush="{DynamicResource AppSearchMatchEdgeBrush}"
+                              CurrentHighlightBrush="{DynamicResource AppSearchCurrentBrush}"
+                              CurrentHighlightForeground="{DynamicResource AppSearchCurrentTextBrush}"
+                              SelectionBrush="{DynamicResource AppAccentSurfaceBrush}"
+                              ChipFontFamily="{DynamicResource AppSansFontFamily}"
+                              ChipBackground="{DynamicResource AppChipBrush}"
+                              ChipHoverBackground="{DynamicResource AppChipHoverBrush}"
+                              ExpanderBrush="{DynamicResource AppSubtleIconBrush}"
+                              ExpanderRowHoverBrush="{DynamicResource AppMutedTextBrush}"
+                              GuideBrush="{DynamicResource AppIndentGuideBrush}"
+                              ShowIndentGuides="{Binding ShowIndentGuides}" />
 
             <ScrollBar x:Name="VerticalScrollBar"
                        Grid.Column="1"

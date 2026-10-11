@@ -314,6 +314,30 @@ public sealed class RawViewModelTests : IDisposable
         }
     }
 
+    /// <summary>A jump in from elsewhere announces where it landed, so the view can flash it; a
+    /// reveal from inside the raw view (find, the edit overview) does not.</summary>
+    [Fact]
+    public async Task RevealByteRangeAsync_AnnouncesTheArrival_ButRevealOffsetDoesNot()
+    {
+        var vm = new RawViewModel(new RawViewSettings());
+        try
+        {
+            await vm.LoadAsync(WriteNewlinelessFile());
+            await vm.IndexingTask;
+            var arrivals = new List<long>();
+            vm.Arrived += arrivals.Add;
+
+            await vm.RevealByteRangeAsync(ByteRange.At(165));
+            vm.RevealOffset(42, 0);
+
+            Assert.Equal([165L], arrivals);
+        }
+        finally
+        {
+            vm.Dispose();
+        }
+    }
+
     [Fact]
     public async Task SelectedByteRange_WithNothingSelected_IsTheCaret()
     {

@@ -1,22 +1,24 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:arrayTable="clr-namespace:Argonaut.Features.Json.ArrayTable"
+             xmlns:icons="clr-namespace:Argonaut.Ui.Icons"
              x:Class="Argonaut.Features.Json.ArrayTable.JsonArrayTableToolbarView"
              x:DataType="arrayTable:JsonArrayTableToolbarViewModel">
     <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
         <!-- Identify the array; the window title already identifies the file. -->
         <TextBlock Text="{Binding OriginDescription}"
                    VerticalAlignment="Center"
-                   TextWrapping="Wrap"
-                   MaxWidth="420"
+                   TextTrimming="CharacterEllipsis"
+                   MaxWidth="320"
                    Foreground="{DynamicResource AppMutedTextBrush}"
                    FontSize="12"
                    ToolTip.Tip="{Binding OriginDescription}" />
 
-        <Button Content="Back to JSON"
-                Click="OnBack"
-                VerticalAlignment="Center"
-                ToolTip.Tip="Reopen the file as JSON and select this array" />
+        <Button Click="OnBack"
+                Classes="tool icononly"
+                ToolTip.Tip="Back to JSON: reopen the file as JSON and select this array">
+            <icons:LucideIcon Data="{StaticResource Icon.Back}" />
+        </Button>
 
         <!-- Hidden for an array of objects: its columns are the property names by definition,
              so there is nothing to re-width into.
@@ -33,8 +35,7 @@
                        FontSize="12" />
             <ComboBox ItemsSource="{Binding ColumnModes}"
                       SelectedItem="{Binding SelectedColumnMode}"
-                      MinWidth="130"
-                      VerticalAlignment="Center"
+                      Classes="tool"
                       ToolTip.Tip="One row per element by property name, or reshape a flat array into N columns">
                 <ComboBox.ItemTemplate>
                     <DataTemplate x:DataType="arrayTable:JsonArrayColumnModeOption">
@@ -55,9 +56,15 @@
                        FontSize="12" />
             <ComboBox ItemsSource="{Binding ArrayColumnCounts}"
                       SelectedItem="{Binding SelectedArrayColumns}"
-                      MinWidth="60"
-                      VerticalAlignment="Center"
+                      Classes="tool"
                       ToolTip.Tip="How many positions an expanded array column draws before the rest are summarised in one" />
         </StackPanel>
+
+        <!-- For the selected cell's tree. -->
+        <ToggleButton IsChecked="{Binding ShowIndentGuides, Mode=TwoWay}"
+                      Classes="tool icononly"
+                      ToolTip.Tip="Indent guides: a line down each open container's contents">
+            <icons:LucideIcon Data="{StaticResource Icon.IndentGuides}" />
+        </ToggleButton>
     </StackPanel>
 </UserControl>

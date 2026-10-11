@@ -109,22 +109,26 @@ public class RawEditedRowIndexTests
             Assert.True(fresh.RowCount == Rows.RowCount,
                 $"{because}: row count {Rows.RowCount}, fresh index says {fresh.RowCount}");
 
+            // Compared first and described only on a mismatch: these loops run once per row and
+            // once per byte, and a message built every time is most of what they cost.
             for (int row = 0; row < fresh.RowCount; row++)
             {
                 var expected = fresh.GetRowInfo(row);
                 var actual = Rows.GetRowInfo(row);
-                Assert.True(expected == actual, $"{because}: row {row} is {actual}, fresh index says {expected}");
+                if (expected != actual)
+                    Assert.Fail($"{because}: row {row} is {actual}, fresh index says {expected}");
 
                 // The line a row sits in, which a continuation row does not report through
                 // RawRowInfo. The caret readout asks for it, so an edit must not disturb it.
-                Assert.True(fresh.LineContaining(row) == Rows.LineContaining(row),
-                    $"{because}: row {row} is in line {Rows.LineContaining(row)}, "
-                    + $"fresh index says {fresh.LineContaining(row)}");
+                if (fresh.LineContaining(row) != Rows.LineContaining(row))
+                    Assert.Fail($"{because}: row {row} is in line {Rows.LineContaining(row)}, fresh index says {fresh.LineContaining(row)}");
             }
 
             for (long offset = 0; offset < edited.Length; offset++)
-                Assert.True(fresh.RowForOffset(offset) == Rows.RowForOffset(offset),
-                    $"{because}: offset {offset} maps to row {Rows.RowForOffset(offset)}, fresh index says {fresh.RowForOffset(offset)}");
+            {
+                if (fresh.RowForOffset(offset) != Rows.RowForOffset(offset))
+                    Assert.Fail($"{because}: offset {offset} maps to row {Rows.RowForOffset(offset)}, fresh index says {fresh.RowForOffset(offset)}");
+            }
 
             Assert.Null(Rows.RowForOffset(edited.Length));
         }
@@ -316,7 +320,8 @@ public class RawEditedRowIndexTests
         // either way.
         const int SiteSpacing = 1500;
         const int Budget = 40;
-        var document = LongDocument(300_000, maxHeldLines: Budget);
+        // Long enough for the sites (~62KB) and no longer: the closing check reads every byte.
+        var document = LongDocument(10_000, maxHeldLines: Budget);
         Assert.False(document.Rows.NeedsRebuild);
 
         int sites = 0;

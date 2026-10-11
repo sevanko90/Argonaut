@@ -204,4 +204,34 @@ public sealed class RawViewHintsTests : IDisposable
         chip.PerformClick();
         Assert.False(popup.IsOpen);
     });
+
+    /// <summary>The reported problem: the chip went 300ms after the pointer left the word, even
+    /// with the pointer on the chip, so it could only be clicked by being very quick.</summary>
+    [Fact]
+    public Task TheHoverChip_StaysWhileThePointerIsOnIt() => WithView("notes.txt", "head line\nprimary #1E90FF here\n", async (window, _, surface) =>
+    {
+        var mark = Assert.Single(surface.HintMarksFor(1));
+        var point = surface.TranslatePoint(surface.HintMarkBounds(1, mark)!.Value.Center, window)!.Value;
+        window.MouseMove(point);
+        await PumpAsync();
+
+        var view = window.GetVisualDescendants().OfType<RawView>().Single();
+        var popup = view.FindControl<Avalonia.Controls.Primitives.Popup>("MarkChipPopup")!;
+        var frame = view.FindControl<Border>("MarkChipFrame")!;
+
+        // The pointer leaves the word for the chip.
+        window.MouseMove(new Point(point.X, point.Y + 200));
+        frame.RaiseEvent(new Avalonia.Input.PointerEventArgs(Avalonia.Input.InputElement.PointerEnteredEvent, frame,
+            new Avalonia.Input.Pointer(Avalonia.Input.Pointer.GetNextFreeId(), Avalonia.Input.PointerType.Mouse, true), window, default, 0,
+            new Avalonia.Input.PointerPointProperties(), Avalonia.Input.KeyModifiers.None));
+        await PumpAsync(800);
+        Assert.True(popup.IsOpen);
+
+        // And off the chip: it goes.
+        frame.RaiseEvent(new Avalonia.Input.PointerEventArgs(Avalonia.Input.InputElement.PointerExitedEvent, frame,
+            new Avalonia.Input.Pointer(Avalonia.Input.Pointer.GetNextFreeId(), Avalonia.Input.PointerType.Mouse, true), window, default, 0,
+            new Avalonia.Input.PointerPointProperties(), Avalonia.Input.KeyModifiers.None));
+        await PumpAsync(800);
+        Assert.False(popup.IsOpen);
+    });
 }

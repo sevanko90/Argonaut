@@ -29,7 +29,7 @@ public partial class RawView : UserControl
     /// <summary>The marked value whose chip is showing, and the grace the pointer has to cross from
     /// the word onto the chip before it goes.</summary>
     private RawHintHit? markChipFor;
-    private readonly DispatcherTimer markChipClose = new() { Interval = TimeSpan.FromMilliseconds(300) };
+    private readonly DispatcherTimer markChipClose = new() { Interval = TimeSpan.FromMilliseconds(400) };
 
     public RawView()
     {
@@ -44,8 +44,10 @@ public partial class RawView : UserControl
         Surface.HintClicked += OnHintClicked;
         Surface.MarkHovered += OnMarkHovered;
         MarkChip.Click += OnMarkChipClick;
-        MarkChipPopup.PointerEntered += (_, _) => markChipClose.Stop();
-        MarkChipPopup.PointerExited += (_, _) => markChipClose.Start();
+        // On the popup's content, not the popup: the content is in a window of its own, so the
+        // Popup control in this tree never sees the pointer arrive.
+        MarkChipFrame.PointerEntered += (_, _) => markChipClose.Stop();
+        MarkChipFrame.PointerExited += (_, _) => markChipClose.Start();
         markChipClose.Tick += (_, _) => CloseMarkChip();
         fontResourceSubscription = this.GetResourceObservable("AppContentFontFamily")
             .Subscribe(new AnonymousObserver<object?>(OnContentFontChanged));

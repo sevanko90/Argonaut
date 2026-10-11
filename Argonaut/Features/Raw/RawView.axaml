@@ -117,7 +117,8 @@
                    Placement="BottomEdgeAlignedLeft"
                    VerticalOffset="2"
                    IsLightDismissEnabled="False">
-                <Border Padding="3"
+                <Border x:Name="MarkChipFrame"
+                        Padding="3"
                         CornerRadius="6"
                         BorderThickness="1"
                         BorderBrush="{DynamicResource AppBorderBrush}"

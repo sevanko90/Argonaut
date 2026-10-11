@@ -57,24 +57,10 @@ it in (see "Saving" in architecture.md).
   Snowflake) were considered as a hint and dropped: too much inference to be reliable, for little
   use.
 
-- **Value hints beyond the JSON tree.** The parsers are already plain functions over bytes
-  (`IsoDateHintClassifier`, `ColourHintClassifier`, `CronHintClassifier`, `DateHintClassifier`);
-  what ties hints to the tree is the provider contract - it takes a `JsonTokenKind` and returns
-  the tree's chip icon, link and style. The split: what a value *is* and what it reads as (a time,
-  a colour, an address, an expiry) moves down to `Engine`, free of Avalonia and of JSON, the JWT,
-  URL, embedded-JSON and Base64 checks with it, and each view renders that its own way.
-
-  The raw view is the first other user. Classifying is not every word on the page: the raw
-  view's lexers already split the rows on screen into tokens for colouring, so it is their strings
-  and values, a few hundred at most. How they show is the real work, and the lexer already says
-  which way, line by line: where `ConfigRawLexer` (chosen by file name, by a sniff of the first
-  lines, or from the Colours picker - `RawLexerChoice`) marks a line's value, that value can take a
-  chip at the end of the line, as the tree does; anything else - no lexer, a comment, a long
-  wrapped line - needs inline marks, a swatch before a colour or an underlined address with a
-  card on hover, drawn by `RawTextSurface` without disturbing the row's text, wrapping or caret.
-  Wants a mock-up first. A hint that hides a document opens the same card the tree's do - a
-  `ValuePreviewView` over `HintExpansion`'s decoded bytes, anchored to the mark or chip - which is
-  the raw view composing the JSON feature's preview, as NDJSON composes its tree.
+- **Raw hints beyond what the lexer marks.** The raw view hints the values its lexer colours,
+  so a file with no lexer, a value inside a comment, or a URL in prose gets none. Classifying
+  every word on screen was ruled out; a cheap pre-filter by shape (a scheme, a `#`, `eyJ`) over
+  the rows on screen is the likely way in, sharing the in-place mark the lexed values use.
 
 - **Per-depth row counts**, only if the estimated scrollbar proves not good enough in use. They
   would give the tree the exact scroll model the raw view has, under the same `RowSurface`

@@ -17,6 +17,7 @@ using Avalonia.Interactivity;
 using Argonaut.Engine.Bytes;
 using Argonaut.Features.Raw.Editing;
 using Argonaut.Features.Raw.Highlighting;
+using Argonaut.Features.Raw.Hints;
 using Argonaut.Features.Raw.Rows;
 using Argonaut.Ui.Find;
 using Argonaut.Ui.Notifications;
@@ -104,6 +105,12 @@ public class RawTextSurface : RowSurface
     /// </summary>
     private const int MaxLookbackRows = 16;
 
+    /// <summary>The value hints of the rows on screen, kept and dropped with the layouts.</summary>
+    private readonly RawHintLayer hints = new();
+
+    /// <summary>The row under the pointer, whose action chips show; null when it is elsewhere.</summary>
+    private int? hoveredRow;
+
     private TextRunProperties?[]? styleProperties;
     private Typeface stylePropertiesTypeface;
     private double stylePropertiesFontSize;
@@ -189,6 +196,47 @@ public class RawTextSurface : RowSurface
         }
     }
 
+    /// <summary>The value hints' drawing: chips, marks and their brushes. Set up by the palette.</summary>
+    public RawHintLayer HintLayer => this.hints;
+
+    /// <summary>The hints' look changed: chips are laid out again.</summary>
+    public void InvalidateHints()
+    {
+        DropRowCaches();
+        InvalidateVisual();
+    }
+
+    /// <summary>A realized row's hint marks, laid out the way drawing lays them out, for tests.</summary>
+    internal IReadOnlyList<RawHintMark> HintMarksFor(int rowIndex)
+    {
+        if (RowAt(rowIndex) is { } row)
+            LayoutFor(rowIndex, row, new Typeface(FontFamily), FontSize, Foreground ?? Brushes.Black);
+        return this.hints.MarksOf(rowIndex);
+    }
+
+    /// <summary>Where a mark on a realized row sits, in surface coordinates, for tests.</summary>
+    internal Rect? HintMarkBounds(int rowIndex, RawHintMark mark)
+    {
+        if (RowAt(rowIndex) is not { } row)
+            return null;
+
+        var layout = LayoutFor(rowIndex, row, new Typeface(FontFamily), FontSize, Foreground ?? Brushes.Black);
+        return RawHintLayer.MarkBounds(layout, new Point(TextOriginX - PanOffset, CentreInRow(layout, rowIndex * RowHeight - scrollTop)), mark);
+    }
+
+    /// <summary>A realized row's first chip, in surface coordinates, for tests.</summary>
+    internal Rect? HintChipBounds(int rowIndex)
+    {
+        if (RowAt(rowIndex) is not { } row)
+            return null;
+
+        var layout = LayoutFor(rowIndex, row, new Typeface(FontFamily), FontSize, Foreground ?? Brushes.Black);
+        return this.hints.ChipBounds(rowIndex, TextOriginX - PanOffset + layout.WidthIncludingTrailingWhitespace, rowIndex * RowHeight - scrollTop);
+    }
+
+    /// <summary>A hint's chip was clicked, or a marked value Cmd/Ctrl+clicked.</summary>
+    public event EventHandler<RawHintHit>? HintClicked;
+
     /// <summary>
     /// Rows the surface currently holds materialized, for tests. A surface that realizes rows
     /// outside its viewport is the runaway-memory failure mode virtualization exists to prevent,
@@ -241,7 +289,16 @@ public class RawTextSurface : RowSurface
         {
             this.viewModel.PropertyChanged -= OnViewModelPropertyChanged;
             this.viewModel.Arrived -= OnArrived;
+            this.viewModel.ValueHints.HintsChanged -= OnValueHintsChanged;
         }
+    }
+
+    /// <summary>A date scheme changed, or the first date on screen chose one: every hint shown
+    /// may read differently.</summary>
+    private void OnValueHintsChanged(object? sender, EventArgs e)
+    {
+        DropRowCaches();
+        InvalidateVisual();
     }
 
     private void Attach(RawViewModel? next)
@@ -255,8 +312,14 @@ public class RawTextSurface : RowSurface
             this.viewModel.Arrived -= OnArrived;
         }
 
+        if (this.viewModel is not null)
+            this.viewModel.ValueHints.HintsChanged -= OnValueHintsChanged;
+
         this.viewModel = next;
         this.isFlashingArrival = false;
+        this.hints.Hints = next?.ValueHints;
+        if (next is not null)
+            next.ValueHints.HintsChanged += OnValueHintsChanged;
 
         if (this.viewModel is not null)
         {
@@ -334,6 +397,7 @@ public class RawTextSurface : RowSurface
                 break;
 
             case nameof(RawViewModel.EditGeneration):
+                this.viewModel?.ValueHints.Forget();
                 DropRowCaches();
                 InvalidateScrollable();
                 InvalidateVisual();
@@ -367,6 +431,7 @@ public class RawTextSurface : RowSurface
         this.layouts.Clear();
         this.exitStates.Clear();
         this.decoded.Clear();
+        this.hints.Clear();
         this.measuredRange = (0, -1);
     }
 
@@ -463,7 +528,7 @@ public class RawTextSurface : RowSurface
         foreach (var (rowIndex, row) in this.realized)
         {
             var layout = LayoutFor(rowIndex, row, typeface, fontSize, foreground);
-            widest = Math.Max(widest, layout.WidthIncludingTrailingWhitespace);
+            widest = Math.Max(widest, layout.WidthIncludingTrailingWhitespace + this.hints.TrailingWidth(rowIndex));
         }
 
         RecordRowWidth(widest);
@@ -483,6 +548,7 @@ public class RawTextSurface : RowSurface
         var foreground = Foreground ?? Brushes.Black;
         var gutter = GutterForeground ?? foreground;
 
+        int? caretRow = CaretRowIndex();
         foreach (var (rowIndex, row) in this.realized)
         {
             double y = rowIndex * RowHeight - scrollTop;
@@ -503,6 +569,8 @@ public class RawTextSurface : RowSurface
                 DrawHighlights(context, layout, rowIndex, textTop, y, current);
                 DrawArrival(context, layout, rowIndex, textTop);
                 layout.Draw(context, new Point(TextOriginX - PanOffset, textTop));
+                this.hints.Draw(context, rowIndex, layout, new Point(TextOriginX - PanOffset, textTop), y,
+                    TextOriginX - PanOffset + layout.WidthIncludingTrailingWhitespace, rowIndex == this.hoveredRow || rowIndex == caretRow);
                 if (current is { } currentChars)
                     DrawCurrentMatch(context, layout, rowIndex, textTop, y, currentChars, overText: true);
                 DrawCaret(context, layout, rowIndex, textTop);
@@ -698,6 +766,7 @@ public class RawTextSurface : RowSurface
     {
         this.rowSpans.Clear();
         LexRow(rowIndex, row, text, this.rowSpans);
+        MarkHints(rowIndex, row, typeface, fontSize);
         if (this.rowSpans.Count == 0)
             return null;
 
@@ -725,6 +794,22 @@ public class RawTextSurface : RowSurface
         var face = style == RawTextStyle.Section ? new Typeface(typeface.FontFamily, typeface.Style, FontWeight.Bold) : typeface;
         return this.styleProperties[(int)style] ??= new GenericTextRunProperties(face, fontSize,
             foregroundBrush: this.styleBrushes is not null && this.styleBrushes.TryGetValue(style, out var brush) ? brush : foreground);
+    }
+
+    /// <summary>
+    /// The value hints of a row just lexed into <see cref="rowSpans"/>, from what the row above
+    /// handed on: nothing at a line start, and unknown when the line's start was out of reach.
+    /// </summary>
+    private void MarkHints(int rowIndex, RawVisibleRow row, Typeface typeface, double fontSize)
+    {
+        if (this.hints.Hints is not { } valueHints || DecodedRow(rowIndex) is not { } decodedRow)
+            return;
+
+        if (!ReferenceEquals(valueHints.Source, Source))
+            valueHints.Source = Source;
+
+        var entry = row.LineNumber is not null ? RawHintCarry.None : this.hints.CarryAfter(rowIndex - 1) ?? RawHintCarry.Unknown;
+        this.hints.MarkRow(rowIndex, new RawHintRow(decodedRow, row.LineNumber is not null, row.IsSoftWrapped), entry, this.rowSpans, typeface, fontSize);
     }
 
     /// <summary>
@@ -771,8 +856,14 @@ public class RawTextSurface : RowSurface
         for (int i = lineStart; i < rowIndex; i++)
         {
             this.lookbackSpans.Clear();
-            state = this.lexer!.Lex(((RawVisibleRow)vm.Rows[i]!).Text, state, this.lookbackSpans);
+            var lineRow = (RawVisibleRow)vm.Rows[i]!;
+            state = this.lexer!.Lex(lineRow.Text, state, this.lookbackSpans);
             this.exitStates[i] = state;
+            if (this.hints.Hints is not null && DecodedRow(i) is { } decodedAbove)
+            {
+                var carry = i == lineStart ? RawHintCarry.None : this.hints.CarryAfter(i - 1) ?? RawHintCarry.Unknown;
+                this.hints.CarryRow(i, new RawHintRow(decodedAbove, i == lineStart, lineRow.IsSoftWrapped), carry, this.lookbackSpans);
+            }
         }
 
         return state;
@@ -794,6 +885,8 @@ public class RawTextSurface : RowSurface
 
     private void PruneLayouts(int firstRow, int lastRow)
     {
+        this.hints.Prune(firstRow, lastRow, MaxLookbackRows);
+
         // Lookback leaves states for rows above the viewport that no layout accounts for, so the
         // states are bounded on their own: the viewport plus the band a lookback can reach.
         if (this.exitStates.Count > (lastRow - firstRow + 1) * 2 + MaxLookbackRows)
@@ -1220,6 +1313,15 @@ public class RawTextSurface : RowSurface
 
         Focus();
 
+        // A chip is a button; a marked value is text first, and follows its hint only with the
+        // command modifier, so a plain click still places the caret in it.
+        if (HintAt(e.GetPosition(this)) is { } hint && (hint.IsChip || HasCommandModifier(e.KeyModifiers)))
+        {
+            HintClicked?.Invoke(this, hint);
+            e.Handled = true;
+            return;
+        }
+
         if (OffsetAt(e.GetPosition(this)) is not long offset)
             return;
 
@@ -1262,6 +1364,9 @@ public class RawTextSurface : RowSurface
     {
         base.OnPointerMoved(e);
 
+        if (!this.dragging)
+            UpdateHintHover(e.GetPosition(this), e.KeyModifiers);
+
         if (!this.dragging || this.caret is null)
             return;
 
@@ -1277,6 +1382,75 @@ public class RawTextSurface : RowSurface
             this.caret.ExtendTo(offset);
 
         e.Handled = true;
+    }
+
+    protected override void OnPointerExited(PointerEventArgs e)
+    {
+        base.OnPointerExited(e);
+        this.hoveredRow = null;
+        if (this.hints.ClearHover())
+            ShowHintTip(null);
+        InvalidateVisual();
+    }
+
+    /// <summary>
+    /// The hint under the pointer, if any, laying its row out to find it. The row under the
+    /// pointer shows its actions, so an action chip there can be hit.
+    /// </summary>
+    private RawHintHit? HintAt(Point position)
+    {
+        int rowIndex = (int)Math.Floor((position.Y + scrollTop) / RowHeight);
+        if (RowAt(rowIndex) is not { } row || position.X < TextOriginX || position.X > TextOriginX + TextViewportWidth)
+            return null;
+
+        var layout = LayoutFor(rowIndex, row, new Typeface(FontFamily), FontSize, Foreground ?? Brushes.Black);
+        double y = rowIndex * RowHeight - scrollTop;
+        var origin = new Point(TextOriginX - PanOffset, CentreInRow(layout, y));
+        this.hints.HitTest(rowIndex, layout, origin, y, origin.X + layout.WidthIncludingTrailingWhitespace, true, position, out var hit);
+        return hit;
+    }
+
+    /// <summary>Lights the hint under the pointer, shows what a marked value reads as, and points
+    /// the cursor at what can be clicked.</summary>
+    private void UpdateHintHover(Point position, KeyModifiers modifiers)
+    {
+        int rowIndex = (int)Math.Floor((position.Y + scrollTop) / RowHeight);
+        bool rowChanged = rowIndex != this.hoveredRow;
+        this.hoveredRow = rowIndex;
+
+        var before = this.hints.Hovered;
+        var hit = HintAt(position);
+        bool hintChanged = hit?.Value != before?.Value || hit?.IsChip != before?.IsChip;
+
+        bool clickable = hit is { IsChip: true } || (hit is not null && HasCommandModifier(modifiers) && IsActionable(hit.Value.Hint!));
+        Cursor = clickable ? HandCursor : null;
+
+        if (hintChanged)
+            ShowHintTip(hit is { IsChip: false } ? hit : null);
+        if (rowChanged || hintChanged)
+            InvalidateVisual();
+    }
+
+    private static readonly Cursor HandCursor = new(StandardCursorType.Hand);
+
+    private static bool IsActionable(Engine.Hints.ValueHint hint)
+        => hint.Expands || hint.Address is not null || hint.Kind == Engine.Hints.ValueHintKind.Date;
+
+    /// <summary>What a value marked in place reads as, in a tip beside it, and what Cmd/Ctrl+click
+    /// does with it.</summary>
+    private void ShowHintTip(RawHintHit? hit)
+    {
+        if (hit?.Value.Hint is not { } hint)
+        {
+            ToolTip.SetIsOpen(this, false);
+            ToolTip.SetTip(this, null);
+            return;
+        }
+
+        string follow = hint.Expands ? "show it" : hint.Address is not null ? "open it" : hint.Kind == Engine.Hints.ValueHintKind.Date ? "change how dates read" : "";
+        ToolTip.SetTip(this, follow.Length == 0 ? hint.Text : $"{hint.Text}\n{(OperatingSystem.IsMacOS() ? "⌘" : "Ctrl+")}click to {follow}");
+        ToolTip.SetPlacement(this, PlacementMode.Pointer);
+        ToolTip.SetIsOpen(this, true);
     }
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)

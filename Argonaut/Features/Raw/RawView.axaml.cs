@@ -1,9 +1,13 @@
 using System;
 using System.ComponentModel;
+using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Reactive;
+using Argonaut.Engine.Hints;
 using Argonaut.Features.Raw.Highlighting;
+using Argonaut.Features.Raw.Hints;
+using Argonaut.Ui.Notifications;
 using Argonaut.Ui.Rows;
 using Argonaut.Ui.ViewModels;
 
@@ -31,6 +35,7 @@ public partial class RawView : UserControl
         ActualThemeVariantChanged += OnThemeChanged;
         scrollBars = new RowScrollBars(Surface, VerticalScrollBar, PanScrollBar);
         EditOverview.EditChosen += OnEditChosen;
+        Surface.HintClicked += OnHintClicked;
         fontResourceSubscription = this.GetResourceObservable("AppContentFontFamily")
             .Subscribe(new AnonymousObserver<object?>(OnContentFontChanged));
     }
@@ -53,6 +58,58 @@ public partial class RawView : UserControl
     }
 
     private void OnThemeChanged(object? sender, EventArgs e) => ApplyTextBrushes();
+
+    /// <summary>
+    /// What a hint does when clicked: a date offers the ways to read the document's dates, an
+    /// address opens, and a value hiding a document opens the card showing it.
+    /// </summary>
+    private void OnHintClicked(object? sender, RawHintHit hit)
+    {
+        if (hit.Value.Hint is not { } hint || subscribedViewModel is not { } vm)
+            return;
+
+        if (hint.Expands)
+            _ = ShowHintCardAsync(vm, hit);
+        else if (hint.Kind == ValueHintKind.Date)
+            DateSchemeMenu(vm).ShowAt(Surface, showAtPointer: true);
+        else if (hint.Address is { } address && UrlHintProvider.IsSafe(address))
+            _ = TopLevel.GetTopLevel(this)?.Launcher.LaunchUriAsync(address);
+    }
+
+    private async Task ShowHintCardAsync(RawViewModel vm, RawHintHit hit)
+    {
+        var shown = await vm.PreviewHintAsync(hit.Value);
+        if (shown is null)
+        {
+            ToastService.Show("That value doesn't decode after all.");
+            return;
+        }
+
+        HintCard.Show(shown, hit.Bounds);
+    }
+
+    /// <summary>The ways a number can read as a date, for the whole document: a raw view has no
+    /// per-value choice, since an edit moves every value after it.</summary>
+    private static MenuFlyout DateSchemeMenu(RawViewModel vm)
+    {
+        var menu = new MenuFlyout();
+        void Add(string header, DateDecodingScheme scheme)
+        {
+            var item = new MenuItem
+            {
+                Header = header,
+                Icon = vm.HintSettings.FileDefaultScheme == scheme ? new TextBlock { Text = "✓" } : null,
+            };
+            item.Click += (_, _) => vm.HintSettings.SetUserDefault(scheme);
+            menu.Items.Add(item);
+        }
+
+        Add("Off", DateDecodingScheme.Off);
+        Add("JS milliseconds", DateDecodingScheme.JsMilliseconds);
+        Add("JS seconds", DateDecodingScheme.JsSeconds);
+        Add("Keepa minutes", DateDecodingScheme.KeepaMinutes);
+        return menu;
+    }
 
     /// <summary>The text palette, from the theme - again whenever the theme changes.</summary>
     private void ApplyTextBrushes() => RawTextPalette.Apply(Surface, this);

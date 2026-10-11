@@ -4,6 +4,7 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:raw="clr-namespace:Argonaut.Features.Raw"
              xmlns:editing="clr-namespace:Argonaut.Features.Raw.Editing"
+             xmlns:preview="clr-namespace:Argonaut.Features.Json.Preview"
              x:Class="Argonaut.Features.Raw.RawView"
              x:DataType="raw:RawViewModel">
     <Border BorderBrush="{DynamicResource AppBorderBrush}"
@@ -103,6 +104,9 @@
                     </StackPanel>
                 </Grid>
             </Border>
+
+            <!-- The card a value hint opens - the JSON view's, composed here as NDJSON composes its tree. -->
+            <preview:HintCard x:Name="HintCard" Anchor="{Binding #Surface}" />
         </Grid>
     </Border>
 </UserControl>

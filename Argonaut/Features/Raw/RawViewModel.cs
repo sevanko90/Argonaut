@@ -5,17 +5,21 @@ using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Detection;
+using Argonaut.Engine.Hints;
 using Argonaut.Engine.Indexing;
 using Argonaut.Engine.Progress;
 using Argonaut.Engine.Saving;
 using Argonaut.Engine.Search;
 using Argonaut.Engine.Settings;
+using Argonaut.Features.Json.Preview;
 using Argonaut.Features.Raw.Editing;
 using Argonaut.Features.Raw.Highlighting;
+using Argonaut.Features.Raw.Hints;
 using Argonaut.Features.Raw.Rows;
 using Argonaut.Ui.Documents;
 using Argonaut.Ui.Documents.Navigation;
 using Argonaut.Ui.Find;
+using Argonaut.Ui.Hints;
 using Argonaut.Ui.Notifications;
 using Argonaut.Ui.Progress;
 
@@ -115,6 +119,48 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     /// <see cref="Bytes"/>.
     /// </summary>
     internal IByteSource? Document => this.editor?.Document ?? this.session?.Bytes;
+
+    /// <summary>How this document's dates read: the scheme the first date-shaped number on screen
+    /// suggests, unless one is picked from a date chip.</summary>
+    public DateHintSettings HintSettings { get; } = new();
+
+    /// <summary>What the values the lexer finds read as - the tree's hints, over raw rows.</summary>
+    internal RawValueHints ValueHints => this.valueHints ??= new RawValueHints(
+    [
+        new DateHintProvider(HintSettings), new IsoDateHintProvider(HintSettings, TimeProvider.System), new ColourHintProvider(),
+        new JwtHintProvider(TimeProvider.System), new UrlHintProvider(), new CronHintProvider(HintSettings, TimeProvider.System),
+        new EmbeddedJsonHintProvider(), new Base64HintProvider(),
+    ], HintSettings);
+
+    private RawValueHints? valueHints;
+
+    /// <summary>
+    /// What a hinted value encodes, ready for a card: its content copied out of the document on
+    /// the UI thread, decoded on a background one. Null when it does not decode after all, or the
+    /// document closed meanwhile.
+    /// </summary>
+    internal async Task<HintPreview?> PreviewHintAsync(RawValue value)
+    {
+        if (Document is not { } bytes || value.Hint is not { } hint)
+            return null;
+
+        long length = value.ContentEnd - value.ContentStart;
+        if (HintPreviews.TooLarge(length) is { } tooLarge)
+            return tooLarge;
+
+        byte[] raw = new byte[length];
+        if (bytes.CopyTo(value.ContentStart, raw) != raw.Length)
+            return null;
+
+        var shown = await HintPreviews.DecodeAsync(hint.Kind, raw, ValueHints.Providers, HintSettings.TimeZoneMode);
+        if (IsDisposed)
+        {
+            shown?.Preview.Dispose();
+            return null;
+        }
+
+        return shown;
+    }
 
     /// <summary>The rows of <see cref="Document"/>.</summary>
     internal IRawRowIndex? RowIndex => (IRawRowIndex?)this.editor?.RowIndex ?? this.session?.Index;

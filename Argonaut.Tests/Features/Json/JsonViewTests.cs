@@ -139,19 +139,19 @@ public sealed class JsonViewTests : IDisposable
             await PumpAsync();
 
         var view = window.GetVisualDescendants().OfType<JsonView>().Single();
-        var card = view.FindControl<Avalonia.Controls.Primitives.Popup>("HintCard")!;
+        var card = view.FindControl<Argonaut.Features.Json.Preview.HintCard>("HintCard")!;
         Assert.True(card.IsOpen);
-        var preview = Assert.IsType<Argonaut.Features.Json.Preview.ValuePreview>(view.FindControl<Argonaut.Features.Json.Preview.ValuePreviewView>("HintCardPreview")!.DataContext);
+        var preview = Assert.IsType<Argonaut.Features.Json.Preview.ValuePreview>(card.ShownPreview);
         Assert.True(preview.IsTree);
         Assert.Equal("JWT · header and claims", preview.Title);
 
-        card.IsOpen = false;
+        card.Close();
         await PumpAsync();
-        Assert.Null(view.FindControl<Argonaut.Features.Json.Preview.ValuePreviewView>("HintCardPreview")!.DataContext);
+        Assert.Null(card.ShownPreview);
     });
 
     private static bool CardIsOpen(Window window)
-        => window.GetVisualDescendants().OfType<JsonView>().Single().FindControl<Avalonia.Controls.Primitives.Popup>("HintCard")!.IsOpen;
+        => window.GetVisualDescendants().OfType<JsonView>().Single().FindControl<Argonaut.Features.Json.Preview.HintCard>("HintCard")!.IsOpen;
 
     [Fact]
     public Task AHintPreviewsWhatItsValueEncodes() => WithView("""{"embedded":"{\"a\":1,\"b\":[2]}","text":"aGVsbG8gdGhlcmUsIHJlYWRlcg==","bad":"{\"a\":"}""", async (_, vm, _) =>

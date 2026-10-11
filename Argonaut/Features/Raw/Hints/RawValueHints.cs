@@ -78,6 +78,9 @@ public sealed class RawValueHints
             provider.HintsChanged += OnProviderHintsChanged;
     }
 
+    /// <summary>What reads the values, in order - the first to read one wins.</summary>
+    public IReadOnlyList<IValueHintProvider> Providers => providers;
+
     /// <summary>The bytes the rows were decoded from. Setting it forgets every value read so far.</summary>
     public IByteSource? Source
     {

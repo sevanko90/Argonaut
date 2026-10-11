@@ -317,41 +317,18 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable, IB
 
         long start = link.ValueStart + 1;
         long length = link.ValueEnd - 1 - start;
-        if (length > HintExpansion.MaxValueBytes)
-        {
-            return new HintPreview(ValuePreview.ForMessage("Too large to preview",
-                $"This value is {ByteLengthText.Format(length)} - too large to decode here. Open it in the raw view to see it."), null);
-        }
+        if (HintPreviews.TooLarge(length) is { } tooLarge)
+            return tooLarge;
 
         byte[] raw = bytes.RequireContiguous(start, (int)length).ToArray();
-        var decoded = await Task.Run(() => HintExpansion.Decode(link.Kind, raw));
-        if (decoded is null || IsDisposed)
-            return null;
-
-        var preview = decoded.Kind switch
+        var shown = await HintPreviews.DecodeAsync(link.Kind, raw, hintProviders, HintSettings.TimeZoneMode);
+        if (IsDisposed)
         {
-            ExpandedKind.Json => ValuePreview.ForJson(decoded.Title, decoded.Bytes, link.Kind == ValueHintKind.Jwt ? JwtHintProviders() : hintProviders),
-            ExpandedKind.Image => ValuePreview.ForImage(decoded.Title, decoded.Bytes),
-            ExpandedKind.Text => ValuePreview.ForText(decoded.Title,
-                Encoding.UTF8.GetString(decoded.Bytes, 0, Math.Min(decoded.Bytes.Length, ValuePreview.MaxTextBytes)),
-                decoded.Bytes.Length > ValuePreview.MaxTextBytes),
-            _ => ValuePreview.ForMessage(decoded.Title, "Binary data, with nothing here to show it. Open it as a document to see its bytes."),
-        };
-        return new HintPreview(preview, decoded);
-    }
+            shown?.Preview.Dispose();
+            return null;
+        }
 
-    /// <summary>The hints for a JWT's decoded claims: as the document's, except that a number
-    /// reads as a date in seconds - RFC 7519 defines <c>exp</c>, <c>iat</c> and <c>nbf</c> that
-    /// way - whatever the document's own numbers were taken to be.</summary>
-    private IReadOnlyList<IValueHintProvider> JwtHintProviders()
-    {
-        var seconds = new DateHintSettings();
-        seconds.SetUserDefault(DateDecodingScheme.JsSeconds);
-        seconds.SetTimeZoneMode(HintSettings.TimeZoneMode);
-        var providers = new List<IValueHintProvider> { new DateHintProvider(seconds) };
-        if (hintProviders is not null)
-            providers.AddRange(hintProviders.Where(provider => provider is not DateHintProvider));
-        return providers;
+        return shown;
     }
 
     private void ShowWhenReady(long offset)

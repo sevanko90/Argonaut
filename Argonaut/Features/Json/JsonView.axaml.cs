@@ -32,7 +32,6 @@ public partial class JsonView : UserControl
     private MenuFlyout? hintFlyout;
     private MenuFlyout? nodeMenu;
     private long hintFlyoutValueOffset = -1;
-    private HintPreview? hintCardShown;
 
     private readonly RowScrollBars scrollBars;
 
@@ -205,49 +204,7 @@ public partial class JsonView : UserControl
             return;
         }
 
-        HintCard.IsOpen = false;
-        ReleaseHintCard();
-        hintCardShown = shown;
-
-        HintCardTitle.Text = shown.Preview.Title;
-        HintCardOpenButton.IsVisible = shown.Decoded is { Kind: not ExpandedKind.Image };
-        // A tree needs a height to lay its rows into; text and pictures take what they need.
-        HintCardPreview.Height = shown.Preview.IsTree ? CardTreeHeight : double.NaN;
-        HintCardPreview.MaxHeight = CardTreeHeight;
-        HintCardPreview.DataContext = shown.Preview;
-
-        HintCard.PlacementRect = chip;
-        HintCard.IsOpen = true;
-    }
-
-    /// <summary>How tall the card's tree is: a screenful of a small document, a window onto a big one.</summary>
-    private const double CardTreeHeight = 280;
-
-    private void OnHintCardOpen(object? sender, RoutedEventArgs e)
-    {
-        if (hintCardShown?.Decoded is { } decoded)
-            OpenDocumentService.Request(new OpenDocumentRequest(decoded.Bytes, decoded.Title, "the decoded value"));
-        HintCard.IsOpen = false;
-    }
-
-    private void OnHintCardKeyDown(object? sender, KeyEventArgs e)
-    {
-        if (e.Key != Key.Escape)
-            return;
-
-        HintCard.IsOpen = false;
-        e.Handled = true;
-    }
-
-    private void OnHintCardClosed(object? sender, EventArgs e) => ReleaseHintCard();
-
-    /// <summary>Lets go of the card's preview - its tree reads bytes of its own that are released
-    /// with it.</summary>
-    private void ReleaseHintCard()
-    {
-        HintCardPreview.DataContext = null;
-        hintCardShown?.Preview.Dispose();
-        hintCardShown = null;
+        HintCard.Show(shown, chip);
     }
 
     private MenuFlyout BuildHintFlyout()

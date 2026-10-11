@@ -96,15 +96,6 @@ public class TreeSurface : RowSurface
     /// <summary>Space kept between pinned trailing items and the pane's right edge.</summary>
     private const double TrailingPinMargin = 8;
 
-    // A chip: its inner padding, height and corner, and the icon it leads with - sized and
-    // weighted (on Lucide's 24-unit grid) to sit with the smaller interface text inside it.
-    private const double ChipPadding = 6;
-    private const double ChipHeight = 17;
-    private const double ChipRadius = 4;
-    private const double ChipIconSize = 11;
-    private const double ChipIconGap = 5;
-    private const double ChipIconStroke = 2;
-    private const double ChipSwatchRadius = 2.5;
 
 
     /// <summary>One note or chip after a pane's text, at <paramref name="X"/> from the text's
@@ -150,7 +141,7 @@ public class TreeSurface : RowSurface
     private IReadOnlyDictionary<TreeRunStyle, IBrush>? runBrushes;
     private IReadOnlyDictionary<TreeRowTint, IBrush>? tintBrushes;
     private IReadOnlyDictionary<TreeRunIcon, Geometry>? runIcons;
-    private readonly Dictionary<IBrush, Pen> iconPens = new();
+    private readonly ChipPainter chips = new();
 
     // The row under the pointer, and which of its trailing items, if any: actions show on the
     // hovered row, and a clickable chip darkens under the pointer.
@@ -171,7 +162,6 @@ public class TreeSurface : RowSurface
     private long turnStarted;
     private double turnFrom;
     private readonly Dictionary<IBrush, Pen> expanderPens = new();
-    private Pen? swatchEdgePen;
 
     // Per realized row, the open containers its indent guides run down from: a span of
     // guideAncestors, each an ancestor's depth and inset (the inset arrays are shared with insets).
@@ -233,7 +223,7 @@ public class TreeSurface : RowSurface
         set
         {
             runBrushes = value;
-            iconPens.Clear();
+            chips.ForgetPens();
             DropLayouts();
             InvalidateVisual();
         }
@@ -425,7 +415,7 @@ public class TreeSurface : RowSurface
             {
                 double textX = ArrowLeft(index, pane) + ToggleWidth;
                 double shift = TrailingShift(laidPane, textX, PaneLeft(pane) + PaneWidth);
-                return new Rect(textX + shift + item.X, ChipTop(index * RowHeight - anchorPixel), item.Width, ChipHeight);
+                return new Rect(textX + shift + item.X, ChipPainter.TopIn(index * RowHeight - anchorPixel), item.Width, ChipPainter.Height);
             }
         }
 
@@ -861,9 +851,9 @@ public class TreeSurface : RowSurface
             bool isChip = run.Style != TreeRunStyle.Note;
             var swatch = isChip && run.Swatch is { } colour ? new ImmutableSolidColorBrush(colour) : null;
             var icon = swatch is null && isChip && runIcons is not null && runIcons.ContainsKey(run.Icon) ? run.Icon : TreeRunIcon.None;
-            double width = label.WidthIncludingTrailingWhitespace
-                + (isChip ? 2 * ChipPadding : 0)
-                + (icon != TreeRunIcon.None || swatch is not null ? ChipIconSize + ChipIconGap : 0);
+            double width = isChip
+                ? ChipPainter.WidthOf(label, icon != TreeRunIcon.None || swatch is not null)
+                : label.WidthIncludingTrailingWhitespace;
 
             items.Add(new TrailingItem(label, brush, run.Style, icon, swatch, x, width, run.Link));
             x += width + TrailingSpacing;
@@ -1088,7 +1078,7 @@ public class TreeSurface : RowSurface
         if (isHot && ChipBackground is { } patch)
         {
             var area = new Rect(centreX - ExpanderPatchSize / 2, centreY - ExpanderPatchSize / 2, ExpanderPatchSize, ExpanderPatchSize);
-            context.DrawRectangle(patch, null, new RoundedRect(area, ChipRadius));
+            context.DrawRectangle(patch, null, new RoundedRect(area, ChipPainter.Radius));
         }
 
         var brush = isHot ? foreground
@@ -1172,69 +1162,14 @@ public class TreeSurface : RowSurface
             if (item.IsChip)
             {
                 bool isHot = isHovered && i == hoveredItem && item.Link is not null;
-                if ((isHot ? ChipHoverBackground ?? ChipBackground : ChipBackground) is { } fill)
-                    context.DrawRectangle(fill, null, new RoundedRect(new Rect(labelX, ChipTop(y), item.Width, ChipHeight), ChipRadius));
-
-                labelX += ChipPadding;
-                if (item.Swatch is { } swatch)
-                {
-                    DrawSwatch(context, swatch, item.Brush, new Rect(labelX, y + (RowHeight - ChipIconSize) / 2, ChipIconSize, ChipIconSize));
-                    labelX += ChipIconSize + ChipIconGap;
-                }
-                else if (item.Icon != TreeRunIcon.None && runIcons!.TryGetValue(item.Icon, out var glyph))
-                {
-                    double scale = ChipIconSize / 24;
-                    var at = Matrix.CreateScale(scale, scale) * Matrix.CreateTranslation(labelX, y + (RowHeight - ChipIconSize) / 2);
-                    using (context.PushTransform(at))
-                        context.DrawGeometry(null, IconPen(item.Brush), glyph);
-                    labelX += ChipIconSize + ChipIconGap;
-                }
+                var fill = isHot ? ChipHoverBackground ?? ChipBackground : ChipBackground;
+                var glyph = item.Icon != TreeRunIcon.None && runIcons!.TryGetValue(item.Icon, out var found) ? found : null;
+                chips.Draw(context, labelX, y, item.Width, item.Label, item.Brush, fill, glyph, item.Swatch);
+                continue;
             }
 
             item.Label.Draw(context, new Point(labelX, CentreInRow(item.Label, y)));
         }
-    }
-
-    private static double ChipTop(double rowTop) => rowTop + (RowHeight - ChipHeight) / 2;
-
-    /// <summary>
-    /// A colour swatch in a chip: a checker under it, so a translucent colour shows as one, and a
-    /// faint edge in the chip's text colour, so a colour close to the chip's own still has a shape.
-    /// </summary>
-    private void DrawSwatch(DrawingContext context, IBrush swatch, IBrush edge, Rect area)
-    {
-        var shape = new RoundedRect(area, ChipSwatchRadius);
-        using (context.PushClip(shape))
-        {
-            if (swatch is ISolidColorBrush { Color.A: < 255 })
-            {
-                double half = area.Width / 2;
-                using (context.PushOpacity(0.35))
-                {
-                    context.FillRectangle(edge, new Rect(area.X, area.Y, half, half));
-                    context.FillRectangle(edge, new Rect(area.X + half, area.Y + half, half, half));
-                }
-            }
-
-            context.FillRectangle(swatch, area);
-        }
-
-        using (context.PushOpacity(0.45))
-            context.DrawRectangle(null, SwatchEdgePen(edge), new RoundedRect(area.Deflate(0.5), ChipSwatchRadius));
-    }
-
-    private Pen SwatchEdgePen(IBrush brush)
-    {
-        if (swatchEdgePen?.Brush != brush)
-            swatchEdgePen = new Pen(brush, 1);
-        return swatchEdgePen;
-    }
-
-    private Pen IconPen(IBrush brush)
-    {
-        if (!iconPens.TryGetValue(brush, out var pen))
-            iconPens[brush] = pen = new Pen(brush, ChipIconStroke, lineCap: PenLineCap.Round, lineJoin: PenLineJoin.Round);
-        return pen;
     }
 
     /// <summary>Whether a row shows its actions: the row under the pointer, and the selected one -
@@ -1441,7 +1376,7 @@ public class TreeSurface : RowSurface
         {
             double rowTop = index * RowHeight - anchorPixel;
             var bounds = TrailingAt(laid, point.X - textX, shift) is var item and >= 0
-                ? new Rect(textX + shift + laid.Trailing![item].X, ChipTop(rowTop), laid.Trailing[item].Width, ChipHeight)
+                ? new Rect(textX + shift + laid.Trailing![item].X, ChipPainter.TopIn(rowTop), laid.Trailing[item].Width, ChipPainter.Height)
                 : new Rect(point.X, rowTop, 0, RowHeight);
             Select(row);
             LinkClicked?.Invoke(this, new TreeLinkClickedEventArgs(row, link, bounds));

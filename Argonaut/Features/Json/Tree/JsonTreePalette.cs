@@ -34,22 +34,6 @@ public static class JsonTreePalette
         Add(TreeRunStyle.Action, "AppMutedTextBrush");
         surface.RunBrushes = brushes;
 
-        var icons = new Dictionary<TreeRunIcon, Geometry>();
-        void AddIcon(TreeRunIcon icon, string key)
-        {
-            if (resourceHost.TryFindResource(key, out var found) && found is Geometry glyph)
-                icons[icon] = glyph;
-        }
-
-        AddIcon(TreeRunIcon.Time, "Icon.Hints");
-        AddIcon(TreeRunIcon.Table, "Icon.Table");
-        AddIcon(TreeRunIcon.FullText, "Icon.FullText");
-        AddIcon(TreeRunIcon.Key, "Icon.Key");
-        AddIcon(TreeRunIcon.OpenLink, "Icon.OpenLink");
-        AddIcon(TreeRunIcon.Mail, "Icon.Mail");
-        AddIcon(TreeRunIcon.Json, "Icon.Json");
-        AddIcon(TreeRunIcon.Binary, "Icon.Binary");
-        AddIcon(TreeRunIcon.Image, "Icon.Image");
-        surface.RunIcons = icons;
+        surface.RunIcons = TreeRunIcons.Load(resourceHost);
     }
 }

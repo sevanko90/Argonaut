@@ -15,10 +15,7 @@
         xmlns:raw="clr-namespace:Argonaut.Features.Raw"
         xmlns:progress="clr-namespace:Argonaut.Ui.Progress"
         xmlns:icons="clr-namespace:Argonaut.Ui.Icons"
-        xmlns:chrome="using:Avalonia.Controls.Chrome"
         Title="{Binding Title}"
-        ExtendClientAreaToDecorationsHint="True"
-        ExtendClientAreaTitleBarHeightHint="52"
         Background="{DynamicResource AppPanelBackgroundBrush}"
         Width="1000" Height="700">
 
@@ -65,17 +62,15 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!-- The title bar and the toolbar are one strip, as in a native unified toolbar: the
-             client area extends under the window controls (ExtendClientAreaToDecorationsHint),
-             the strip's background is the drag region, and the controls on it stay clickable.
-             MainWindow pads it clear of the platform's window buttons - traffic lights on the
-             left on macOS, caption buttons on the right elsewhere.
+        <!-- On macOS the title bar and the toolbar are one strip, as in a native unified
+             toolbar: MainWindow extends the client area under the window controls, makes the
+             strip's background the drag region, and pads it clear of the traffic lights.
+             Elsewhere the platform keeps its own title bar and this is the toolbar below it.
 
              Left to right: what is open, then the open view's own options, the document
              actions, and search last, where a desktop app keeps it. -->
         <Border Grid.Row="0"
                 x:Name="TitleBar"
-                chrome:WindowDecorationProperties.ElementRole="TitleBar"
                 Height="52"
                 Background="{DynamicResource AppChromeBackgroundBrush}"
                 BorderBrush="{DynamicResource AppBorderBrush}"

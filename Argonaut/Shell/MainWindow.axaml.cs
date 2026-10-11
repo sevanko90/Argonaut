@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Chrome;
 using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
@@ -60,8 +61,10 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
-        // The title bar is drawn by the app (see TitleBar in the XAML), so it keeps clear of
-        // the platform's own window buttons, and the traffic lights are re-centred in it.
+        // On macOS the title bar is drawn by the app (see TitleBar in the XAML), so it keeps
+        // clear of the traffic lights, which are re-centred in it. Elsewhere the platform's own
+        // title bar stays, and the strip is an ordinary toolbar below it.
+        UnifyTitleBarOnMac();
         PadTitleBar();
         Opened += (_, _) =>
         {
@@ -204,14 +207,30 @@ public partial class MainWindow : Window
     private IDisposable? trafficLightWatch;
 
     /// <summary>
-    /// Keeps the strip clear of the platform's window buttons: macOS's traffic lights at the
-    /// left, the caption buttons elsewhere at the right. Full screen on macOS hides the traffic
-    /// lights in a title bar of its own, so the strip takes its normal margin there.
+    /// Extends the client area under the window controls on macOS only, making the strip the
+    /// title bar as a native unified toolbar does. Windows and Linux keep their own title bar:
+    /// extended there, Avalonia draws caption buttons of its own over the strip, which collide
+    /// with the toolbar and offer no way out of full screen.
+    /// </summary>
+    private void UnifyTitleBarOnMac()
+    {
+        if (!OperatingSystem.IsMacOS())
+            return;
+
+        ExtendClientAreaToDecorationsHint = true;
+        ExtendClientAreaTitleBarHeightHint = TitleBar.Height;
+        WindowDecorationProperties.SetElementRole(TitleBar, WindowDecorationsElementRole.TitleBar);
+    }
+
+    /// <summary>
+    /// Keeps the strip clear of macOS's traffic lights at the left. Full screen hides them in a
+    /// title bar of its own, so the strip takes its normal margin there, as it always does on
+    /// a platform that keeps its own title bar.
     /// </summary>
     private void PadTitleBar()
     {
         if (!OperatingSystem.IsMacOS())
-            TitleBar.Padding = new Thickness(12, 0, 144, 0);
+            TitleBar.Padding = new Thickness(12, 0, 12, 0);
         else
             TitleBar.Padding = WindowState == WindowState.FullScreen ? new Thickness(12, 0, 12, 0) : new Thickness(84, 0, 12, 0);
     }

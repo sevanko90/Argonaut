@@ -57,11 +57,6 @@ it in (see "Saving" in architecture.md).
   Snowflake) were considered as a hint and dropped: too much inference to be reliable, for little
   use.
 
-- **Raw hints beyond what the lexer marks.** The raw view hints the values its lexer colours,
-  so a file with no lexer, a value inside a comment, or a URL in prose gets none. Classifying
-  every word on screen was ruled out; a cheap pre-filter by shape (a scheme, a `#`, `eyJ`) over
-  the rows on screen is the likely way in, sharing the in-place mark the lexed values use.
-
 - **Per-depth row counts**, only if the estimated scrollbar proves not good enough in use. They
   would give the tree the exact scroll model the raw view has, under the same `RowSurface`
   interface. The fixed-size thumb snaps on a document with few visible rows of uneven size (a
@@ -232,6 +227,10 @@ format keeps it honest. An XML view adds a scanner, a reader and a painter.
 
 ## Input sources
 
+- **A log read as CSV.** `FileTypeDetector` takes a file whose first two lines hold the same
+  non-zero count of unquoted commas for CSV, so a log whose first lines happen to match opens
+  in the table. A second signal - the same count on a few more lines, or no line much longer
+  than the others - would keep prose out.
 - **Load from URL.** An `HttpByteOrigin`: the download on the background with progress and
   cancellation, reporting `AvailableLength` as bytes land and `LengthSettled` when the response
   completes. The indexers already consume growth, so the work is in the origin. An in-flight source

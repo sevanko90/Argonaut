@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Reactive;
+using Avalonia.Threading;
 using Argonaut.Engine.Hints;
 using Argonaut.Features.Raw.Highlighting;
 using Argonaut.Features.Raw.Hints;
@@ -25,6 +26,11 @@ public partial class RawView : UserControl
     private readonly RowScrollBars scrollBars;
     private RawViewModel? subscribedViewModel;
 
+    /// <summary>The marked value whose chip is showing, and the grace the pointer has to cross from
+    /// the word onto the chip before it goes.</summary>
+    private RawHintHit? markChipFor;
+    private readonly DispatcherTimer markChipClose = new() { Interval = TimeSpan.FromMilliseconds(300) };
+
     public RawView()
     {
         InitializeComponent();
@@ -36,6 +42,11 @@ public partial class RawView : UserControl
         scrollBars = new RowScrollBars(Surface, VerticalScrollBar, PanScrollBar);
         EditOverview.EditChosen += OnEditChosen;
         Surface.HintClicked += OnHintClicked;
+        Surface.MarkHovered += OnMarkHovered;
+        MarkChip.Click += OnMarkChipClick;
+        MarkChipPopup.PointerEntered += (_, _) => markChipClose.Stop();
+        MarkChipPopup.PointerExited += (_, _) => markChipClose.Start();
+        markChipClose.Tick += (_, _) => CloseMarkChip();
         fontResourceSubscription = this.GetResourceObservable("AppContentFontFamily")
             .Subscribe(new AnonymousObserver<object?>(OnContentFontChanged));
     }
@@ -112,7 +123,47 @@ public partial class RawView : UserControl
     }
 
     /// <summary>The text palette, from the theme - again whenever the theme changes.</summary>
-    private void ApplyTextBrushes() => RawTextPalette.Apply(Surface, this);
+    private void ApplyTextBrushes()
+    {
+        RawTextPalette.Apply(Surface, this);
+        MarkChip.Icons = Surface.HintLayer.Icons;
+        MarkChip.InvalidateVisual();
+    }
+
+    /// <summary>
+    /// Shows the chip of the value under the pointer just below it, or - when the pointer has left
+    /// it - closes the chip after a moment, long enough to reach it.
+    /// </summary>
+    private void OnMarkHovered(object? sender, RawHintHit? hit)
+    {
+        if (hit?.Value.Hint is not { } hint)
+        {
+            markChipClose.Start();
+            return;
+        }
+
+        markChipClose.Stop();
+        markChipFor = hit;
+        MarkChip.Hint = hint;
+        MarkChipPopup.PlacementRect = hit.Bounds;
+        MarkChipPopup.IsOpen = false;
+        MarkChipPopup.IsOpen = true;
+    }
+
+    private void OnMarkChipClick(object? sender, EventArgs e)
+    {
+        var hit = markChipFor;
+        CloseMarkChip();
+        if (hit is not null)
+            OnHintClicked(Surface, hit);
+    }
+
+    private void CloseMarkChip()
+    {
+        markChipClose.Stop();
+        MarkChipPopup.IsOpen = false;
+        markChipFor = null;
+    }
 
     private void OnDataContextChanged(object? sender, EventArgs e)
     {

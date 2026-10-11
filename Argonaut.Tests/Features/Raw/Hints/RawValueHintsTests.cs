@@ -242,4 +242,13 @@ public sealed class RawValueHintsTests
         Assert.Equal(["https://example.com/a"], json.Marked);
         Assert.Equal(["https://example.com/b"], config.Marked);
     }
+
+    /// <summary>A log line opens with its timestamp; marking it would mark every line alike.</summary>
+    [Fact]
+    public void ADateOpeningALine_IsLeftAlone_ButNotOneLaterInIt()
+    {
+        var rows = Mark("2026-10-11 09:12:07 WARN certificate expires 2026-11-30T00:00:00Z", noLexer: true);
+
+        Assert.Equal(["2026-11-30T00:00:00Z"], rows[0].Marked);
+    }
 }

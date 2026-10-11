@@ -391,8 +391,13 @@ The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLeng
   carried there beside the lexer state, by the same lookback. A value that is its line's only one,
   with only punctuation or a comment after it, is a chip after the line's text, as the tree shows
   it; any other is marked in place by a line under it. `RawHintLayer` keeps each row's marks and
-  chips with the surface's layouts, draws them, and finds the one under the pointer. With no
-  lexer there are no values, and no hints.
+  chips with the surface's layouts, draws them, and finds the one under the pointer.
+- **Text no lexer reads is taken word by word, strictly.** A file with no lexer, and the
+  comments of one with a lexer, are read as words (`RawValueHints.MarkWords`). A word is
+  classified only when it starts as an unambiguous kind must, and only an address, an ISO date
+  (not one opening a line - a log's timestamp), a JWT, a hex colour or Base64 of a known format
+  is hinted. Words are always marked in place; hovering one shows its chip in a popup under it
+  (`HintChip`, `Ui/Hints`), which follows the hint when clicked.
 - **One card.** A hint that hides a document opens `HintCard` (`Features/Json/Preview`), which
   decodes through `HintPreviews` off the UI thread and shows a `ValuePreview`. The raw view
   composes it as NDJSON composes the tree.

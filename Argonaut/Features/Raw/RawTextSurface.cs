@@ -234,6 +234,10 @@ public class RawTextSurface : RowSurface
         return this.hints.ChipBounds(rowIndex, TextOriginX - PanOffset + layout.WidthIncludingTrailingWhitespace, rowIndex * RowHeight - scrollTop);
     }
 
+    /// <summary>The pointer moved onto a value marked in place, or off one (null) - for the host to
+    /// show what it reads as.</summary>
+    public event EventHandler<RawHintHit?>? MarkHovered;
+
     /// <summary>A hint's chip was clicked, or a marked value Cmd/Ctrl+clicked.</summary>
     public event EventHandler<RawHintHit>? HintClicked;
 
@@ -1403,7 +1407,7 @@ public class RawTextSurface : RowSurface
         base.OnPointerExited(e);
         this.hoveredRow = null;
         if (this.hints.ClearHover())
-            ShowHintTip(null);
+            MarkHovered?.Invoke(this, null);
         InvalidateVisual();
     }
 
@@ -1424,8 +1428,8 @@ public class RawTextSurface : RowSurface
         return hit;
     }
 
-    /// <summary>Lights the hint under the pointer, shows what a marked value reads as, and points
-    /// the cursor at what can be clicked.</summary>
+    /// <summary>Lights the hint under the pointer, says when a value marked in place is hovered,
+    /// and points the cursor at what can be clicked.</summary>
     private void UpdateHintHover(Point position, KeyModifiers modifiers)
     {
         int rowIndex = (int)Math.Floor((position.Y + scrollTop) / RowHeight);
@@ -1440,7 +1444,7 @@ public class RawTextSurface : RowSurface
         Cursor = clickable ? HandCursor : null;
 
         if (hintChanged)
-            ShowHintTip(hit is { IsChip: false } ? hit : null);
+            MarkHovered?.Invoke(this, hit is { IsChip: false } ? hit : null);
         if (rowChanged || hintChanged)
             InvalidateVisual();
     }
@@ -1449,23 +1453,6 @@ public class RawTextSurface : RowSurface
 
     private static bool IsActionable(Engine.Hints.ValueHint hint)
         => hint.Expands || hint.Address is not null || hint.Kind == Engine.Hints.ValueHintKind.Date;
-
-    /// <summary>What a value marked in place reads as, in a tip beside it, and what Cmd/Ctrl+click
-    /// does with it.</summary>
-    private void ShowHintTip(RawHintHit? hit)
-    {
-        if (hit?.Value.Hint is not { } hint)
-        {
-            ToolTip.SetIsOpen(this, false);
-            ToolTip.SetTip(this, null);
-            return;
-        }
-
-        string follow = hint.Expands ? "show it" : hint.Address is not null ? "open it" : hint.Kind == Engine.Hints.ValueHintKind.Date ? "change how dates read" : "";
-        ToolTip.SetTip(this, follow.Length == 0 ? hint.Text : $"{hint.Text}\n{(OperatingSystem.IsMacOS() ? "⌘" : "Ctrl+")}click to {follow}");
-        ToolTip.SetPlacement(this, PlacementMode.Pointer);
-        ToolTip.SetIsOpen(this, true);
-    }
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
     {

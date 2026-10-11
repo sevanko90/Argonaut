@@ -183,7 +183,7 @@ public sealed class RawViewHintsTests : IDisposable
     });
 
     [Fact]
-    public Task HoveringAMarkedWord_ShowsWhatItReadsAs() => WithView("notes.txt", "head line\nsee https://example.com/a for more\n", async (window, _, surface) =>
+    public Task HoveringAMarkedWord_ShowsItsChip_WhichFollowsTheHintWhenClicked() => WithView("notes.txt", "head line\nprimary #1E90FF here\n", async (window, _, surface) =>
     {
         var mark = Assert.Single(surface.HintMarksFor(1));
         var point = surface.TranslatePoint(surface.HintMarkBounds(1, mark)!.Value.Center, window)!.Value;
@@ -191,6 +191,17 @@ public sealed class RawViewHintsTests : IDisposable
         await PumpAsync();
 
         Assert.Equal(mark.Value, surface.HintLayer.Hovered?.Value);
-        Assert.Contains("Open example.com", ToolTip.GetTip(surface) as string);
+        var view = window.GetVisualDescendants().OfType<RawView>().Single();
+        var popup = view.FindControl<Avalonia.Controls.Primitives.Popup>("MarkChipPopup")!;
+        var chip = view.FindControl<Argonaut.Ui.Hints.HintChip>("MarkChip")!;
+        Assert.True(popup.IsOpen);
+        Assert.Equal("rgb(30, 144, 255)", chip.Hint?.Text);
+
+        // Leaving the word for the chip keeps it; clicking it follows the hint and closes it.
+        window.MouseMove(new Point(point.X, point.Y + 200));
+        await PumpAsync(5);
+        Assert.True(popup.IsOpen);
+        chip.PerformClick();
+        Assert.False(popup.IsOpen);
     });
 }

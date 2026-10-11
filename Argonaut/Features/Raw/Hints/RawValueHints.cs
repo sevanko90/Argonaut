@@ -61,7 +61,8 @@ public readonly record struct RawHintMark(int Start, int End, RawValue Value, bo
 /// (<see cref="MarkWords"/>), and more strictly: a word is only offered when it starts the way an
 /// unambiguous kind must (a scheme, <c>#</c>, <c>eyJ</c>, a year, a known Base64 header), and only
 /// an address, an ISO date, a JWT, a hex colour or Base64 that decodes to a known format is
-/// hinted. Prose is full of numbers and words that would otherwise read as something.
+/// hinted. Prose is full of numbers and words that would otherwise read as something. A date
+/// opening a line is left alone too: it is a log's timestamp, the same on every line.
 /// </summary>
 public sealed class RawValueHints
 {
@@ -192,8 +193,14 @@ public sealed class RawValueHints
             if (start == 0 && !row.IsLineStart && source is { } bytes && wordStart > 0 && !IsBlank(bytes.ByteAt(wordStart - 1)))
                 wordStart = WordStartBefore(bytes, wordStart);
 
-            if (ResolveWord(wordStart) is { Hint: not null } value)
-                AddMark(row, value, firstOnLine: false, marks);
+            if (ResolveWord(wordStart) is not { Hint: { } hint } value)
+                continue;
+
+            // A log line opens with its timestamp, so a date there would mark every line alike.
+            if (hint.Kind == ValueHintKind.IsoDate && start == 0 && row.IsLineStart)
+                continue;
+
+            AddMark(row, value, firstOnLine: false, marks);
         }
     }
 

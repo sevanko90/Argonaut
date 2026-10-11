@@ -31,7 +31,8 @@ public static class RawTextPalette
         Add(RawTextStyle.Punctuation, "AppMutedTextBrush");
         surface.StyleBrushes = brushes;
 
-        // Hints draw as the tree's do: its chip fills, muted labels and icons, in the interface font.
+        // Hints draw as the tree's do: its chip fills, muted labels and icons, in the interface font;
+        // a value marked in place is underlined in the accent.
         IBrush? Find(string key)
             => resourceHost.TryFindResource(key, resourceHost.ActualThemeVariant, out var found) ? found as IBrush : null;
 
@@ -39,6 +40,7 @@ public static class RawTextPalette
         hints.ChipBackground = Find("AppChipBrush");
         hints.ChipHoverBackground = Find("AppChipHoverBrush");
         hints.ChipForeground = Find("AppMutedTextBrush");
+        hints.MarkBrush = Find("AppAccentBrush");
         hints.ChipFontFamily = resourceHost.TryFindResource("AppSansFontFamily", out var font) ? font as FontFamily : null;
         hints.Icons = TreeRunIcons.Load(resourceHost);
         hints.ForgetPens();

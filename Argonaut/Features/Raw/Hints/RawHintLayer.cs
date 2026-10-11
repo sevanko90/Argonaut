@@ -24,7 +24,8 @@ public sealed record RawHintHit(int RowIndex, RawValue Value, Rect Bounds, bool 
 ///
 /// A chip is drawn as the tree draws it, a gap after the row's text. A value marked in place gets
 /// a line under it that never moves the text, the wrapping or the caret: in its own colour for a
-/// colour, so the swatch is the underline, and a dotted line otherwise, solid while hovered.
+/// colour, so the swatch is the underline, and a dotted line in the accent otherwise, solid while
+/// hovered.
 /// </summary>
 public sealed class RawHintLayer
 {
@@ -50,8 +51,11 @@ public sealed class RawHintLayer
 
     public IBrush? ChipHoverBackground { get; set; }
 
-    /// <summary>A chip's label and icon, and the line under a marked value.</summary>
+    /// <summary>A chip's label and icon.</summary>
     public IBrush? ChipForeground { get; set; }
+
+    /// <summary>The line under a value marked in place, dotted until hovered.</summary>
+    public IBrush? MarkBrush { get; set; }
 
     public IReadOnlyDictionary<TreeRunIcon, Geometry>? Icons { get; set; }
 
@@ -208,7 +212,8 @@ public sealed class RawHintLayer
                 }
 
                 double y = Math.Round(area.Bottom) + 0.5;
-                context.DrawLine(isHot ? SolidPen(brush) : DottedPen(brush), new Point(area.X, y), new Point(area.Right, y));
+                var markBrush = MarkBrush ?? brush;
+                context.DrawLine(isHot ? SolidPen(markBrush) : DottedPen(markBrush), new Point(area.X, y), new Point(area.Right, y));
             }
         }
 

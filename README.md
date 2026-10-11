@@ -7,6 +7,8 @@ A cross-platform file viewer built for large files — multi-gigabyte files (inc
 - Instantly view any file contents - anything Argonaut can't identify opens in the text view, and you can try any view on any file from the status bar if the auto detection fails. 
 - Paste data straight in - the clipboard opens as a document, no file needed
 - Specialised views for different file types
+- Value hints - dates, colours, tokens, links and encoded payloads are explained right beside the value, and the ones hiding a document open up to show it
+- Edit and save in the text view, even multi-gigabyte files
 - Files of any size are navigable almost instantly, no "loading..." spinner here! Argonaut never loads the whole file before starting to display it.
 - Fast search and highlighting across multi-gb files
 - Searches run in the background and results are shown as soon as they become available
@@ -37,10 +39,10 @@ Argonaut was originally conceived as a viewer for large JSON files (hence the na
 
 - Displays documentation from JSON Schema files
 - Semantic JSON Diff
-- Collapsible nodes
+- Collapsible nodes, with optional indent guides
 - Open JSON Arrays in a grid view for slicing them by different dimensions
 - JSONPath display of selected node and go to JSONPath node option
-- Inline decoding of JS dates to readable form
+- Value hints beside the values that need them - see [Value hints](#value-hints) below
 - Copy property value or JSONPath to clipboard
 
 #### NDJson / JSONL
@@ -69,6 +71,13 @@ everything else, so a multi-gigabyte log scrolls smoothly from the moment it ope
   that's breaking your file. Names come from the Unicode Character Database 16.0.0, since .NET
   exposes character categories but no names.
 - Double-click to select a word
+- Edit in place, with undo and redo, then save or save as. Your edits are held on top of the file
+  rather than a copy of it, so editing a multi-gigabyte file is as quick as opening one. Saving
+  writes a copy beside the file and swaps it in, so a failed save never leaves you with half a
+  file. (Search is paused while there are unsaved edits.)
+- Value hints, as in the JSON view: on values the syntax colouring picks out, and on unambiguous
+  things anywhere else - links, ISO dates, JWTs, hex colours, Base64 pictures - in logs, comments
+  and plain text
 - Syntax colouring for config-style files, in both viewing and editing:
   - JSON, JSONC and NDJSON - keys, strings, numbers, `true`/`false`/`null`, comments
   - Config files - YAML, INI, `.properties`, `.env`, `.editorconfig`, simple TOML: keys,
@@ -100,6 +109,28 @@ This is documentation only - we're not validating correctness. Argonaut attempts
 Unlike regular diff tools, Argonaut understands that JSON structure carries a *meaning* and uses this to show real differences in the data instead of just reporting that a line changed. This means that, for example, moving a property from the top of an object to the bottom won't show as a diff because in JSON terms the object it represents is unchanged.
 
 This also means that you can't rely on the visible node structure of the target document being the same as the underlying file (because the two views are synchronised to the shape of the source document). If you want to find something in the target document, use the JSONPath view to show exactly where it is. 
+
+### Value hints
+
+Plenty of values in data files are unreadable as written. Argonaut reads them for you and says what
+they are, right next to the value:
+
+- **Dates** - epoch numbers (milliseconds, seconds, or Keepa minutes - Argonaut works out which from
+  the document and you can change it) and ISO 8601 strings, with how long ago or how far off they are
+- **Colours** - a swatch, and the colour in the other notation (`#1E90FF` reads as `rgb(30, 144, 255)`)
+- **JWTs** - the algorithm and when the token expires, or how long ago it did
+- **Links** - web and mail addresses open with a click (Cmd/Ctrl+click on the value itself)
+- **Cron schedules** - in words, with when it next runs
+- **JSON inside a string** - and **Base64**, named for what it decodes to: text, PNG/GIF/JPEG/WebP
+  images (with their size), PDF, ZIP or gzip
+
+A hint ending in a chevron opens up: a JWT shows its header and claims, embedded JSON shows as a tree,
+a Base64 picture shows the picture - and the rest can be opened as a document of their own. A
+date's hint lets you change how the file's numbers are read.
+
+Hints go by what a value looks like, never by the name of its property, so they work on any file.
+In the text view they're stricter outside the values syntax colouring finds - a number in a log is
+just a number - and show as an underline that reveals the hint when you hover it.
 
 ### Searching
 Argonaut searches files in the background and highlights matches as it finds them (or as you scroll them into view) - searches never block the UI. 

@@ -139,6 +139,16 @@
             <Setter Property="Foreground" Value="{DynamicResource AppMutedTextBrush}" />
         </Style>
 
+        <!-- The excerpt control: a pill, tinted so an excerpt never passes for the whole file. -->
+        <Style Selector="Button.excerptchip">
+            <Setter Property="Background" Value="{DynamicResource AppAccentSurfaceBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource AppAccentBrush}" />
+            <Setter Property="CornerRadius" Value="11" />
+        </Style>
+        <Style Selector="Button.excerptchip icons|LucideIcon.chevron">
+            <Setter Property="Foreground" Value="{DynamicResource AppAccentBrush}" />
+        </Style>
+
         <!-- A hairline between groups of title-bar controls. -->
         <Style Selector="Border.toolseparator">
             <Setter Property="Width" Value="1" />

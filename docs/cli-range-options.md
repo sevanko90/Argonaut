@@ -156,8 +156,10 @@ Requirements:
    - [x] shared line numbering (source / 1-based) applied in Raw and NdJson
    - [x] CSV header taken from the whole file
    - [x] `--bytes` excerpts (no scan; UTF-8 start snap; long-line hint on `--lines`)
-   - [ ] excerpt control: range, numbering toggle, "Open full file" (logic done; look being chosen)
-   - [ ] About box "Command line" section (look being chosen)
+   - [x] excerpt control: a title-bar pill beside the file name, its range rounded to k/m/g
+         (exact in the tooltip and flyout), with a flyout for numbering and "Open all of"
+   - [x] About box "Command-line options" link to a window with the `--help` text, which
+         `--help` also opens when there is no terminal
    CSV stays on TableView here, with no gutter yet.
 2. **Next branch** - a custom `TableSurface` on `Ui/Rows/RowSurface` in `Ui/TableGrid`, CSV
    first, with the pinned line-number gutter. TableView has no frozen columns, so a gutter there

@@ -325,7 +325,7 @@ public partial class MainWindow : Window
             if (startup.ShowHelp)
             {
                 await WhenOpenedAsync();
-                await AboutDialog.ShowAbout(this, updateSettings);
+                await CommandLineDialog.ShowUsage(this);
                 return;
             }
 
@@ -612,6 +612,9 @@ public partial class MainWindow : Window
         this.closeAgreed = true;
         Close();
     }
+
+    private void OnOpenWholeFile(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+        => _ = viewModel.OpenWholeFileAsync();
 
     private async void OnShowAbout(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {

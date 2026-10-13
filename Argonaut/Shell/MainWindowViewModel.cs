@@ -605,7 +605,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
         var whole = new FileByteOrigin(normalizedPath);
         var requestId = openRequest.Begin();
-        string wanted = ExcerptByteOrigin.Describe(new LocatedLines(default, lines.First, lines.Last));
+        string wanted = ExcerptByteOrigin.Describe(new LocatedLines(default, lines.First, lines.Last), CompactCount.Format);
         using var stopping = new CancellationTokenSource();
         var progress = this.progressBoard.Begin($"Finding {wanted} of {whole.DisplayName}", stopping.Cancel);
 
@@ -673,9 +673,14 @@ public sealed class MainWindowViewModel : ObservableObject
     /// <summary>True while the open input is an excerpt.</summary>
     public bool IsExcerpt => Excerpt is not null;
 
-    /// <summary>Which part of the file the excerpt is - "Lines 1,000,000–2,000,000" - or
-    /// empty.</summary>
-    public string ExcerptLabel => Excerpt is { } excerpt ? Capitalise(excerpt.Description) : string.Empty;
+    /// <summary>Which part of the file the excerpt is, rounded to fit the title bar - "Lines
+    /// 1m–2m" - or empty.</summary>
+    public string ExcerptLabel => Excerpt is { } excerpt ? Capitalise(excerpt.ShortDescription) : string.Empty;
+
+    /// <summary>Exactly which part of which file the excerpt is - "Lines 1,000,000–2,000,000 of
+    /// big.ndjson" - or empty.</summary>
+    public string ExcerptDescription
+        => Excerpt is { } excerpt ? $"{Capitalise(excerpt.Description)} of {excerpt.Whole.DisplayName}" : string.Empty;
 
     /// <summary>The file the excerpt was taken from, by name - or empty.</summary>
     public string ExcerptSourceName => Excerpt?.Whole.DisplayName ?? string.Empty;
@@ -1228,6 +1233,7 @@ public sealed class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(Excerpt));
         OnPropertyChanged(nameof(IsExcerpt));
         OnPropertyChanged(nameof(ExcerptLabel));
+        OnPropertyChanged(nameof(ExcerptDescription));
         OnPropertyChanged(nameof(ExcerptSourceName));
         OnPropertyChanged(nameof(ExcerptSourceNumberingLabel));
         OnPropertyChanged(nameof(HeaderTitle));

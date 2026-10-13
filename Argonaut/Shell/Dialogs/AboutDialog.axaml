@@ -29,6 +29,11 @@
                     Classes="linklike"
                     HorizontalAlignment="Left" />
         </StackPanel>
+        <Button x:Name="CommandLineLinkButton"
+                Content="Command-line options"
+                Click="OnCommandLineLinkClicked"
+                Classes="linklike"
+                HorizontalAlignment="Left" />
         <CheckBox x:Name="AutoUpdateCheckBox"
                   Content="Automatically check for updates"
                   Click="OnAutoUpdateToggled" />

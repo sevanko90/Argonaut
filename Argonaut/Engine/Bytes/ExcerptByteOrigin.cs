@@ -1,6 +1,7 @@
 using System;
 using System.Globalization;
 using Argonaut.Engine.Indexing.Lines;
+using Argonaut.Engine.Text;
 
 namespace Argonaut.Engine.Bytes;
 
@@ -29,11 +30,11 @@ public sealed class ExcerptByteOrigin : IByteOrigin
 {
     /// <summary>An excerpt of the lines <paramref name="lines"/> located.</summary>
     public ExcerptByteOrigin(IByteOrigin whole, LocatedLines lines)
-        : this(whole, lines.Range, lines, Describe(lines))
+        : this(whole, lines.Range, lines, Describe(lines, N), Describe(lines, CompactCount.Format))
     {
     }
 
-    private ExcerptByteOrigin(IByteOrigin whole, ByteRange range, LocatedLines? lines, string description)
+    private ExcerptByteOrigin(IByteOrigin whole, ByteRange range, LocatedLines? lines, string description, string shortDescription)
     {
         ArgumentNullException.ThrowIfNull(whole);
         if (range.Offset < 0 || range.Length < 0 || range.End > whole.AvailableLength)
@@ -43,12 +44,13 @@ public sealed class ExcerptByteOrigin : IByteOrigin
         Range = range;
         Lines = lines;
         Description = description;
+        ShortDescription = shortDescription;
         DisplayName = $"{whole.DisplayName} ({description})";
     }
 
     /// <summary>An excerpt of the bytes in <paramref name="range"/>, which it takes as given.</summary>
     public static ExcerptByteOrigin OfBytes(IByteOrigin whole, ByteRange range)
-        => new(whole, range, lines: null, Describe(range));
+        => new(whole, range, lines: null, Describe(range, N), Describe(range, CompactCount.Format));
 
     /// <summary>The document this is an excerpt of.</summary>
     public IByteOrigin Whole { get; }
@@ -62,6 +64,10 @@ public sealed class ExcerptByteOrigin : IByteOrigin
 
     /// <summary>Which part of the file this is: "lines 1,000,000–2,000,000", "bytes 0–499".</summary>
     public string Description { get; }
+
+    /// <summary><see cref="Description"/> with its numbers rounded to fit a label - "lines
+    /// 1m–2m" (see <see cref="CompactCount"/>).</summary>
+    public string ShortDescription { get; }
 
     public string DisplayName { get; }
 
@@ -87,17 +93,17 @@ public sealed class ExcerptByteOrigin : IByteOrigin
     public KeptIndexes KeptIndexes { get; } = new();
 
     /// <summary>"lines 1,000,000–2,000,000", or "lines 1,000,000–end" for one that runs to the
-    /// end of the document.</summary>
-    public static string Describe(LocatedLines lines)
+    /// end of the document, with each number written by <paramref name="number"/>.</summary>
+    public static string Describe(LocatedLines lines, Func<long, string> number)
     {
-        string first = N(lines.FirstLine);
-        string last = lines.LastLine is { } l ? N(l) : "end";
+        string first = number(lines.FirstLine);
+        string last = lines.LastLine is { } l ? number(l) : "end";
         return lines.LastLine == lines.FirstLine ? $"line {first}" : $"lines {first}–{last}";
     }
 
     /// <summary>"bytes 0–499": zero-based, last byte included, as an HTTP range names them.</summary>
-    public static string Describe(ByteRange range)
-        => range.Length <= 1 ? $"byte {N(range.Offset)}" : $"bytes {N(range.Offset)}–{N(range.End - 1)}";
+    public static string Describe(ByteRange range, Func<long, string> number)
+        => range.Length <= 1 ? $"byte {number(range.Offset)}" : $"bytes {number(range.Offset)}–{number(range.End - 1)}";
 
     private static string N(long value) => value.ToString("N0", CultureInfo.CurrentCulture);
 

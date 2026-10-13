@@ -77,4 +77,13 @@ public class ExcerptByteOriginTests
         Assert.Null(excerpt.Lines);
         Assert.Equal("big.json (bytes 4–6)", excerpt.DisplayName);
     }
+
+    [Fact]
+    public void Its_short_description_rounds_for_a_label()
+    {
+        var whole = new MemoryByteOrigin(new byte[3_000_000], "big.bin");
+        using var excerpt = ExcerptByteOrigin.OfBytes(whole, new ByteRange(1_500_000, 1_000_000));
+
+        Assert.Equal("bytes 1.5m–2.5m", excerpt.ShortDescription);
+    }
 }

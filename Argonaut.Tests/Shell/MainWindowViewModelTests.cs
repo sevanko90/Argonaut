@@ -716,8 +716,8 @@ public sealed class MainWindowViewModelTests : IDisposable
         var excerpt = Assert.IsType<ExcerptByteOrigin>(loaded);
         Assert.Equal("{\"n\":3}\n{\"n\":4}\n", loadedText);
         Assert.Null(excerpt.Path);
-        Assert.Equal(3, excerpt.Lines.FirstLine);
-        Assert.Equal(4, excerpt.Lines.LastLine);
+        Assert.Equal(3, excerpt.Lines!.Value.FirstLine);
+        Assert.Equal(4, excerpt.Lines!.Value.LastLine);
     }
 
     [Fact]
@@ -783,5 +783,61 @@ public sealed class MainWindowViewModelTests : IDisposable
         Assert.Equal(2, loads.Count);
         Assert.Equal(FileTypeDetector.FileKind.Unidentified, loads[1].Kind);
         Assert.Equal(Path.GetFullPath(path), loads[1].Origin.Path);
+    }
+
+    [Fact]
+    public async Task OpenByteExcerpt_LoadsExactlyTheBytesAskedFor()
+    {
+        string path = WriteLinesFile(10);
+        string? loadedText = null;
+        IByteOrigin? loaded = null;
+        var vm = CreateViewModel((_, origin, _) =>
+        {
+            loaded = origin;
+            loadedText = ReadAll(origin);
+            return Task.FromResult<IDocumentViewModel>(new FakeDocument { Origin = origin });
+        });
+
+        await vm.OpenStartupAsync(StartupArguments.Parse([path, "--bytes", "2-6"]));
+
+        var excerpt = Assert.IsType<ExcerptByteOrigin>(loaded);
+        Assert.Equal("n\":1}", loadedText);
+        Assert.Null(excerpt.Lines);
+        Assert.Equal(new ByteRange(2, 5), excerpt.Range);
+    }
+
+    [Fact]
+    public async Task OpenByteExcerpt_StartingInsideACharacter_StartsAtTheCharacter()
+    {
+        string path = Path.Combine(tempDir, "accents.txt");
+        File.WriteAllText(path, "ab€cd"); // € is three bytes, at 2..4
+        string? loadedText = null;
+        var vm = CreateViewModel((_, origin, _) =>
+        {
+            loadedText = ReadAll(origin);
+            return Task.FromResult<IDocumentViewModel>(new FakeDocument { Origin = origin });
+        });
+
+        await vm.OpenStartupAsync(StartupArguments.Parse([path, "--bytes", "4-"]));
+
+        Assert.Equal("€cd", loadedText);
+    }
+
+    [Fact]
+    public async Task OpenByteExcerpt_PastTheEnd_OpensNothing_AndAnEndPastIt_IsCutShort()
+    {
+        string path = WriteLinesFile(2); // 16 bytes
+        var loaded = new List<string>();
+        var vm = CreateViewModel((_, origin, _) =>
+        {
+            loaded.Add(ReadAll(origin));
+            return Task.FromResult<IDocumentViewModel>(new FakeDocument { Origin = origin });
+        });
+
+        await vm.OpenStartupAsync(StartupArguments.Parse([path, "--bytes", "16-20"]));
+        Assert.Empty(loaded);
+
+        await vm.OpenStartupAsync(StartupArguments.Parse([path, "--bytes", "8+100"]));
+        Assert.Equal(["{\"n\":2}\n"], loaded);
     }
 }

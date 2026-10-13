@@ -66,4 +66,15 @@ public class ExcerptByteOriginTests
         Assert.Equal("big.ndjson (line 4)", Excerpt(4, 4).DisplayName);
         Assert.Equal("big.ndjson (lines 2–end)", Excerpt(2, null).DisplayName);
     }
+
+    [Fact]
+    public void A_byte_excerpt_reads_its_range_and_names_it_by_bytes()
+    {
+        var whole = new MemoryByteOrigin(Encoding.UTF8.GetBytes(Text), "big.json");
+        using var excerpt = ExcerptByteOrigin.OfBytes(whole, new ByteRange(4, 3));
+
+        Assert.Equal("two", Read(excerpt.Open()));
+        Assert.Null(excerpt.Lines);
+        Assert.Equal("big.json (bytes 4–6)", excerpt.DisplayName);
+    }
 }

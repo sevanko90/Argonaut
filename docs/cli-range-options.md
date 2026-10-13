@@ -119,6 +119,16 @@ Requirements:
 
 - `--lines A-B` opens lines A..B (1-based, inclusive, like `sed -n`) as an excerpt. `A-` runs to
   the end. `1m`/`2.5m`/`500k` suffixes allowed.
+- `--bytes A-B` opens a byte range, for files whose lines are too long to ask for by line (a
+  1 GB minified document is one line, so `--lines` can only open all of it). Zero-based and
+  inclusive like an HTTP range; `A-`, `A+COUNT`, `k`/`m`/`g` suffixes and hex. No scan: the
+  start backs off up to 3 bytes to a UTF-8 character start, the end is cut at EOF. The view is
+  detected from the slice (usually Raw); `--view` still overrides. `--lines` that lands on one
+  line over 64 MB points at `--bytes`. Lines as wrapped rows were rejected: their meaning would
+  change with the wrap width.
+- A byte excerpt does not know its first line number, so numbering "as in the file" shows file
+  offsets with lines counted from 1. Counting the newlines before it in the background is a
+  possible later addition, deliberately not done now.
 - `--view json|ndjson|csv|tsv|raw` forces the view instead of detection. Works with or without
   `--lines`.
 - Line numbers in an excerpt are switchable between **source** (the file's real numbers, the
@@ -139,14 +149,15 @@ Requirements:
 1. **This branch (`feature/cli-range`)** - excerpt and command line, on the existing views:
    - [x] `LineRangeLocator` (Engine/Indexing/Lines) + tests, including growing and split sources
    - [x] `ExcerptByteOrigin` (Engine/Bytes) + tests
-   - [ ] command-line parser (`--lines`, `--view`, `--help`) + tests; help text shared with About
-   - [ ] `--help` console output and exit before Avalonia starts (Windows: attach to the parent
+   - [x] command-line parser (`--lines`, `--bytes`, `--view`, `--help`) + tests; help text shared with About
+   - [x] `--help` console output and exit before Avalonia starts (Windows: attach to the parent
          console, since the app is `WinExe`)
-   - [ ] shell: locate on the background with progress, open the excerpt, honour `--view`
-   - [ ] shared line numbering (source / 1-based) applied in Raw and NdJson
-   - [ ] CSV header taken from the whole file
-   - [ ] excerpt chip: range, numbering toggle, "Open full file"
-   - [ ] About box "Command line" section
+   - [x] shell: locate on the background with progress, open the excerpt, honour `--view`
+   - [x] shared line numbering (source / 1-based) applied in Raw and NdJson
+   - [x] CSV header taken from the whole file
+   - [x] `--bytes` excerpts (no scan; UTF-8 start snap; long-line hint on `--lines`)
+   - [ ] excerpt control: range, numbering toggle, "Open full file" (logic done; look being chosen)
+   - [ ] About box "Command line" section (look being chosen)
    CSV stays on TableView here, with no gutter yet.
 2. **Next branch** - a custom `TableSurface` on `Ui/Rows/RowSurface` in `Ui/TableGrid`, CSV
    first, with the pinned line-number gutter. TableView has no frozen columns, so a gutter there

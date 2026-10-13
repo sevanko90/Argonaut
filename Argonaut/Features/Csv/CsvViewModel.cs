@@ -235,13 +235,13 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
 
     /// <summary>
     /// The whole file's first line, split into fields, when <paramref name="origin"/> is an
-    /// excerpt starting past it - or null. Reads only the start of the file: a header longer than
+    /// excerpt starting past the start of the file - or null. Reads only the start of the file: a header longer than
     /// <see cref="HeaderReadLimit"/> is not a header anyone can read in a column title, and the
     /// columns fall back to their numbers.
     /// </summary>
     private static string[]? ReadWholeFileHeader(IByteOrigin origin, byte delimiter)
     {
-        if (origin is not ExcerptByteOrigin { Lines.FirstLine: > 1 } excerpt)
+        if (origin is not ExcerptByteOrigin { Range.Offset: > 0 } excerpt)
             return null;
 
         long length = Math.Min(excerpt.Whole.AvailableLength, HeaderReadLimit);

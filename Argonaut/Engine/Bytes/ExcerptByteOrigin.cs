@@ -5,8 +5,8 @@ using Argonaut.Engine.Indexing.Lines;
 namespace Argonaut.Engine.Bytes;
 
 /// <summary>
-/// A run of lines of another document, opened as a document in its own right - what
-/// <c>--lines</c> opens. Every view, search and view switch sees only the excerpt: a mapping of
+/// Part of another document, opened as a document in its own right - what <c>--lines</c> and
+/// <c>--bytes</c> open. Every view, search and view switch sees only the excerpt: a mapping of
 /// only its bytes, an index of only its lines, a scrollbar its size. That is the point of it over
 /// opening the whole document and jumping: indexing time and memory scale with the excerpt, not
 /// the file.
@@ -14,6 +14,10 @@ namespace Argonaut.Engine.Bytes;
 /// It is <see cref="IByteOrigin.OpenRange"/> on <see cref="Whole"/>, offset - the same mechanism
 /// that makes one NDJSON line or one JSON array a document - so it holds nothing of its own beyond
 /// where it sits.
+///
+/// An excerpt taken by lines knows which line of the file it starts at (<see cref="Lines"/>). One
+/// taken by bytes does not: finding out would mean counting every newline before it, which is
+/// the scan opening by bytes exists to skip.
 ///
 /// <see cref="Path"/> is null, deliberately: the excerpt is not the file, so recent files, the
 /// schema sidecar and the remembered schema binding pass it over, and a save is a Save As - an
@@ -23,22 +27,41 @@ namespace Argonaut.Engine.Bytes;
 /// </summary>
 public sealed class ExcerptByteOrigin : IByteOrigin
 {
+    /// <summary>An excerpt of the lines <paramref name="lines"/> located.</summary>
     public ExcerptByteOrigin(IByteOrigin whole, LocatedLines lines)
+        : this(whole, lines.Range, lines, Describe(lines))
+    {
+    }
+
+    private ExcerptByteOrigin(IByteOrigin whole, ByteRange range, LocatedLines? lines, string description)
     {
         ArgumentNullException.ThrowIfNull(whole);
-        if (lines.Range.Offset < 0 || lines.Range.End > whole.AvailableLength)
-            throw new ArgumentOutOfRangeException(nameof(lines), "The excerpt must lie within what has arrived of the whole document.");
+        if (range.Offset < 0 || range.Length < 0 || range.End > whole.AvailableLength)
+            throw new ArgumentOutOfRangeException(nameof(range), "The excerpt must lie within what has arrived of the whole document.");
 
         Whole = whole;
+        Range = range;
         Lines = lines;
-        DisplayName = $"{whole.DisplayName} ({Describe(lines)})";
+        Description = description;
+        DisplayName = $"{whole.DisplayName} ({description})";
     }
+
+    /// <summary>An excerpt of the bytes in <paramref name="range"/>, which it takes as given.</summary>
+    public static ExcerptByteOrigin OfBytes(IByteOrigin whole, ByteRange range)
+        => new(whole, range, lines: null, Describe(range));
 
     /// <summary>The document this is an excerpt of.</summary>
     public IByteOrigin Whole { get; }
 
-    /// <summary>Which lines of <see cref="Whole"/> this is, and where they sit in it.</summary>
-    public LocatedLines Lines { get; }
+    /// <summary>Where the excerpt sits in <see cref="Whole"/>.</summary>
+    public ByteRange Range { get; }
+
+    /// <summary>Which lines of <see cref="Whole"/> this is, or null for an excerpt taken by
+    /// bytes - see the class remarks.</summary>
+    public LocatedLines? Lines { get; }
+
+    /// <summary>Which part of the file this is: "lines 1,000,000–2,000,000", "bytes 0–499".</summary>
+    public string Description { get; }
 
     public string DisplayName { get; }
 
@@ -47,18 +70,18 @@ public sealed class ExcerptByteOrigin : IByteOrigin
 
     /// <summary>The excerpt's length. Always settled: its bytes had arrived before it could be
     /// opened.</summary>
-    public long AvailableLength => Lines.Range.Length;
+    public long AvailableLength => Range.Length;
 
-    public IByteSource Open() => Whole.OpenRange(Lines.Range.Offset, Lines.Range.Length);
+    public IByteSource Open() => Whole.OpenRange(Range.Offset, Range.Length);
 
     public IByteSource OpenRange(long offset, long length)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(offset);
         ArgumentOutOfRangeException.ThrowIfNegative(length);
-        if (offset + length > Lines.Range.Length)
+        if (offset + length > Range.Length)
             throw new ArgumentOutOfRangeException(nameof(length), "The range runs past the end of the excerpt.");
 
-        return Whole.OpenRange(Lines.Range.Offset + offset, length);
+        return Whole.OpenRange(Range.Offset + offset, length);
     }
 
     public KeptIndexes KeptIndexes { get; } = new();
@@ -67,10 +90,16 @@ public sealed class ExcerptByteOrigin : IByteOrigin
     /// end of the document.</summary>
     public static string Describe(LocatedLines lines)
     {
-        string first = lines.FirstLine.ToString("N0", CultureInfo.CurrentCulture);
-        string last = lines.LastLine is { } l ? l.ToString("N0", CultureInfo.CurrentCulture) : "end";
+        string first = N(lines.FirstLine);
+        string last = lines.LastLine is { } l ? N(l) : "end";
         return lines.LastLine == lines.FirstLine ? $"line {first}" : $"lines {first}–{last}";
     }
+
+    /// <summary>"bytes 0–499": zero-based, last byte included, as an HTTP range names them.</summary>
+    public static string Describe(ByteRange range)
+        => range.Length <= 1 ? $"byte {N(range.Offset)}" : $"bytes {N(range.Offset)}–{N(range.End - 1)}";
+
+    private static string N(long value) => value.ToString("N0", CultureInfo.CurrentCulture);
 
     public void Dispose()
     {

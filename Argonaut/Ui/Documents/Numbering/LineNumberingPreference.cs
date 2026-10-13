@@ -36,9 +36,10 @@ public sealed class LineNumberingPreference : ObservableObject
     }
 
     /// <summary>How <paramref name="origin"/>'s lines are numbered now: by the file for an
-    /// excerpt when that is the choice, from the start otherwise.</summary>
+    /// excerpt when that is the choice, from the start otherwise. An excerpt taken by bytes
+    /// does not know its first line number, so only its offsets follow the file.</summary>
     public LineNumbering For(IByteOrigin? origin)
         => origin is ExcerptByteOrigin excerpt && NumberExcerptsFromSource
-            ? new LineNumbering(excerpt.Lines.FirstLine, excerpt.Lines.Range.Offset)
+            ? new LineNumbering(excerpt.Lines?.FirstLine ?? 1, excerpt.Range.Offset)
             : LineNumbering.FromStart;
 }

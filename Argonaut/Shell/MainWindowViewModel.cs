@@ -15,6 +15,7 @@ using Argonaut.Engine.Logging;
 using Argonaut.Engine.Progress;
 using Argonaut.Engine.Saving;
 using Argonaut.Engine.Settings;
+using Argonaut.Engine.Text;
 using Argonaut.Features.Json;
 using Argonaut.Features.Json.Schema;
 using Argonaut.Features.Json.ArrayTable;
@@ -179,6 +180,7 @@ public sealed class MainWindowViewModel : ObservableObject
         this.confirmReplace = confirmReplace;
         this.readClipboardBytes = readClipboardBytes;
         this.lineNumbers = new LineNumberingPreference(settings.Get<LineNumberingSettings>());
+        this.lineNumbers.PropertyChanged += (_, _) => OnPropertyChanged(nameof(NumberExcerptFromSource));
         this.documentLoader = documentLoader ?? new DocumentViewCatalog(settings, schemaCatalog, this.lineNumbers).LoadAsync;
         this.pickSaveDestination = pickSaveDestination;
         this.askAboutUnsavedChanges = askAboutUnsavedChanges;
@@ -224,8 +226,9 @@ public sealed class MainWindowViewModel : ObservableObject
 
     /// <summary>What the title bar names the open document by: the file name, or the document's
     /// own <see cref="IDocumentViewModel.HeaderTitle"/>. Raised alongside <see cref="Title"/>, which
-    /// changes whenever the document or its file does.</summary>
-    public string HeaderTitle => currentDocument?.HeaderTitle ?? FileName;
+    /// changes whenever the document or its file does. An excerpt is named by its file; which
+    /// lines it is, the excerpt control says.</summary>
+    public string HeaderTitle => Excerpt is { } excerpt ? excerpt.Whole.DisplayName : currentDocument?.HeaderTitle ?? FileName;
 
     /// <summary>True when a document is loaded; drives the toolbar's visibility.</summary>
     public bool IsFileOpen => currentFilePath is not null;
@@ -574,6 +577,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
         if (startup.Lines is { } lines && first is not null)
             await OpenExcerptAsync(first, lines, startup.View);
+        else if (startup.Bytes is { } bytes && first is not null)
+            await OpenByteExcerptAsync(first, bytes, startup.View);
         else if (startup.View is { } view && second is null)
             await OpenPathAsync(first, view);
         else
@@ -649,7 +654,9 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
-        if (lines.Last is { } last && found.LastLine < last)
+        if (found.LastLine == found.FirstLine && found.Range.Length > LongLineHint)
+            ToastService.Show($"Line {found.FirstLine:N0} is {found.Range.Length / (1024 * 1024):N0} MB long — --bytes opens part of it.");
+        else if (lines.Last is { } last && found.LastLine < last)
             ToastService.Show($"\"{whole.DisplayName}\" ends at line {found.LastLine:N0}.");
 
         await OpenOriginAsync(new ExcerptByteOrigin(whole, found), addToRecents: false, view);
@@ -662,6 +669,35 @@ public sealed class MainWindowViewModel : ObservableObject
     /// <summary>The switch between an excerpt's source line numbers and counting from its start,
     /// shared with every view that shows them.</summary>
     public LineNumberingPreference LineNumbers => this.lineNumbers;
+
+    /// <summary>True while the open input is an excerpt.</summary>
+    public bool IsExcerpt => Excerpt is not null;
+
+    /// <summary>Which part of the file the excerpt is - "Lines 1,000,000–2,000,000" - or
+    /// empty.</summary>
+    public string ExcerptLabel => Excerpt is { } excerpt ? Capitalise(excerpt.Description) : string.Empty;
+
+    /// <summary>The file the excerpt was taken from, by name - or empty.</summary>
+    public string ExcerptSourceName => Excerpt?.Whole.DisplayName ?? string.Empty;
+
+    /// <summary>What numbering an excerpt by its file shows: its line numbers from where it
+    /// starts, or for one taken by bytes - whose first line number is not known - the file's
+    /// offsets with lines counted from 1.</summary>
+    public string ExcerptSourceNumberingLabel => Excerpt switch
+    {
+        { Lines: { } lines } => $"As in the file, from line {lines.FirstLine:N0}",
+        { } excerpt => $"File offsets, from byte {excerpt.Range.Offset:N0}",
+        _ => string.Empty,
+    };
+
+    /// <summary>Two-way face of <see cref="LineNumbers"/> for the excerpt controls.</summary>
+    public bool NumberExcerptFromSource
+    {
+        get => this.lineNumbers.NumberExcerptsFromSource;
+        set => this.lineNumbers.NumberExcerptsFromSource = value;
+    }
+
+    private static string Capitalise(string text) => text.Length == 0 ? text : char.ToUpperInvariant(text[0]) + text[1..];
 
     /// <summary>
     /// Leaves the excerpt for the whole file it came from, in the same view and at the same
@@ -682,13 +718,67 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
 
         var selected = (CurrentDocument as IByteRangeNavigable)?.SelectedByteRange ?? ByteRange.At(0);
-        var reveal = new ByteRange(excerpt.Lines.Range.Offset + selected.Offset, selected.Length);
+        var reveal = new ByteRange(excerpt.Range.Offset + selected.Offset, selected.Length);
         FileTypeDetector.FileKind? view = currentKind == FileTypeDetector.FileKind.Unknown ? null : currentKind;
 
         await OpenOriginAsync(new FileByteOrigin(path), addToRecents: true, view);
 
         if (CurrentDocument is IByteRangeNavigable navigable && CurrentDocument.Origin?.Path == path)
             await navigable.RevealByteRangeAsync(reveal);
+    }
+
+    /// <summary>How long a single line has to be before opening it by line earns a pointer to
+    /// <c>--bytes</c> - long enough that it is the file's shape (minified JSON, one giant record)
+    /// rather than an unusually long line.</summary>
+    private const long LongLineHint = 64L * 1024 * 1024;
+
+    /// <summary>
+    /// Opens bytes <paramref name="bytes"/> of <paramref name="path"/> as a document of their own
+    /// (<see cref="ExcerptByteOrigin.OfBytes"/>) - for a file whose lines are too long to ask for
+    /// by line. Nothing is scanned: the range is the bytes asked for, moved back to the start of
+    /// a character if it began inside one, and cut short at the end of the file. The view is
+    /// detected from the bytes themselves unless <paramref name="view"/> says otherwise; a slice
+    /// of something structured usually detects as raw text, which is the view it is for.
+    /// </summary>
+    public async Task OpenByteExcerptAsync(string path, ByteSpan bytes, FileTypeDetector.FileKind? view = null)
+    {
+        var normalizedPath = Path.GetFullPath(path);
+        if (!File.Exists(normalizedPath))
+        {
+            ToastService.Show($"\"{Path.GetFileName(normalizedPath)}\" doesn't exist.");
+            return;
+        }
+
+        if (RefusedWhileSaving() || !await ResolveUnsavedChangesAsync($"opening \"{Path.GetFileName(normalizedPath)}\""))
+            return;
+
+        var whole = new FileByteOrigin(normalizedPath);
+        long length = whole.AvailableLength;
+        if (bytes.First >= length)
+        {
+            ToastService.Show($"\"{whole.DisplayName}\" is only {length:N0} bytes long.");
+            whole.Dispose();
+            return;
+        }
+
+        // Only the few bytes a backoff can reach are read, through a source of their own.
+        long start;
+        long headStart = Math.Max(0, bytes.First - Utf8Boundary.MaxBackoff);
+        var head = whole.OpenRange(headStart, bytes.First + 1 - headStart);
+        try
+        {
+            start = headStart + Utf8Boundary.CharacterStartAtOrBefore(head, bytes.First - headStart);
+        }
+        finally
+        {
+            head.Release();
+        }
+
+        long end = bytes.Last is { } last ? Math.Min(length, last + 1) : length;
+        if (bytes.Last is { } asked && asked + 1 > length)
+            ToastService.Show($"\"{whole.DisplayName}\" ends at byte {length - 1:N0}.");
+
+        await OpenOriginAsync(ExcerptByteOrigin.OfBytes(whole, new ByteRange(start, end - start)), addToRecents: false, view);
     }
 
     public ThemeMode ThemeMode
@@ -1136,6 +1226,11 @@ public sealed class MainWindowViewModel : ObservableObject
         this.ownedOrigins.Clear();
         this.ownedOrigins.AddRange(origins);
         OnPropertyChanged(nameof(Excerpt));
+        OnPropertyChanged(nameof(IsExcerpt));
+        OnPropertyChanged(nameof(ExcerptLabel));
+        OnPropertyChanged(nameof(ExcerptSourceName));
+        OnPropertyChanged(nameof(ExcerptSourceNumberingLabel));
+        OnPropertyChanged(nameof(HeaderTitle));
     }
 
     private void SetCurrentDocument(IDocumentViewModel? document, string? path, FileTypeDetector.FileKind kind = FileTypeDetector.FileKind.Unknown)

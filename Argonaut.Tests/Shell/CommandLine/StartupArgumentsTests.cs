@@ -110,4 +110,42 @@ public class StartupArgumentsTests
         foreach (var (name, _) in StartupArguments.ViewNames)
             Assert.Contains(name, CommandLineUsage.Text);
     }
+
+    [Theory]
+    [InlineData("0-499", 0L, 499L)]
+    [InlineData("1.5g+100m", 1_500_000_000L, 1_599_999_999L)]
+    [InlineData("0x10-0x1F", 16L, 31L)]
+    [InlineData("100k+1", 100_000L, 100_000L)]
+    public void Reads_a_bounded_byte_range(string text, long first, long last)
+    {
+        var parsed = Parse("big.json", "--bytes", text);
+
+        Assert.Null(parsed.Error);
+        Assert.Equal(new ByteSpan(first, last), parsed.Bytes);
+    }
+
+    [Fact]
+    public void A_byte_range_with_no_end_runs_to_the_end_of_the_file()
+        => Assert.Equal(new ByteSpan(0, null), Parse("big.json", "--bytes=0-").Bytes);
+
+    [Theory]
+    [InlineData("5")]
+    [InlineData("9-3")]
+    [InlineData("0xZZ-0x20")]
+    [InlineData("1.5-2")]
+    public void Rejects_what_is_not_a_byte_range(string text)
+    {
+        var parsed = Parse("big.json", $"--bytes={text}");
+
+        Assert.Null(parsed.Bytes);
+        Assert.Contains("--bytes", parsed.Error);
+    }
+
+    [Fact]
+    public void Lines_and_bytes_together_are_an_error()
+        => Assert.Equal("Use --lines or --bytes, not both.", Parse("a.json", "--lines", "1-2", "--bytes", "0-9").Error);
+
+    [Fact]
+    public void Bytes_open_one_file_not_a_comparison()
+        => Assert.Equal("--bytes opens one file, not a comparison.", Parse("a.json", "b.json", "--bytes", "0-9").Error);
 }

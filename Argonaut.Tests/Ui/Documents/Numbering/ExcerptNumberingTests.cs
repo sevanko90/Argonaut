@@ -141,4 +141,32 @@ public class ExcerptNumberingTests
             vm.Dispose();
         }
     }
+
+    [Fact]
+    public void A_byte_excerpt_follows_the_file_for_offsets_only()
+    {
+        var whole = new MemoryByteOrigin("a\nbb\nccc\n"u8.ToArray(), "big.txt");
+        using var excerpt = ExcerptByteOrigin.OfBytes(whole, new ByteRange(5, 4));
+
+        Assert.Equal(new LineNumbering(1, 5), Preference(fromSource: true).For(excerpt));
+    }
+
+    [Fact]
+    public async Task A_csv_byte_excerpt_takes_its_header_from_the_whole_file()
+    {
+        var whole = new MemoryByteOrigin("id,name\n1,one\n2,two\n"u8.ToArray(), "rows.csv");
+        var vm = new CsvViewModel();
+        try
+        {
+            await vm.LoadAsync(ExcerptByteOrigin.OfBytes(whole, new ByteRange(14, 6)), (byte)',');
+            await vm.IndexingTask;
+
+            Assert.Equal(["id", "name"], vm.Structure.Columns.Select(c => c.Name));
+            Assert.Equal(1, vm.RowCount);
+        }
+        finally
+        {
+            vm.Dispose();
+        }
+    }
 }

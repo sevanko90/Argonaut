@@ -9,6 +9,11 @@ namespace Argonaut.Shell.CommandLine;
 /// command line; <see cref="Last"/> is null for a range that runs to the end of the file.</summary>
 public readonly record struct LineSpan(long First, long? Last);
 
+/// <summary>Bytes <see cref="First"/>..<see cref="Last"/> asked for on the command line -
+/// zero-based and inclusive, as an HTTP range names them; <see cref="Last"/> is null for a range
+/// that runs to the end of the file.</summary>
+public readonly record struct ByteSpan(long First, long? Last);
+
 /// <summary>
 /// What the command line asked for: the files to open, and optionally a run of lines to open as
 /// an excerpt, a view to force, or the usage text. Parsed once at startup, before any window
@@ -20,10 +25,12 @@ public readonly record struct LineSpan(long First, long? Last);
 /// </summary>
 public sealed class StartupArguments
 {
-    private StartupArguments(IReadOnlyList<string> paths, LineSpan? lines, FileTypeDetector.FileKind? view, bool showHelp, string? error)
+    private StartupArguments(IReadOnlyList<string> paths, LineSpan? lines, ByteSpan? bytes, FileTypeDetector.FileKind? view,
+        bool showHelp, string? error)
     {
         Paths = paths;
         Lines = lines;
+        Bytes = bytes;
         View = view;
         ShowHelp = showHelp;
         Error = error;
@@ -34,6 +41,10 @@ public sealed class StartupArguments
 
     /// <summary><c>--lines</c>: open just these lines of the file.</summary>
     public LineSpan? Lines { get; }
+
+    /// <summary><c>--bytes</c>: open just these bytes of the file - for a file whose lines are
+    /// too long to ask for by line.</summary>
+    public ByteSpan? Bytes { get; }
 
     /// <summary><c>--view</c>: open in this view instead of the one detection picks.</summary>
     public FileTypeDetector.FileKind? View { get; }
@@ -62,6 +73,7 @@ public sealed class StartupArguments
     {
         var paths = new List<string>();
         LineSpan? lines = null;
+        ByteSpan? bytes = null;
         FileTypeDetector.FileKind? view = null;
         bool showHelp = false;
         string? error = null;
@@ -82,7 +94,7 @@ public sealed class StartupArguments
             }
 
             var (name, inlineValue) = SplitOption(arg);
-            if (name is not ("--lines" or "--view"))
+            if (name is not ("--lines" or "--bytes" or "--view"))
                 continue;
 
             string? value = inlineValue ?? (i + 1 < args.Count ? args[++i] : null);
@@ -98,6 +110,12 @@ public sealed class StartupArguments
                 if (lines is null)
                     error ??= $"--lines: \"{value}\" is not a line range. Use A-B, A-, A+COUNT or A.";
             }
+            else if (name == "--bytes")
+            {
+                bytes = ParseBytes(value);
+                if (bytes is null)
+                    error ??= $"--bytes: \"{value}\" is not a byte range. Use A-B, A- or A+COUNT.";
+            }
             else
             {
                 view = ParseView(value);
@@ -106,13 +124,16 @@ public sealed class StartupArguments
             }
         }
 
-        if (error is null && paths.Count > 1 && lines is not null)
-            error = "--lines opens one file, not a comparison.";
+        if (error is null && lines is not null && bytes is not null)
+            error = "Use --lines or --bytes, not both.";
 
-        if (error is null && (lines is not null || view is not null) && paths.Count == 0)
-            error = "--lines and --view need a file to open.";
+        if (error is null && paths.Count > 1 && (lines is not null || bytes is not null))
+            error = $"{(lines is not null ? "--lines" : "--bytes")} opens one file, not a comparison.";
 
-        return new StartupArguments(paths, lines, view, showHelp, error);
+        if (error is null && (lines is not null || bytes is not null || view is not null) && paths.Count == 0)
+            error = "--lines, --bytes and --view need a file to open.";
+
+        return new StartupArguments(paths, lines, bytes, view, showHelp, error);
     }
 
     /// <summary>
@@ -120,6 +141,18 @@ public sealed class StartupArguments
     /// number may carry a <c>k</c> or <c>m</c> multiplier - <c>1m-2m</c>, <c>2.5m+500k</c>.
     /// </summary>
     internal static LineSpan? ParseLines(string text)
+        => ParseRange(text, lowest: 1, allowSingle: true) is { } range ? new LineSpan(range.First, range.Last) : null;
+
+    /// <summary>
+    /// <c>A-B</c>, <c>A-</c> (to the end) or <c>A+COUNT</c>, zero-based, where each number may
+    /// carry a <c>k</c>, <c>m</c> or <c>g</c> multiplier or be hex (<c>0x1F400</c>). No single
+    /// byte: one byte is not a document anyone opens on purpose, and <c>--bytes 5</c> is more
+    /// likely a mistyped count.
+    /// </summary>
+    internal static ByteSpan? ParseBytes(string text)
+        => ParseRange(text, lowest: 0, allowSingle: false) is { } range ? new ByteSpan(range.First, range.Last) : null;
+
+    private static (long First, long? Last)? ParseRange(string text, long lowest, bool allowSingle)
     {
         text = text.Trim();
         int plus = text.IndexOf('+');
@@ -127,36 +160,42 @@ public sealed class StartupArguments
 
         if (plus > 0)
         {
-            return ParseCount(text[..plus]) is { } first && ParseCount(text[(plus + 1)..]) is { } count && first >= 1 && count >= 1
-                ? new LineSpan(first, first + count - 1)
+            return ParseCount(text[..plus]) is { } first && ParseCount(text[(plus + 1)..]) is { } count && first >= lowest && count >= 1
+                ? (first, first + count - 1)
                 : null;
         }
 
         if (dash > 0)
         {
-            if (ParseCount(text[..dash]) is not { } first || first < 1)
+            if (ParseCount(text[..dash]) is not { } first || first < lowest)
                 return null;
 
             string rest = text[(dash + 1)..];
             if (rest.Length == 0)
-                return new LineSpan(first, null);
+                return (first, null);
 
-            return ParseCount(rest) is { } last && last >= first ? new LineSpan(first, last) : null;
+            return ParseCount(rest) is { } last && last >= first ? (first, last) : null;
         }
 
-        return ParseCount(text) is { } single && single >= 1 ? new LineSpan(single, single) : null;
+        return allowSingle && ParseCount(text) is { } single && single >= lowest ? (single, single) : null;
     }
 
-    /// <summary>A whole number with an optional <c>k</c> (thousand) or <c>m</c> (million)
-    /// multiplier, which may follow a decimal - <c>2.5m</c>. Null when it is not one.</summary>
+    /// <summary>A whole number with an optional <c>k</c> (thousand), <c>m</c> (million) or
+    /// <c>g</c> (billion) multiplier, which may follow a decimal - <c>2.5m</c> - or a hex number,
+    /// <c>0x1F400</c>. Null when it is not one.</summary>
     internal static long? ParseCount(string text)
     {
         text = text.Trim();
+        if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+            return long.TryParse(text[2..], NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out long hex) && hex >= 0 ? hex : null;
+
         long multiplier = 1;
         if (text.EndsWith('k') || text.EndsWith('K'))
             multiplier = 1_000;
         else if (text.EndsWith('m') || text.EndsWith('M'))
             multiplier = 1_000_000;
+        else if (text.EndsWith('g') || text.EndsWith('G'))
+            multiplier = 1_000_000_000;
 
         string digits = multiplier == 1 ? text : text[..^1];
         if (multiplier == 1)

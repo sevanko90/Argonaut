@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Detection;
 using Argonaut.Engine.Indexing;
+using Argonaut.Engine.Indexing.Lines;
 using Argonaut.Engine.Locations;
 using Argonaut.Engine.Logging;
 using Argonaut.Engine.Progress;
@@ -18,6 +19,7 @@ using Argonaut.Features.Json;
 using Argonaut.Features.Json.Schema;
 using Argonaut.Features.Json.ArrayTable;
 using Argonaut.Features.Json.Diff;
+using Argonaut.Shell.CommandLine;
 using Argonaut.Shell.Dialogs;
 using Argonaut.Ui.Documents;
 using Argonaut.Ui.Documents.Navigation;
@@ -556,6 +558,99 @@ public sealed class MainWindowViewModel : ObservableObject
             ToastService.Show("Second file ignored — both files must be JSON to open as a diff.");
     }
 
+    /// <summary>
+    /// What the command line asked to open (see <see cref="App"/>): one file or a pair to compare
+    /// (<see cref="OpenPathsAsync"/>), optionally in a forced view, or a run of one file's lines
+    /// as an excerpt (<see cref="OpenExcerptAsync"/>).
+    /// </summary>
+    public async Task OpenStartupAsync(StartupArguments startup)
+    {
+        string? first = startup.Paths.Count > 0 ? startup.Paths[0] : null;
+        string? second = startup.Paths.Count > 1 ? startup.Paths[1] : null;
+
+        if (startup.Lines is { } lines && first is not null)
+            await OpenExcerptAsync(first, lines, startup.View);
+        else if (startup.View is { } view && second is null)
+            await OpenPathAsync(first, view);
+        else
+            await OpenPathsAsync(first, second);
+    }
+
+    /// <summary>
+    /// Opens lines <paramref name="lines"/> of <paramref name="path"/> as a document of their own
+    /// (<see cref="ExcerptByteOrigin"/>). Finding where they are reads the file up to the last of
+    /// them, which for a range deep into a multi-GB file is seconds of work - so it runs on the
+    /// background, on the progress board, and its Stop abandons the open.
+    /// </summary>
+    public async Task OpenExcerptAsync(string path, LineSpan lines, FileTypeDetector.FileKind? view = null)
+    {
+        var normalizedPath = Path.GetFullPath(path);
+        if (!File.Exists(normalizedPath))
+        {
+            ToastService.Show($"\"{Path.GetFileName(normalizedPath)}\" doesn't exist.");
+            return;
+        }
+
+        if (RefusedWhileSaving() || !await ResolveUnsavedChangesAsync($"opening \"{Path.GetFileName(normalizedPath)}\""))
+            return;
+
+        var whole = new FileByteOrigin(normalizedPath);
+        var requestId = openRequest.Begin();
+        string wanted = ExcerptByteOrigin.Describe(new LocatedLines(default, lines.First, lines.Last));
+        using var stopping = new CancellationTokenSource();
+        var progress = this.progressBoard.Begin($"Finding {wanted} of {whole.DisplayName}", stopping.Cancel);
+
+        LocatedLines? located;
+        try
+        {
+            located = await Task.Run(() =>
+            {
+                var source = whole.Open();
+                try
+                {
+                    return LineRangeLocator.Locate(source, lines.First, lines.Last, progress, stopping.Token);
+                }
+                finally
+                {
+                    source.Release();
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            if (ex is not OperationCanceledException)
+            {
+                this.log.Write($"OpenExcerpt: locating lines threw: {ex}");
+                ToastService.Show($"Couldn't read \"{whole.DisplayName}\".");
+            }
+
+            whole.Dispose();
+            return;
+        }
+        finally
+        {
+            progress.Finish();
+        }
+
+        if (!openRequest.IsCurrent(requestId))
+        {
+            whole.Dispose();
+            return;
+        }
+
+        if (located is not { } found)
+        {
+            ToastService.Show($"\"{whole.DisplayName}\" has fewer than {lines.First:N0} lines.");
+            whole.Dispose();
+            return;
+        }
+
+        if (lines.Last is { } last && found.LastLine < last)
+            ToastService.Show($"\"{whole.DisplayName}\" ends at line {found.LastLine:N0}.");
+
+        await OpenOriginAsync(new ExcerptByteOrigin(whole, found), addToRecents: false, view);
+    }
+
     public ThemeMode ThemeMode
     {
         get => themeMode;
@@ -615,7 +710,8 @@ public sealed class MainWindowViewModel : ObservableObject
     /// guards against a newer open superseding this one mid-load; the loser is disposed here
     /// (never published), so its mapping is released.
     /// </summary>
-    public async Task OpenPathAsync(string? path)
+    /// <param name="view">The view to open it in, instead of the one detection picks.</param>
+    public async Task OpenPathAsync(string? path, FileTypeDetector.FileKind? view = null)
     {
         if (string.IsNullOrWhiteSpace(path))
         {
@@ -648,7 +744,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 return;
         }
 
-        await OpenOriginAsync(new FileByteOrigin(normalizedPath), addToRecents: true);
+        await OpenOriginAsync(new FileByteOrigin(normalizedPath), addToRecents: true, view);
     }
 
     /// <summary>
@@ -734,7 +830,8 @@ public sealed class MainWindowViewModel : ObservableObject
     /// Takes ownership of <paramref name="origin"/>: it is disposed here if detection fails, and
     /// otherwise passes to the shell's own ownership (see <see cref="AdoptOrigins"/>).
     /// </summary>
-    private async Task OpenOriginAsync(IByteOrigin origin, bool addToRecents)
+    /// <param name="view">The view to open it in; null detects one.</param>
+    private async Task OpenOriginAsync(IByteOrigin origin, bool addToRecents, FileTypeDetector.FileKind? view = null)
     {
         var requestId = openRequest.Begin();
         string name = origin.Path ?? origin.DisplayName;
@@ -742,7 +839,7 @@ public sealed class MainWindowViewModel : ObservableObject
         FileTypeDetector.FileKind fileType;
         try
         {
-            fileType = FileTypeDetector.DetectFileType(origin);
+            fileType = view ?? FileTypeDetector.DetectFileType(origin);
         }
         catch (Exception ex)
         {

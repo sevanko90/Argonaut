@@ -6,6 +6,7 @@ using Argonaut.Engine.Indexing;
 using Argonaut.Engine.Search;
 using Argonaut.Engine.Settings;
 using Argonaut.Shell;
+using Argonaut.Shell.CommandLine;
 using Argonaut.Ui.Documents;
 using Argonaut.Ui.Find;
 using Argonaut.Ui.ViewModels;
@@ -673,5 +674,92 @@ public sealed class MainWindowViewModelTests : IDisposable
 
         Assert.NotNull(vm.CurrentDocument!.Origin);
         Assert.Equal(Path.GetFullPath(path), vm.CurrentDocument.Origin!.Path);
+    }
+
+    // ---- command line ------------------------------------------------------------------
+
+    private string WriteLinesFile(int count, string name = "lines.ndjson")
+    {
+        string path = Path.Combine(tempDir, name);
+        File.WriteAllText(path, string.Concat(Enumerable.Range(1, count).Select(i => $"{{\"n\":{i}}}\n")));
+        return path;
+    }
+
+    private static string ReadAll(IByteOrigin origin)
+    {
+        var source = origin.Open();
+        try
+        {
+            return source.GetUtf8String(0, (int)source.AvailableLength);
+        }
+        finally
+        {
+            source.Release();
+        }
+    }
+
+    [Fact]
+    public async Task OpenExcerpt_LoadsOnlyTheLinesAskedFor()
+    {
+        string path = WriteLinesFile(10);
+        IByteOrigin? loaded = null;
+        string? loadedText = null;
+        var vm = CreateViewModel((_, origin, _) =>
+        {
+            loaded = origin;
+            loadedText = ReadAll(origin);
+            return Task.FromResult<IDocumentViewModel>(new FakeDocument { Origin = origin });
+        });
+
+        await vm.OpenStartupAsync(StartupArguments.Parse([path, "--lines", "3-4"]));
+
+        var excerpt = Assert.IsType<ExcerptByteOrigin>(loaded);
+        Assert.Equal("{\"n\":3}\n{\"n\":4}\n", loadedText);
+        Assert.Null(excerpt.Path);
+        Assert.Equal(3, excerpt.Lines.FirstLine);
+        Assert.Equal(4, excerpt.Lines.LastLine);
+    }
+
+    [Fact]
+    public async Task OpenExcerpt_PastTheEnd_OpensNothing()
+    {
+        string path = WriteLinesFile(10);
+        var vm = CreateViewModel((_, _, _) => throw new InvalidOperationException("nothing should load"));
+
+        await vm.OpenStartupAsync(StartupArguments.Parse([path, "--lines", "11-20"]));
+
+        Assert.False(vm.IsFileOpen);
+    }
+
+    [Fact]
+    public async Task OpenStartup_View_ForcesTheKindInsteadOfDetecting()
+    {
+        string path = WriteJsonFile();
+        FileTypeDetector.FileKind? loadedAs = null;
+        var vm = CreateViewModel((kind, _, _) =>
+        {
+            loadedAs = kind;
+            return Task.FromResult<IDocumentViewModel>(new FakeDocument { FilePath = path });
+        });
+
+        await vm.OpenStartupAsync(StartupArguments.Parse([path, "--view", "raw"]));
+
+        Assert.Equal(FileTypeDetector.FileKind.Unidentified, loadedAs);
+    }
+
+    [Fact]
+    public async Task OpenStartup_LinesAndView_ForcesTheKindOfTheExcerpt()
+    {
+        string path = WriteLinesFile(10);
+        FileTypeDetector.FileKind? loadedAs = null;
+        var vm = CreateViewModel((kind, origin, _) =>
+        {
+            loadedAs = kind;
+            return Task.FromResult<IDocumentViewModel>(new FakeDocument { Origin = origin });
+        });
+
+        await vm.OpenStartupAsync(StartupArguments.Parse([path, "--lines", "2-", "--view", "raw"]));
+
+        Assert.Equal(FileTypeDetector.FileKind.Unidentified, loadedAs);
     }
 }

@@ -110,16 +110,49 @@ What B has to deal with, roughly in order of cost:
 **Effort:** the core (decorator, locator, parser, wiring, relative numbering) is **about 2-3
 days**. Absolute numbering, the CSV header and the escape chip make it **about a week**.
 
-## Recommendation
+## Decision and plan
 
-Build A's pieces first (parser and locator). B needs both of them, so nothing is wasted. Then
-build B as `--lines` and keep A as `--goto`, or as what the escape chip does. Once
-`RangeByteOrigin` exists, an in-app "Open selection as document" (select rows in Raw, isolate
-them) costs very little, so the feature is not CLI-only.
+**Option B is chosen.** Targets are NDJSON, Raw and CSV. Pretty-printed JSON slices are out of
+scope (they fail detection and land in Raw, which is fine).
 
-Open questions:
+Requirements:
 
-- Should a range be 1-based and inclusive (`--lines 1-10` = the first ten lines, like `sed -n`)?
-  Proposed: yes.
-- In B, is relative numbering acceptable for v1?
-- Should the CSV header be fixed in v1, or is CSV out of scope at first?
+- `--lines A-B` opens lines A..B (1-based, inclusive, like `sed -n`) as an excerpt. `A-` runs to
+  the end. `1m`/`2.5m`/`500k` suffixes allowed.
+- `--view json|ndjson|csv|tsv|raw` forces the view instead of detection. Works with or without
+  `--lines`.
+- Line numbers in an excerpt are switchable between **source** (the file's real numbers, the
+  default) and **1-based** (counted from the excerpt's start). One shared setting, honoured by
+  every view that shows line numbers or offsets (Raw gutter and caret readout, NdJson line
+  column and status, CSV gutter).
+- CSV in an excerpt takes its header row from the whole file's line 1 when the excerpt does not
+  start at line 1.
+- CSV shows line numbers in a pinned gutter like Raw.
+- "Open full file" escape: a chip that reopens the whole file at the current position.
+- Command-line reference: `--help` (`-h`, and `/?` on Windows) prints the usage text to the
+  console and exits without opening a window. The same text appears in a "Command line" section
+  of the About box, so it can be found by someone who launched from a shortcut. One source for
+  the text.
+
+### Order
+
+1. **This branch (`feature/cli-range`)** - excerpt and command line, on the existing views:
+   - [x] `LineRangeLocator` (Engine/Indexing/Lines) + tests, including growing and split sources
+   - [x] `ExcerptByteOrigin` (Engine/Bytes) + tests
+   - [ ] command-line parser (`--lines`, `--view`, `--help`) + tests; help text shared with About
+   - [ ] `--help` console output and exit before Avalonia starts (Windows: attach to the parent
+         console, since the app is `WinExe`)
+   - [ ] shell: locate on the background with progress, open the excerpt, honour `--view`
+   - [ ] shared line numbering (source / 1-based) applied in Raw and NdJson
+   - [ ] CSV header taken from the whole file
+   - [ ] excerpt chip: range, numbering toggle, "Open full file"
+   - [ ] About box "Command line" section
+   CSV stays on TableView here, with no gutter yet.
+2. **Next branch** - a custom `TableSurface` on `Ui/Rows/RowSurface` in `Ui/TableGrid`, CSV
+   first, with the pinned line-number gutter. TableView has no frozen columns, so a gutter there
+   would scroll away; the surface also stops realising a control per cell. About 3-4 days.
+3. **Then** - move the JSON array table onto `TableSurface` and delete `TableGridColumns`, so
+   there is one grid, not two. About 2 days.
+
+UI looks (chip, About section, CSV gutter) are shown as screenshots with variants to choose
+from before they are settled.

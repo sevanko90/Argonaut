@@ -17,6 +17,7 @@ using Argonaut.Features.Raw.Highlighting;
 using Argonaut.Features.Raw.Hints;
 using Argonaut.Features.Raw.Rows;
 using Argonaut.Ui.Documents;
+using Argonaut.Ui.Documents.Numbering;
 using Argonaut.Ui.Documents.Navigation;
 using Argonaut.Ui.Find;
 using Argonaut.Ui.Hints;
@@ -83,11 +84,15 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
 
     private readonly RawViewSettings settings;
 
+    private readonly LineNumberingPreference? lineNumbers;
+
     /// <param name="settings">Where the wrap width is remembered.</param>
     /// <param name="progressBoard"><see cref="ProgressBoard.Shared"/> unless a test substitutes one.</param>
-    public RawViewModel(RawViewSettings settings, ProgressBoard? progressBoard = null)
+    /// <param name="lineNumbers">How an excerpt numbers its lines; null numbers from the start.</param>
+    public RawViewModel(RawViewSettings settings, ProgressBoard? progressBoard = null, LineNumberingPreference? lineNumbers = null)
     {
         this.settings = settings;
+        this.lineNumbers = lineNumbers;
         this.progressBoard = progressBoard ?? ProgressBoard.Shared;
     }
 
@@ -235,9 +240,11 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
             if (CaretReadout is not { } readout)
                 return string.Empty;
 
-            string position = $"Byte {readout.ByteOffset:N0}";
-            if (readout.LineNumber is int line)
+            var numbering = LineNumbering;
+            string position = $"Byte {numbering.Offset(readout.ByteOffset):N0}";
+            if (readout.LineNumber is int documentLine)
             {
+                long line = numbering.Line(documentLine);
                 position += readout.Column is int column
                     ? $"    Ln {line:N0}, Col {column:N0}"
                     : $"    Ln {line:N0}, Col —";
@@ -246,6 +253,9 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
             return position;
         }
     }
+
+    /// <summary>The caret readout's numbers follow the excerpt numbering.</summary>
+    protected override void OnLineNumberingChanged() => OnPropertyChanged(nameof(CaretPositionText));
 
     /// <summary>Selection size, empty when nothing is selected. Bytes always; characters when the
     /// selection is small enough to decode (<see cref="RawCaretReadout.SelectionScanBytes"/>).</summary>
@@ -767,6 +777,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     {
         this.Origin = origin;
         this.FilePath = origin.Path ?? origin.DisplayName;
+        FollowLineNumbering(this.lineNumbers);
         this.wrapWidth = this.settings.WrapWidth;
         this.toolbar = new RawToolbarViewModel(this.wrapWidth, ChooseWrapWidth, SetEditing, ChooseColours);
 

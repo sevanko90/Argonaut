@@ -1,8 +1,11 @@
 using System;
+using System.ComponentModel;
 using System.Threading.Tasks;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Detection;
 using Argonaut.Engine.Indexing;
+using Argonaut.Engine.Indexing.Lines;
+using Argonaut.Ui.Documents.Numbering;
 using Argonaut.Ui.Find;
 using Argonaut.Ui.ViewModels;
 
@@ -36,6 +39,8 @@ public abstract class IndexedDocumentViewModel : ObservableObject, IDocumentView
     private string statusText = string.Empty;
     private IndexFailure? indexFailure;
     private volatile bool disposed;
+    private LineNumbering lineNumbering = LineNumbering.FromStart;
+    private LineNumberingPreference? lineNumberingPreference;
 
     /// <summary>
     /// True once <see cref="Dispose"/> has run. Written only on the UI thread (the app's
@@ -175,6 +180,54 @@ public abstract class IndexedDocumentViewModel : ObservableObject, IDocumentView
 
     /// <summary>Subclass teardown, run between rows disposal and session disposal - e.g.
     /// NdJsonViewModel's nested per-line JsonViewModel and settings-handler unsubscription.</summary>
+    /// <summary>How this document's lines and offsets are shown - see <see cref="LineNumbering"/>.
+    /// From the start until <see cref="FollowLineNumbering"/> is called, and always for a
+    /// document that is not an excerpt.</summary>
+    public LineNumbering LineNumbering
+    {
+        get => lineNumbering;
+        private set => SetField(ref lineNumbering, value);
+    }
+
+    /// <summary>
+    /// Numbers this document's lines by <paramref name="preference"/> from now on, renumbering
+    /// whenever it is flipped. Called once <see cref="Origin"/> is set; a null preference (a view
+    /// model built without one, as tests do) leaves the numbering from the start.
+    /// </summary>
+    protected void FollowLineNumbering(LineNumberingPreference? preference)
+    {
+        if (lineNumberingPreference is not null)
+            lineNumberingPreference.PropertyChanged -= OnLineNumberingPreferenceChanged;
+
+        lineNumberingPreference = preference;
+        if (preference is null)
+            return;
+
+        preference.PropertyChanged += OnLineNumberingPreferenceChanged;
+        ApplyLineNumbering();
+    }
+
+    /// <summary>The numbering changed: anything that formatted a number into text redoes it.
+    /// Bindings to <see cref="LineNumbering"/> follow on their own.</summary>
+    protected virtual void OnLineNumberingChanged()
+    {
+    }
+
+    private void OnLineNumberingPreferenceChanged(object? sender, PropertyChangedEventArgs e) => ApplyLineNumbering();
+
+    private void ApplyLineNumbering()
+    {
+        if (lineNumberingPreference is null || disposed)
+            return;
+
+        var numbering = lineNumberingPreference.For(Origin);
+        if (numbering == lineNumbering)
+            return;
+
+        LineNumbering = numbering;
+        OnLineNumberingChanged();
+    }
+
     protected virtual void DisposeCore()
     {
     }
@@ -187,6 +240,9 @@ public abstract class IndexedDocumentViewModel : ObservableObject, IDocumentView
         if (disposed)
             return;
         disposed = true;
+
+        if (lineNumberingPreference is not null)
+            lineNumberingPreference.PropertyChanged -= OnLineNumberingPreferenceChanged;
 
         // Captured once: DisposeCore runs subclass teardown in the middle of this sequence, and
         // the session must be the same one on both sides of it.

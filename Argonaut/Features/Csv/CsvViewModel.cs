@@ -8,6 +8,7 @@ using Argonaut.Engine.Indexing;
 using Argonaut.Engine.Indexing.Lines;
 using Argonaut.Engine.Progress;
 using Argonaut.Ui.Documents;
+using Argonaut.Ui.Documents.Numbering;
 using Argonaut.Ui.Find;
 using Argonaut.Ui.TableGrid;
 
@@ -17,6 +18,9 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
 {
     private const int InitialIndexedRowTarget = 250;
 
+    /// <summary>How much of the whole file an excerpt reads looking for the header line.</summary>
+    private const int HeaderReadLimit = 1024 * 1024;
+
     private IndexedSourceSession<FileOffsetIndex>? session;
 
     // What the line index was built over, so a finished one is kept for the next view of the
@@ -25,11 +29,23 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
     private CsvRowCollection? rows;
     private TableStructure? structure;
     private string[] headerFields = [];
+
+    // True when headerFields came from the whole file's first line rather than this document's:
+    // an excerpt that starts past line 1 has no header of its own, so every line is data.
+    private bool headerFromWhole;
     private byte delimiter;
     private bool isHeaderRow = true;
     private string? highlightTerm;
     private int? selectedRowIndex;
     private int? selectedColumnIndex;
+
+    private readonly LineNumberingPreference? lineNumbers;
+
+    /// <param name="lineNumbers">How an excerpt numbers its lines; null numbers from the start.</param>
+    public CsvViewModel(LineNumberingPreference? lineNumbers = null)
+    {
+        this.lineNumbers = lineNumbers;
+    }
 
     protected override IDocumentSession? Session => this.session;
 
@@ -69,11 +85,15 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
             if (!SetField(ref this.isHeaderRow, value))
                 return;
 
-            this.rows?.SetDataStartIndex(value ? 1 : 0);
+            this.rows?.SetDataStartIndex(DataStartIndex);
             OnPropertyChanged(nameof(RowCount));
             ApplyColumnNames();
         }
     }
+
+    /// <summary>The line the data rows start at: past the header when the first line is one,
+    /// and 0 for an excerpt whose header was taken from the whole file.</summary>
+    internal int DataStartIndex => this.isHeaderRow && !this.headerFromWhole ? 1 : 0;
 
     /// <summary>The active find term, highlighted in every visible cell (header and data) via
     /// CsvView's SearchHighlight bindings. No nested view model to propagate into, unlike
@@ -117,6 +137,7 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
     {
         this.Origin = origin;
         this.FilePath = origin.Path ?? origin.DisplayName;
+        FollowLineNumbering(this.lineNumbers);
         this.delimiter = delimiter;
 
         this.indexBasis = IndexBasis.Of(origin);
@@ -135,13 +156,15 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
 
         // Row 0 is the only row decoded at load: it carries the column labels. Every other
         // sampled row is measured from its field SPANS (see MeasureColumns), which is what lets
-        // the sample be the whole initial batch instead of a token two rows.
-        this.headerFields = session.Index.LineCount > 0
-            ? CsvFieldReader.ReadFields(session.Bytes, session.Index.GetLineSpan(0), delimiter)
-            : [];
+        // the sample be the whole initial batch instead of a token two rows. An excerpt past
+        // line 1 has no header line of its own, so it borrows the whole file's.
+        var wholeHeader = ReadWholeFileHeader(origin, delimiter);
+        this.headerFromWhole = wholeHeader is not null;
+        this.headerFields = wholeHeader
+            ?? (session.Index.LineCount > 0 ? CsvFieldReader.ReadFields(session.Bytes, session.Index.GetLineSpan(0), delimiter) : []);
 
         this.structure = TableStructure.FromMaxChars(ColumnNames(), MeasureColumns(session));
-        this.rows = new CsvRowCollection(session.Index, session.Bytes, delimiter, this.isHeaderRow ? 1 : 0);
+        this.rows = new CsvRowCollection(session.Index, session.Bytes, delimiter, DataStartIndex);
 
         OnPropertyChanged(nameof(Rows));
         OnPropertyChanged(nameof(Structure));
@@ -196,7 +219,7 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
             maxChars[c] = this.headerFields[c].Length;
 
         int sampleCount = Math.Min(session.Index.LineCount, InitialIndexedRowTarget);
-        for (int i = 1; i < sampleCount; i++)
+        for (int i = this.headerFromWhole ? 0 : 1; i < sampleCount; i++)
         {
             var spans = CsvFieldReader.SplitToSpans(session.Bytes, session.Index.GetLineSpan(i), delimiter, CsvFieldReader.MaxDisplayFields);
             int columns = Math.Min(spans.Length, maxChars.Length);
@@ -208,6 +231,33 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
         }
 
         return maxChars;
+    }
+
+    /// <summary>
+    /// The whole file's first line, split into fields, when <paramref name="origin"/> is an
+    /// excerpt starting past it - or null. Reads only the start of the file: a header longer than
+    /// <see cref="HeaderReadLimit"/> is not a header anyone can read in a column title, and the
+    /// columns fall back to their numbers.
+    /// </summary>
+    private static string[]? ReadWholeFileHeader(IByteOrigin origin, byte delimiter)
+    {
+        if (origin is not ExcerptByteOrigin { Lines.FirstLine: > 1 } excerpt)
+            return null;
+
+        long length = Math.Min(excerpt.Whole.AvailableLength, HeaderReadLimit);
+        var start = excerpt.Whole.OpenRange(0, length);
+        try
+        {
+            if (LineRangeLocator.Locate(start, 1, 1) is not { } header
+                || (header.Range.End == length && length < excerpt.Whole.AvailableLength))
+                return null;
+
+            return CsvFieldReader.ReadFields(start, new FileLineSpan(header.Range.Offset, (int)header.Range.Length), delimiter);
+        }
+        finally
+        {
+            start.Release();
+        }
     }
 
     /// <summary>Row 0's parsed fields when the tickbox says row 0 is a header, generic

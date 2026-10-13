@@ -762,4 +762,26 @@ public sealed class MainWindowViewModelTests : IDisposable
 
         Assert.Equal(FileTypeDetector.FileKind.Unidentified, loadedAs);
     }
+
+    [Fact]
+    public async Task OpenWholeFile_LeavesTheExcerptForItsFileInTheSameView()
+    {
+        string path = WriteLinesFile(10);
+        var loads = new List<(FileTypeDetector.FileKind Kind, IByteOrigin Origin)>();
+        var vm = CreateViewModel((kind, origin, _) =>
+        {
+            loads.Add((kind, origin));
+            return Task.FromResult<IDocumentViewModel>(new FakeDocument { Origin = origin });
+        });
+
+        await vm.OpenStartupAsync(StartupArguments.Parse([path, "--lines", "3-4", "--view", "raw"]));
+        Assert.NotNull(vm.Excerpt);
+
+        await vm.OpenWholeFileAsync();
+
+        Assert.Null(vm.Excerpt);
+        Assert.Equal(2, loads.Count);
+        Assert.Equal(FileTypeDetector.FileKind.Unidentified, loads[1].Kind);
+        Assert.Equal(Path.GetFullPath(path), loads[1].Origin.Path);
+    }
 }

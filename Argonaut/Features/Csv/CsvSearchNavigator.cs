@@ -54,7 +54,7 @@ public sealed class CsvSearchNavigator : ISearchNavigator
         // A match on the header line while IsHeaderRow is true has no data row to select, but
         // the column can still be revealed - the sticky header is pinned vertically, not
         // horizontally, so it can still be scrolled out of view sideways.
-        int dataStartIndex = viewModel.IsHeaderRow ? 1 : 0;
+        int dataStartIndex = viewModel.DataStartIndex;
         int? rowIndex = lineIndex >= dataStartIndex ? lineIndex - dataStartIndex : null;
 
         viewModel.SelectRow(rowIndex, columnIndex);

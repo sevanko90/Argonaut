@@ -12,6 +12,7 @@ using Argonaut.Features.Json.Schema;
 using Argonaut.Features.NdJson;
 using Argonaut.Features.Raw;
 using Argonaut.Ui.Documents;
+using Argonaut.Ui.Documents.Numbering;
 
 namespace Argonaut.Shell;
 
@@ -48,8 +49,12 @@ public sealed class DocumentViewCatalog
 
     private readonly IReadOnlyDictionary<FileTypeDetector.FileKind, int> kindToRegistration;
 
-    public DocumentViewCatalog(ISettingsStore settings, JsonSchemaCatalog schemaCatalog)
+    /// <param name="lineNumbers">The excerpt numbering switch the views follow - the shell's, so
+    /// the control that flips it and the views that show it share one; a new one over
+    /// <paramref name="settings"/> when null.</param>
+    public DocumentViewCatalog(ISettingsStore settings, JsonSchemaCatalog schemaCatalog, LineNumberingPreference? lineNumbers = null)
     {
+        lineNumbers ??= new LineNumberingPreference(settings.Get<LineNumberingSettings>());
         var jsonView = settings.Get<JsonViewSettings>();
         var schemaBindings = settings.Get<SchemaBindings>();
         var rawView = settings.Get<RawViewSettings>();
@@ -57,9 +62,9 @@ public sealed class DocumentViewCatalog
         registrations =
         [
             (() => new JsonViewModel(jsonView, schemaBindings, schemaCatalog), (vm, _, o, r) => ((JsonViewModel)vm).LoadAsync(o, r)),
-            (() => new NdJsonViewModel(jsonView, schemaBindings, schemaCatalog), (vm, _, o, r) => ((NdJsonViewModel)vm).LoadAsync(o, r)),
-            (() => new CsvViewModel(), (vm, k, o, r) => ((CsvViewModel)vm).LoadAsync(o, k == FileTypeDetector.FileKind.Tsv ? (byte)'\t' : (byte)',', r)),
-            (() => new RawViewModel(rawView), (vm, _, o, r) => ((RawViewModel)vm).LoadAsync(o, r)),
+            (() => new NdJsonViewModel(jsonView, schemaBindings, schemaCatalog, lineNumbers), (vm, _, o, r) => ((NdJsonViewModel)vm).LoadAsync(o, r)),
+            (() => new CsvViewModel(lineNumbers), (vm, k, o, r) => ((CsvViewModel)vm).LoadAsync(o, k == FileTypeDetector.FileKind.Tsv ? (byte)'\t' : (byte)',', r)),
+            (() => new RawViewModel(rawView, lineNumbers: lineNumbers), (vm, _, o, r) => ((RawViewModel)vm).LoadAsync(o, r)),
         ];
         kindToRegistration = BuildMap();
     }

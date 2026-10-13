@@ -23,6 +23,7 @@ using Argonaut.Shell.CommandLine;
 using Argonaut.Shell.Dialogs;
 using Argonaut.Ui.Documents;
 using Argonaut.Ui.Documents.Navigation;
+using Argonaut.Ui.Documents.Numbering;
 using Argonaut.Ui.Find;
 using Argonaut.Ui.Notifications;
 using Argonaut.Ui.Progress;
@@ -98,6 +99,8 @@ public sealed class MainWindowViewModel : ObservableObject
     // Raw re-downloading a URL or re-materialising a paste. Released by AdoptOrigins when the
     // input actually changes; see IByteOrigin.
     private readonly List<IByteOrigin> ownedOrigins = new();
+
+    private readonly LineNumberingPreference lineNumbers;
 
     private string? currentFilePath;
     private FileTypeDetector.FileKind currentKind;
@@ -175,7 +178,8 @@ public sealed class MainWindowViewModel : ObservableObject
         this.configLocations = configLocations;
         this.confirmReplace = confirmReplace;
         this.readClipboardBytes = readClipboardBytes;
-        this.documentLoader = documentLoader ?? new DocumentViewCatalog(settings, schemaCatalog).LoadAsync;
+        this.lineNumbers = new LineNumberingPreference(settings.Get<LineNumberingSettings>());
+        this.documentLoader = documentLoader ?? new DocumentViewCatalog(settings, schemaCatalog, this.lineNumbers).LoadAsync;
         this.pickSaveDestination = pickSaveDestination;
         this.askAboutUnsavedChanges = askAboutUnsavedChanges;
         this.reportFailure = reportFailure;
@@ -651,6 +655,42 @@ public sealed class MainWindowViewModel : ObservableObject
         await OpenOriginAsync(new ExcerptByteOrigin(whole, found), addToRecents: false, view);
     }
 
+    /// <summary>The excerpt that is open, or null when the input is a whole document - what the
+    /// excerpt chip shows, and what <see cref="OpenWholeFileAsync"/> leaves.</summary>
+    public ExcerptByteOrigin? Excerpt => this.ownedOrigins.Count == 1 ? this.ownedOrigins[0] as ExcerptByteOrigin : null;
+
+    /// <summary>The switch between an excerpt's source line numbers and counting from its start,
+    /// shared with every view that shows them.</summary>
+    public LineNumberingPreference LineNumbers => this.lineNumbers;
+
+    /// <summary>
+    /// Leaves the excerpt for the whole file it came from, in the same view and at the same
+    /// place: what is selected in the excerpt (or its first line) is revealed in the file,
+    /// shifted by where the excerpt starts. No "replace?" question - it is the same file - but
+    /// unsaved edits to the excerpt are asked about, since they would be lost.
+    /// </summary>
+    public async Task OpenWholeFileAsync()
+    {
+        if (Excerpt is not { Whole.Path: { } path } excerpt || !File.Exists(path))
+            return;
+
+        if (RefusedWhileSaving() || !await ResolveUnsavedChangesAsync($"opening the whole of \"{excerpt.Whole.DisplayName}\""))
+            return;
+
+        // The save the user may just have chosen ends the excerpt; nothing left to leave.
+        if (!ReferenceEquals(Excerpt, excerpt))
+            return;
+
+        var selected = (CurrentDocument as IByteRangeNavigable)?.SelectedByteRange ?? ByteRange.At(0);
+        var reveal = new ByteRange(excerpt.Lines.Range.Offset + selected.Offset, selected.Length);
+        FileTypeDetector.FileKind? view = currentKind == FileTypeDetector.FileKind.Unknown ? null : currentKind;
+
+        await OpenOriginAsync(new FileByteOrigin(path), addToRecents: true, view);
+
+        if (CurrentDocument is IByteRangeNavigable navigable && CurrentDocument.Origin?.Path == path)
+            await navigable.RevealByteRangeAsync(reveal);
+    }
+
     public ThemeMode ThemeMode
     {
         get => themeMode;
@@ -1095,6 +1135,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
         this.ownedOrigins.Clear();
         this.ownedOrigins.AddRange(origins);
+        OnPropertyChanged(nameof(Excerpt));
     }
 
     private void SetCurrentDocument(IDocumentViewModel? document, string? path, FileTypeDetector.FileKind kind = FileTypeDetector.FileKind.Unknown)

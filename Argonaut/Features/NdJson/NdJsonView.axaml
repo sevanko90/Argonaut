@@ -6,6 +6,7 @@
              xmlns:jsonview="clr-namespace:Argonaut.Features.Json"
              xmlns:find="clr-namespace:Argonaut.Ui.Find"
              xmlns:icons="clr-namespace:Argonaut.Ui.Icons"
+             xmlns:numbering="clr-namespace:Argonaut.Ui.Documents.Numbering"
              x:Class="Argonaut.Features.NdJson.NdJsonView"
              x:DataType="json:NdJsonViewModel">
     <Border BorderBrush="{DynamicResource AppBorderBrush}"
@@ -29,11 +30,17 @@
                     <DataTemplate x:DataType="json:NdJsonVisibleLine">
                         <Grid ColumnDefinitions="72,*">
                             <TextBlock Grid.Column="0"
-                                       Text="{Binding LineNumber}"
                                        HorizontalAlignment="Right"
                                        Margin="0,0,12,0"
                                        Foreground="{DynamicResource AppMutedTextBrush}"
-                                       FontFamily="{DynamicResource AppContentFontFamily}" />
+                                       FontFamily="{DynamicResource AppContentFontFamily}">
+                                <TextBlock.Text>
+                                    <MultiBinding Converter="{x:Static numbering:LineNumberConverter.Instance}">
+                                        <Binding Path="LineNumber" />
+                                        <Binding Path="$parent[json:NdJsonView].((json:NdJsonViewModel)DataContext).LineNumbering" />
+                                    </MultiBinding>
+                                </TextBlock.Text>
+                            </TextBlock>
                             <TextBlock Grid.Column="1"
                                        find:SearchHighlight.Text="{Binding Text}"
                                        find:SearchHighlight.Term="{Binding $parent[json:NdJsonView].((json:NdJsonViewModel)DataContext).HighlightTerm}"

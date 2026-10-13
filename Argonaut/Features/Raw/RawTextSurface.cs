@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Diagnostics;
@@ -146,7 +147,18 @@ public class RawTextSurface : RowSurface
 
     static RawTextSurface()
     {
-        AffectsRender<RawTextSurface>(CaretBrushProperty);
+        AffectsRender<RawTextSurface>(CaretBrushProperty, FirstLineNumberProperty);
+    }
+
+    /// <summary>The number the gutter shows for the document's first line - 1, unless this is an
+    /// excerpt numbered as its file numbers it (see <c>LineNumbering</c>).</summary>
+    public static readonly StyledProperty<long> FirstLineNumberProperty =
+        AvaloniaProperty.Register<RawTextSurface, long>(nameof(FirstLineNumber), defaultValue: 1);
+
+    public long FirstLineNumber
+    {
+        get => GetValue(FirstLineNumberProperty);
+        set => SetValue(FirstLineNumberProperty, value);
     }
 
     /// <summary>Brush for the flash where a jump in landed.</summary>
@@ -591,7 +603,7 @@ public class RawTextSurface : RowSurface
         if (row.LineNumber is not int lineNumber)
             return;
 
-        var layout = new TextLayout(lineNumber.ToString(), typeface, fontSize, brush);
+        var layout = new TextLayout((FirstLineNumber - 1 + lineNumber).ToString(CultureInfo.InvariantCulture), typeface, fontSize, brush);
         double x = ContentPaddingX + LineNumberColumnWidth - LineNumberGap - layout.WidthIncludingTrailingWhitespace;
         layout.Draw(context, new Point(x, CentreInRow(layout, y)));
     }

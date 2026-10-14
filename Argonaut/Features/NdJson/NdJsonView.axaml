@@ -28,19 +28,24 @@
                 </ListBox.Styles>
                 <ListBox.ItemTemplate>
                     <DataTemplate x:DataType="json:NdJsonVisibleLine">
-                        <Grid ColumnDefinitions="72,*">
-                            <TextBlock Grid.Column="0"
-                                       HorizontalAlignment="Right"
-                                       Margin="0,0,12,0"
-                                       Foreground="{DynamicResource AppMutedTextBrush}"
-                                       FontFamily="{DynamicResource AppContentFontFamily}">
-                                <TextBlock.Text>
-                                    <MultiBinding Converter="{x:Static numbering:LineNumberConverter.Instance}">
-                                        <Binding Path="LineNumber" />
-                                        <Binding Path="$parent[json:NdJsonView].((json:NdJsonViewModel)DataContext).LineNumbering" />
-                                    </MultiBinding>
-                                </TextBlock.Text>
-                            </TextBlock>
+                        <!-- The gutter is as wide as the widest number shown, so every row's
+                             is the same width: an invisible run of zeros that long sizes it. -->
+                        <Grid ColumnDefinitions="Auto,*">
+                            <Panel Grid.Column="0" MinWidth="60" Margin="0,0,12,0">
+                                <TextBlock Opacity="0"
+                                           FontFamily="{DynamicResource AppContentFontFamily}"
+                                           Text="{Binding $parent[json:NdJsonView].((json:NdJsonViewModel)DataContext).WidestLineNumber}" />
+                                <TextBlock HorizontalAlignment="Right"
+                                           Foreground="{DynamicResource AppMutedTextBrush}"
+                                           FontFamily="{DynamicResource AppContentFontFamily}">
+                                    <TextBlock.Text>
+                                        <MultiBinding Converter="{x:Static numbering:LineNumberConverter.Instance}">
+                                            <Binding Path="LineNumber" />
+                                            <Binding Path="$parent[json:NdJsonView].((json:NdJsonViewModel)DataContext).LineNumbering" />
+                                        </MultiBinding>
+                                    </TextBlock.Text>
+                                </TextBlock>
+                            </Panel>
                             <TextBlock Grid.Column="1"
                                        find:SearchHighlight.Text="{Binding Text}"
                                        find:SearchHighlight.Term="{Binding $parent[json:NdJsonView].((json:NdJsonViewModel)DataContext).HighlightTerm}"

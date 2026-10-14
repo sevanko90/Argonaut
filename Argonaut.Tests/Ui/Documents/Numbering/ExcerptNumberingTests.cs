@@ -3,6 +3,10 @@ using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Indexing.Lines;
 using Argonaut.Engine.Settings;
 using Argonaut.Features.Csv;
+using Argonaut.Features.Json;
+using Argonaut.Features.Json.Schema;
+using Argonaut.Features.NdJson;
+using Argonaut.Tests.Support;
 using Argonaut.Features.Raw;
 using Argonaut.Ui.Documents.Numbering;
 
@@ -115,6 +119,29 @@ public class ExcerptNumberingTests
             {
                 source.Release();
             }
+        }
+        finally
+        {
+            vm.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task The_ndjson_gutter_is_as_wide_as_the_files_numbers_for_a_deep_excerpt()
+    {
+        byte[] text = "{\"a\":1}\n{\"a\":2}\n"u8.ToArray();
+        var whole = new MemoryByteOrigin(text, "big.ndjson");
+        var preference = Preference(fromSource: true);
+        var vm = new NdJsonViewModel(new JsonViewSettings(), new SchemaBindings(), TestSchemas.Catalog(), lineNumbers: preference);
+        try
+        {
+            await vm.LoadAsync(new ExcerptByteOrigin(whole, new LocatedLines(new ByteRange(0, text.Length), 150_000_000, 150_000_001)));
+            await vm.IndexingTask;
+
+            Assert.Equal("000000000", vm.WidestLineNumber);
+
+            preference.NumberExcerptsFromSource = false;
+            Assert.Equal("0", vm.WidestLineNumber);
         }
         finally
         {

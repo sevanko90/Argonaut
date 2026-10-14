@@ -49,6 +49,50 @@ public class MMapFileTests
     }
 
     [Fact]
+    public void A_file_another_program_is_still_writing_can_be_read()
+    {
+        // A writer that shares its file for reading - a log being appended to, an export still
+        // running. Windows refused this while the mapping denied writers.
+        string path = Path.GetTempFileName();
+        try
+        {
+            using var writer = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read);
+            writer.Write("still writing"u8);
+            writer.Flush();
+
+            using var file = new MMapFile(path);
+            Assert.Equal("still writing", file.GetUtf8String(0, (int)file.AvailableLength));
+
+            using var range = new MMapFile(path, 6, 7);
+            Assert.Equal("writing", range.GetUtf8String(0, 7));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void A_file_locked_against_readers_throws_an_io_exception()
+    {
+        string path = Path.GetTempFileName();
+        try
+        {
+            using (var writer = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                writer.Write("locked"u8);
+                writer.Flush();
+
+                Assert.Throws<IOException>(() => new MMapFile(path));
+            }
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void Length_ComesFromFileNotMappingCapacity()
     {
         // 100 bytes is far below any platform's allocation granularity, so a capacity-derived

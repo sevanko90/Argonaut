@@ -29,7 +29,7 @@ class Program
 
         // --help, and a command line that cannot be acted on, are answered in the terminal and
         // never open a window - when there is a terminal to answer in. Without one (a Windows
-        // shortcut), the window opens and says it there instead (see App).
+        // shortcut, the macOS Dock), the window opens and says it there instead (see App).
         var startup = StartupArguments.Parse(args);
         if ((startup.ShowHelp || startup.Error is not null) && ParentConsole.TryAttach())
         {

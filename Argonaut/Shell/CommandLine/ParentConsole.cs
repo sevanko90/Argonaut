@@ -5,7 +5,9 @@ namespace Argonaut.Shell.CommandLine;
 
 /// <summary>
 /// Where command-line output can go before any window exists. On macOS and Linux the process
-/// inherits the terminal's stdout, so there is always somewhere. On Windows the app is a
+/// inherits the streams of whatever launched it: a terminal's, or - from the Dock, Finder or a
+/// desktop launcher - <c>/dev/null</c>, so output is only seen when one of stdout and stderr is
+/// still a terminal (either is enough: <c>--help | less</c> leaves stderr on it). On Windows the app is a
 /// <c>WinExe</c>, which gets no console of its own: output only reaches the terminal it was
 /// started from by attaching to that terminal's console - and when there is none (a shortcut, an
 /// "Open with"), nothing printed would ever be seen, so the caller shows it in a window instead.
@@ -18,7 +20,7 @@ public static class ParentConsole
     public static bool TryAttach()
     {
         if (!OperatingSystem.IsWindows())
-            return true;
+            return !Console.IsOutputRedirected || !Console.IsErrorRedirected;
 
         if (!AttachConsole(AttachParentProcess))
             return false;

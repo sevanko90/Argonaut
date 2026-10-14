@@ -62,7 +62,7 @@ public class StartupArgumentsTests
     [Fact]
     public void Keeps_positional_paths_in_order_around_options()
     {
-        var parsed = Parse("--view", "json", "a.json", "b.json");
+        var parsed = Parse("--help", "a.json", "--unknown", "b.json");
 
         Assert.Equal(["a.json", "b.json"], parsed.Paths);
         Assert.Null(parsed.Error);
@@ -148,4 +148,23 @@ public class StartupArgumentsTests
     [Fact]
     public void Bytes_open_one_file_not_a_comparison()
         => Assert.Equal("--bytes opens one file, not a comparison.", Parse("a.json", "b.json", "--bytes", "0-9").Error);
+
+    [Fact]
+    public void View_opens_one_file_not_a_comparison()
+        => Assert.Equal("--view opens one file, not a comparison.", Parse("a.json", "b.json", "--view", "raw").Error);
+
+    [Theory]
+    [InlineData("1g+0x7FFFFFFFFFFFFFFF")]
+    [InlineData("2+0x7FFFFFFFFFFFFFFF")]
+    public void A_count_that_runs_past_the_largest_offset_is_an_error(string range)
+    {
+        var parsed = Parse("a.json", "--bytes", range);
+
+        Assert.Null(parsed.Bytes);
+        Assert.Contains("is not a byte range", parsed.Error);
+    }
+
+    [Fact]
+    public void A_count_that_ends_exactly_at_the_largest_offset_is_a_range()
+        => Assert.Equal(long.MaxValue, Parse("a.json", "--bytes", "1+0x7FFFFFFFFFFFFFFF").Bytes!.Value.Last);
 }

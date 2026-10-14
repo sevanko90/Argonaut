@@ -127,8 +127,8 @@ public sealed class StartupArguments
         if (error is null && lines is not null && bytes is not null)
             error = "Use --lines or --bytes, not both.";
 
-        if (error is null && paths.Count > 1 && (lines is not null || bytes is not null))
-            error = $"{(lines is not null ? "--lines" : "--bytes")} opens one file, not a comparison.";
+        if (error is null && paths.Count > 1 && (lines is not null || bytes is not null || view is not null))
+            error = $"{(lines is not null ? "--lines" : bytes is not null ? "--bytes" : "--view")} opens one file, not a comparison.";
 
         if (error is null && (lines is not null || bytes is not null || view is not null) && paths.Count == 0)
             error = "--lines, --bytes and --view need a file to open.";
@@ -161,6 +161,7 @@ public sealed class StartupArguments
         if (plus > 0)
         {
             return ParseCount(text[..plus]) is { } first && ParseCount(text[(plus + 1)..]) is { } count && first >= lowest && count >= 1
+                    && count - 1 <= long.MaxValue - first
                 ? (first, first + count - 1)
                 : null;
         }

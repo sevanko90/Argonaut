@@ -178,8 +178,6 @@ public abstract class IndexedDocumentViewModel : ObservableObject, IDocumentView
     {
     }
 
-    /// <summary>Subclass teardown, run between rows disposal and session disposal - e.g.
-    /// NdJsonViewModel's nested per-line JsonViewModel and settings-handler unsubscription.</summary>
     /// <summary>How this document's lines and offsets are shown - see <see cref="LineNumbering"/>.
     /// From the start until <see cref="FollowLineNumbering"/> is called, and always for a
     /// document that is not an excerpt.</summary>
@@ -228,6 +226,8 @@ public abstract class IndexedDocumentViewModel : ObservableObject, IDocumentView
         OnLineNumberingChanged();
     }
 
+    /// <summary>Subclass teardown, run between rows disposal and session disposal - e.g.
+    /// NdJsonViewModel's nested per-line JsonViewModel and settings-handler unsubscription.</summary>
     protected virtual void DisposeCore()
     {
     }

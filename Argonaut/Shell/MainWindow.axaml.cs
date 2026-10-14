@@ -309,9 +309,6 @@ public partial class MainWindow : Window
 #endif
     }
 
-    /// <param name="second">A second command-line path (e.g. `argonaut a.json b.json`), or
-    /// null for the single-file case. See <see cref="MainWindowViewModel.OpenPathsAsync"/> for
-    /// how the pair decides between diff mode and opening <paramref name="first"/> alone.</param>
     /// <summary>
     /// Acts on the command line once the window is up: opens what it names, or - when it asked
     /// for help, or could not be acted on, and there was no terminal to say so in (see Program) -
@@ -360,6 +357,9 @@ public partial class MainWindow : Window
         return opened.Task;
     }
 
+    /// <param name="second">A second command-line path (e.g. `argonaut a.json b.json`), or
+    /// null for the single-file case. See <see cref="MainWindowViewModel.OpenPathsAsync"/> for
+    /// how the pair decides between diff mode and opening <paramref name="first"/> alone.</param>
     public async Task OpenInitialFileAsync(string? first, string? second = null)
     {
         log.Write($"OpenInitialFileAsync: first={first}, second={second}");

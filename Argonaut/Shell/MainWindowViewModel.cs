@@ -116,6 +116,10 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool isFindAvailable;
     private readonly RequestTicket openRequest = new();
 
+    // Stops the scan finding an excerpt's lines, while there is one: an open that supersedes it
+    // stops it reading the rest of a multi-GB file only to have its answer thrown away.
+    private CancellationTokenSource? locatingLines;
+
     // Where every long operation the shell starts is reported - see ProgressBoard.
     private readonly ProgressBoard progressBoard;
 
@@ -395,7 +399,7 @@ public sealed class MainWindowViewModel : ObservableObject
     /// </summary>
     public async Task OpenDiffAsync(IByteOrigin leftOrigin, IByteOrigin rightOrigin)
     {
-        var requestId = openRequest.Begin();
+        var requestId = BeginOpenRequest();
         string leftPath = leftOrigin.Path ?? leftOrigin.DisplayName;
         string rightPath = rightOrigin.Path ?? rightOrigin.DisplayName;
 
@@ -452,7 +456,7 @@ public sealed class MainWindowViewModel : ObservableObject
     /// </summary>
     public async Task OpenArrayTableAsync(ArrayTableRequest request)
     {
-        var requestId = openRequest.Begin();
+        var requestId = BeginOpenRequest();
 
         // UI hygiene before the swap, exactly as OpenDiffAsync does it - see the remark there
         // for why this is not what makes the swap safe.
@@ -600,13 +604,19 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
+        // Asked before the scan so a document with changes is settled before seconds of waiting.
+        // Changes still there after it were agreed to be discarded; the document stays editable
+        // while the scan runs, and changes made then were not, so they are asked about after it.
         if (RefusedWhileSaving() || !await ResolveUnsavedChangesAsync($"opening \"{Path.GetFileName(normalizedPath)}\""))
             return;
 
+        bool discardAgreed = HasUnsavedChanges;
+
         var whole = new FileByteOrigin(normalizedPath);
-        var requestId = openRequest.Begin();
+        var requestId = BeginOpenRequest();
         string wanted = ExcerptByteOrigin.Describe(new LocatedLines(default, lines.First, lines.Last), CompactCount.Format);
         using var stopping = new CancellationTokenSource();
+        locatingLines = stopping;
         var progress = this.progressBoard.Begin($"Finding {wanted} of {whole.DisplayName}", stopping.Cancel);
 
         LocatedLines? located;
@@ -630,7 +640,7 @@ public sealed class MainWindowViewModel : ObservableObject
             if (ex is not OperationCanceledException)
             {
                 this.log.Write($"OpenExcerpt: locating lines threw: {ex}");
-                ToastService.Show($"Couldn't read \"{whole.DisplayName}\".");
+                ToastService.Show(CouldNotRead(whole.DisplayName, ex));
             }
 
             whole.Dispose();
@@ -639,6 +649,8 @@ public sealed class MainWindowViewModel : ObservableObject
         finally
         {
             progress.Finish();
+            if (locatingLines == stopping)
+                locatingLines = null;
         }
 
         if (!openRequest.IsCurrent(requestId))
@@ -654,12 +666,34 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
+        if (RefusedWhileSaving()
+            || (!discardAgreed && !await ResolveUnsavedChangesAsync($"opening \"{whole.DisplayName}\""))
+            || !openRequest.IsCurrent(requestId))
+        {
+            whole.Dispose();
+            return;
+        }
+
         if (found.LastLine == found.FirstLine && found.Range.Length > LongLineHint)
             ToastService.Show($"Line {found.FirstLine:N0} is {found.Range.Length / (1024 * 1024):N0} MB long — --bytes opens part of it.");
         else if (lines.Last is { } last && found.LastLine < last)
             ToastService.Show($"\"{whole.DisplayName}\" ends at line {found.LastLine:N0}.");
 
-        await OpenOriginAsync(new ExcerptByteOrigin(whole, found), addToRecents: false, view);
+        ExcerptByteOrigin excerpt;
+        try
+        {
+            excerpt = new ExcerptByteOrigin(whole, found);
+        }
+        catch (Exception ex)
+        {
+            // The file shrank or went away since the scan read it.
+            this.log.Write($"OpenExcerpt: excerpt threw: {ex}");
+            ToastService.Show(CouldNotRead(whole.DisplayName, ex));
+            whole.Dispose();
+            return;
+        }
+
+        await OpenOriginAsync(excerpt, addToRecents: false, view);
     }
 
     /// <summary>The excerpt that is open, or null when the input is a whole document - what the
@@ -758,32 +792,45 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
 
         var whole = new FileByteOrigin(normalizedPath);
-        long length = whole.AvailableLength;
-        if (bytes.First >= length)
+        ExcerptByteOrigin excerpt;
+        try
         {
-            ToastService.Show($"\"{whole.DisplayName}\" is only {length:N0} bytes long.");
+            long length = whole.AvailableLength;
+            if (bytes.First >= length)
+            {
+                ToastService.Show($"\"{whole.DisplayName}\" is only {length:N0} bytes long.");
+                whole.Dispose();
+                return;
+            }
+
+            // Only the few bytes a backoff can reach are read, through a source of their own.
+            long start;
+            long headStart = Math.Max(0, bytes.First - Utf8Boundary.MaxBackoff);
+            var head = whole.OpenRange(headStart, bytes.First + 1 - headStart);
+            try
+            {
+                start = headStart + Utf8Boundary.CharacterStartAtOrBefore(head, bytes.First - headStart);
+            }
+            finally
+            {
+                head.Release();
+            }
+
+            long end = bytes.Last is { } last ? Math.Min(length, last + 1) : length;
+            if (bytes.Last is { } asked && asked + 1 > length)
+                ToastService.Show($"\"{whole.DisplayName}\" ends at byte {length - 1:N0}.");
+
+            excerpt = ExcerptByteOrigin.OfBytes(whole, new ByteRange(start, end - start));
+        }
+        catch (Exception ex)
+        {
+            this.log.Write($"OpenByteExcerpt: reading the file threw: {ex}");
+            ToastService.Show(CouldNotRead(whole.DisplayName, ex));
             whole.Dispose();
             return;
         }
 
-        // Only the few bytes a backoff can reach are read, through a source of their own.
-        long start;
-        long headStart = Math.Max(0, bytes.First - Utf8Boundary.MaxBackoff);
-        var head = whole.OpenRange(headStart, bytes.First + 1 - headStart);
-        try
-        {
-            start = headStart + Utf8Boundary.CharacterStartAtOrBefore(head, bytes.First - headStart);
-        }
-        finally
-        {
-            head.Release();
-        }
-
-        long end = bytes.Last is { } last ? Math.Min(length, last + 1) : length;
-        if (bytes.Last is { } asked && asked + 1 > length)
-            ToastService.Show($"\"{whole.DisplayName}\" ends at byte {length - 1:N0}.");
-
-        await OpenOriginAsync(ExcerptByteOrigin.OfBytes(whole, new ByteRange(start, end - start)), addToRecents: false, view);
+        await OpenOriginAsync(excerpt, addToRecents: false, view);
     }
 
     public ThemeMode ThemeMode
@@ -968,7 +1015,7 @@ public sealed class MainWindowViewModel : ObservableObject
     /// <param name="view">The view to open it in; null detects one.</param>
     private async Task OpenOriginAsync(IByteOrigin origin, bool addToRecents, FileTypeDetector.FileKind? view = null)
     {
-        var requestId = openRequest.Begin();
+        var requestId = BeginOpenRequest();
         string name = origin.Path ?? origin.DisplayName;
 
         FileTypeDetector.FileKind fileType;
@@ -979,6 +1026,7 @@ public sealed class MainWindowViewModel : ObservableObject
         catch (Exception ex)
         {
             this.log.Write($"OpenOrigin: DetectFileType threw: {ex}");
+            ToastService.Show(CouldNotRead(origin.DisplayName, ex));
             origin.Dispose();
             return;
         }
@@ -1031,7 +1079,7 @@ public sealed class MainWindowViewModel : ObservableObject
         // different kind must not re-materialise it.
         var origin = this.ownedOrigins[0];
         string path = origin.Path ?? origin.DisplayName;
-        var requestId = openRequest.Begin();
+        var requestId = BeginOpenRequest();
 
         // UI hygiene and defence in depth (see the remark in OpenDiffAsync) - the outgoing
         // document's own mapping scope is what actually stops a live search before the swap.
@@ -1070,7 +1118,11 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             this.log.Write($"LoadAndPublish: IsPlausibleFor threw: {ex}");
             if (openRequest.IsCurrent(requestId))
+            {
                 StatusText = $"{path} — failed to open";
+                ToastService.Show(CouldNotRead(origin.DisplayName, ex));
+            }
+
             return;
         }
 
@@ -1096,7 +1148,11 @@ public sealed class MainWindowViewModel : ObservableObject
             progress.Finish();
             this.log.Write($"LoadAndPublish: load threw: {ex}");
             if (openRequest.IsCurrent(requestId))
+            {
                 StatusText = $"{path} — failed to open";
+                ToastService.Show(CouldNotRead(origin.DisplayName, ex));
+            }
+
             return;
         }
 
@@ -1141,7 +1197,7 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
-        openRequest.Begin();
+        BeginOpenRequest();
         StatusText = currentDocument?.StatusText ?? "No file loaded";
     }
 
@@ -1326,7 +1382,7 @@ public sealed class MainWindowViewModel : ObservableObject
     /// <see cref="CloseFileAsync"/>, and what a save that lost its document falls back to.</summary>
     private void CloseCurrentDocument()
     {
-        openRequest.Begin();
+        BeginOpenRequest();
         loadProgress?.Finish();
 
         // UI hygiene and defence in depth (see the remark in OpenDiffAsync) - the outgoing
@@ -1521,6 +1577,27 @@ public sealed class MainWindowViewModel : ObservableObject
     }
 
     /// <summary>True, with a toast saying why, while a save is running.</summary>
+    /// <summary>Starts a new open, close or view switch, which supersedes whatever was being
+    /// opened - including stopping an excerpt's line scan that is still running.</summary>
+    private long BeginOpenRequest()
+    {
+        locatingLines?.Cancel();
+        locatingLines = null;
+        return openRequest.Begin();
+    }
+
+    /// <summary>What to tell the user when <paramref name="name"/> could not be read.</summary>
+    private static string CouldNotRead(string name, Exception ex) => ex switch
+    {
+        UnauthorizedAccessException => $"You don't have permission to read \"{name}\".",
+        IOException io when IsSharingViolation(io) => $"\"{name}\" is locked by another program.",
+        _ => $"Couldn't read \"{name}\".",
+    };
+
+    /// <summary>Windows' ERROR_SHARING_VIOLATION or ERROR_LOCK_VIOLATION: another program has
+    /// the file open in a way that keeps readers out.</summary>
+    private static bool IsSharingViolation(IOException ex) => (ex.HResult & 0xFFFF) is 32 or 33;
+
     private bool RefusedWhileSaving()
     {
         if (!isSaving)

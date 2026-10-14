@@ -8,6 +8,7 @@ using Argonaut.Engine.Saving;
 using Argonaut.Engine.Search;
 using Argonaut.Engine.Settings;
 using Argonaut.Shell;
+using Argonaut.Shell.CommandLine;
 using Argonaut.Shell.Dialogs;
 using Argonaut.Tests.Features.Raw;
 using Argonaut.Ui.Documents;
@@ -455,5 +456,41 @@ public sealed class ShellSaveTests : IDisposable
         saving!.RequestStop();
         await save.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.True(harness.Shell.CanSaveAs);
+    }
+
+    /// <summary>Finding an excerpt's lines takes seconds on a big file, and the open document
+    /// stays editable meanwhile: changes made then are asked about before it is replaced.</summary>
+    [Fact]
+    public async Task OpenExcerpt_AsksAboutChangesMadeWhileItsLinesWereFound()
+    {
+        var harness = new Harness();
+        await harness.Shell.OpenPathAsync(WriteFile());
+        string lines = WriteFile("lines.txt");
+        harness.Board.WorkStarted += (_, entry) =>
+        {
+            if (entry.Title.StartsWith("Finding", StringComparison.Ordinal))
+                harness.Document.HasUnsavedChanges = true;
+        };
+
+        await harness.Shell.OpenStartupAsync(StartupArguments.Parse([lines, "--lines", "1"]));
+
+        Assert.Single(harness.Asked);
+        Assert.Same(harness.Document, harness.Shell.CurrentDocument);
+        Assert.False(harness.Document.Disposed);
+    }
+
+    [Fact]
+    public async Task OpenExcerpt_ChangesAgreedToBeDiscardedAreNotAskedAboutTwice()
+    {
+        var harness = new Harness { Choice = UnsavedChangesChoice.Discard };
+        await harness.Shell.OpenPathAsync(WriteFile());
+        harness.Document.HasUnsavedChanges = true;
+        string lines = WriteFile("lines.txt");
+
+        await harness.Shell.OpenStartupAsync(StartupArguments.Parse([lines, "--lines", "1"]));
+
+        Assert.Single(harness.Asked);
+        Assert.True(harness.Document.Disposed);
+        Assert.IsType<ExcerptByteOrigin>(harness.Shell.CurrentDocument!.Origin);
     }
 }

@@ -9,6 +9,7 @@ using Argonaut.Shell;
 using Argonaut.Shell.CommandLine;
 using Argonaut.Ui.Documents;
 using Argonaut.Ui.Find;
+using Argonaut.Ui.Notifications;
 using Argonaut.Ui.ViewModels;
 
 namespace Argonaut.Tests.Shell;
@@ -839,5 +840,51 @@ public sealed class MainWindowViewModelTests : IDisposable
 
         await vm.OpenStartupAsync(StartupArguments.Parse([path, "--bytes", "8+100"]));
         Assert.Equal(["{\"n\":2}\n"], loaded);
+    }
+
+    /// <summary>Opens <paramref name="path"/> while another program holds it locked against
+    /// readers, and returns the toasts the attempt raised.</summary>
+    private static async Task<List<string>> ToastsOpeningLocked(string path, Func<Task> open)
+    {
+        var toasts = new List<string>();
+        void Capture(string message) => toasts.Add(message);
+        ToastService.Requested += Capture;
+        try
+        {
+            using var writer = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            await open();
+        }
+        finally
+        {
+            ToastService.Requested -= Capture;
+        }
+
+        return toasts;
+    }
+
+    [Fact]
+    public async Task OpenPath_FileLockedByAnotherProgram_SaysSo()
+    {
+        string path = WriteJsonFile();
+        var vm = CreateViewModel((_, _, _) => throw new InvalidOperationException("nothing should load"));
+
+        var toasts = await ToastsOpeningLocked(path, () => vm.OpenPathAsync(path));
+
+        Assert.Contains(toasts, toast => toast.Contains("doc.json"));
+        Assert.False(vm.IsFileOpen);
+    }
+
+    [Theory]
+    [InlineData("--lines", "2-3")]
+    [InlineData("--bytes", "0-9")]
+    public async Task OpenExcerpt_FileLockedByAnotherProgram_SaysSo(string option, string range)
+    {
+        string path = WriteLinesFile(10);
+        var vm = CreateViewModel((_, _, _) => throw new InvalidOperationException("nothing should load"));
+
+        var toasts = await ToastsOpeningLocked(path, () => vm.OpenStartupAsync(StartupArguments.Parse([path, option, range])));
+
+        Assert.Contains(toasts, toast => toast.Contains("lines.ndjson"));
+        Assert.False(vm.IsFileOpen);
     }
 }

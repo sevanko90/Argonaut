@@ -21,6 +21,11 @@ public partial class AboutDialog : Window
         RepoLinkButton.Content = AppInfo.RepoUrl;
     }
 
+    private async void OnCommandLineLinkClicked(object? sender, RoutedEventArgs e)
+    {
+        await CommandLineDialog.ShowUsage(this);
+    }
+
     private void OnAutoUpdateToggled(object? sender, RoutedEventArgs e)
     {
         if (updateSettings is not null)

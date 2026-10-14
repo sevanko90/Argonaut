@@ -28,7 +28,7 @@ public sealed unsafe class MMapFile : IByteSource, IDisposable
         if (AvailableLength == 0)
             return; // an empty file can't be mapped; GetContiguousSpan can only ever yield an empty span
 
-        this.mmf = MemoryMappedFile.CreateFromFile(path, FileMode.Open, null, 0, MemoryMappedFileAccess.Read);
+        this.mmf = MapForReading(path);
         this.accessor = this.mmf.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
 
         byte* ptr = null;
@@ -49,12 +49,33 @@ public sealed unsafe class MMapFile : IByteSource, IDisposable
         if (AvailableLength == 0)
             return; // an empty range can't be mapped; GetContiguousSpan can only ever yield an empty span
 
-        this.mmf = MemoryMappedFile.CreateFromFile(path, FileMode.Open, null, 0, MemoryMappedFileAccess.Read);
+        this.mmf = MapForReading(path);
         this.accessor = this.mmf.CreateViewAccessor(offset, length, MemoryMappedFileAccess.Read);
 
         byte* ptr = null;
         this.accessor.SafeMemoryMappedViewHandle.AcquirePointer(ref ptr);
         this.ptr = ptr + this.accessor.PointerOffset;
+    }
+
+    /// <summary>
+    /// Maps the whole file read-only, letting other programs go on writing it. Mapping by path
+    /// opens the file denying writers, which on Windows refuses any file another program still
+    /// has open for writing - a log being appended to, an export still running - even when that
+    /// program shares it for reading. What is mapped is the file as long as it was at this
+    /// moment; bytes appended later are not seen.
+    /// </summary>
+    private static MemoryMappedFile MapForReading(string path)
+    {
+        var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        try
+        {
+            return MemoryMappedFile.CreateFromFile(file, null, 0, MemoryMappedFileAccess.Read, HandleInheritability.None, leaveOpen: false);
+        }
+        catch
+        {
+            file.Dispose();
+            throw;
+        }
     }
 
     /// <summary>

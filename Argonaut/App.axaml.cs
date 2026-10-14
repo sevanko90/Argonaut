@@ -12,6 +12,7 @@ using Argonaut.Engine.Logging;
 using Argonaut.Engine.Settings;
 using Argonaut.Features.Json.Schema;
 using Argonaut.Shell;
+using Argonaut.Shell.CommandLine;
 
 namespace Argonaut;
 
@@ -61,20 +62,18 @@ public partial class App : Application
 
             // Up to two positional paths: `argonaut a.json b.json` opens a diff when both are
             // JSON (see MainWindowViewModel.OpenPathsAsync); a third or later positional arg is
-            // ignored.
-            var positionalArgs = desktop.Args?.Where(a => !a.StartsWith('-')).ToArray() ?? [];
-            if (positionalArgs.Length > 0)
+            // ignored. --lines/--view shape how the first opens. Program has already answered
+            // --help and a bad command line wherever there was a terminal to answer in; one that
+            // reaches here is shown in the window (see MainWindow.OpenStartupAsync).
+            var startup = StartupArguments.Parse(desktop.Args ?? []);
+            foreach (var arg in startup.Paths)
             {
-                var first = positionalArgs[0];
-                var second = positionalArgs.Length > 1 ? positionalArgs[1] : null;
-                log.Write($"Opening from Args: first={first}, second={second}");
-                foreach (var arg in positionalArgs)
-                {
-                    try { startupArgPaths.Add(Path.GetFullPath(arg)); }
-                    catch { /* malformed path - let OpenPathsAsync reject it normally */ }
-                }
-                _ = window.OpenInitialFileAsync(first, second);
+                try { startupArgPaths.Add(Path.GetFullPath(arg)); }
+                catch { /* malformed path - let OpenPathsAsync reject it normally */ }
             }
+
+            if (startup.Paths.Count > 0 || startup.ShowHelp || startup.Error is not null)
+                _ = window.OpenStartupAsync(startup);
         }
 
         // macOS launches "Open With" via a document-open activation event rather than argv.

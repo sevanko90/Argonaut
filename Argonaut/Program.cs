@@ -1,6 +1,7 @@
 ﻿using Avalonia;
 using Avalonia.Media;
 using System;
+using Argonaut.Shell.CommandLine;
 using Velopack;
 
 namespace Argonaut;
@@ -25,6 +26,24 @@ class Program
         // updates explicitly (after user confirmation) regardless of this setting - only the
         // implicit on-startup swap is disabled.
         VelopackApp.Build().SetAutoApplyOnStartup(false).Run();
+
+        // --help, and a command line that cannot be acted on, are answered in the terminal and
+        // never open a window - when there is a terminal to answer in. Without one (a Windows
+        // shortcut, the macOS Dock), the window opens and says it there instead (see App).
+        var startup = StartupArguments.Parse(args);
+        if ((startup.ShowHelp || startup.Error is not null) && ParentConsole.TryAttach())
+        {
+            if (startup.ShowHelp)
+            {
+                Console.WriteLine(CommandLineUsage.Text);
+                return;
+            }
+
+            Console.Error.WriteLine($"{AppInfo.Name}: {startup.Error}");
+            Console.Error.WriteLine("Run with --help to see what can be passed.");
+            Environment.ExitCode = 2;
+            return;
+        }
 
         BuildAvaloniaApp()
             .StartWithClassicDesktopLifetime(args);

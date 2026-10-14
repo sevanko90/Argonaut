@@ -98,7 +98,7 @@
                     </Border>
                     <!-- Left-aligned, so the close button sits right after the name rather than at
                          the far end of the column, and the name's star column truncates it. -->
-                    <Grid ColumnDefinitions="*,Auto" HorizontalAlignment="Left">
+                    <Grid ColumnDefinitions="*,Auto,Auto" HorizontalAlignment="Left">
                         <TextBlock Text="{Binding HeaderTitle}"
                                    IsVisible="{Binding IsFileOpen}"
                                    IsHitTestVisible="False"
@@ -124,6 +124,39 @@
                                 HorizontalContentAlignment="Center"
                                 ToolTip.Tip="Close file">
                             <icons:LucideIcon Data="{StaticResource Icon.Close}" Size="13" />
+                        </Button>
+                        <!-- An excerpt's pill: which part of the file is open, rounded to stay short
+                             (the tooltip and the flyout give it exactly), and the flyout that numbers
+                             it or leaves it for the whole file. -->
+                        <Button Grid.Column="2"
+                                x:Name="ExcerptButton"
+                                Classes="tool excerptchip"
+                                IsVisible="{Binding IsExcerpt}"
+                                Margin="8,0,0,0"
+                                ToolTip.Tip="{Binding ExcerptDescription}">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <TextBlock Text="{Binding ExcerptLabel}" Classes="toolvalue" />
+                                <icons:LucideIcon Classes="chevron" Data="{StaticResource Icon.ChevronDown}" />
+                            </StackPanel>
+                            <Button.Flyout>
+                                <Flyout Placement="BottomEdgeAlignedLeft">
+                                    <StackPanel Margin="8" Spacing="2" MinWidth="230">
+                                        <TextBlock Text="{Binding ExcerptDescription}" FontSize="12" Margin="8,0,8,8" />
+                                        <TextBlock Classes="flyouthead" Text="Line numbers" />
+                                        <RadioButton GroupName="excerptNumbers" IsChecked="{Binding NumberExcerptFromSource}">
+                                            <TextBlock Text="{Binding ExcerptSourceNumberingLabel}" />
+                                        </RadioButton>
+                                        <RadioButton GroupName="excerptNumbers" IsChecked="{Binding !NumberExcerptFromSource, Mode=OneWay}" Content="From 1" />
+                                        <Separator Margin="0,4" />
+                                        <Button Classes="tool" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                                                Click="OnOpenWholeFile">
+                                            <TextBlock>
+                                                <Run Text="Open all of " /><Run Text="{Binding ExcerptSourceName}" FontWeight="SemiBold" />
+                                            </TextBlock>
+                                        </Button>
+                                    </StackPanel>
+                                </Flyout>
+                            </Button.Flyout>
                         </Button>
                     </Grid>
                 </DockPanel>

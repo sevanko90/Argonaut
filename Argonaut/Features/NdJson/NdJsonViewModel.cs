@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel;
+using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Engine.Bytes;
@@ -14,6 +15,7 @@ using Argonaut.Engine.Hints;
 using Argonaut.Ui.Hints;
 using Argonaut.Features.Json.Schema;
 using Argonaut.Ui.Documents;
+using Argonaut.Ui.Documents.Numbering;
 using Argonaut.Ui.Documents.Navigation;
 using Argonaut.Ui.Find;
 using Argonaut.Ui.ViewModels;
@@ -51,6 +53,27 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
     internal CancellationToken TearingDown => this.session?.TearingDown ?? default;
 
     public int LineCount => this.session?.Index.LineCount ?? 0;
+
+    /// <summary>
+    /// As many zeros as the widest line number shown, for the gutter to size itself by: an
+    /// excerpt numbered by its file shows numbers as long as the file's, however few lines it
+    /// has. Set when the lines are first shown, when indexing finishes and when the numbering is
+    /// flipped, not on every line indexed - a whole document still being indexed past a power of
+    /// ten widens when it is done.
+    /// </summary>
+    public string WidestLineNumber
+    {
+        get => widestLineNumber;
+        private set => SetField(ref widestLineNumber, value);
+    }
+
+    private string widestLineNumber = "0";
+
+    private void MeasureWidestLineNumber()
+    {
+        long widest = LineNumbering.Line(Math.Max(LineCount, 1));
+        WidestLineNumber = new string('0', widest.ToString(CultureInfo.InvariantCulture).Length);
+    }
 
     public NdJsonLineCollection Lines => lines ?? throw new InvalidOperationException("LoadAsync must complete before Lines is accessed.");
 
@@ -123,13 +146,17 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
     private readonly JsonViewSettings viewSettings;
     private readonly SchemaBindings schemaBindings;
     private readonly JsonSchemaCatalog schemaCatalog;
+    private readonly LineNumberingPreference? lineNumbers;
 
     /// <param name="viewSettings">Where the default expand depth is remembered; also handed to
     /// each line's nested tree.</param>
     /// <param name="schemaBindings">Where the schema chosen for each document is remembered.</param>
     /// <param name="schemaCatalog">The schemas a document can be bound to.</param>
-    public NdJsonViewModel(JsonViewSettings viewSettings, SchemaBindings schemaBindings, JsonSchemaCatalog schemaCatalog)
+    /// <param name="lineNumbers">How an excerpt numbers its lines; null numbers from the start.</param>
+    public NdJsonViewModel(JsonViewSettings viewSettings, SchemaBindings schemaBindings, JsonSchemaCatalog schemaCatalog,
+        LineNumberingPreference? lineNumbers = null)
     {
+        this.lineNumbers = lineNumbers;
         this.viewSettings = viewSettings;
         this.schemaBindings = schemaBindings;
         this.schemaCatalog = schemaCatalog;
@@ -232,6 +259,7 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
     {
         Origin = origin;
         FilePath = origin.Path ?? origin.DisplayName;
+        FollowLineNumbering(this.lineNumbers);
         DefaultExpandDepth = viewSettings.ExpandDepth;
         toolbar = new JsonToolbarViewModel(HintSettings, SchemaSettings, DefaultExpandDepth, ChooseExpandDepth,
             refreshSchemaEntries: () => RefreshSchemaEntriesAsync(origin.Path), openSchemaFolder: schemaCatalog.OpenUserDirectory,
@@ -334,10 +362,14 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
 
     private void UpdateStatusText()
     {
+        MeasureWidestLineNumber();
         StatusText = SelectedLineNumber is { } line
-            ? DocumentStatusLine.Compose(FilePath, $"{LineCount:N0} lines · Selected line: {line:N0}")
+            ? DocumentStatusLine.Compose(FilePath, $"{LineCount:N0} lines · Selected line: {LineNumbering.Line(line):N0}")
             : DocumentStatusLine.Compose(FilePath, $"{LineCount:N0} lines");
     }
+
+    /// <summary>The status line names the selected line by its shown number.</summary>
+    protected override void OnLineNumberingChanged() => UpdateStatusText();
 
     /// <summary>Indexing finished: keeps the "Selected line" suffix if one is selected by then.</summary>
     protected override void OnIndexingCompleted()

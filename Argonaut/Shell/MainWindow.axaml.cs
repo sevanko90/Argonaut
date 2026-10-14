@@ -16,6 +16,7 @@ using Argonaut.Shell.FilePicking;
 using Argonaut.Engine.Logging;
 using Argonaut.Engine.Settings;
 using Argonaut.Features.Json.Schema;
+using Argonaut.Shell.CommandLine;
 using Argonaut.Shell.Dialogs;
 using Argonaut.Shell.Updates;
 using Argonaut.Ui.Documents.Navigation;
@@ -308,6 +309,54 @@ public partial class MainWindow : Window
 #endif
     }
 
+    /// <summary>
+    /// Acts on the command line once the window is up: opens what it names, or - when it asked
+    /// for help, or could not be acted on, and there was no terminal to say so in (see Program) -
+    /// says it here instead.
+    /// </summary>
+    public async Task OpenStartupAsync(StartupArguments startup)
+    {
+        log.Write($"OpenStartupAsync: paths=[{string.Join(", ", startup.Paths)}], lines={startup.Lines}, view={startup.View}, help={startup.ShowHelp}, error={startup.Error}");
+        try
+        {
+            if (startup.ShowHelp)
+            {
+                await WhenOpenedAsync();
+                await CommandLineDialog.ShowUsage(this);
+                return;
+            }
+
+            if (startup.Error is { } error)
+            {
+                ToastService.Show(error);
+                return;
+            }
+
+            await viewModel.OpenStartupAsync(startup);
+        }
+        catch (Exception ex)
+        {
+            log.Write($"OpenStartupAsync threw: {ex}");
+        }
+    }
+
+    /// <summary>Completes once the window has opened - a dialog needs a visible owner.</summary>
+    private Task WhenOpenedAsync()
+    {
+        if (IsVisible)
+            return Task.CompletedTask;
+
+        var opened = new TaskCompletionSource();
+        void OnOpened(object? sender, EventArgs e)
+        {
+            Opened -= OnOpened;
+            opened.TrySetResult();
+        }
+
+        Opened += OnOpened;
+        return opened.Task;
+    }
+
     /// <param name="second">A second command-line path (e.g. `argonaut a.json b.json`), or
     /// null for the single-file case. See <see cref="MainWindowViewModel.OpenPathsAsync"/> for
     /// how the pair decides between diff mode and opening <paramref name="first"/> alone.</param>
@@ -563,6 +612,9 @@ public partial class MainWindow : Window
         this.closeAgreed = true;
         Close();
     }
+
+    private void OnOpenWholeFile(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+        => _ = viewModel.OpenWholeFileAsync();
 
     private async void OnShowAbout(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {

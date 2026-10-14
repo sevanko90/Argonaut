@@ -1,5 +1,6 @@
 using System;
 using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Text;
 
 namespace Argonaut.Features.Raw.Rows;
 
@@ -64,11 +65,11 @@ internal static class RawRowBoundary
     {
         for (int back = 0; back < MaxUtf8Backoff; back++)
         {
-            if (!IsUtf8ContinuationByte(ByteAt(source, cap - back)))
+            if (!Utf8Boundary.IsContinuationByte(ByteAt(source, cap - back)))
                 return back;
         }
 
-        return IsUtf8ContinuationByte(ByteAt(source, cap - MaxUtf8Backoff)) ? 0 : MaxUtf8Backoff;
+        return Utf8Boundary.IsContinuationByte(ByteAt(source, cap - MaxUtf8Backoff)) ? 0 : MaxUtf8Backoff;
     }
 
     /// <summary>
@@ -104,6 +105,4 @@ internal static class RawRowBoundary
         var span = source.GetContiguousSpan(offset, 1);
         return span.IsEmpty ? (byte)0 : span[0];
     }
-
-    private static bool IsUtf8ContinuationByte(byte b) => (b & 0xC0) == 0x80;
 }

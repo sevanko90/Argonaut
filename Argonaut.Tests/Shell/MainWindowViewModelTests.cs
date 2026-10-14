@@ -6,8 +6,10 @@ using Argonaut.Engine.Indexing;
 using Argonaut.Engine.Search;
 using Argonaut.Engine.Settings;
 using Argonaut.Shell;
+using Argonaut.Shell.CommandLine;
 using Argonaut.Ui.Documents;
 using Argonaut.Ui.Find;
+using Argonaut.Ui.Notifications;
 using Argonaut.Ui.ViewModels;
 
 namespace Argonaut.Tests.Shell;
@@ -673,5 +675,216 @@ public sealed class MainWindowViewModelTests : IDisposable
 
         Assert.NotNull(vm.CurrentDocument!.Origin);
         Assert.Equal(Path.GetFullPath(path), vm.CurrentDocument.Origin!.Path);
+    }
+
+    // ---- command line ------------------------------------------------------------------
+
+    private string WriteLinesFile(int count, string name = "lines.ndjson")
+    {
+        string path = Path.Combine(tempDir, name);
+        File.WriteAllText(path, string.Concat(Enumerable.Range(1, count).Select(i => $"{{\"n\":{i}}}\n")));
+        return path;
+    }
+
+    private static string ReadAll(IByteOrigin origin)
+    {
+        var source = origin.Open();
+        try
+        {
+            return source.GetUtf8String(0, (int)source.AvailableLength);
+        }
+        finally
+        {
+            source.Release();
+        }
+    }
+
+    [Fact]
+    public async Task OpenExcerpt_LoadsOnlyTheLinesAskedFor()
+    {
+        string path = WriteLinesFile(10);
+        IByteOrigin? loaded = null;
+        string? loadedText = null;
+        var vm = CreateViewModel((_, origin, _) =>
+        {
+            loaded = origin;
+            loadedText = ReadAll(origin);
+            return Task.FromResult<IDocumentViewModel>(new FakeDocument { Origin = origin });
+        });
+
+        await vm.OpenStartupAsync(StartupArguments.Parse([path, "--lines", "3-4"]));
+
+        var excerpt = Assert.IsType<ExcerptByteOrigin>(loaded);
+        Assert.Equal("{\"n\":3}\n{\"n\":4}\n", loadedText);
+        Assert.Null(excerpt.Path);
+        Assert.Equal(3, excerpt.Lines!.Value.FirstLine);
+        Assert.Equal(4, excerpt.Lines!.Value.LastLine);
+    }
+
+    [Fact]
+    public async Task OpenExcerpt_PastTheEnd_OpensNothing()
+    {
+        string path = WriteLinesFile(10);
+        var vm = CreateViewModel((_, _, _) => throw new InvalidOperationException("nothing should load"));
+
+        await vm.OpenStartupAsync(StartupArguments.Parse([path, "--lines", "11-20"]));
+
+        Assert.False(vm.IsFileOpen);
+    }
+
+    [Fact]
+    public async Task OpenStartup_View_ForcesTheKindInsteadOfDetecting()
+    {
+        string path = WriteJsonFile();
+        FileTypeDetector.FileKind? loadedAs = null;
+        var vm = CreateViewModel((kind, _, _) =>
+        {
+            loadedAs = kind;
+            return Task.FromResult<IDocumentViewModel>(new FakeDocument { FilePath = path });
+        });
+
+        await vm.OpenStartupAsync(StartupArguments.Parse([path, "--view", "raw"]));
+
+        Assert.Equal(FileTypeDetector.FileKind.Unidentified, loadedAs);
+    }
+
+    [Fact]
+    public async Task OpenStartup_LinesAndView_ForcesTheKindOfTheExcerpt()
+    {
+        string path = WriteLinesFile(10);
+        FileTypeDetector.FileKind? loadedAs = null;
+        var vm = CreateViewModel((kind, origin, _) =>
+        {
+            loadedAs = kind;
+            return Task.FromResult<IDocumentViewModel>(new FakeDocument { Origin = origin });
+        });
+
+        await vm.OpenStartupAsync(StartupArguments.Parse([path, "--lines", "2-", "--view", "raw"]));
+
+        Assert.Equal(FileTypeDetector.FileKind.Unidentified, loadedAs);
+    }
+
+    [Fact]
+    public async Task OpenWholeFile_LeavesTheExcerptForItsFileInTheSameView()
+    {
+        string path = WriteLinesFile(10);
+        var loads = new List<(FileTypeDetector.FileKind Kind, IByteOrigin Origin)>();
+        var vm = CreateViewModel((kind, origin, _) =>
+        {
+            loads.Add((kind, origin));
+            return Task.FromResult<IDocumentViewModel>(new FakeDocument { Origin = origin });
+        });
+
+        await vm.OpenStartupAsync(StartupArguments.Parse([path, "--lines", "3-4", "--view", "raw"]));
+        Assert.NotNull(vm.Excerpt);
+
+        await vm.OpenWholeFileAsync();
+
+        Assert.Null(vm.Excerpt);
+        Assert.Equal(2, loads.Count);
+        Assert.Equal(FileTypeDetector.FileKind.Unidentified, loads[1].Kind);
+        Assert.Equal(Path.GetFullPath(path), loads[1].Origin.Path);
+    }
+
+    [Fact]
+    public async Task OpenByteExcerpt_LoadsExactlyTheBytesAskedFor()
+    {
+        string path = WriteLinesFile(10);
+        string? loadedText = null;
+        IByteOrigin? loaded = null;
+        var vm = CreateViewModel((_, origin, _) =>
+        {
+            loaded = origin;
+            loadedText = ReadAll(origin);
+            return Task.FromResult<IDocumentViewModel>(new FakeDocument { Origin = origin });
+        });
+
+        await vm.OpenStartupAsync(StartupArguments.Parse([path, "--bytes", "2-6"]));
+
+        var excerpt = Assert.IsType<ExcerptByteOrigin>(loaded);
+        Assert.Equal("n\":1}", loadedText);
+        Assert.Null(excerpt.Lines);
+        Assert.Equal(new ByteRange(2, 5), excerpt.Range);
+    }
+
+    [Fact]
+    public async Task OpenByteExcerpt_StartingInsideACharacter_StartsAtTheCharacter()
+    {
+        string path = Path.Combine(tempDir, "accents.txt");
+        File.WriteAllText(path, "ab€cd"); // € is three bytes, at 2..4
+        string? loadedText = null;
+        var vm = CreateViewModel((_, origin, _) =>
+        {
+            loadedText = ReadAll(origin);
+            return Task.FromResult<IDocumentViewModel>(new FakeDocument { Origin = origin });
+        });
+
+        await vm.OpenStartupAsync(StartupArguments.Parse([path, "--bytes", "4-"]));
+
+        Assert.Equal("€cd", loadedText);
+    }
+
+    [Fact]
+    public async Task OpenByteExcerpt_PastTheEnd_OpensNothing_AndAnEndPastIt_IsCutShort()
+    {
+        string path = WriteLinesFile(2); // 16 bytes
+        var loaded = new List<string>();
+        var vm = CreateViewModel((_, origin, _) =>
+        {
+            loaded.Add(ReadAll(origin));
+            return Task.FromResult<IDocumentViewModel>(new FakeDocument { Origin = origin });
+        });
+
+        await vm.OpenStartupAsync(StartupArguments.Parse([path, "--bytes", "16-20"]));
+        Assert.Empty(loaded);
+
+        await vm.OpenStartupAsync(StartupArguments.Parse([path, "--bytes", "8+100"]));
+        Assert.Equal(["{\"n\":2}\n"], loaded);
+    }
+
+    /// <summary>Opens <paramref name="path"/> while another program holds it locked against
+    /// readers, and returns the toasts the attempt raised.</summary>
+    private static async Task<List<string>> ToastsOpeningLocked(string path, Func<Task> open)
+    {
+        var toasts = new List<string>();
+        void Capture(string message) => toasts.Add(message);
+        ToastService.Requested += Capture;
+        try
+        {
+            using var writer = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            await open();
+        }
+        finally
+        {
+            ToastService.Requested -= Capture;
+        }
+
+        return toasts;
+    }
+
+    [Fact]
+    public async Task OpenPath_FileLockedByAnotherProgram_SaysSo()
+    {
+        string path = WriteJsonFile();
+        var vm = CreateViewModel((_, _, _) => throw new InvalidOperationException("nothing should load"));
+
+        var toasts = await ToastsOpeningLocked(path, () => vm.OpenPathAsync(path));
+
+        Assert.Contains(toasts, toast => toast.Contains("doc.json"));
+        Assert.False(vm.IsFileOpen);
+    }
+
+    [Theory]
+    [InlineData("--lines", "2-3")]
+    [InlineData("--bytes", "0-9")]
+    public async Task OpenExcerpt_FileLockedByAnotherProgram_SaysSo(string option, string range)
+    {
+        string path = WriteLinesFile(10);
+        var vm = CreateViewModel((_, _, _) => throw new InvalidOperationException("nothing should load"));
+
+        var toasts = await ToastsOpeningLocked(path, () => vm.OpenStartupAsync(StartupArguments.Parse([path, option, range])));
+
+        Assert.Contains(toasts, toast => toast.Contains("lines.ndjson"));
+        Assert.False(vm.IsFileOpen);
     }
 }

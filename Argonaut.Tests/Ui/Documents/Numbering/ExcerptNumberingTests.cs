@@ -86,6 +86,42 @@ public class ExcerptNumberingTests
         }
     }
 
+    [Theory]
+    [InlineData("\n")]
+    [InlineData("\r\n")]
+    public async Task A_raw_excerpt_of_lines_100_to_500_shows_all_of_them(string newline)
+    {
+        var text = new StringBuilder();
+        for (int line = 1; line <= 1000; line++)
+            text.Append("line ").Append(line).Append(newline);
+
+        var vm = new RawViewModel(new RawViewSettings(), lineNumbers: Preference(fromSource: true));
+        try
+        {
+            await vm.LoadAsync(Excerpt(text.ToString(), 100, 500));
+            await vm.IndexingTask;
+
+            var rows = vm.RowIndex!;
+            var last = rows.GetRowInfo(rows.RowCount - 1);
+            Assert.Equal(100, vm.LineNumbering.FirstLine);
+            Assert.Equal(401, rows.RowCount);
+            Assert.Equal(401, last.LineNumber);
+            var source = vm.Origin!.Open();
+            try
+            {
+                Assert.StartsWith("line 500", source.GetUtf8String(last.Start, (int)(last.End - last.Start)));
+            }
+            finally
+            {
+                source.Release();
+            }
+        }
+        finally
+        {
+            vm.Dispose();
+        }
+    }
+
     [Fact]
     public async Task A_disposed_document_stops_following_the_switch()
     {

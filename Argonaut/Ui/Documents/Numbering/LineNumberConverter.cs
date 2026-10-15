@@ -7,9 +7,9 @@ using Avalonia.Data.Converters;
 namespace Argonaut.Ui.Documents.Numbering;
 
 /// <summary>
-/// Shows a templated row's 1-based line number under its document's <see cref="LineNumbering"/>:
-/// bound to the row's own number and the document's numbering, so flipping the numbering
-/// renumbers the realized rows without rebuilding them.
+/// Shows a templated row's gutter label under its document's <see cref="LineNumbering"/>: bound
+/// to the row's own 1-based number, the document's numbering and the row's start offset, so
+/// flipping the numbering relabels the realized rows without rebuilding them.
 /// </summary>
 public sealed class LineNumberConverter : IMultiValueConverter
 {
@@ -21,6 +21,7 @@ public sealed class LineNumberConverter : IMultiValueConverter
             return null;
 
         var numbering = values.Count > 1 && values[1] is LineNumbering n ? n : LineNumbering.FromStart;
-        return numbering.Line(lineNumber).ToString(CultureInfo.InvariantCulture);
+        long lineStart = values.Count > 2 && values[2] is long start ? start : 0;
+        return numbering.GutterLabel(lineNumber, lineStart);
     }
 }

@@ -13,13 +13,18 @@ namespace Argonaut.Features.NdJson;
 /// </summary>
 public sealed class NdJsonVisibleLine
 {
-    public NdJsonVisibleLine(int lineNumber, string text)
+    public NdJsonVisibleLine(int lineNumber, long lineStart, string text)
     {
         LineNumber = lineNumber;
+        LineStart = lineStart;
         Text = text;
     }
 
     public int LineNumber { get; }
+
+    /// <summary>Offset of the line's first byte in the document, for a gutter that labels lines
+    /// by where they start.</summary>
+    public long LineStart { get; }
 
     public string Text { get; }
 }
@@ -67,10 +72,10 @@ public sealed class NdJsonLineCollection : VirtualizingItemsSourceBase
 
         int lineCount = index.LineCount;
         if (i < 0 || i >= lineCount)
-            return new NdJsonVisibleLine(i + 1, string.Empty);
+            return new NdJsonVisibleLine(i + 1, 0, string.Empty);
 
         var lineSpan = index.GetLineSpan(i);
-        var line = new NdJsonVisibleLine(i + 1, LineReader.ReadDisplayLine(bytes, lineSpan));
+        var line = new NdJsonVisibleLine(i + 1, lineSpan.Offset, LineReader.ReadDisplayLine(bytes, lineSpan));
 
         var newNode = new LinkedListNode<(int, NdJsonVisibleLine)>((i, line));
         cacheOrder.AddFirst(newNode);

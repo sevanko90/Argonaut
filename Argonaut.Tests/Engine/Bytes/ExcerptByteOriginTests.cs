@@ -86,4 +86,15 @@ public class ExcerptByteOriginTests
 
         Assert.Equal("bytes 1.5m–2.5m", excerpt.ShortDescription);
     }
+
+    [Fact]
+    public void Its_short_description_keeps_close_ends_apart()
+    {
+        var whole = new MemoryByteOrigin(new byte[1_100_000], "big.bin");
+        using var bytes = ExcerptByteOrigin.OfBytes(whole, new ByteRange(1_000_000, 201));
+        using var lines = new ExcerptByteOrigin(whole, new LocatedLines(new ByteRange(0, 10), 1_000_000, 1_000_300));
+
+        Assert.Equal("bytes 1m–1.0002m", bytes.ShortDescription);
+        Assert.Equal("lines 1m–1.0003m", lines.ShortDescription);
+    }
 }

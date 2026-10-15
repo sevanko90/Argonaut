@@ -614,7 +614,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
         var whole = new FileByteOrigin(normalizedPath);
         var requestId = BeginOpenRequest();
-        string wanted = ExcerptByteOrigin.Describe(new LocatedLines(default, lines.First, lines.Last), CompactCount.Format);
+        string wanted = ExcerptByteOrigin.Describe(new LocatedLines(default, lines.First, lines.Last), CompactCount.FormatRange);
         using var stopping = new CancellationTokenSource();
         locatingLines = stopping;
         var progress = this.progressBoard.Begin($"Finding {wanted} of {whole.DisplayName}", stopping.Cancel);
@@ -720,8 +720,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public string ExcerptSourceName => Excerpt?.Whole.DisplayName ?? string.Empty;
 
     /// <summary>What numbering an excerpt by its file shows: its line numbers from where it
-    /// starts, or for one taken by bytes - whose first line number is not known - the file's
-    /// offsets with lines counted from 1.</summary>
+    /// starts, or for one taken by bytes - whose first line number is not known - each line
+    /// labelled by the file offset it starts at.</summary>
     public string ExcerptSourceNumberingLabel => Excerpt switch
     {
         { Lines: { } lines } => $"As in the file, from line {lines.FirstLine:N0}",

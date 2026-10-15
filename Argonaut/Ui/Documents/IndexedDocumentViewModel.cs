@@ -219,7 +219,7 @@ public abstract class IndexedDocumentViewModel : ObservableObject, IDocumentView
             return;
 
         var numbering = lineNumberingPreference.For(Origin);
-        if (numbering == lineNumbering)
+        if (numbering.Equals(lineNumbering))
             return;
 
         LineNumbering = numbering;

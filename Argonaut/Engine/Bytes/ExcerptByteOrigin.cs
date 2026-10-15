@@ -30,7 +30,7 @@ public sealed class ExcerptByteOrigin : IByteOrigin
 {
     /// <summary>An excerpt of the lines <paramref name="lines"/> located.</summary>
     public ExcerptByteOrigin(IByteOrigin whole, LocatedLines lines)
-        : this(whole, lines.Range, lines, Describe(lines, N), Describe(lines, CompactCount.Format))
+        : this(whole, lines.Range, lines, Describe(lines, Exact), Describe(lines, CompactCount.FormatRange))
     {
     }
 
@@ -50,7 +50,7 @@ public sealed class ExcerptByteOrigin : IByteOrigin
 
     /// <summary>An excerpt of the bytes in <paramref name="range"/>, which it takes as given.</summary>
     public static ExcerptByteOrigin OfBytes(IByteOrigin whole, ByteRange range)
-        => new(whole, range, lines: null, Describe(range, N), Describe(range, CompactCount.Format));
+        => new(whole, range, lines: null, Describe(range, Exact), Describe(range, CompactCount.FormatRange));
 
     /// <summary>The document this is an excerpt of.</summary>
     public IByteOrigin Whole { get; }
@@ -93,19 +93,26 @@ public sealed class ExcerptByteOrigin : IByteOrigin
     public KeptIndexes KeptIndexes { get; } = new();
 
     /// <summary>"lines 1,000,000–2,000,000", or "lines 1,000,000–end" for one that runs to the
-    /// end of the document, with each number written by <paramref name="number"/>.</summary>
-    public static string Describe(LocatedLines lines, Func<long, string> number)
+    /// end of the document, with the two ends written together by <paramref name="numbers"/> -
+    /// so a rounding one can keep them from reading the same.</summary>
+    public static string Describe(LocatedLines lines, Func<long, long, (string First, string Last)> numbers)
     {
-        string first = number(lines.FirstLine);
-        string last = lines.LastLine is { } l ? number(l) : "end";
-        return lines.LastLine == lines.FirstLine ? $"line {first}" : $"lines {first}–{last}";
+        if (lines.LastLine is not { } last)
+            return $"lines {numbers(lines.FirstLine, lines.FirstLine).First}–end";
+
+        var (a, b) = numbers(lines.FirstLine, last);
+        return last == lines.FirstLine ? $"line {a}" : $"lines {a}–{b}";
     }
 
     /// <summary>"bytes 0–499": zero-based, last byte included, as an HTTP range names them.</summary>
-    public static string Describe(ByteRange range, Func<long, string> number)
-        => range.Length <= 1 ? $"byte {number(range.Offset)}" : $"bytes {number(range.Offset)}–{number(range.End - 1)}";
+    public static string Describe(ByteRange range, Func<long, long, (string First, string Last)> numbers)
+    {
+        var (a, b) = numbers(range.Offset, Math.Max(range.Offset, range.End - 1));
+        return range.Length <= 1 ? $"byte {a}" : $"bytes {a}–{b}";
+    }
 
-    private static string N(long value) => value.ToString("N0", CultureInfo.CurrentCulture);
+    private static (string, string) Exact(long first, long last)
+        => (first.ToString("N0", CultureInfo.CurrentCulture), last.ToString("N0", CultureInfo.CurrentCulture));
 
     public void Dispose()
     {

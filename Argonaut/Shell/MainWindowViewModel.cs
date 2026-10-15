@@ -614,7 +614,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
         var whole = new FileByteOrigin(normalizedPath);
         var requestId = BeginOpenRequest();
-        string wanted = ExcerptByteOrigin.Describe(new LocatedLines(default, lines.First, lines.Last), CompactCount.Format);
+        string wanted = ExcerptByteOrigin.Describe(new LocatedLines(default, lines.First, lines.Last), CompactCount.FormatRange);
         using var stopping = new CancellationTokenSource();
         locatingLines = stopping;
         var progress = this.progressBoard.Begin($"Finding {wanted} of {whole.DisplayName}", stopping.Cancel);

@@ -42,6 +42,7 @@
                                         <MultiBinding Converter="{x:Static numbering:LineNumberConverter.Instance}">
                                             <Binding Path="LineNumber" />
                                             <Binding Path="$parent[json:NdJsonView].((json:NdJsonViewModel)DataContext).LineNumbering" />
+                                            <Binding Path="LineStart" />
                                         </MultiBinding>
                                     </TextBlock.Text>
                                 </TextBlock>

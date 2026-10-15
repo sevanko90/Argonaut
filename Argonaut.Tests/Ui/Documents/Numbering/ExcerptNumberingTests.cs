@@ -40,7 +40,7 @@ public class ExcerptNumberingTests
     {
         using var excerpt = Excerpt("a\nbb\nccc\n", 2, 3);
 
-        Assert.Equal(new LineNumbering(2, 2), Preference(fromSource: true).For(excerpt));
+        Assert.Equal(LineNumbering.Starting(2, 2), Preference(fromSource: true).For(excerpt));
         Assert.Equal(LineNumbering.FromStart, Preference(fromSource: false).For(excerpt));
     }
 
@@ -107,7 +107,7 @@ public class ExcerptNumberingTests
 
             var rows = vm.RowIndex!;
             var last = rows.GetRowInfo(rows.RowCount - 1);
-            Assert.Equal(100, vm.LineNumbering.FirstLine);
+            Assert.Equal(100, vm.LineNumbering.Line(1));
             Assert.Equal(401, rows.RowCount);
             Assert.Equal(401, last.LineNumber);
             var source = vm.Origin!.Open();
@@ -160,7 +160,7 @@ public class ExcerptNumberingTests
 
         preference.NumberExcerptsFromSource = false;
 
-        Assert.Equal(new LineNumbering(2, 4), vm.LineNumbering);
+        Assert.Equal(LineNumbering.Starting(2, 4), vm.LineNumbering);
     }
 
     [Fact]
@@ -206,12 +206,25 @@ public class ExcerptNumberingTests
     }
 
     [Fact]
-    public void A_byte_excerpt_follows_the_file_for_offsets_only()
+    public void A_byte_excerpt_by_its_file_labels_lines_by_where_they_start()
     {
         var whole = new MemoryByteOrigin("a\nbb\nccc\n"u8.ToArray(), "big.txt");
         using var excerpt = ExcerptByteOrigin.OfBytes(whole, new ByteRange(5, 4));
 
-        Assert.Equal(new LineNumbering(1, 5), Preference(fromSource: true).For(excerpt));
+        var numbering = Preference(fromSource: true).For(excerpt);
+
+        Assert.True(numbering.LabelsLineStarts);
+        Assert.Equal(5, numbering.Offset(0));
+        Assert.Equal(LineNumbering.ByLineStarts(5, 4), numbering);
+    }
+
+    [Fact]
+    public void A_byte_excerpt_from_its_start_numbers_lines_from_1()
+    {
+        var whole = new MemoryByteOrigin("a\nbb\nccc\n"u8.ToArray(), "big.txt");
+        using var excerpt = ExcerptByteOrigin.OfBytes(whole, new ByteRange(5, 4));
+
+        Assert.Equal(LineNumbering.FromStart, Preference(fromSource: false).For(excerpt));
     }
 
     [Fact]

@@ -55,7 +55,9 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
     public int LineCount => this.session?.Index.LineCount ?? 0;
 
     /// <summary>
-    /// As many zeros as the widest line number shown, for the gutter to size itself by: an
+    /// As many zeros as the widest line number shown, for the gutter to size itself by - or the
+    /// widest offset itself, when lines are labelled by where they start (digits are the same
+    /// width in the content font, and the separators come out the same in every label). An
     /// excerpt numbered by its file shows numbers as long as the file's, however few lines it
     /// has. Set when the lines are first shown, when indexing finishes and when the numbering is
     /// flipped, not on every line indexed - a whole document still being indexed past a power of
@@ -71,6 +73,12 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
 
     private void MeasureWidestLineNumber()
     {
+        if (LineNumbering.WidestLineStartLabel is { } widestStart)
+        {
+            WidestLineNumber = widestStart;
+            return;
+        }
+
         long widest = LineNumbering.Line(Math.Max(LineCount, 1));
         WidestLineNumber = new string('0', widest.ToString(CultureInfo.InvariantCulture).Length);
     }
@@ -364,9 +372,15 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
     {
         MeasureWidestLineNumber();
         StatusText = SelectedLineNumber is { } line
-            ? DocumentStatusLine.Compose(FilePath, $"{LineCount:N0} lines · Selected line: {LineNumbering.Line(line):N0}")
+            ? DocumentStatusLine.Compose(FilePath, $"{LineCount:N0} lines · {SelectedLineLabel(line)}")
             : DocumentStatusLine.Compose(FilePath, $"{LineCount:N0} lines");
     }
+
+    /// <summary>The selected line as the gutter names it: by number, or by where it starts.</summary>
+    private string SelectedLineLabel(int line)
+        => LineNumbering.LabelsLineStarts && this.Index is { } index
+            ? $"Selected line at byte {LineNumbering.Offset(index.GetLineSpan(line - 1).Offset):N0}"
+            : $"Selected line: {LineNumbering.Line(line):N0}";
 
     /// <summary>The status line names the selected line by its shown number.</summary>
     protected override void OnLineNumberingChanged() => UpdateStatusText();

@@ -1,5 +1,4 @@
 using System;
-using System.Globalization;
 using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Diagnostics;
@@ -16,6 +15,7 @@ using Avalonia.Utilities;
 using System.Threading.Tasks;
 using Avalonia.Interactivity;
 using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Indexing.Lines;
 using Argonaut.Features.Raw.Editing;
 using Argonaut.Features.Raw.Highlighting;
 using Argonaut.Features.Raw.Hints;
@@ -50,7 +50,8 @@ namespace Argonaut.Features.Raw;
 /// </summary>
 public class RawTextSurface : RowSurface
 {
-    /// <summary>Width of the line-number gutter, including <see cref="LineNumberGap"/>.</summary>
+    /// <summary>Width of the line-number gutter, including <see cref="LineNumberGap"/>; wider
+    /// only when its lines are labelled by file offsets too long for it.</summary>
     public const double LineNumberColumnWidth = 100;
 
     /// <summary>Space between the right-aligned line number and the text.</summary>
@@ -147,18 +148,18 @@ public class RawTextSurface : RowSurface
 
     static RawTextSurface()
     {
-        AffectsRender<RawTextSurface>(CaretBrushProperty, FirstLineNumberProperty);
+        AffectsRender<RawTextSurface>(CaretBrushProperty, LineNumberingProperty);
     }
 
-    /// <summary>The number the gutter shows for the document's first line - 1, unless this is an
-    /// excerpt numbered as its file numbers it (see <c>LineNumbering</c>).</summary>
-    public static readonly StyledProperty<long> FirstLineNumberProperty =
-        AvaloniaProperty.Register<RawTextSurface, long>(nameof(FirstLineNumber), defaultValue: 1);
+    /// <summary>How the gutter labels the document's lines - from 1, unless this is an excerpt
+    /// numbered as its file numbers it, or labelled by where its lines start in the file.</summary>
+    public static readonly StyledProperty<LineNumbering> LineNumberingProperty =
+        AvaloniaProperty.Register<RawTextSurface, LineNumbering>(nameof(LineNumbering), defaultValue: LineNumbering.FromStart);
 
-    public long FirstLineNumber
+    public LineNumbering LineNumbering
     {
-        get => GetValue(FirstLineNumberProperty);
-        set => SetValue(FirstLineNumberProperty, value);
+        get => GetValue(LineNumberingProperty);
+        set => SetValue(LineNumberingProperty, value);
     }
 
     /// <summary>Brush for the flash where a jump in landed.</summary>
@@ -272,8 +273,11 @@ public class RawTextSurface : RowSurface
 
     private int RowCount => this.viewModel?.RowCount ?? 0;
 
+    /// <summary>The gutter's width now - see <see cref="LineNumberColumnWidth"/>.</summary>
+    private double lineNumberColumnWidth = LineNumberColumnWidth;
+
     /// <summary>Left edge of the text column.</summary>
-    private double TextOriginX => ContentPaddingX + LineNumberColumnWidth;
+    private double TextOriginX => ContentPaddingX + this.lineNumberColumnWidth;
 
     /// <summary>Width available to text before the wrap-marker gutter.</summary>
     private double TextViewportWidth
@@ -464,7 +468,41 @@ public class RawTextSurface : RowSurface
         ResetWidestRowWidth();
     }
 
-    protected override void OnTextStyleChanged() => DropLayouts();
+    protected override void OnTextStyleChanged()
+    {
+        DropLayouts();
+        MeasureLineNumberColumn();
+    }
+
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+
+        if (change.Property == LineNumberingProperty)
+            MeasureLineNumberColumn();
+    }
+
+    /// <summary>
+    /// Widens the gutter to the widest line-start label the numbering will show, or narrows it
+    /// back. Every x past the gutter moves with it, so the layouts, the hint bounds and the pan
+    /// range are all dropped - which happens only when the numbering or the font changes.
+    /// </summary>
+    private void MeasureLineNumberColumn()
+    {
+        double width = LineNumberColumnWidth;
+        if (LineNumbering.WidestLineStartLabel is { } widest)
+        {
+            var layout = new TextLayout(widest, new Typeface(FontFamily), FontSize, Brushes.Black);
+            width = Math.Max(width, layout.WidthIncludingTrailingWhitespace + LineNumberGap);
+        }
+
+        if (width == this.lineNumberColumnWidth)
+            return;
+
+        this.lineNumberColumnWidth = width;
+        DropLayouts();
+        InvalidateVisual();
+    }
 
     protected override void OnViewportChanged() => InvalidateScrollable();
 
@@ -603,8 +641,8 @@ public class RawTextSurface : RowSurface
         if (row.LineNumber is not int lineNumber)
             return;
 
-        var layout = new TextLayout((FirstLineNumber - 1 + lineNumber).ToString(CultureInfo.InvariantCulture), typeface, fontSize, brush);
-        double x = ContentPaddingX + LineNumberColumnWidth - LineNumberGap - layout.WidthIncludingTrailingWhitespace;
+        var layout = new TextLayout(LineNumbering.GutterLabel(lineNumber, row.Start), typeface, fontSize, brush);
+        double x = ContentPaddingX + this.lineNumberColumnWidth - LineNumberGap - layout.WidthIncludingTrailingWhitespace;
         layout.Draw(context, new Point(x, CentreInRow(layout, y)));
     }
 

@@ -32,7 +32,7 @@
                                 SelectionBrush="{DynamicResource AppTextSelectionBrush}"
                                 CaretBrush="{DynamicResource AppTextBrush}"
                                 ArrivalBrush="{DynamicResource AppAccentBrush}"
-                                FirstLineNumber="{Binding LineNumbering.FirstLine}" />
+                                LineNumbering="{Binding LineNumbering}" />
 
             <ScrollBar x:Name="VerticalScrollBar"
                        Grid.Row="0"

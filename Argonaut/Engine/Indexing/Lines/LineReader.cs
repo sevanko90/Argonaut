@@ -31,12 +31,15 @@ public static class LineReader
     /// <summary>
     /// Returns <paramref name="lineSpan"/> with any trailing '\n'/'\r' bytes excluded, so the
     /// range can be handed to something (e.g. a JSON parser) that must not see them.
+    ///
+    /// The newline is looked at a byte at a time rather than read with the line: in a selection
+    /// of lines it may be one the view adds after a stretch of the file that has none of its own,
+    /// which is not beside the line's bytes in memory. The line without it always is.
     /// </summary>
     public static FileLineSpan TrimTrailingNewline(IByteSource file, FileLineSpan lineSpan)
     {
-        var span = file.RequireContiguous(lineSpan.Offset, lineSpan.Length);
-        int length = span.Length;
-        while (length > 0 && span[length - 1] is (byte)'\n' or (byte)'\r')
+        int length = lineSpan.Length;
+        while (length > 0 && file.ByteAt(lineSpan.Offset + length - 1) is (byte)'\n' or (byte)'\r')
             length--;
 
         return new FileLineSpan(lineSpan.Offset, length);

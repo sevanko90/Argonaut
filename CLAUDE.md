@@ -215,6 +215,33 @@ the app on the next commit (`JsonToolbarViewModel.SelectedSchemaIndex`,
 `SchemaRootPickerViewModel.SelectedPick`). Tests drive the deferral through `UiDeferral.PostOverride` via
 `DeferredUiScope`, which keeps view-model tests dispatcher-free.
 
+## Render only draws: work a surface does while painting acts outside the pass (`RowSurface.OutsideRenderPass`)
+
+The self-drawn surfaces (`RawTextSurface`, `TableSurface`, `TreeSurface`) lay out lazily, so a
+row reached for the first time while painting is read, laid out and measured *inside* the render
+pass. Avalonia throws `InvalidOperationException: Visual was invalidated during the render pass`
+at any visual change made there, unhandled, killing the app. It only happens when rows arrive
+between the layout pass and the frame - scrolling, slow reads off a network drive - so it slips
+past ordinary use and tests.
+
+- **Anything lazy work sets off that changes what is drawn goes through `OutsideRenderPass`**:
+  a notification another control reacts to, a handler that drops caches and redraws. It acts at
+  once outside a render, and a dispatcher turn later from inside one. Decide synchronously, act
+  outside the pass.
+- **`RowSurface` hides `InvalidateVisual` with a guarded version** (`new`, because Avalonia's is
+  not virtual), so a surface's redraws of itself are safe without each call site remembering.
+  It cannot cover a *different* control changed mid-render - that is what the helper is for.
+- **`Render` is sealed on `RowSurface`**; a surface draws in `RenderRows`. That is what lets the
+  base know it is mid-render.
+
+Real bugs, twice: measuring rows raised `WidestRowWidthChanged` and the host resized the pan
+scrollbar; and the first epoch number laid out chose the raw view's date scheme, whose
+`HintsChanged` handler invalidated the surface - a field crash scrolling up through
+`wide-object-sample.json`. Test it the way `RowSurfaceTests` and
+`RawViewHintsTests.AnEpochFirstMetWhileRendering_…` do: scroll, then `CaptureRenderedFrame()`
+without a layout pass in between, so the lazy work runs inside the frame. Never assert on how
+many frames rendered - the headless compositor coalesces them depending on what else ran.
+
 ## Naming: say what it means, not what it is
 
 Names carry intent. A member named for its *type* or its *mechanism* forces every reader to go

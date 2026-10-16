@@ -938,9 +938,8 @@ public class TreeSurface : RowSurface
         return finalSize;
     }
 
-    public override void Render(DrawingContext context)
+    protected override void RenderRows(DrawingContext context)
     {
-        base.Render(context);
         if (document is null || realized.Count == 0)
             return;
 

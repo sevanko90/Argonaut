@@ -469,10 +469,8 @@ public partial class TableSurface : RowSurface
 
     private readonly record struct CellText(TextLayout Layout, string Text, bool Trimmed);
 
-    public override void Render(DrawingContext context)
+    protected override void RenderRows(DrawingContext context)
     {
-        base.Render(context);
-
         if (this.columns is not { } layout || Structure is not { } structure)
             return;
 

@@ -59,6 +59,10 @@ public sealed class RowScrollBarsTests
 
         public void AskToPan(double x) => RequestPan(x);
 
+        protected override void RenderRows(Avalonia.Media.DrawingContext context)
+        {
+        }
+
         private void Move(double top)
         {
             Top = Math.Clamp(top, 0, MaxTop);

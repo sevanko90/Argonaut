@@ -46,6 +46,7 @@ public abstract class RowSurface : Control
     private double panOffset;
     private double widestRowWidth;
     private Pen? matchEdgePen;
+    private bool isRendering;
 
     static RowSurface()
     {
@@ -225,19 +226,15 @@ public abstract class RowSurface : Control
         NotifyWidestRowWidthChanged();
     }
 
-    /// <summary>
-    /// Raises <see cref="WidestRowWidthChanged"/> a dispatcher turn later. One of the call sites
-    /// is the render pass, and the host reacts by resizing the pan scrollbar - a visual change,
-    /// which Avalonia refuses mid-render ("Visual was invalidated during the render pass"). The
-    /// deferral is the same re-entrancy tool the selection setters use (see CLAUDE.md), for the
-    /// same reason: decide synchronously, act after the pass that asked has unwound.
-    /// </summary>
+    /// <summary>Raises <see cref="WidestRowWidthChanged"/>. Rows are measured in the render pass
+    /// too, and the host reacts by resizing the pan scrollbar, so it goes out through
+    /// <see cref="OutsideRenderPass"/>.</summary>
     private void NotifyWidestRowWidthChanged()
     {
         if (WidestRowWidthChanged is null)
             return;
 
-        UiDeferral.AfterCurrentInput(() => WidestRowWidthChanged?.Invoke(this, EventArgs.Empty));
+        OutsideRenderPass(() => WidestRowWidthChanged?.Invoke(this, EventArgs.Empty));
     }
 
     /// <summary>
@@ -276,13 +273,60 @@ public abstract class RowSurface : Control
 
     protected override Size MeasureOverride(Size availableSize) => availableSize;
 
-    public override void Render(DrawingContext context)
+    // ---- the render pass ------------------------------------------------------------------
+
+    /// <summary>
+    /// Paints the background, then the rows (<see cref="RenderRows"/>), noting while it does so
+    /// that the surface is mid-render. Sealed so that note cannot be skipped: a surface lays out
+    /// lazily, so the rows it reaches for the first time while painting are read, laid out and
+    /// measured inside the render pass - and anything that work sets off is running mid-render,
+    /// where Avalonia refuses any visual change. See <see cref="OutsideRenderPass"/>.
+    /// </summary>
+    public sealed override void Render(DrawingContext context)
     {
         base.Render(context);
 
         if (Background is { } background)
             context.FillRectangle(background, new Rect(Bounds.Size));
+
+        this.isRendering = true;
+        try
+        {
+            RenderRows(context);
+        }
+        finally
+        {
+            this.isRendering = false;
+        }
     }
+
+    /// <summary>Draws the rows, over the background <see cref="Render"/> has already painted.</summary>
+    protected abstract void RenderRows(DrawingContext context);
+
+    /// <summary>
+    /// Runs <paramref name="action"/> now, or - when called from inside <see cref="Render"/> - a
+    /// dispatcher turn later, once the render pass has unwound. Avalonia throws "Visual was
+    /// invalidated during the render pass" at any visual change made mid-render, unhandled,
+    /// killing the app. Anything a surface's lazy work sets off that changes what is drawn - a
+    /// notification another control reacts to, a handler that drops caches and redraws - goes
+    /// through here. Decide synchronously; act outside the pass.
+    /// </summary>
+    protected void OutsideRenderPass(Action action)
+    {
+        if (this.isRendering)
+            Dispatcher.Post(action);
+        else
+            action();
+    }
+
+    // Deliberately hides Visual.InvalidateVisual - do not remove it, and do not call
+    // base.InvalidateVisual() anywhere else in this class (in a derived surface, base. already
+    // binds here). Avalonia's is not virtual, so hiding it is the only
+    // way to make every redraw a surface asks for safe mid-render without each call site having
+    // to remember: a handler raised by lazy work inside Render invalidating directly crashed the
+    // app (the raw view's date hints). Only calls through a RowSurface-typed reference come here;
+    // that is every call a surface makes on itself, which is the case that matters.
+    public new void InvalidateVisual() => OutsideRenderPass(base.InvalidateVisual);
 
     // ---- scrolling ------------------------------------------------------------------------
 

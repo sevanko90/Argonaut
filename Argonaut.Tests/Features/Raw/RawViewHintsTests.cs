@@ -163,6 +163,34 @@ public sealed class RawViewHintsTests : IDisposable
         Assert.Equal(ValueHintKind.Colour, Assert.Single(surface.HintMarksFor(2)).Hint.Kind);
     });
 
+    /// <summary>
+    /// The first epoch number on screen chooses the document's date scheme, and every hint shown
+    /// is redrawn for it. Rows scrolled into view are first laid out by the render pass itself,
+    /// which is where that choice was then made - and redrawing from inside the render pass is
+    /// refused ("Visual was invalidated during the render pass"), unhandled, killing the app.
+    /// </summary>
+    [Fact]
+    public Task AnEpochFirstMetWhileRendering_ChoosesTheSchemeWithoutRedrawingMidRender()
+    {
+        var json = new StringBuilder("{\n");
+        for (int i = 0; i < 2000; i++)
+            json.Append($"  \"k{i}\": \"plain\",\n");
+        json.Append("  \"t\": 1709305509000\n}\n");
+
+        return WithView(json.ToString(), async (window, vm, surface) =>
+        {
+            Assert.Equal(DateDecodingScheme.Off, vm.HintSettings.FileDefaultScheme);
+
+            surface.ScrollToEnd();
+            window.CaptureRenderedFrame();
+            await PumpAsync();
+
+            Assert.Equal(DateDecodingScheme.JsMilliseconds, vm.HintSettings.FileDefaultScheme);
+            window.UpdateLayout();
+            Assert.Equal(ValueHintKind.Date, Assert.Single(Enumerable.Range(vm.RowCount - 3, 3).SelectMany(surface.HintMarksFor)).Hint.Kind);
+        });
+    }
+
     [Fact]
     public Task AFileNoLexerReads_HintsItsUnambiguousWords() => WithView("notes.txt", "deploy log\nsee https://example.com/runs/42 at 2026-10-08T09:12:03Z, id 1709305509\n", async (_, _, surface) =>
     {

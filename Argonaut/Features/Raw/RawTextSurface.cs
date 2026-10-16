@@ -314,12 +314,14 @@ public class RawTextSurface : RowSurface
     }
 
     /// <summary>A date scheme changed, or the first date on screen chose one: every hint shown
-    /// may read differently.</summary>
-    private void OnValueHintsChanged(object? sender, EventArgs e)
+    /// may read differently. The first date is chosen while laying out a row, which for rows
+    /// scrolled into view is the render pass - so this waits it out, rather than dropping the row
+    /// caches from under the loop that is building them.</summary>
+    private void OnValueHintsChanged(object? sender, EventArgs e) => OutsideRenderPass(() =>
     {
         DropRowCaches();
         InvalidateVisual();
-    }
+    });
 
     private void Attach(RawViewModel? next)
     {
@@ -588,10 +590,8 @@ public class RawTextSurface : RowSurface
         RecordRowWidth(widest);
     }
 
-    public override void Render(DrawingContext context)
+    protected override void RenderRows(DrawingContext context)
     {
-        base.Render(context);
-
         if (this.viewModel is null || this.realized.Count == 0)
             return;
 

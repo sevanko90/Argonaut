@@ -1,7 +1,8 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using Argonaut.Engine.Detection;
+using Argonaut.Engine.Selection;
+using Argonaut.Engine.Text;
 
 namespace Argonaut.Shell.CommandLine;
 
@@ -16,7 +17,7 @@ public readonly record struct ByteSpan(long First, long? Last);
 
 /// <summary>
 /// What the command line asked for: the files to open, and optionally a run of lines to open as
-/// an excerpt, a view to force, or the usage text. Parsed once at startup, before any window
+/// an excerpt, a filter file of many of them, a view to force, or the usage text. Parsed once at startup, before any window
 /// exists - <see cref="ShowHelp"/> is acted on before Avalonia starts at all.
 ///
 /// An option it does not know is ignored rather than rejected: the OS adds its own (older macOS
@@ -25,12 +26,14 @@ public readonly record struct ByteSpan(long First, long? Last);
 /// </summary>
 public sealed class StartupArguments
 {
-    private StartupArguments(IReadOnlyList<string> paths, LineSpan? lines, ByteSpan? bytes, FileTypeDetector.FileKind? view,
-        bool showHelp, string? error)
+    private StartupArguments(IReadOnlyList<string> paths, LineSpan? lines, ByteSpan? bytes, string? filterPath, SelectionUnit? filterUnit,
+        FileTypeDetector.FileKind? view, bool showHelp, string? error)
     {
         Paths = paths;
         Lines = lines;
         Bytes = bytes;
+        FilterPath = filterPath;
+        FilterUnit = filterUnit;
         View = view;
         ShowHelp = showHelp;
         Error = error;
@@ -45,6 +48,14 @@ public sealed class StartupArguments
     /// <summary><c>--bytes</c>: open just these bytes of the file - for a file whose lines are
     /// too long to ask for by line.</summary>
     public ByteSpan? Bytes { get; }
+
+    /// <summary><c>--filter</c>: a file listing the lines or bytes of the file to open, as one
+    /// read-only view of all of them.</summary>
+    public string? FilterPath { get; }
+
+    /// <summary>What <see cref="FilterPath"/>'s entries count - lines with <c>--lines</c>, bytes
+    /// with <c>--bytes</c>; null without a filter.</summary>
+    public SelectionUnit? FilterUnit { get; }
 
     /// <summary><c>--view</c>: open in this view instead of the one detection picks.</summary>
     public FileTypeDetector.FileKind? View { get; }
@@ -74,6 +85,9 @@ public sealed class StartupArguments
         var paths = new List<string>();
         LineSpan? lines = null;
         ByteSpan? bytes = null;
+        bool linesAsked = false;
+        bool bytesAsked = false;
+        string? filterPath = null;
         FileTypeDetector.FileKind? view = null;
         bool showHelp = false;
         string? error = null;
@@ -94,17 +108,29 @@ public sealed class StartupArguments
             }
 
             var (name, inlineValue) = SplitOption(arg);
-            if (name is not ("--lines" or "--bytes" or "--view"))
+            if (name is not ("--lines" or "--bytes" or "--filter" or "--view"))
                 continue;
 
-            string? value = inlineValue ?? (i + 1 < args.Count ? args[++i] : null);
+            // --lines and --bytes take their range from --filter when they have none of their
+            // own, so the next argument is theirs only if it is not another option. A range
+            // never starts with '-'.
+            bool rangeOption = name is "--lines" or "--bytes";
+            linesAsked |= name == "--lines";
+            bytesAsked |= name == "--bytes";
+            string? value = inlineValue
+                ?? (i + 1 < args.Count && !(rangeOption && args[i + 1].StartsWith('-')) ? args[++i] : null);
             if (value is null)
             {
-                error ??= $"{name} needs a value.";
+                if (!rangeOption)
+                    error ??= name == "--filter" ? "--filter needs a file." : $"{name} needs a value.";
                 continue;
             }
 
-            if (name == "--lines")
+            if (name == "--filter")
+            {
+                filterPath = value;
+            }
+            else if (name == "--lines")
             {
                 lines = ParseLines(value);
                 if (lines is null)
@@ -124,16 +150,33 @@ public sealed class StartupArguments
             }
         }
 
-        if (error is null && lines is not null && bytes is not null)
+        string unitName = linesAsked ? "--lines" : "--bytes";
+        bool rangeGiven = lines is not null || bytes is not null;
+        bool anyAsked = linesAsked || bytesAsked || filterPath is not null || view is not null;
+
+        if (error is null && linesAsked && bytesAsked)
             error = "Use --lines or --bytes, not both.";
 
-        if (error is null && paths.Count > 1 && (lines is not null || bytes is not null || view is not null))
-            error = $"{(lines is not null ? "--lines" : bytes is not null ? "--bytes" : "--view")} opens one file, not a comparison.";
+        if (error is null && filterPath is not null && !linesAsked && !bytesAsked)
+            error = "--filter needs --lines or --bytes, to say whether the file lists lines or bytes.";
 
-        if (error is null && (lines is not null || bytes is not null || view is not null) && paths.Count == 0)
-            error = "--lines, --bytes and --view need a file to open.";
+        if (error is null && filterPath is not null && rangeGiven)
+            error = $"Give {unitName} a range or --filter, not both.";
 
-        return new StartupArguments(paths, lines, bytes, view, showHelp, error);
+        if (error is null && (linesAsked || bytesAsked) && !rangeGiven && filterPath is null)
+            error = $"{unitName} needs a range, or --filter with a file of them.";
+
+        if (error is null && filterPath is not null && view == FileTypeDetector.FileKind.Json)
+            error = "--view json cannot show a selection of lines. Use ndjson, csv, tsv or raw.";
+
+        if (error is null && paths.Count > 1 && anyAsked)
+            error = $"{(linesAsked || bytesAsked ? unitName : "--view")} opens one file, not a comparison.";
+
+        if (error is null && anyAsked && paths.Count == 0)
+            error = "--lines, --bytes, --filter and --view need a file to open.";
+
+        SelectionUnit? filterUnit = filterPath is null ? null : linesAsked ? SelectionUnit.Lines : SelectionUnit.Bytes;
+        return new StartupArguments(paths, lines, bytes, filterPath, filterUnit, view, showHelp, error);
     }
 
     /// <summary>
@@ -141,7 +184,7 @@ public sealed class StartupArguments
     /// number may carry a <c>k</c> or <c>m</c> multiplier - <c>1m-2m</c>, <c>2.5m+500k</c>.
     /// </summary>
     internal static LineSpan? ParseLines(string text)
-        => ParseRange(text, lowest: 1, allowSingle: true) is { } range ? new LineSpan(range.First, range.Last) : null;
+        => RangeSyntax.ParseRange(text, lowest: 1, allowSingle: true) is { } range ? new LineSpan(range.First, range.Last) : null;
 
     /// <summary>
     /// <c>A-B</c>, <c>A-</c> (to the end) or <c>A+COUNT</c>, zero-based, where each number may
@@ -150,64 +193,7 @@ public sealed class StartupArguments
     /// likely a mistyped count.
     /// </summary>
     internal static ByteSpan? ParseBytes(string text)
-        => ParseRange(text, lowest: 0, allowSingle: false) is { } range ? new ByteSpan(range.First, range.Last) : null;
-
-    private static (long First, long? Last)? ParseRange(string text, long lowest, bool allowSingle)
-    {
-        text = text.Trim();
-        int plus = text.IndexOf('+');
-        int dash = text.IndexOf('-');
-
-        if (plus > 0)
-        {
-            return ParseCount(text[..plus]) is { } first && ParseCount(text[(plus + 1)..]) is { } count && first >= lowest && count >= 1
-                    && count - 1 <= long.MaxValue - first
-                ? (first, first + count - 1)
-                : null;
-        }
-
-        if (dash > 0)
-        {
-            if (ParseCount(text[..dash]) is not { } first || first < lowest)
-                return null;
-
-            string rest = text[(dash + 1)..];
-            if (rest.Length == 0)
-                return (first, null);
-
-            return ParseCount(rest) is { } last && last >= first ? (first, last) : null;
-        }
-
-        return allowSingle && ParseCount(text) is { } single && single >= lowest ? (single, single) : null;
-    }
-
-    /// <summary>A whole number with an optional <c>k</c> (thousand), <c>m</c> (million) or
-    /// <c>g</c> (billion) multiplier, which may follow a decimal - <c>2.5m</c> - or a hex number,
-    /// <c>0x1F400</c>. Null when it is not one.</summary>
-    internal static long? ParseCount(string text)
-    {
-        text = text.Trim();
-        if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
-            return long.TryParse(text[2..], NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out long hex) && hex >= 0 ? hex : null;
-
-        long multiplier = 1;
-        if (text.EndsWith('k') || text.EndsWith('K'))
-            multiplier = 1_000;
-        else if (text.EndsWith('m') || text.EndsWith('M'))
-            multiplier = 1_000_000;
-        else if (text.EndsWith('g') || text.EndsWith('G'))
-            multiplier = 1_000_000_000;
-
-        string digits = multiplier == 1 ? text : text[..^1];
-        if (multiplier == 1)
-            return long.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out long whole) ? whole : null;
-
-        if (!decimal.TryParse(digits, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out decimal scaled))
-            return null;
-
-        decimal value = scaled * multiplier;
-        return value == decimal.Truncate(value) && value <= long.MaxValue ? (long)value : null;
-    }
+        => RangeSyntax.ParseRange(text, lowest: 0, allowSingle: false) is { } range ? new ByteSpan(range.First, range.Last) : null;
 
     private static FileTypeDetector.FileKind? ParseView(string text)
     {

@@ -293,12 +293,13 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     }
 
     /// <summary>
-    /// Whether edit mode can be entered: the scan must have finished. The append log is read
-    /// lock-free because nothing already written ever changes, and layering a mutating
-    /// coordinate system over a log still being appended to would end that
-    /// (<see cref="RawEditedRowIndex"/> refuses outright).
+    /// Whether edit mode can be entered: never for a read-only document, and otherwise once the
+    /// scan has finished. The append log is read lock-free because nothing already written ever
+    /// changes, and layering a mutating coordinate system over a log still being appended to
+    /// would end that (<see cref="RawEditedRowIndex"/> refuses outright).
     /// </summary>
-    public bool CanEdit => !IsDisposed && this.session is { } open && RawEditController.CanEdit(open.Index);
+    public bool CanEdit => !IsDisposed && Origin is not { IsReadOnly: true }
+        && this.session is { } open && RawEditController.CanEdit(open.Index);
 
     /// <summary>True once the document reads differently from the file on disk.</summary>
     public bool IsDirty => this.editor?.IsDirty == true;

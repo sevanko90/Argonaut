@@ -18,6 +18,10 @@ public static class CommandLineUsage
         "                  by line. Bytes count from 0 and the last is included: 0-499 is",
         "                  the first 500. RANGE is A-B, A- or A+COUNT; numbers may use",
         "                  k, m or g (thousands, millions, billions) or be hex: 0x1F400.",
+        "  --filter FILE   With --lines or --bytes instead of a range: open every line or",
+        "                  byte range FILE lists, in file order, as one read-only view.",
+        "                  Entries are ranges as above, separated by commas or newlines;",
+        "                  # starts a comment. The view follows FILE as it changes.",
         "  --view VIEW     Open in this view instead of the detected one:",
         $"                  {ViewList()}.",
         "  --help, -h      Print this text and exit." + (OperatingSystem.IsWindows() ? " Also /?." : string.Empty),
@@ -28,12 +32,13 @@ public static class CommandLineUsage
         $"  {AppInfo.Name} big.ndjson --lines 1m-2m",
         $"  {AppInfo.Name} export.csv --lines 500k+1000 --view raw",
         $"  {AppInfo.Name} minified.json --bytes 1.5g+100m",
+        $"  {AppInfo.Name} big.ndjson --lines --filter picks.txt",
         $"  {AppInfo.Name} before.json after.json");
 
     /// <summary>The usage line and the options - what the About box shows, under its own
     /// name and version.</summary>
     public static string Reference { get; } = string.Join(Environment.NewLine,
-        $"Usage: {AppInfo.Name} [FILE [FILE2]] [--lines RANGE | --bytes RANGE] [--view VIEW]",
+        $"Usage: {AppInfo.Name} [FILE [FILE2]] [--lines RANGE | --bytes RANGE | --lines --filter FILE | --bytes --filter FILE] [--view VIEW]",
         "",
         Options);
 

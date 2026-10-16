@@ -87,4 +87,9 @@ public interface IByteOrigin : IDisposable
     /// <summary>Indexes built over these bytes, kept for as long as this origin is open so a view
     /// reopened over it need not scan again. Cleared when the origin is disposed.</summary>
     KeptIndexes KeptIndexes { get; }
+
+    /// <summary>True when the document may only be read: no editing, no Save and no Save As.
+    /// For a document whose bytes are not one thing the user could sensibly write out - a
+    /// selection of lines from all over a file.</summary>
+    bool IsReadOnly => false;
 }

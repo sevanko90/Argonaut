@@ -91,7 +91,8 @@ public partial class MainWindow : Window
             askAboutUnsavedChanges: message => UnsavedChangesDialog.Show(this, message),
             reportFailure: message => ConfirmDialog.Inform(this, message),
             log: log,
-            configLocations: configLocations);
+            configLocations: configLocations,
+            filterFiles: new SelectionFilterFiles());
         DataContext = viewModel;
         viewModel.PropertyChanged += OnViewModelPropertyChanged;
         viewModel.FindStatusChanged += status => FindBarControl.SetStatus(status);

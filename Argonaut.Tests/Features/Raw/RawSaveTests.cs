@@ -1,6 +1,7 @@
 using System.Text;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Saving;
+using Argonaut.Engine.Selection;
 using Argonaut.Features.Raw;
 using Argonaut.Tests.Support;
 using Argonaut.Ui.Documents;
@@ -65,6 +66,29 @@ public sealed class RawSaveTests : IDisposable
             await Task.Delay(10);
 
         Assert.True(condition());
+    }
+
+    [Fact]
+    public async Task A_read_only_document_can_be_neither_edited_nor_saved()
+    {
+        var whole = new MemoryByteOrigin("a\nb\nc\n"u8.ToArray(), "big.txt");
+        var selection = LineSelectionLocator.Locate(whole.Open(), SelectionFilter.Parse(new StringReader("1, 3"), SelectionUnit.Lines));
+        var vm = new RawViewModel(new RawViewSettings());
+        try
+        {
+            await vm.LoadAsync(new SelectionByteOrigin(whole, selection));
+            await vm.IndexingTask;
+
+            Assert.False(vm.CanEdit);
+            Assert.False(vm.CanSave);
+            vm.SetEditing(true);
+            Assert.False(vm.IsEditing);
+            Assert.Equal("a\nc\n", DocumentText(vm));
+        }
+        finally
+        {
+            vm.Dispose();
+        }
     }
 
     [Fact]

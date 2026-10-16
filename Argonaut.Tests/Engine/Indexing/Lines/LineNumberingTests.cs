@@ -146,6 +146,20 @@ public class LineNumberingTests
         Assert.Equal(LineNumbering.ByLineStarts(5, 4), LineNumbering.ByLineStarts(5, 4));
     }
 
+    [Fact]
+    public void Labelled_by_line_starts_across_runs_each_line_shows_its_file_offset()
+    {
+        var numbering = LineNumbering.ByLineStarts([new LineRun(0, 0, 0, 1_000), new LineRun(0, 0, 50, 9_000)], 80);
+
+        WithCulture("en-GB", () =>
+        {
+            Assert.Equal("1,010", numbering.GutterLabel(2, 10));
+            Assert.Equal("9,005", numbering.GutterLabel(7, 55));
+            Assert.Equal("9,029", numbering.WidestLineStartLabel);
+        });
+        Assert.Equal(7, numbering.Line(7));
+    }
+
     private static void WithCulture(string name, Action check)
     {
         var previous = CultureInfo.CurrentCulture;

@@ -18,10 +18,10 @@ namespace Argonaut.Tests.Features;
 /// </summary>
 public class SelectionViewsTests
 {
-    private static SelectionByteOrigin Select(string file, string filter)
+    private static SelectionByteOrigin Select(string file, string filter, SelectionUnit unit = SelectionUnit.Lines)
     {
         var whole = new MemoryByteOrigin(Encoding.UTF8.GetBytes(file), "big.txt");
-        var selection = LineSelectionLocator.Locate(whole.Open(), SelectionFilter.Parse(new StringReader(filter), SelectionUnit.Lines));
+        var selection = LineSelectionLocator.Locate(whole.Open(), SelectionFilter.Parse(new StringReader(filter), unit));
         return new SelectionByteOrigin(whole, selection);
     }
 
@@ -113,6 +113,52 @@ public class SelectionViewsTests
             raw.Dispose();
             csv.Dispose();
             ndjson.Dispose();
+        }
+    }
+
+    // A run with no newline of its own - a byte range ending mid-row, or the file's last line -
+    // is followed by one the view adds, which is not beside the row's bytes. Reading a row must
+    // not ask for the two together.
+
+    [Fact]
+    public async Task Csv_reads_rows_a_byte_range_cuts_off_mid_row()
+    {
+        const string file = "id,name\n1,one\n2,two\n3,three\n";
+        int cut = file.IndexOf("2,tw", StringComparison.Ordinal) + 4;
+        var vm = new CsvViewModel();
+        try
+        {
+            await vm.LoadAsync(Select(file, $"8-{cut - 1}", SelectionUnit.Bytes), (byte)',');
+            await vm.IndexingTask;
+
+            Assert.Equal([["1", "one"], ["2", "tw"]],
+                Enumerable.Range(0, vm.RowCount).Select(i => ((Argonaut.Ui.TableGrid.TableRow)vm.Rows[i]!).Cells.Select(c => c.Text).ToArray()));
+        }
+        finally
+        {
+            vm.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task NdJson_reads_and_parses_a_last_line_with_no_newline()
+    {
+        var vm = new NdJsonViewModel(new JsonViewSettings(), new SchemaBindings(), TestSchemas.Catalog());
+        try
+        {
+            await vm.LoadAsync(Select("{\"n\":1}\n{\"n\":2}\n{\"n\":3}", "1, 3"));
+            await vm.IndexingTask;
+
+            Assert.Equal("{\"n\":3}", ((NdJsonVisibleLine)vm.Lines[1]!).Text);
+
+            vm.LoadSelectedLine(1);
+            for (int i = 0; i < 200 && vm.SelectedLineJsonViewModel is null; i++)
+                await Task.Delay(10);
+            Assert.NotNull(vm.SelectedLineJsonViewModel);
+        }
+        finally
+        {
+            vm.Dispose();
         }
     }
 }

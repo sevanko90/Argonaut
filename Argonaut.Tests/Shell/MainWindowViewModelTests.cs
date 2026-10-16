@@ -966,6 +966,15 @@ public sealed class MainWindowViewModelTests : IDisposable
         Assert.True(condition());
     }
 
+    /// <summary>
+    /// Waits for the reload a filter change started to replace <paramref name="shown"/> with the
+    /// selection it found - not for the reload's load: the shell calls the loader before it adopts
+    /// what was loaded, and the reload runs on past the test's <c>Changed</c> call, so a test that
+    /// waited for the load could read the excerpt label while it still described the old selection.
+    /// </summary>
+    private static Task WaitForReload(MainWindowViewModel vm, SelectionByteOrigin shown)
+        => WaitUntil(() => vm.Selection is { } selection && !ReferenceEquals(selection, shown));
+
     private MainWindowViewModel CreateFollowingViewModel(FakeFilterFiles filters, List<string> loaded)
         => new(SettingsStore.InMemory(), TestSchemas.Catalog(), _ => Task.FromResult(true),
             documentLoader: (_, origin, _) =>
@@ -989,9 +998,10 @@ public sealed class MainWindowViewModelTests : IDisposable
         Assert.Equal(["{\"n\":2}\n"], loaded);
         Assert.Equal(1, filters.Watching);
 
+        var shown = vm.Selection!;
         filters.Text[filterPath] = "2\n9";
         filters.Changed!();
-        await WaitUntil(() => loaded.Count == 2);
+        await WaitForReload(vm, shown);
 
         Assert.Equal("{\"n\":2}\n{\"n\":9}\n", loaded[1]);
         Assert.Equal("2 lines selected", vm.ExcerptLabel);
@@ -1033,9 +1043,10 @@ public sealed class MainWindowViewModelTests : IDisposable
         var vm = CreateFollowingViewModel(filters, loaded);
         await vm.OpenStartupAsync(StartupArguments.Parse([path, "--lines", "--filter", filterPath]));
 
+        var shown = vm.Selection!;
         filters.Text[filterPath] = "# none for now";
         filters.Changed!();
-        await WaitUntil(() => loaded.Count == 2);
+        await WaitForReload(vm, shown);
 
         Assert.Equal("", loaded[1]);
         Assert.Equal("0 lines selected", vm.ExcerptLabel);

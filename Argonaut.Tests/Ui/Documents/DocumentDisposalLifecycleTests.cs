@@ -84,12 +84,24 @@ public class DocumentDisposalLifecycleTests
         return WriteTemp(sb.ToString());
     }
 
-    private static string WriteLargeRaw()
+    private static string LargeRaw()
     {
         var sb = new StringBuilder();
         for (int i = 0; i < LargeElementCount; i++)
             sb.Append("row ").Append(i).Append('\n');
-        return WriteTemp(sb.ToString());
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// A raw document whose indexing is still running for as long as the test needs, the same way
+    /// as <see cref="StillIndexingCsv"/>: the scan reads every byte, then waits for more until the
+    /// document is torn down or re-indexed. A file would race - the raw scan only finds newlines,
+    /// so a fast machine indexes 500,000 short rows before LoadAsync returns.
+    /// </summary>
+    private static GrowingByteOrigin StillIndexingRaw()
+    {
+        byte[] bytes = Encoding.UTF8.GetBytes(LargeRaw());
+        return new GrowingByteOrigin(new GrowingByteSource(bytes, initiallyAvailable: bytes.Length), "large.txt");
     }
 
     /// <summary>Runs <paramref name="dispose"/> on a background thread and asserts it completes
@@ -288,30 +300,23 @@ public class DocumentDisposalLifecycleTests
     [Fact]
     public async Task Raw_CloseDuringIndexing_DoesNotHangOrCrash()
     {
-        string path = WriteLargeRaw();
-        try
-        {
-            var vm = new RawViewModel(new RawViewSettings());
-            await vm.LoadAsync(path);
-            Assert.False(vm.IndexingTask.IsCompleted);
+        var vm = new RawViewModel(new RawViewSettings());
+        await vm.LoadAsync(StillIndexingRaw());
+        Assert.False(vm.IndexingTask.IsCompleted);
 
-            await DisposeWithTimeoutAsync(vm.Dispose);
-            Assert.True(vm.IndexingTask.IsCompleted);
-        }
-        finally
-        {
-            File.Delete(path);
-        }
+        await DisposeWithTimeoutAsync(vm.Dispose);
+        Assert.True(vm.IndexingTask.IsCompleted);
     }
 
     [Fact]
     public async Task Raw_CloseDuringIndexingWithActiveSearch_DoesNotHangOrCrash()
     {
-        string path = WriteLargeRaw();
+        // The search scans a file of the same rows, as find scans the document's input.
+        string path = WriteTemp(LargeRaw());
         try
         {
             var vm = new RawViewModel(new RawViewSettings());
-            await vm.LoadAsync(path);
+            await vm.LoadAsync(StillIndexingRaw());
             Assert.False(vm.IndexingTask.IsCompleted);
 
             await DisposeDuringActiveSearchAsync(path, vm.Dispose);
@@ -324,16 +329,16 @@ public class DocumentDisposalLifecycleTests
 
     /// <summary>Raw's extra wrinkle: closing while a wrap-width restart (its own re-index, with
     /// its own linked CTS) is in flight, on top of the same search-scope contract as the other
-    /// four types.</summary>
+    /// four types. The restart lands on a scan still waiting for more bytes and its own scan waits
+    /// the same way, so the re-index is provably still running when the document closes.</summary>
     [Fact]
     public async Task Raw_CloseDuringWrapWidthRestartWithActiveSearch_DoesNotHangOrCrash()
     {
-        string path = WriteLargeRaw();
+        string path = WriteTemp(LargeRaw());
         try
         {
             var vm = new RawViewModel(new RawViewSettings());
-            await vm.LoadAsync(path);
-            await vm.IndexingTask;
+            await vm.LoadAsync(StillIndexingRaw());
 
             vm.SetWrapWidth(vm.WrapWidth == 80 ? 160 : 80);
             Assert.False(vm.IndexingTask.IsCompleted);
@@ -477,7 +482,7 @@ public class DocumentDisposalLifecycleTests
             finally { File.Delete(path); }
         }
         {
-            string path = WriteLargeRaw();
+            string path = WriteTemp(LargeRaw());
             try
             {
                 var vm = new RawViewModel(new RawViewSettings());

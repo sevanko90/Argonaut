@@ -28,6 +28,24 @@ public partial class CsvView : UserControl
         this.scrollBars = new RowScrollBars(Surface, VerticalScrollBar, PanScrollBar);
         DataContextChanged += OnDataContextChanged;
         DetachedFromVisualTree += OnDetachedFromVisualTree;
+        Surface.PropertyChanged += OnSurfacePropertyChanged;
+        Surface.ScrollPositionChanged += OnSurfaceScrolled;
+    }
+
+    /// <summary>The row the user selected is where the document is - tells the view model, so a
+    /// filter reload or a view switch can land back on it.</summary>
+    private void OnSurfacePropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
+    {
+        if (e.Property == TableSurface.SelectedIndexProperty)
+            this.subscribedViewModel?.RecordSelectedRow(Surface.SelectedIndex >= 0 ? Surface.SelectedIndex : null);
+    }
+
+    /// <summary>The grid moved, or its rows or size changed: tells the view model which rows are on
+    /// screen, so a reload or a view switch can come back to them when nothing selected is in sight.</summary>
+    private void OnSurfaceScrolled(object? sender, EventArgs e)
+    {
+        var (first, last) = Surface.RowsOnScreen();
+        this.subscribedViewModel?.RecordRowsOnScreen(first, last);
     }
 
     private void OnDataContextChanged(object? sender, EventArgs e)
@@ -74,6 +92,9 @@ public partial class CsvView : UserControl
         bool columnChanged = e.PropertyName is null or nameof(CsvViewModel.SelectedColumnIndex);
         if (columnChanged && vm.SelectedColumnIndex is int column)
             Surface.RevealColumn(column);
+
+        if (e.PropertyName == nameof(CsvViewModel.RowShownAtTop) && vm.RowShownAtTop is int top)
+            Surface.ShowRowAtTop(top);
     }
 
     private void ShowDocument(CsvViewModel vm)
@@ -92,6 +113,8 @@ public partial class CsvView : UserControl
     {
         DataContextChanged -= OnDataContextChanged;
         DetachedFromVisualTree -= OnDetachedFromVisualTree;
+        Surface.PropertyChanged -= OnSurfacePropertyChanged;
+        Surface.ScrollPositionChanged -= OnSurfaceScrolled;
 
         if (this.subscribedViewModel is not null)
         {

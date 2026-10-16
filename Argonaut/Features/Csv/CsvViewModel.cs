@@ -10,13 +10,14 @@ using Argonaut.Engine.Indexing.Lines;
 using Argonaut.Engine.Progress;
 using Argonaut.Engine.Selection;
 using Argonaut.Ui.Documents;
+using Argonaut.Ui.Documents.Navigation;
 using Argonaut.Ui.Documents.Numbering;
 using Argonaut.Ui.Find;
 using Argonaut.Ui.TableGrid;
 
 namespace Argonaut.Features.Csv;
 
-public sealed class CsvViewModel : IndexedDocumentViewModel
+public sealed class CsvViewModel : IndexedDocumentViewModel, IByteRangeNavigable
 {
     private const int InitialIndexedRowTarget = 250;
 
@@ -41,6 +42,16 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
     private int? selectedRowIndex;
     private int? selectedColumnIndex;
     private int? selectedMatchOccurrence;
+
+    // The data row the grid has selected, however it got there - a click, the keyboard, a reveal.
+    // Kept apart from selectedRowIndex, which is a reveal the view acts on: this one nothing acts
+    // on, it is only where the user is, for a view switch or a filter reload to carry over.
+    private int? rowSelectedInGrid;
+
+    // The data rows the grid has on screen, as the view last reported them - where the document is
+    // when nothing selected is in sight. Null until the grid has laid out a row.
+    private (int First, int Last)? rowsOnScreen;
+    private int? rowShownAtTop;
 
     private readonly LineNumberingPreference? lineNumbers;
 
@@ -141,6 +152,86 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
         OnPropertyChanged(nameof(SelectedMatchOccurrence));
         OnPropertyChanged(nameof(SelectedRowIndex));
         OnPropertyChanged(nameof(SelectedColumnIndex));
+    }
+
+    /// <summary>The row the view wants put at the top of the screen, not selected - a place to go
+    /// back to (<see cref="RevealByteRangeAsync"/>). Notified even when unchanged, like
+    /// <see cref="SelectRow"/>: it is an action, not a state.</summary>
+    public int? RowShownAtTop => this.rowShownAtTop;
+
+    /// <summary>The grid's selection moved, to <paramref name="rowIndex"/> or to nothing. Only
+    /// recorded, for <see cref="SelectedByteRange"/>: the grid already shows it.</summary>
+    public void RecordSelectedRow(int? rowIndex) => this.rowSelectedInGrid = rowIndex;
+
+    /// <summary>The grid scrolled, or was laid out: <paramref name="first"/> to
+    /// <paramref name="last"/> are on screen, or none when last is before first. Only recorded,
+    /// for <see cref="SelectedByteRange"/>.</summary>
+    public void RecordRowsOnScreen(int first, int last) => this.rowsOnScreen = last >= first ? (first, last) : null;
+
+    /// <summary>
+    /// Where the user is, for a filter reload or a switch to another view to land back on - as raw
+    /// does it. The selected row's bytes, without its newline, when it is on screen; otherwise the
+    /// start of the top row on screen, as an empty range: a place, not a selection, so the view
+    /// coming back scrolls to it and selects nothing (<see cref="RevealByteRangeAsync"/>). Null
+    /// when the grid has neither.
+    /// </summary>
+    public ByteRange? SelectedByteRange
+    {
+        get
+        {
+            if (this.session?.Index is not { } index || this.session.Bytes is not { } bytes)
+                return null;
+
+            if (this.rowSelectedInGrid is int selected
+                && (this.rowsOnScreen is not { } shown || (selected >= shown.First && selected <= shown.Last))
+                && selected + DataStartIndex < index.LineCount)
+            {
+                var span = LineReader.TrimTrailingNewline(bytes, index.GetLineSpan(selected + DataStartIndex));
+                return new ByteRange(span.Offset, span.Length);
+            }
+
+            if (this.rowsOnScreen is { } screen && screen.First + DataStartIndex < index.LineCount)
+                return ByteRange.At(index.GetLineSpan(screen.First + DataStartIndex).Offset);
+
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Goes back to <paramref name="range"/> once indexing has reached it. A range with bytes in
+    /// it is a selection, and selects the row it starts on; an empty one is only a place, and puts
+    /// its row at the top of the screen with nothing selected - which is also what a selected row
+    /// becomes when a filter reload drops it. The column is left alone, unlike a find reveal:
+    /// nothing about a byte range says which one the user was looking at.
+    /// </summary>
+    public async Task RevealByteRangeAsync(ByteRange range)
+    {
+        if (this.session?.Index is not { } index || IsDisposed)
+            return;
+
+        int? line;
+        try
+        {
+            line = await OffsetLineResolver.ResolveWhenCoveredAsync(index, range.Offset, TearingDown);
+        }
+        catch (OperationCanceledException)
+        {
+            return; // the document closed while the line was resolving
+        }
+
+        if (line is not int found)
+            return;
+
+        int row = Math.Max(0, found - DataStartIndex);
+        if (range.Length > 0)
+        {
+            if (found >= DataStartIndex)
+                SelectRow(row, columnIndex: null);
+            return;
+        }
+
+        this.rowShownAtTop = row;
+        OnPropertyChanged(nameof(RowShownAtTop));
     }
 
     public async Task LoadAsync(IByteOrigin origin, byte delimiter, IProgressReporter? progressReporter = null)

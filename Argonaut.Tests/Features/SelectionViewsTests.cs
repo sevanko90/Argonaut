@@ -64,6 +64,51 @@ public class SelectionViewsTests
         }
     }
 
+    /// <summary>
+    /// What the shell does when a followed filter file changes, from the CSV side: where the user
+    /// was, mapped to the file and into the new selection. A selected row on screen is selected
+    /// again; otherwise the top row on screen goes back to the top, with nothing selected - and so
+    /// does the next row still listed, when the filter dropped the one that was selected.
+    /// </summary>
+    /// <param name="selected">The data row selected before, or -1 for none.</param>
+    /// <param name="selectedAfter">The first cell of the row selected after, or null for none.</param>
+    /// <param name="topAfter">The first cell of the row put at the top after, or null for none.</param>
+    [Theory]
+    [InlineData(1, "2, 4, 8-9", "7", null)]     // selected and still listed: selected again
+    [InlineData(1, "2, 4, 9, 15", null, "8")]   // selected but dropped: the next listed row, at the top
+    [InlineData(-1, "2, 4, 8-9", null, "7")]    // nothing selected: the top row stays at the top
+    [InlineData(0, "2, 4, 8-9", null, "7")]     // selected but scrolled away from: the top row, as raw does
+    public async Task Csv_comes_back_to_where_the_user_was_when_the_filter_changes(int selected, string changedFilter, string? selectedAfter, string? topAfter)
+    {
+        string file = "id,name\n" + Lines(20, n => $"{n},row {n}");
+        var before = new CsvViewModel();
+        var after = new CsvViewModel();
+        try
+        {
+            var shown = Select(file, "4, 8-9, 15"); // rows "3", "7", "8", "14"
+            await before.LoadAsync(shown, (byte)',');
+            await before.IndexingTask;
+            before.RecordRowsOnScreen(1, 2);
+            before.RecordSelectedRow(selected >= 0 ? selected : null);
+
+            var place = shown.FileRangeOf(before.SelectedByteRange!.Value);
+            var next = Select(file, changedFilter);
+            await after.LoadAsync(next, (byte)',');
+            await after.RevealByteRangeAsync(next.ViewRangeOf(place));
+
+            Assert.Equal(selectedAfter, after.SelectedRowIndex is int row ? FirstCell(after, row) : null);
+            Assert.Equal(topAfter, after.RowShownAtTop is int top ? FirstCell(after, top) : null);
+            Assert.Null(after.SelectedColumnIndex);
+        }
+        finally
+        {
+            before.Dispose();
+            after.Dispose();
+        }
+    }
+
+    private static string FirstCell(CsvViewModel vm, int row) => ((Argonaut.Ui.TableGrid.TableRow)vm.Rows[row]!).Cells[0].Text;
+
     [Fact]
     public async Task NdJson_shows_and_parses_the_selected_lines()
     {

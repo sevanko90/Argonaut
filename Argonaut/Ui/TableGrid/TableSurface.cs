@@ -112,6 +112,9 @@ public partial class TableSurface : RowSurface
     private INotifyCollectionChanged? subscribedRows;
     private (int First, int Last) cachedRows = (0, -1);
     private double scrollTop;
+
+    // A row ShowRowAtTop is still waiting to put at the top, until the rows reach it.
+    private int? pendingTopRow;
     private double gutterWidth;
     private double charAdvance;
     private Pen? gridPen;
@@ -212,6 +215,7 @@ public partial class TableSurface : RowSurface
     /// </summary>
     public void RevealRow(int row)
     {
+        this.pendingTopRow = null;
         if ((uint)row >= (uint)RowCount)
             return;
 
@@ -220,6 +224,42 @@ public partial class TableSurface : RowSurface
             return;
 
         SetVerticalOffset(top - (BodyHeight - RowHeight) / 2);
+    }
+
+    /// <summary>
+    /// Scrolls so <paramref name="row"/> is the first row on screen - putting a view back where it
+    /// was scrolled to, as a filter reload does. Held until the rows reach far enough to allow it,
+    /// since a document still indexing can be short of a screen past the row; the user's own
+    /// scrolling, a click or a key abandons it, as does a reveal.
+    /// </summary>
+    public void ShowRowAtTop(int row)
+    {
+        this.pendingTopRow = row;
+        ApplyPendingTopRow();
+    }
+
+    private void ApplyPendingTopRow()
+    {
+        if (this.pendingTopRow is not int row || row >= RowCount)
+            return;
+
+        double top = row * RowHeight;
+        SetVerticalOffset(top);
+        if (Math.Abs(this.scrollTop - top) < 0.5)
+            this.pendingTopRow = null;
+    }
+
+    /// <summary>The rows from the first to the last at least partly on screen, or (0, -1) when
+    /// none are.</summary>
+    public (int First, int Last) RowsOnScreen()
+    {
+        int count = RowCount;
+        if (count == 0 || BodyHeight <= 0)
+            return (0, -1);
+
+        int first = Math.Clamp((int)(this.scrollTop / RowHeight), 0, count - 1);
+        int last = Math.Clamp((int)Math.Ceiling((this.scrollTop + BodyHeight) / RowHeight) - 1, first, count - 1);
+        return (first, last);
     }
 
     /// <summary>Pans just enough to bring <paramref name="column"/> wholly into view, or its left
@@ -245,11 +285,24 @@ public partial class TableSurface : RowSurface
 
     public override bool ShowsEnd => this.scrollTop >= MaxScrollTop - 0.5;
 
-    public override void ScrollByPixels(double delta) => SetVerticalOffset(this.scrollTop + delta);
+    // The wheel and the scrollbars - the user moving the view, which abandons a pending top row.
+    public override void ScrollByPixels(double delta)
+    {
+        this.pendingTopRow = null;
+        SetVerticalOffset(this.scrollTop + delta);
+    }
 
-    public override void ScrollToFraction(double fraction) => SetVerticalOffset(Math.Clamp(fraction, 0, 1) * ExtentHeight);
+    public override void ScrollToFraction(double fraction)
+    {
+        this.pendingTopRow = null;
+        SetVerticalOffset(Math.Clamp(fraction, 0, 1) * ExtentHeight);
+    }
 
-    public override void ScrollToEnd() => SetVerticalOffset(MaxScrollTop);
+    public override void ScrollToEnd()
+    {
+        this.pendingTopRow = null;
+        SetVerticalOffset(MaxScrollTop);
+    }
 
     public override double PanViewportWidth => Math.Max(0, Bounds.Width - this.gutterWidth);
 
@@ -276,7 +329,11 @@ public partial class TableSurface : RowSurface
             SetVerticalOffset(top + RowHeight - BodyHeight);
     }
 
-    protected override void OnViewportChanged() => SetVerticalOffset(this.scrollTop);
+    protected override void OnViewportChanged()
+    {
+        SetVerticalOffset(this.scrollTop);
+        ApplyPendingTopRow();
+    }
 
     // ---- what changed -------------------------------------------------------------------
 
@@ -288,6 +345,7 @@ public partial class TableSurface : RowSurface
         {
             SubscribeRows();
             DropCells();
+            this.pendingTopRow = null;
             SetVerticalOffset(0);
             InvalidateVisual();
         }
@@ -340,6 +398,7 @@ public partial class TableSurface : RowSurface
             DropCells();
 
         SetVerticalOffset(this.scrollTop);
+        ApplyPendingTopRow();
         InvalidateVisual();
     }
 
@@ -536,17 +595,6 @@ public partial class TableSurface : RowSurface
         }
     }
 
-    private (int First, int Last) RowsOnScreen()
-    {
-        int count = RowCount;
-        if (count == 0 || BodyHeight <= 0)
-            return (0, -1);
-
-        int first = Math.Clamp((int)(this.scrollTop / RowHeight), 0, count - 1);
-        int last = Math.Clamp((int)Math.Ceiling((this.scrollTop + BodyHeight) / RowHeight) - 1, first, count - 1);
-        return (first, last);
-    }
-
     /// <summary>Lets go of the cells of rows that have scrolled away, so the cache stays a
     /// screen's worth.</summary>
     private void PruneCells(int firstRow, int lastRow)
@@ -703,6 +751,7 @@ public partial class TableSurface : RowSurface
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
         base.OnPointerPressed(e);
+        this.pendingTopRow = null;
         if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
             return;
 
@@ -781,6 +830,7 @@ public partial class TableSurface : RowSurface
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
+        this.pendingTopRow = null;
         int count = RowCount;
         if (e.Handled || count == 0)
             return;

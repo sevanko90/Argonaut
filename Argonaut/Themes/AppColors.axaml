@@ -126,16 +126,6 @@
             <SolidColorBrush x:Key="MenuFlyoutPresenterBackground" Color="#FFFFFF" />
             <SolidColorBrush x:Key="MenuFlyoutPresenterBorderBrush" Color="#E0E1E6" />
             <SolidColorBrush x:Key="FlyoutPresenterBackground" Color="#FFFFFF" />
-            <SolidColorBrush x:Key="TableViewRowBackground" Color="#FFFFFF" />
-            <SolidColorBrush x:Key="TableViewRowBackgroundPointerOver" Color="#E6E7EB" />
-            <SolidColorBrush x:Key="TableViewRowBackgroundPressed" Color="#E6E7EB" />
-            <SolidColorBrush x:Key="TableViewRowBackgroundSelected" Color="#E3ECFF" />
-            <SolidColorBrush x:Key="TableViewRowBackgroundSelectedPointerOver" Color="#E3ECFF" />
-            <SolidColorBrush x:Key="TableViewRowBackgroundSelectedPressed" Color="#E3ECFF" />
-            <SolidColorBrush x:Key="TableViewRowForegroundSelected" Color="#1C1D21" />
-            <SolidColorBrush x:Key="TableViewRowForegroundSelectedPointerOver" Color="#1C1D21" />
-            <SolidColorBrush x:Key="TableViewRowForegroundPointerOver" Color="#1C1D21" />
-            <SolidColorBrush x:Key="TableViewColumnHeaderSeparatorBackground" Color="#E0E1E6" />
         </ResourceDictionary>
 
         <ResourceDictionary x:Key="Dark">
@@ -251,16 +241,6 @@
             <SolidColorBrush x:Key="MenuFlyoutPresenterBackground" Color="#26272D" />
             <SolidColorBrush x:Key="MenuFlyoutPresenterBorderBrush" Color="#2F3138" />
             <SolidColorBrush x:Key="FlyoutPresenterBackground" Color="#26272D" />
-            <SolidColorBrush x:Key="TableViewRowBackground" Color="#18191D" />
-            <SolidColorBrush x:Key="TableViewRowBackgroundPointerOver" Color="#2C2E35" />
-            <SolidColorBrush x:Key="TableViewRowBackgroundPressed" Color="#2C2E35" />
-            <SolidColorBrush x:Key="TableViewRowBackgroundSelected" Color="#25334A" />
-            <SolidColorBrush x:Key="TableViewRowBackgroundSelectedPointerOver" Color="#25334A" />
-            <SolidColorBrush x:Key="TableViewRowBackgroundSelectedPressed" Color="#25334A" />
-            <SolidColorBrush x:Key="TableViewRowForegroundSelected" Color="#E7E8EC" />
-            <SolidColorBrush x:Key="TableViewRowForegroundSelectedPointerOver" Color="#E7E8EC" />
-            <SolidColorBrush x:Key="TableViewRowForegroundPointerOver" Color="#E7E8EC" />
-            <SolidColorBrush x:Key="TableViewColumnHeaderSeparatorBackground" Color="#2F3138" />
         </ResourceDictionary>
     </ResourceDictionary.ThemeDictionaries>
 

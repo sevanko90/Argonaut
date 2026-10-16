@@ -129,16 +129,6 @@
             <Setter Property="Foreground" Value="{DynamicResource AppMutedTextBrush}" />
         </Style>
 
-        <!-- Tables (CSV, the array table): the palette's surfaces rather than Fluent's greys -
-             rows on the content background, a header strip on the panel one. -->
-        <Style Selector="TableView">
-            <Setter Property="Background" Value="{DynamicResource AppWindowBackgroundBrush}" />
-        </Style>
-        <Style Selector="TableViewColumnHeader">
-            <Setter Property="Background" Value="{DynamicResource AppPanelBackgroundBrush}" />
-            <Setter Property="Foreground" Value="{DynamicResource AppMutedTextBrush}" />
-        </Style>
-
         <!-- The excerpt control: a pill, tinted so an excerpt never passes for the whole file. -->
         <Style Selector="Button.excerptchip">
             <Setter Property="Background" Value="{DynamicResource AppAccentSurfaceBrush}" />

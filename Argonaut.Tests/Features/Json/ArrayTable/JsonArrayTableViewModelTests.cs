@@ -75,11 +75,11 @@ public class JsonArrayTableViewModelTests
         {
             // An element's own StartObject token has Length 1. Measuring that would collapse
             // every column to the minimum width, which is the bug this asserts against.
-            double idWidth = document.Structure.Columns[0].Width;
-            double descriptionWidth = document.Structure.Columns[1].Width;
+            int idChars = document.Structure.Columns[0].MaxChars;
+            int descriptionChars = document.Structure.Columns[1].MaxChars;
 
-            Assert.Equal(TableStructure.MinColumnWidth, idWidth); // "id" (2) and the value (1) both clamp to the minimum
-            Assert.True(descriptionWidth > idWidth);
+            Assert.Equal(TableStructure.MinColumnChars, idChars); // "id" (2) and the value (1) both clamp to the minimum
+            Assert.True(descriptionChars > idChars);
             return Task.CompletedTask;
         });
 
@@ -90,10 +90,10 @@ public class JsonArrayTableViewModelTests
             // A StartObject token's own Length is 1, but the cell renders "{ 2 members }" - the
             // geojson case, where every container column came out at the minimum width and was
             // trimmed to "{ 2 me...". The width must fit the summary text instead.
-            double width = document.Structure.Columns[0].Width;
+            int chars = document.Structure.Columns[0].MaxChars;
 
-            Assert.Equal(TableStructure.WidthForChars("{ 2 members }".Length), width);
-            Assert.True(width > TableStructure.MinColumnWidth);
+            Assert.Equal("{ 2 members }".Length, chars);
+            Assert.True(chars > TableStructure.MinColumnChars);
             return Task.CompletedTask;
         });
 
@@ -101,7 +101,7 @@ public class JsonArrayTableViewModelTests
     public Task ColumnWidthIsSeededByItsOwnHeaderSoTheLabelAlwaysFits()
         => WithDocument("""[{"a-long-column-header":1}]""", document =>
         {
-            Assert.Equal(TableStructure.WidthForChars("a-long-column-header".Length), document.Structure.Columns[0].Width);
+            Assert.Equal("a-long-column-header".Length, document.Structure.Columns[0].MaxChars);
             return Task.CompletedTask;
         });
 

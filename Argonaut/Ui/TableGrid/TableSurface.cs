@@ -17,7 +17,7 @@ namespace Argonaut.Ui.TableGrid;
 /// <summary>
 /// A grid that draws itself: a pinned header of column names across the top, a pinned gutter of
 /// line labels down the left, and the cells between them - only the rows and columns on screen,
-/// with no control per cell. What the CSV view is drawn with.
+/// with no control per cell. What the CSV view and the JSON array table are drawn with.
 ///
 /// Rows are <see cref="RowSurface.RowHeight"/> tall and their count is known, so the scroll is
 /// <see cref="RowSurface"/>'s exact model: the rows on screen are arithmetic on the offset, and a
@@ -35,9 +35,11 @@ namespace Argonaut.Ui.TableGrid;
 /// move the selection; every occurrence of the find term in a cell or a column name sits on a
 /// pill; a value too long for its column is cut with an ellipsis and shown whole in a tooltip; a
 /// column's right edge in the header drags to resize it, and a double-click there fits it to the
-/// widest value among the rows already read (<see cref="IColumnFitSource"/>).
+/// widest value among the rows already read (<see cref="IColumnFitSource"/>). A grid whose cells
+/// and headers do more than select - the JSON array table's - makes them clickable; see the
+/// partial that does it.
 /// </summary>
-public class TableSurface : RowSurface
+public partial class TableSurface : RowSurface
 {
     /// <summary>Height of the header row of column names.</summary>
     public const double HeaderHeight = RowHeight + 4;
@@ -97,7 +99,7 @@ public class TableSurface : RowSurface
     static TableSurface()
     {
         AffectsRender<TableSurface>(SelectedIndexProperty, HighlightTermProperty, GridLineBrushProperty, HeaderBackgroundProperty,
-            RowBandBrushProperty, CurrentMatchProperty);
+            RowBandBrushProperty, CurrentMatchProperty, CellClickHintProperty, HoverBrushProperty, LinkForegroundProperty);
     }
 
     // Cell text laid out at its column's width, for the rows and columns on screen. Dropped when
@@ -117,7 +119,6 @@ public class TableSurface : RowSurface
     private int resizingColumn = -1;
     private double resizeStartX;
     private double resizeStartWidth;
-    private (int Row, int Column)? hovered;
 
     public IList? Rows
     {
@@ -298,6 +299,14 @@ public class TableSurface : RowSurface
         {
             MeasureGutter();
         }
+        else if (change.Property == ColumnHeadersProperty)
+        {
+            OnColumnHeadersChanged();
+        }
+        else if (change.Property == LinkForegroundProperty)
+        {
+            this.headers.Clear();
+        }
     }
 
     protected override void OnTextStyleChanged()
@@ -477,6 +486,7 @@ public class TableSurface : RowSurface
         var (firstColumn, lastColumn) = layout.Covering(PanOffset, PanOffset + PanViewportWidth);
         var (firstRow, lastRow) = RowsOnScreen();
         PruneCells(firstRow, lastRow);
+        var hoveredCell = HoveredClickableCell();
 
         // Body.
         using (context.PushClip(new Rect(0, HeaderHeight, width, BodyHeight)))
@@ -502,8 +512,15 @@ public class TableSurface : RowSurface
                         var cell = CellAt(r, c, row.Cells[c].Text, layout.Width(c), typeface, foreground);
                         double x = cellsLeft + layout.Left(c) - PanOffset;
                         int? current = CurrentMatch is { } m && m.Row == r && m.Column == c ? m.Occurrence : null;
+                        bool hovered = hoveredCell == (r, c);
                         using (context.PushClip(new Rect(x, y, layout.Width(c), RowHeight)))
+                        {
+                            if (hovered && HoverBrush is { } tint)
+                                context.FillRectangle(tint, new Rect(x, y, layout.Width(c), RowHeight));
                             DrawText(context, cell, x + CellPaddingX, y, current: current);
+                            if (hovered)
+                                DrawOpenMark(context, x + layout.Width(c), y);
+                        }
                     }
                 }
             }
@@ -653,12 +670,13 @@ public class TableSurface : RowSurface
         {
             for (int c = first; c <= last; c++)
             {
-                if (!this.headers.TryGetValue(c, out var name))
-                    this.headers[c] = name = LayOut(structure.Columns[c].Name, layout.Width(c), typeface, FontWeight.SemiBold, foreground);
-
+                var name = HeaderAt(c, structure, layout, typeface, foreground);
                 double x = this.gutterWidth + layout.Left(c) - PanOffset;
                 using (context.PushClip(new Rect(x, 0, layout.Width(c), HeaderHeight)))
+                {
                     DrawText(context, name, x + CellPaddingX, 0, HeaderHeight);
+                    DrawLinkUnderlines(context, c, name, x + CellPaddingX);
+                }
             }
         }
 
@@ -712,13 +730,17 @@ public class TableSurface : RowSurface
             return;
         }
 
-        if (point.Y >= HeaderHeight)
+        if (point.Y < HeaderHeight)
         {
-            int row = (int)((point.Y - HeaderHeight + this.scrollTop) / RowHeight);
-            if (row < RowCount)
-                SelectedIndex = row;
-            e.Handled = true;
+            e.Handled = RaiseClick(point, e.ClickCount);
+            return;
         }
+
+        int row = (int)((point.Y - HeaderHeight + this.scrollTop) / RowHeight);
+        if (row < RowCount)
+            SelectedIndex = row;
+        e.Handled = true;
+        RaiseClick(point, e.ClickCount);
     }
 
     protected override void OnPointerMoved(PointerEventArgs e)
@@ -733,8 +755,7 @@ public class TableSurface : RowSurface
             return;
         }
 
-        Cursor = EdgeAt(point) >= 0 ? new Cursor(StandardCursorType.SizeWestEast) : Cursor.Default;
-        ShowTipFor(CellAtPoint(point));
+        TrackPointer(point);
     }
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
@@ -756,18 +777,7 @@ public class TableSurface : RowSurface
     protected override void OnPointerExited(PointerEventArgs e)
     {
         base.OnPointerExited(e);
-        ShowTipFor(null);
-    }
-
-    /// <summary>A cut-off value shows whole in a tooltip while the pointer is over it.</summary>
-    private void ShowTipFor((int Row, int Column)? cell)
-    {
-        if (cell == this.hovered)
-            return;
-
-        this.hovered = cell;
-        string? tip = cell is { } at && this.cells.TryGetValue(at, out var text) && text.Trimmed ? text.Text : null;
-        ToolTip.SetTip(this, tip);
+        TrackPointer(null);
     }
 
     protected override void OnKeyDown(KeyEventArgs e)

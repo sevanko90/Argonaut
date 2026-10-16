@@ -4,11 +4,8 @@ namespace Argonaut.Tests.Ui.TableGrid;
 
 /// <summary>
 /// Verifies the TableStructure width heuristic: driven by the per-column maximum character count
-/// its caller measured, clamped to 6..40 characters - plus the relabelling that carries the character counts over untouched.
-///
-/// Expectations are written in CHARACTERS, through TableStructure.WidthForChars, because the
-/// characters-to-pixels conversion is measured from the running font (CellTextMetrics) and is
-/// deliberately not a number this test gets to know.
+/// its caller measured, clamped to 6..40 characters - plus the relabelling that carries the
+/// character counts over untouched. Pixels are the grid's business, not the structure's.
 /// </summary>
 public class TableStructureTests
 {
@@ -20,7 +17,7 @@ public class TableStructureTests
     {
         var structure = Build(["abc"], 3);
 
-        Assert.Equal(TableStructure.WidthForChars(6), structure.Columns[0].Width);
+        Assert.Equal(6, structure.Columns[0].MaxChars);
     }
 
     [Fact]
@@ -28,7 +25,7 @@ public class TableStructureTests
     {
         var structure = Build([new string('x', 100)], 100);
 
-        Assert.Equal(TableStructure.WidthForChars(40), structure.Columns[0].Width);
+        Assert.Equal(40, structure.Columns[0].MaxChars);
     }
 
     [Fact]
@@ -37,7 +34,7 @@ public class TableStructureTests
         // 19 characters, inside the 6..40 clamp, so the count is used as measured.
         var structure = Build(["id"], 19);
 
-        Assert.Equal(TableStructure.WidthForChars(19), structure.Columns[0].Width);
+        Assert.Equal(19, structure.Columns[0].MaxChars);
     }
 
     [Fact]
@@ -45,8 +42,8 @@ public class TableStructureTests
     {
         var structure = Build(["a", "much-longer-header"], 1, 18);
 
-        Assert.Equal(TableStructure.WidthForChars(6), structure.Columns[0].Width);
-        Assert.True(structure.Columns[1].Width > structure.Columns[0].Width);
+        Assert.Equal(6, structure.Columns[0].MaxChars);
+        Assert.Equal(18, structure.Columns[1].MaxChars);
     }
 
     [Fact]
@@ -55,7 +52,7 @@ public class TableStructureTests
         // The counts span is shorter than the names list - column 1 was never measured.
         var structure = Build(["a", "a-long-column-header"], 1);
 
-        Assert.Equal(TableStructure.WidthForChars("a-long-column-header".Length), structure.Columns[1].Width);
+        Assert.Equal("a-long-column-header".Length, structure.Columns[1].MaxChars);
     }
 
     [Fact]
@@ -67,14 +64,6 @@ public class TableStructureTests
     }
 
     [Fact]
-    public void TotalWidth_IsSumOfColumnWidths()
-    {
-        var structure = Build(["a", "b"], 1, 1);
-
-        Assert.Equal(structure.Columns[0].Width + structure.Columns[1].Width, structure.TotalWidth);
-    }
-
-    [Fact]
     public void WithNames_KeepsWidthsAndReplacesLabels()
     {
         var structure = Build(["id", "description"], 2, 30);
@@ -83,8 +72,8 @@ public class TableStructureTests
 
         Assert.Equal("Column 1", renamed.Columns[0].Name);
         Assert.Equal("Column 2", renamed.Columns[1].Name);
-        Assert.Equal(structure.Columns[1].Width, renamed.Columns[1].Width);
-        Assert.Equal(structure.TotalWidth, renamed.TotalWidth);
+        Assert.Equal(structure.Columns[0].MaxChars, renamed.Columns[0].MaxChars);
+        Assert.Equal(structure.Columns[1].MaxChars, renamed.Columns[1].MaxChars);
     }
 
     [Fact]
@@ -96,6 +85,6 @@ public class TableStructureTests
 
         Assert.Equal("only", renamed.Columns[0].Name);
         Assert.Equal(string.Empty, renamed.Columns[1].Name);
-        Assert.Equal(structure.Columns[1].Width, renamed.Columns[1].Width);
+        Assert.Equal(structure.Columns[1].MaxChars, renamed.Columns[1].MaxChars);
     }
 }

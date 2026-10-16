@@ -166,6 +166,12 @@ Requirements:
    would scroll away; the surface also stops realising a control per cell. About 3-4 days.
 3. **Then** - move the JSON array table onto `TableSurface` and delete `TableGridColumns`, so
    there is one grid, not two. About 2 days.
+   - [x] route headers drawn by the surface (`TableColumnHeader`), link pieces raising
+         `HeaderLinkClicked`; a new header list re-seeds the widths
+   - [x] clickable cells: `CellClicked`, and under a `CellClickHint` the hover tint, hand, open
+         mark and hint tooltip the TableView grid had
+   - [x] `TableGridColumns`, `CellTextMetrics`, `TableStructure`'s pixel widths and the
+         TableView styles deleted
 
 UI looks (chip, About section, CSV gutter) are shown as screenshots with variants to choose
 from before they are settled.

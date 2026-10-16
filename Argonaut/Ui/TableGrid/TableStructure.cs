@@ -10,18 +10,15 @@ public readonly record struct TableCell(string Text);
 
 /// <summary>
 /// One column: its display name and the character count its width is derived from. Pixels are
-/// deliberately not stored - <see cref="Width"/> asks <see cref="CellTextMetrics"/> every time,
-/// so the answer follows the font the app is actually rendering with (the status bar can swap
-/// the content font at runtime) rather than the one that was current at discovery.
+/// deliberately not stored - the grid turns the count into a width in the font it is actually
+/// drawing with (the status bar can swap the content font at runtime), not the one that was
+/// current at discovery.
 /// </summary>
-public readonly record struct TableColumn(string Name, int MaxChars)
-{
-    public double Width => CellTextMetrics.Current.WidthForChars(MaxChars);
-}
+public readonly record struct TableColumn(string Name, int MaxChars);
 
 /// <summary>
-/// The shape of a CSV-style grid as one immutable object: the column names, their fixed pixel
-/// widths, and the prebuilt header row. Constructed by whoever knows the data, consumed by
+/// The shape of a CSV-style grid as one immutable object: the column names and the character
+/// counts their widths open at. Constructed by whoever knows the data, consumed by
 /// whoever renders it - this type discovers nothing.
 ///
 /// Column *identity* cannot live here because it has three different sources: a CSV header
@@ -33,8 +30,8 @@ public readonly record struct TableColumn(string Name, int MaxChars)
 ///
 /// Widths are a character COUNT rather than a text measurement, per CLAUDE.md's low-allocation
 /// guidance - laying out every value of a multi-gigabyte file to size a column is exactly what
-/// this app cannot do. The count becomes pixels through <see cref="CellTextMetrics"/>, whose two
-/// terms are themselves measured; content that still doesn't fit is handled by the view with
+/// this app cannot do. The count becomes pixels in the grid, from the measured advance of the font
+/// it draws with; content that still doesn't fit is handled by the view with
 /// ellipsis + a tooltip, not by resizing. The counts come from a sample of the rows available at
 /// first paint and are fixed for this structure's lifetime - a *new* structure replaces it when
 /// the grid's shape changes.
@@ -49,11 +46,11 @@ public sealed class TableStructure
     /// short values still reads as a column. A width the user chose - by dragging, or by
     /// double-clicking a resizer to fit the column to its content - is theirs, and is not
     /// second-guessed against this.</summary>
-    private const int MinColumnChars = 6;
+    internal const int MinColumnChars = 6;
 
     /// <summary>Widest a column opens from discovery, in characters. Past this the value is
     /// long enough that the tooltip, not the column, is how it gets read.</summary>
-    private const int MaxDiscoveredChars = 40;
+    internal const int MaxDiscoveredChars = 40;
 
     private readonly TableColumn[] columns;
 
@@ -63,30 +60,8 @@ public sealed class TableStructure
 
     public int ColumnCount => this.columns.Length;
 
-    public double TotalWidth
-    {
-        get
-        {
-            double total = 0;
-            foreach (var column in this.columns)
-                total += column.Width;
-
-            return total;
-        }
-    }
-
-    /// <summary>The narrowest a discovered column opens, in pixels.</summary>
-    public static double MinColumnWidth => WidthForChars(MinColumnChars);
-
     /// <summary>
-    /// Pixel width for a character count, with no discovery ceiling applied - what discovery and
-    /// a fit-to-content double-click both go through, so the two can never disagree. Both terms
-    /// of the conversion are measured; see <see cref="CellTextMetrics"/>.
-    /// </summary>
-    public static double WidthForChars(int chars) => CellTextMetrics.Current.WidthForChars(chars);
-
-    /// <summary>
-    /// The one factory: per-column pixel widths from a per-column maximum character count.
+    /// The one factory: the columns, each with its opening width as a character count.
     /// <paramref name="maxChars"/> is indexed in parallel with <paramref name="names"/>; a
     /// column the caller had no counts for (a shorter span) is widthed from its name alone.
     /// Callers are expected to seed each count with the name's own length where the header

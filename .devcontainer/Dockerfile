@@ -6,7 +6,8 @@ FROM mcr.microsoft.com/devcontainers/dotnet:1-10.0-noble
 # X11 / font / GL libraries Avalonia's Linux backend links against, plus Xvfb so the
 # real window can be driven headlessly inside the container (see .devcontainer/README.md).
 # Avalonia.Headless (used by Argonaut.Tests) needs fontconfig and a font to shape text,
-# even though it never opens a window.
+# even though it never opens a window. python3 runs the scripts/make-*.py sample-file
+# generators: the base image carries only python3-minimal, which has no json module.
 #
 # The base image ships a yarn apt repo whose signing key it no longer carries, which makes
 # `apt-get update` fail outright (NO_PUBKEY 62D54FD4003F6525). Nothing here comes from yarn,
@@ -29,6 +30,7 @@ RUN if [ -f /etc/apt/sources.list.d/yarn.list ]; then mv /etc/apt/sources.list.d
         fontconfig \
         fonts-dejavu-core \
         xvfb \
+        python3 \
     && if [ -f /tmp/yarn.list.bak ]; then mv /tmp/yarn.list.bak /etc/apt/sources.list.d/yarn.list; fi \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 

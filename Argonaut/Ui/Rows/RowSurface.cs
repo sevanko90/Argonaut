@@ -326,7 +326,15 @@ public abstract class RowSurface : Control
     // to remember: a handler raised by lazy work inside Render invalidating directly crashed the
     // app (the raw view's date hints). Only calls through a RowSurface-typed reference come here;
     // that is every call a surface makes on itself, which is the case that matters.
-    public new void InvalidateVisual() => OutsideRenderPass(base.InvalidateVisual);
+    // OutsideRenderPass inlined: a method-group delegate is a fresh allocation per call, and
+    // scrolling, panning and hover all invalidate, so only a deferral (rare) pays for one.
+    public new void InvalidateVisual()
+    {
+        if (this.isRendering)
+            Dispatcher.Post(base.InvalidateVisual);
+        else
+            base.InvalidateVisual();
+    }
 
     // ---- scrolling ------------------------------------------------------------------------
 

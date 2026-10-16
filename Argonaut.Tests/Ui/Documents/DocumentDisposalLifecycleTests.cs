@@ -42,7 +42,7 @@ public class DocumentDisposalLifecycleTests
         return path;
     }
 
-    private static string WriteLargeJson()
+    private static string LargeJson()
     {
         var sb = new StringBuilder("[");
         for (int i = 0; i < LargeElementCount; i++)
@@ -52,7 +52,50 @@ public class DocumentDisposalLifecycleTests
             sb.Append("{\"i\":").Append(i).Append(",\"s\":\"value-").Append(i).Append("\"}");
         }
         sb.Append(']');
-        return WriteTemp(sb.ToString());
+        return sb.ToString();
+    }
+
+    private static string WriteLargeJson() => WriteTemp(LargeJson());
+
+    /// <summary>
+    /// A document whose indexing is still running for as long as the test needs: all of
+    /// <paramref name="content"/> is there, but the source has not said it is all there is, so
+    /// the scan reads it and then waits for more until the document is torn down. A file would
+    /// race - a fast machine, or a Release build, indexes 500,000 short elements before LoadAsync
+    /// returns. A search in the same test scans a file of the same content instead, as find
+    /// scans the document's input.
+    /// </summary>
+    private static GrowingByteOrigin StillIndexing(string content, string displayName)
+    {
+        byte[] bytes = Encoding.UTF8.GetBytes(content);
+        return new GrowingByteOrigin(new GrowingByteSource(bytes, initiallyAvailable: bytes.Length), displayName);
+    }
+
+    /// <summary>
+    /// The array table's equivalent of <see cref="StillIndexing"/>. The table reads only a
+    /// sub-range of its origin, and <see cref="IByteOrigin.OpenRange"/> promises a sub-range is
+    /// always settled - so no real origin can hold the table's scan open, and
+    /// <see cref="GrowingByteOrigin"/> refuses ranges. This one steps outside that promise on
+    /// purpose, for this test only: its one range is the whole array, still arriving, which the
+    /// table's sparse index waits on exactly as the JSON document's does. Teardown is what is
+    /// under test, and it does not care why the scan is still running.
+    /// </summary>
+    private sealed class StillIndexingArrayOrigin(GrowingByteSource bytes) : IByteOrigin
+    {
+        private readonly MemoryByteOrigin kept = new([], "large.json");
+
+        public string DisplayName => "large.json";
+        public string? Path => null;
+        public long AvailableLength => bytes.AvailableLength;
+        public bool LengthSettled => bytes.LengthSettled;
+        public KeptIndexes KeptIndexes => this.kept.KeptIndexes;
+        public void WaitForLength(long atLeast, CancellationToken cancellationToken) => bytes.WaitForLength(atLeast, cancellationToken);
+        public IByteSource Open() => bytes;
+
+        public IByteSource OpenRange(long offset, long length) =>
+            offset == 0 && length == bytes.AvailableLength ? bytes : throw new NotSupportedException();
+
+        public void Dispose() => this.kept.Dispose();
     }
 
     private static string LargeCsv()
@@ -63,26 +106,19 @@ public class DocumentDisposalLifecycleTests
         return sb.ToString();
     }
 
-    /// <summary>
-    /// A CSV document whose indexing is still running for as long as the test needs: all its bytes
-    /// are there, but the source has not said they are all there is, so the scan reads them and
-    /// then waits for more until the document is torn down. A file would race - CSV's load does
-    /// enough after its first batch (the header, the column sample) that a fast machine finishes
-    /// indexing 500,000 short rows before it returns.
-    /// </summary>
-    private static GrowingByteOrigin StillIndexingCsv()
-    {
-        byte[] bytes = Encoding.UTF8.GetBytes(LargeCsv());
-        return new GrowingByteOrigin(new GrowingByteSource(bytes, initiallyAvailable: bytes.Length), "large.csv");
-    }
+    /// <summary>CSV's load does enough after its first batch (the header, the column sample) that
+    /// a file loses the race even more easily than the others.</summary>
+    private static GrowingByteOrigin StillIndexingCsv() => StillIndexing(LargeCsv(), "large.csv");
 
-    private static string WriteLargeNdJson()
+    private static string LargeNdJson()
     {
         var sb = new StringBuilder();
         for (int i = 0; i < LargeElementCount; i++)
             sb.Append("{\"i\":").Append(i).Append(",\"s\":\"value-").Append(i).Append("\"}\n");
-        return WriteTemp(sb.ToString());
+        return sb.ToString();
     }
+
+    private static string WriteLargeNdJson() => WriteTemp(LargeNdJson());
 
     private static string LargeRaw()
     {
@@ -92,17 +128,9 @@ public class DocumentDisposalLifecycleTests
         return sb.ToString();
     }
 
-    /// <summary>
-    /// A raw document whose indexing is still running for as long as the test needs, the same way
-    /// as <see cref="StillIndexingCsv"/>: the scan reads every byte, then waits for more until the
-    /// document is torn down or re-indexed. A file would race - the raw scan only finds newlines,
-    /// so a fast machine indexes 500,000 short rows before LoadAsync returns.
-    /// </summary>
-    private static GrowingByteOrigin StillIndexingRaw()
-    {
-        byte[] bytes = Encoding.UTF8.GetBytes(LargeRaw());
-        return new GrowingByteOrigin(new GrowingByteSource(bytes, initiallyAvailable: bytes.Length), "large.txt");
-    }
+    /// <summary>The raw scan waits the same way after a wrap-width restart, so a re-index is held
+    /// open too.</summary>
+    private static GrowingByteOrigin StillIndexingRaw() => StillIndexing(LargeRaw(), "large.txt");
 
     /// <summary>Runs <paramref name="dispose"/> on a background thread and asserts it completes
     /// within <paramref name="timeoutMs"/> - the "does not hang" half of every test here. Any
@@ -174,20 +202,12 @@ public class DocumentDisposalLifecycleTests
     [Fact]
     public async Task Json_CloseDuringIndexing_DoesNotHangOrCrash()
     {
-        string path = WriteLargeJson();
-        try
-        {
-            var vm = new JsonViewModel(new JsonViewSettings(), new SchemaBindings(), TestSchemas.Catalog());
-            await vm.LoadAsync(path);
-            Assert.False(vm.IndexingTask.IsCompleted); // sanity: indexing genuinely still running
+        var vm = new JsonViewModel(new JsonViewSettings(), new SchemaBindings(), TestSchemas.Catalog());
+        await vm.LoadAsync(StillIndexing(LargeJson(), "large.json"));
+        Assert.False(vm.IndexingTask.IsCompleted); // sanity: indexing genuinely still running
 
-            await DisposeWithTimeoutAsync(vm.Dispose);
-            Assert.True(vm.IndexingTask.IsCompleted);
-        }
-        finally
-        {
-            File.Delete(path);
-        }
+        await DisposeWithTimeoutAsync(vm.Dispose);
+        Assert.True(vm.IndexingTask.IsCompleted);
     }
 
     [Fact]
@@ -197,7 +217,7 @@ public class DocumentDisposalLifecycleTests
         try
         {
             var vm = new JsonViewModel(new JsonViewSettings(), new SchemaBindings(), TestSchemas.Catalog());
-            await vm.LoadAsync(path);
+            await vm.LoadAsync(StillIndexing(LargeJson(), "large.json"));
             Assert.False(vm.IndexingTask.IsCompleted);
 
             await DisposeDuringActiveSearchAsync(path, vm.Dispose);
@@ -241,20 +261,12 @@ public class DocumentDisposalLifecycleTests
     [Fact]
     public async Task NdJson_CloseDuringIndexing_DoesNotHangOrCrash()
     {
-        string path = WriteLargeNdJson();
-        try
-        {
-            var vm = new NdJsonViewModel(new JsonViewSettings(), new SchemaBindings(), TestSchemas.Catalog());
-            await vm.LoadAsync(path);
-            Assert.False(vm.IndexingTask.IsCompleted);
+        var vm = new NdJsonViewModel(new JsonViewSettings(), new SchemaBindings(), TestSchemas.Catalog());
+        await vm.LoadAsync(StillIndexing(LargeNdJson(), "large.ndjson"));
+        Assert.False(vm.IndexingTask.IsCompleted);
 
-            await DisposeWithTimeoutAsync(vm.Dispose);
-            Assert.True(vm.IndexingTask.IsCompleted);
-        }
-        finally
-        {
-            File.Delete(path);
-        }
+        await DisposeWithTimeoutAsync(vm.Dispose);
+        Assert.True(vm.IndexingTask.IsCompleted);
     }
 
     [Fact]
@@ -264,7 +276,7 @@ public class DocumentDisposalLifecycleTests
         try
         {
             var vm = new NdJsonViewModel(new JsonViewSettings(), new SchemaBindings(), TestSchemas.Catalog());
-            await vm.LoadAsync(path);
+            await vm.LoadAsync(StillIndexing(LargeNdJson(), "large.ndjson"));
             Assert.False(vm.IndexingTask.IsCompleted);
 
             await DisposeDuringActiveSearchAsync(path, vm.Dispose);
@@ -358,15 +370,42 @@ public class DocumentDisposalLifecycleTests
         // mapping, and the element walk reading that index - so its teardown has an ordering
         // the single-index documents do not: join the walk before the mapping is released.
         // There is no active-search variant because the table returns no navigator in v1.
+        byte[] bytes = Encoding.UTF8.GetBytes(LargeJson());
+        var vm = new JsonArrayTableViewModel(new JsonViewSettings());
+        await vm.LoadAsync(new StillIndexingArrayOrigin(new GrowingByteSource(bytes, initiallyAvailable: bytes.Length)),
+            0, bytes.Length, "$");
+        Assert.False(vm.IndexingTask.IsCompleted); // sanity: the walk genuinely still running
+
+        await DisposeWithTimeoutAsync(vm.Dispose);
+        Assert.True(vm.IndexingTask.IsCompleted);
+    }
+
+    [Fact]
+    public async Task Diff_CloseDuringIndexing_DoesNotHangOrCrash()
+    {
+        var vm = new JsonDiffViewModel(new JsonViewSettings());
+        await vm.LoadAsync(StillIndexing(LargeJson(), "left.json"), StillIndexing(LargeJson(), "right.json"));
+        Assert.False(vm.IndexingTask.IsCompleted);
+
+        await DisposeWithTimeoutAsync(vm.Dispose);
+        Assert.True(vm.IndexingTask.IsCompleted);
+    }
+
+    [Fact]
+    public async Task Diff_CloseDuringIndexingWithActiveSearchOnLeftSide_DoesNotHangOrCrash()
+    {
         string path = WriteLargeJson();
         try
         {
-            var vm = new JsonArrayTableViewModel(new JsonViewSettings());
-            await vm.LoadAsync(path, 0, new FileInfo(path).Length, "$");
-            Assert.False(vm.IndexingTask.IsCompleted); // sanity: the walk genuinely still running
+            var left = StillIndexing(LargeJson(), "left.json");
+            var vm = new JsonDiffViewModel(new JsonViewSettings());
+            await vm.LoadAsync(left, StillIndexing(LargeJson(), "right.json"));
+            Assert.False(vm.IndexingTask.IsCompleted);
 
-            await DisposeWithTimeoutAsync(vm.Dispose);
-            Assert.True(vm.IndexingTask.IsCompleted);
+            var navigator = (JsonDiffSearchNavigator)vm.CreateSearchNavigator()!;
+            Assert.Same(left, navigator.ScanTargets[0].Origin);
+
+            await DisposeDuringActiveSearchAsync(path, vm.Dispose);
         }
         finally
         {
@@ -375,69 +414,24 @@ public class DocumentDisposalLifecycleTests
     }
 
     [Fact]
-    public async Task Diff_CloseDuringIndexing_DoesNotHangOrCrash()
-    {
-        string leftPath = WriteLargeJson();
-        string rightPath = WriteLargeJson();
-        try
-        {
-            var vm = new JsonDiffViewModel(new JsonViewSettings());
-            await vm.LoadAsync(leftPath, rightPath);
-            Assert.False(vm.IndexingTask.IsCompleted);
-
-            await DisposeWithTimeoutAsync(vm.Dispose);
-            Assert.True(vm.IndexingTask.IsCompleted);
-        }
-        finally
-        {
-            File.Delete(leftPath);
-            File.Delete(rightPath);
-        }
-    }
-
-    [Fact]
-    public async Task Diff_CloseDuringIndexingWithActiveSearchOnLeftSide_DoesNotHangOrCrash()
-    {
-        string leftPath = WriteLargeJson();
-        string rightPath = WriteLargeJson();
-        try
-        {
-            var vm = new JsonDiffViewModel(new JsonViewSettings());
-            await vm.LoadAsync(leftPath, rightPath);
-            Assert.False(vm.IndexingTask.IsCompleted);
-
-            var navigator = (JsonDiffSearchNavigator)vm.CreateSearchNavigator()!;
-            Assert.Equal(leftPath, navigator.ScanTargets[0].Origin.Path);
-
-            await DisposeDuringActiveSearchAsync(leftPath, vm.Dispose);
-        }
-        finally
-        {
-            File.Delete(leftPath);
-            File.Delete(rightPath);
-        }
-    }
-
-    [Fact]
     public async Task Diff_CloseDuringIndexingWithActiveSearchOnRightSide_DoesNotHangOrCrash()
     {
-        string leftPath = WriteLargeJson();
-        string rightPath = WriteLargeJson();
+        string path = WriteLargeJson();
         try
         {
+            var right = StillIndexing(LargeJson(), "right.json");
             var vm = new JsonDiffViewModel(new JsonViewSettings());
-            await vm.LoadAsync(leftPath, rightPath);
+            await vm.LoadAsync(StillIndexing(LargeJson(), "left.json"), right);
             Assert.False(vm.IndexingTask.IsCompleted);
 
             var navigator = (JsonDiffSearchNavigator)vm.CreateSearchNavigator()!;
-            Assert.Equal(rightPath, navigator.ScanTargets[1].Origin.Path);
+            Assert.Same(right, navigator.ScanTargets[1].Origin);
 
-            await DisposeDuringActiveSearchAsync(rightPath, vm.Dispose);
+            await DisposeDuringActiveSearchAsync(path, vm.Dispose);
         }
         finally
         {
-            File.Delete(leftPath);
-            File.Delete(rightPath);
+            File.Delete(path);
         }
     }
 

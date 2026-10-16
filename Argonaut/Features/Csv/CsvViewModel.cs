@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Engine.Bytes;
@@ -39,6 +40,7 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
     private string? highlightTerm;
     private int? selectedRowIndex;
     private int? selectedColumnIndex;
+    private int? selectedMatchOccurrence;
 
     private readonly LineNumberingPreference? lineNumbers;
 
@@ -115,6 +117,11 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
     /// of view sideways.</summary>
     public int? SelectedColumnIndex => this.selectedColumnIndex;
 
+    /// <summary>Which occurrence of the find term in the selected cell the reveal landed on, 0 for
+    /// the first - so the grid can mark the one find is on among several in a cell; null when the
+    /// reveal was not a find match.</summary>
+    public int? SelectedMatchOccurrence => this.selectedMatchOccurrence;
+
     /// <summary>
     /// Used by CsvSearchNavigator to reveal a search match - the view reacts to the resulting
     /// property changes by selecting/scrolling, mirroring JsonViewModel.SelectToken's verb-method
@@ -125,11 +132,13 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
     /// next/prev asks for the row that is already selected, and after the user has scrolled away
     /// that still has to scroll back. Gating on inequality made those presses do nothing at all.
     /// </summary>
-    public void SelectRow(int? rowIndex, int? columnIndex)
+    public void SelectRow(int? rowIndex, int? columnIndex, int? matchOccurrence = null)
     {
         this.selectedRowIndex = rowIndex;
         this.selectedColumnIndex = columnIndex;
+        this.selectedMatchOccurrence = matchOccurrence;
 
+        OnPropertyChanged(nameof(SelectedMatchOccurrence));
         OnPropertyChanged(nameof(SelectedRowIndex));
         OnPropertyChanged(nameof(SelectedColumnIndex));
     }
@@ -173,10 +182,41 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
         OnPropertyChanged(nameof(RowCount));
 
         StatusText = DocumentStatusLine.Compose(FilePath, $"{RowCount:N0} rows indexed so far");
+        MeasureWidestGutterLabel();
         MonitorIndexing();
     }
 
     public override ISearchNavigator? CreateSearchNavigator() => new CsvSearchNavigator(this);
+
+    /// <summary>
+    /// The widest label the line gutter shows, for it to size itself by: as many zeros as the
+    /// widest line number, or the widest offset when lines are labelled by where they start (digits
+    /// are the same width in the content font). Set when the rows are first shown, when indexing
+    /// finishes and when the numbering is flipped - a file still indexing past a power of ten
+    /// widens when it is done, as the NDJSON gutter does.
+    /// </summary>
+    public string WidestGutterLabel
+    {
+        get => this.widestGutterLabel;
+        private set => SetField(ref this.widestGutterLabel, value);
+    }
+
+    private string widestGutterLabel = "0";
+
+    private void MeasureWidestGutterLabel()
+    {
+        if (LineNumbering.WidestLineStartLabel is { } widestStart)
+        {
+            WidestGutterLabel = widestStart;
+            return;
+        }
+
+        long widest = LineNumbering.Line(Math.Max(this.session?.Index.LineCount ?? 1, 1));
+        WidestGutterLabel = new string('0', widest.ToString(CultureInfo.InvariantCulture).Length);
+    }
+
+    /// <summary>The gutter's labels follow the numbering.</summary>
+    protected override void OnLineNumberingChanged() => MeasureWidestGutterLabel();
 
     /// <summary>
     /// Returns true if the VM can process the specified file type
@@ -193,6 +233,7 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
     {
         this.indexBasis?.Keep(FileLineAnchors.Key, this.session?.Index.DetachAnchors());
         StatusText = DocumentStatusLine.Compose(FilePath, $"{RowCount:N0} rows");
+        MeasureWidestGutterLabel();
     }
 
     /// <summary>Indexing stopped early (failure, or cancellation on <paramref name="failure"/> null).</summary>

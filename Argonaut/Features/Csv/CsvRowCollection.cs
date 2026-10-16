@@ -65,7 +65,7 @@ public sealed class CsvRowCollection : VirtualizingItemsSourceBase, IColumnFitSo
         for (int c = 0; c < fields.Length; c++)
             cells[c] = new TableCell(fields[c]);
 
-        var row = new TableRow(i + 1, cells);
+        var row = new TableRow(i + 1, cells, i + dataStartIndex + 1, lineSpan.Offset);
 
         var newNode = new LinkedListNode<(int, TableRow)>((i, row));
         cacheOrder.AddFirst(newNode);

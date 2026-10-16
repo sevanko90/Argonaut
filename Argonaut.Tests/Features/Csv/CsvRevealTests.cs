@@ -1,6 +1,7 @@
 using System.Text;
 using Argonaut.Features.Csv;
 using Argonaut.Tests.Support;
+using Argonaut.Ui.TableGrid;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless;
@@ -33,9 +34,8 @@ public sealed class CsvRevealTests
         return path;
     }
 
-    private static ScrollViewer BodyScroll(Window window)
-        => window.GetVisualDescendants().OfType<TableView>().First()
-            .GetVisualDescendants().OfType<ScrollViewer>().First();
+    private static TableSurface Grid(Window window)
+        => window.GetVisualDescendants().OfType<TableSurface>().First();
 
     [Fact]
     public Task RevealingTheSameRowTwice_ScrollsBackToItAfterTheUserScrollsAway()
@@ -62,20 +62,21 @@ public sealed class CsvRevealTests
                 await PumpAsync();
                 window.UpdateLayout();
 
-                double revealed = BodyScroll(window).Offset.Y;
+                double revealed = Grid(window).ScrollFraction;
                 Assert.True(revealed > 0, "the first reveal should scroll to the match");
+                Assert.Equal(4_000, Grid(window).SelectedIndex);
 
                 // The user scrolls away, then presses next - which lands on the same single match.
-                BodyScroll(window).Offset = new Vector(0, 0);
+                Grid(window).ScrollToFraction(0);
                 await PumpAsync();
                 window.UpdateLayout();
-                Assert.Equal(0, BodyScroll(window).Offset.Y);
+                Assert.Equal(0, Grid(window).ScrollFraction);
 
                 vm.SelectRow(4_000, 1);
                 await PumpAsync();
                 window.UpdateLayout();
 
-                Assert.Equal(revealed, BodyScroll(window).Offset.Y, 1);
+                Assert.Equal(revealed, Grid(window).ScrollFraction, 6);
                 return true;
             }
             finally

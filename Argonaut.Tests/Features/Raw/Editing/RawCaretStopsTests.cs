@@ -109,7 +109,7 @@ public class RawCaretStopsTests
         var stops = WalkForward(index, source);
 
         Assert.Equal(21, stops.Count);
-        Assert.Equal(stops, new HashSet<long>(stops));
+        Assert.Distinct(stops);
     }
 
     [Fact]

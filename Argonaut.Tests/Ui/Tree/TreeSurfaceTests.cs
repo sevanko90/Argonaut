@@ -540,7 +540,7 @@ public sealed class TreeSurfaceTests
     {
         // Laid out as the characters they are, they would stack four lines in one row band and
         // clip all but the first.
-        Assert.Equal(1, h.Surface.PaneTextLayout(0).TextLines.Count);
+        Assert.Single(h.Surface.PaneTextLayout(0).TextLines);
         return Task.CompletedTask;
     }, painter: bytes => new SeparatorPainter(bytes));
 

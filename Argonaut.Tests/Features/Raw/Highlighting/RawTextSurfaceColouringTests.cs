@@ -147,7 +147,7 @@ public sealed class RawTextSurfaceColouringTests : IDisposable
 
             vm.SetEditing(true);
             Assert.True(vm.IsEditing);
-            vm.Caret.PlaceAt(5);
+            vm.Caret!.PlaceAt(5);
             vm.TypeText("\"");
             await PumpAsync();
 
@@ -186,10 +186,10 @@ public sealed class RawTextSurfaceColouringTests : IDisposable
         }, colour: false);
 
     [Fact]
-    public void SectionHeaders_AreTheOneBoldStyle()
+    public Task SectionHeaders_AreTheOneBoldStyle()
     {
         var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(RawTextSurfaceColouringTests).Assembly);
-        session.Dispatch(() =>
+        return session.Dispatch(() =>
         {
             var surface = new RawTextSurface { StyleBrushes = AllBrushes() };
             var typeface = new Typeface("Inter");
@@ -201,6 +201,6 @@ public sealed class RawTextSurfaceColouringTests : IDisposable
             }
 
             return true;
-        }, CancellationToken.None).GetAwaiter().GetResult();
+        }, CancellationToken.None);
     }
 }

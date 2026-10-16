@@ -66,7 +66,7 @@ public class JsonSparseIndexTests
 
     [Theory]
     [MemberData(nameof(Documents))]
-    public void EverySourceShapeGivesTheSameIndex(int seed, bool jsonc)
+    public async Task EverySourceShapeGivesTheSameIndex(int seed, bool jsonc)
     {
         byte[] json = RandomJson.LargeContainers(new Random(seed), elements: 120, jsonc);
         var whole = Snapshot(Build(new MemoryByteSource(json)));
@@ -84,17 +84,17 @@ public class JsonSparseIndexTests
 
         growing.Reveal(json.Length);
         growing.Seal();
-        index.IndexingTask.GetAwaiter().GetResult();
+        await index.IndexingTask;
         Assert.Equal(whole, Snapshot(index));
     }
 
     [Fact]
-    public void TheUnicodeFixtureIndexesLikeTheReaderSeesIt()
+    public async Task TheUnicodeFixtureIndexesLikeTheReaderSeesIt()
     {
         byte[] json = File.ReadAllBytes(Fixtures.UnicodeNamesAndValuesJson);
         var model = Model(json);
         var index = JsonSparseIndex.StartIndexing(new MemoryByteSource(json), promotionBytes: 32, checkpointBytes: 16);
-        index.IndexingTask.GetAwaiter().GetResult();
+        await index.IndexingTask;
 
         Assert.Equal(model.Where(c => c.End - c.Start >= 32).Select(Describe), Recorded(index.Structure).Select(Describe));
     }
@@ -106,10 +106,10 @@ public class JsonSparseIndexTests
     [InlineData("[ /* ] */ ]", 0)]
     [InlineData("[{}]", 1)]
     [InlineData("[[],[],]", 2)]
-    public void ChildCountsIgnoreTrailingCommasAndComments(string text, long children)
+    public async Task ChildCountsIgnoreTrailingCommasAndComments(string text, long children)
     {
         var index = JsonSparseIndex.StartIndexing(new MemoryByteSource(Encoding.UTF8.GetBytes(text)), promotionBytes: 1, checkpointBytes: 1);
-        index.IndexingTask.GetAwaiter().GetResult();
+        await index.IndexingTask;
 
         Assert.Equal(children, index.Structure.GetContainer(0).ChildCount);
     }
@@ -271,11 +271,11 @@ public class JsonSparseIndexTests
             .ToList();
 
     [Fact]
-    public void TheScan_HintsTheBytesAheadOfIt()
+    public async Task TheScan_HintsTheBytesAheadOfIt()
     {
         var source = new PrefetchRecordingSource(Encoding.UTF8.GetBytes("[" + string.Join(",", Enumerable.Repeat("{\"a\":1}", 1000)) + "]"));
         var index = JsonSparseIndex.StartIndexing(source, Promotion, Checkpoint);
-        index.IndexingTask.GetAwaiter().GetResult();
+        await index.IndexingTask;
 
         Assert.Equal(0, source.Hints[0].Offset);
     }

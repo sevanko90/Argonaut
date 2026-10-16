@@ -743,7 +743,7 @@ public sealed class TableGridVirtualizationTests
                 await PumpAsync();
                 window.UpdateLayout();
 
-                Assert.Empty(window.GetVisualDescendants().OfType<TextBlock>().Where(t => t.Inlines is { Count: > 1 }));
+                Assert.DoesNotContain(window.GetVisualDescendants().OfType<TextBlock>(), t => t.Inlines is { Count: > 1 });
                 return true;
             }
             finally

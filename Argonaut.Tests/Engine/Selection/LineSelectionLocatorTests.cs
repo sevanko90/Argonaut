@@ -132,7 +132,7 @@ public class LineSelectionLocatorTests
     }
 
     [Fact]
-    public void Waits_for_a_source_still_arriving_rather_than_ending_early()
+    public async Task Waits_for_a_source_still_arriving_rather_than_ending_early()
     {
         const string text = "a\nb\nc\nd\n";
         var source = new GrowingByteSource(Encoding.UTF8.GetBytes(text), initiallyAvailable: 3);
@@ -143,7 +143,7 @@ public class LineSelectionLocatorTests
         source.Reveal(2);
         source.Seal();
 
-        var selection = locating.GetAwaiter().GetResult();
+        var selection = await locating;
         Assert.Equal("b\nd\n", View(text, selection));
         Assert.Equal(0, selection.RangesPastEnd);
     }

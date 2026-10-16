@@ -3,13 +3,13 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:csv="clr-namespace:Argonaut.Features.Csv"
+             xmlns:grid="clr-namespace:Argonaut.Ui.TableGrid"
              x:Class="Argonaut.Features.Csv.CsvView"
              x:DataType="csv:CsvViewModel">
-    <!-- The grid is a TableView (Avalonia 12.1), which owns the sticky header, its
-         horizontal-scroll tracking and the column resizer - all of which used to be built here
-         by hand. Columns are absent from this markup because their count and names are data:
-         TableGridColumns builds them in code-behind from the view model's TableStructure, and
-         carries the find-term binding into each cell so matches still highlight. -->
+    <!-- The grid draws itself (TableSurface): the column names pinned across the top, the line
+         gutter pinned down the left, and only the cells on screen. Its scrollbars drive it through
+         RowScrollBars, as every self-drawn view's do. Rows and Structure throw until the document
+         has loaded, so the code-behind hands them over rather than binding them. -->
     <Border BorderBrush="{DynamicResource AppBorderBrush}"
             BorderThickness="0"
             Background="{DynamicResource AppWindowBackgroundBrush}"
@@ -28,24 +28,42 @@
                           FontSize="11" />
             </Border>
 
-            <TableView Grid.Row="1"
-                       x:Name="Table"
-                       ItemsSource="{Binding Rows}"
-                       SelectionMode="Single"
-                       CanUserResizeColumns="True"
-                       Padding="0">
-                <TableView.Styles>
-                    <Style Selector="TableViewRow">
-                        <Setter Property="Padding" Value="0" />
-                        <Setter Property="MinHeight" Value="24" />
-                    </Style>
-                    <Style Selector="TableViewColumnHeader">
-                        <Setter Property="FontFamily" Value="{DynamicResource AppContentFontFamily}" />
-                        <Setter Property="FontSize" Value="{DynamicResource AppContentFontSize}" />
-                        <Setter Property="FontWeight" Value="SemiBold" />
-                    </Style>
-                </TableView.Styles>
-            </TableView>
+            <Grid Grid.Row="1" RowDefinitions="*,Auto" ColumnDefinitions="*,Auto">
+                <grid:TableSurface x:Name="Surface"
+                                   Grid.Row="0"
+                                   Grid.Column="0"
+                                   Background="{DynamicResource AppWindowBackgroundBrush}"
+                                   HeaderBackground="{DynamicResource AppPanelBackgroundBrush}"
+                                   RowBandBrush="{DynamicResource AppPanelBackgroundBrush}"
+                                   GridLineBrush="{DynamicResource AppBorderBrush}"
+                                   FontFamily="{DynamicResource AppContentFontFamily}"
+                                   FontSize="{DynamicResource AppContentFontSize}"
+                                   Foreground="{DynamicResource AppTextBrush}"
+                                   GutterForeground="{DynamicResource AppMutedTextBrush}"
+                                   HighlightBrush="{DynamicResource AppSearchMatchBrush}"
+                                   HighlightEdgeBrush="{DynamicResource AppSearchMatchEdgeBrush}"
+                                   CurrentHighlightBrush="{DynamicResource AppSearchCurrentBrush}"
+                                   CurrentHighlightForeground="{DynamicResource AppSearchCurrentTextBrush}"
+                                   SelectionBrush="{DynamicResource AppTextSelectionBrush}"
+                                   LineNumbering="{Binding LineNumbering}"
+                                   WidestGutterLabel="{Binding WidestGutterLabel}"
+                                   HighlightTerm="{Binding HighlightTerm}" />
+
+                <ScrollBar x:Name="VerticalScrollBar"
+                           Grid.Row="0"
+                           Grid.Column="1"
+                           Orientation="Vertical"
+                           IsVisible="False"
+                           Minimum="0" />
+
+                <ScrollBar x:Name="PanScrollBar"
+                           Grid.Row="1"
+                           Grid.Column="0"
+                           Orientation="Horizontal"
+                           AllowAutoHide="False"
+                           IsVisible="False"
+                           Minimum="0" />
+            </Grid>
         </Grid>
     </Border>
 </UserControl>

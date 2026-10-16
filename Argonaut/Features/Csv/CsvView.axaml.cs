@@ -1,33 +1,31 @@
 using System;
 using System.ComponentModel;
-using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Data;
-using Avalonia.VisualTree;
+using Argonaut.Ui.Rows;
 using Argonaut.Ui.TableGrid;
 
 namespace Argonaut.Features.Csv;
 
 /// <summary>
-/// The CSV grid's code-behind. Three jobs: keep the TableView's columns in step with the view
-/// model's <see cref="CsvViewModel.Structure"/> (the "first row is header" tickbox relabels
-/// them), reveal what a search match selected, and dispose the document on detach as the
-/// idempotent safety net the shell doesn't drive (window close).
+/// The CSV grid's code-behind. Three jobs: hand the surface the view model's rows and
+/// <see cref="CsvViewModel.Structure"/> once they exist (the "first row is header" tickbox
+/// relabels the columns), reveal what a search match selected, and dispose the document on
+/// detach as the idempotent safety net the shell doesn't drive (window close).
 ///
-/// The sticky header, its horizontal-scroll tracking and the column resizer all belong to
-/// TableView now; what used to be mirrored by hand here is gone.
+/// The grid itself - header, gutter, cells, selection, resizing - is the surface's; its
+/// scrollbars are driven by <see cref="RowScrollBars"/>.
 /// </summary>
 public partial class CsvView : UserControl
 {
-    private readonly TableGridColumns columns;
+    private readonly RowScrollBars scrollBars;
     private CsvViewModel? subscribedViewModel;
 
     public CsvView()
     {
         InitializeComponent();
 
-        this.columns = new TableGridColumns(Table);
+        this.scrollBars = new RowScrollBars(Surface, VerticalScrollBar, PanScrollBar);
         DataContextChanged += OnDataContextChanged;
         DetachedFromVisualTree += OnDetachedFromVisualTree;
     }
@@ -38,95 +36,56 @@ public partial class CsvView : UserControl
             this.subscribedViewModel.PropertyChanged -= OnViewModelPropertyChanged;
 
         this.subscribedViewModel = DataContext as CsvViewModel;
+        Surface.SelectedIndex = -1;
+        this.scrollBars.ResetPan();
         if (this.subscribedViewModel is null)
+        {
+            Surface.Rows = null;
+            Surface.Structure = null;
             return;
+        }
 
         this.subscribedViewModel.PropertyChanged += OnViewModelPropertyChanged;
-        RebuildColumns(this.subscribedViewModel);
+        ShowDocument(this.subscribedViewModel);
     }
 
     /// <summary>
-    /// Reveals a search match (CsvSearchNavigator.SelectRow): the row vertically via
-    /// TableView.SelectedIndex (Avalonia auto-scrolls the selected item into view, no explicit
-    /// ScrollIntoView needed - same as NdJsonView), the column horizontally via the grid's own
-    /// ScrollViewer, which the navigator/view model never touch directly.
-    ///
-    /// A new structure means new column labels (the tickbox) - the widths are unchanged, but the
-    /// columns carry the names, so they are rebuilt from it.
+    /// Reveals a search match (CsvSearchNavigator.SelectRow): the row selected and centred, the
+    /// column panned into view. A new structure means new column labels (the tickbox).
     /// </summary>
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (sender is not CsvViewModel vm)
             return;
 
-        if (e.PropertyName is null or nameof(CsvViewModel.Structure))
-            RebuildColumns(vm);
+        if (e.PropertyName is null or nameof(CsvViewModel.Structure) or nameof(CsvViewModel.Rows))
+            ShowDocument(vm);
 
         if (e.PropertyName is null or nameof(CsvViewModel.SelectedRowIndex))
-            RevealRow(vm.SelectedRowIndex ?? -1);
+        {
+            Surface.SelectedIndex = vm.SelectedRowIndex ?? -1;
+            Surface.CurrentMatch = vm is { SelectedRowIndex: int r, SelectedColumnIndex: int c, SelectedMatchOccurrence: int o }
+                ? new TableMatch(r, c, o)
+                : null;
+            if (vm.SelectedRowIndex is int row)
+                Surface.RevealRow(row);
+        }
 
         bool columnChanged = e.PropertyName is null or nameof(CsvViewModel.SelectedColumnIndex);
-        if (columnChanged && vm.SelectedColumnIndex is int columnIndex)
-            ScrollColumnIntoView(columnIndex);
+        if (columnChanged && vm.SelectedColumnIndex is int column)
+            Surface.RevealColumn(column);
     }
 
-    /// <summary>
-    /// Selects the revealed row and scrolls it into view.
-    ///
-    /// The scroll is explicit because AutoScrollToSelectedItem only reacts to the selection
-    /// LANDING somewhere new: a file with a single match sends every next/prev press to the same
-    /// index, and re-assigning it moves nothing - nor does clearing to -1 first, with or without
-    /// a dispatcher turn in between (all three measured). JsonDiffView deliberately does not
-    /// call ScrollIntoView, but that is about its own expanded merged list; over a TableView this
-    /// costs nothing measurable - 13 realized rows and 41ms to reveal index 4,000,000 of five
-    /// million, because the panel estimates its way there instead of walking.
-    /// </summary>
-    private void RevealRow(int index)
+    private void ShowDocument(CsvViewModel vm)
     {
-        Table.SelectedIndex = index;
-        if (index >= 0)
-            Table.ScrollIntoView(index);
-    }
-
-    private void RebuildColumns(CsvViewModel vm)
-    {
-        // Structure throws until LoadAsync has published one.
+        // Rows and Structure throw until LoadAsync has published them.
         if (vm.ColumnCount == 0)
             return;
 
-        this.columns.Rebuild(vm.Structure, vm.Rows, new Binding(nameof(CsvViewModel.HighlightTerm)) { Source = vm });
-    }
-
-    /// <summary>
-    /// Scrolls the grid horizontally just enough to bring [left, left + width) for
-    /// <paramref name="columnIndex"/> fully into the viewport - standard scroll-into-view clamp,
-    /// only moving when the target isn't already visible. Widths come from the columns' own
-    /// ActualWidth, so a column the user resized is measured as it currently is.
-    /// </summary>
-    private void ScrollColumnIntoView(int columnIndex)
-    {
-        if (columnIndex < 0 || columnIndex >= Table.Columns.Count)
-            return;
-
-        if (Table.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault() is not { } scroll)
-            return;
-
-        double left = 0;
-        for (int i = 0; i < columnIndex; i++)
-            left += Table.Columns[i].ActualWidth;
-        double right = left + Table.Columns[columnIndex].ActualWidth;
-
-        double viewportLeft = scroll.Offset.X;
-        double viewportRight = viewportLeft + scroll.Viewport.Width;
-
-        double newLeft = viewportLeft;
-        if (left < viewportLeft)
-            newLeft = left;
-        else if (right > viewportRight)
-            newLeft = Math.Max(0, right - scroll.Viewport.Width);
-
-        if (newLeft != viewportLeft)
-            scroll.Offset = new Vector(newLeft, scroll.Offset.Y);
+        Surface.Rows = vm.Rows;
+        Surface.FitSource = vm.Rows;
+        Surface.Structure = vm.Structure;
+        this.scrollBars.Refresh();
     }
 
     private void OnDetachedFromVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
@@ -140,11 +99,11 @@ public partial class CsvView : UserControl
             this.subscribedViewModel = null;
         }
 
-        // Columns first: their cell bindings are the last things reading the row collection.
-        this.columns.Dispose();
+        // The surface is the last thing reading the row collection.
+        Surface.Rows = null;
+        this.scrollBars.Dispose();
 
-        // Disposed synchronously here (before the content swap's trailing ItemsSource walk):
-        // CsvRowCollection reports empty once disposed, so that walk reads nothing.
+        // Disposed synchronously here: CsvRowCollection reports empty once disposed.
         if (DataContext is IDisposable d)
             d.Dispose();
     }

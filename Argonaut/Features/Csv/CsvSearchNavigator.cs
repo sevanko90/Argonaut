@@ -1,5 +1,6 @@
 using System.Threading;
 using System.Threading.Tasks;
+using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Indexing.Lines;
 using Argonaut.Engine.Search;
 using Argonaut.Ui.Find;
@@ -42,11 +43,13 @@ public sealed class CsvSearchNavigator : ISearchNavigator
         var fieldSpans = CsvFieldReader.SplitToSpans(viewModel.Bytes!, lineSpan, viewModel.Delimiter);
 
         int columnIndex = 0;
+        int occurrence = 0;
         for (int i = 0; i < fieldSpans.Length; i++)
         {
             if (match.Offset >= fieldSpans[i].Offset && match.Offset < fieldSpans[i].Offset + fieldSpans[i].Length)
             {
                 columnIndex = i;
+                occurrence = OccurrencesBefore(fieldSpans[i].Offset, match.Offset);
                 break;
             }
         }
@@ -57,6 +60,28 @@ public sealed class CsvSearchNavigator : ISearchNavigator
         int dataStartIndex = viewModel.DataStartIndex;
         int? rowIndex = lineIndex >= dataStartIndex ? lineIndex - dataStartIndex : null;
 
-        viewModel.SelectRow(rowIndex, columnIndex);
+        viewModel.SelectRow(rowIndex, columnIndex, occurrence);
+    }
+
+    /// <summary>
+    /// How many times the find term occurs in the field before the match - which of the cell's
+    /// highlighted occurrences find is on. Counted in the field's raw text the way the cell's text
+    /// is highlighted (case-insensitively, without overlaps); the quotes and doubled quotes a field
+    /// may carry change nothing unless the term itself holds a quote.
+    /// </summary>
+    private int OccurrencesBefore(long fieldStart, long matchOffset)
+    {
+        if (matchOffset <= fieldStart || viewModel.HighlightTerm is not { Length: > 0 } term)
+            return 0;
+
+        string before = viewModel.Bytes!.GetUtf8String(fieldStart, (int)(matchOffset - fieldStart));
+        int count = 0;
+        foreach (var segment in SearchTextSplitter.Split(before, term) ?? [])
+        {
+            if (segment.IsMatch)
+                count++;
+        }
+
+        return count;
     }
 }

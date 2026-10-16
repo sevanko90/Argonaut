@@ -4,6 +4,7 @@ using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Detection;
 using Argonaut.Engine.Indexing;
 using Argonaut.Engine.Search;
+using Argonaut.Engine.Selection;
 using Argonaut.Engine.Settings;
 using Argonaut.Shell;
 using Argonaut.Shell.CommandLine;
@@ -784,6 +785,296 @@ public sealed class MainWindowViewModelTests : IDisposable
         Assert.Equal(2, loads.Count);
         Assert.Equal(FileTypeDetector.FileKind.Unidentified, loads[1].Kind);
         Assert.Equal(Path.GetFullPath(path), loads[1].Origin.Path);
+    }
+
+    private string WriteFilter(string text, string name = "picks.txt")
+    {
+        string path = Path.Combine(tempDir, name);
+        File.WriteAllText(path, text);
+        return path;
+    }
+
+    /// <summary>All of <paramref name="origin"/>, gathered - a selection's runs are not
+    /// contiguous, so <see cref="ReadAll"/> cannot read one whole.</summary>
+    private static string Gather(IByteOrigin origin)
+    {
+        var source = origin.Open();
+        try
+        {
+            var bytes = new byte[source.AvailableLength];
+            source.CopyTo(0, bytes);
+            return System.Text.Encoding.UTF8.GetString(bytes);
+        }
+        finally
+        {
+            source.Release();
+        }
+    }
+
+    private static async Task<List<string>> Toasts(Func<Task> open)
+    {
+        var toasts = new List<string>();
+        void Capture(string message) => toasts.Add(message);
+        ToastService.Requested += Capture;
+        try
+        {
+            await open();
+        }
+        finally
+        {
+            ToastService.Requested -= Capture;
+        }
+
+        return toasts;
+    }
+
+    [Fact]
+    public async Task OpenSelection_LoadsTheListedLinesInFileOrder_ReadOnly()
+    {
+        string path = WriteLinesFile(10);
+        string filter = WriteFilter("7 # last\n2-3\n");
+        IByteOrigin? loaded = null;
+        string? loadedText = null;
+        FileTypeDetector.FileKind? loadedAs = null;
+        var vm = CreateViewModel((kind, origin, _) =>
+        {
+            loaded = origin;
+            loadedAs = kind;
+            loadedText = Gather(origin);
+            return Task.FromResult<IDocumentViewModel>(new FakeDocument { Origin = origin });
+        });
+
+        await vm.OpenStartupAsync(StartupArguments.Parse([path, "--lines", "--filter", filter]));
+
+        var selection = Assert.IsType<SelectionByteOrigin>(loaded);
+        Assert.Equal("{\"n\":2}\n{\"n\":3}\n{\"n\":7}\n", loadedText);
+        Assert.True(selection.IsReadOnly);
+        Assert.Null(selection.Path);
+        Assert.Equal(FileTypeDetector.FileKind.Ndjson, loadedAs);
+        Assert.True(vm.IsExcerpt);
+        Assert.Same(selection, vm.Selection);
+        Assert.Equal("3 lines selected", vm.ExcerptLabel);
+        Assert.Equal("3 lines selected from lines.ndjson, as picks.txt lists them", vm.ExcerptDescription);
+        Assert.Equal("lines.ndjson", vm.HeaderTitle);
+    }
+
+    [Fact]
+    public async Task OpenSelection_OfAJsonFile_OpensAsRawText()
+    {
+        string path = Path.Combine(tempDir, "pretty.json");
+        File.WriteAllText(path, "{\n  \"a\": 1,\n  \"b\": 2\n}\n");
+        FileTypeDetector.FileKind? loadedAs = null;
+        var vm = CreateViewModel((kind, origin, _) =>
+        {
+            loadedAs = kind;
+            return Task.FromResult<IDocumentViewModel>(new FakeDocument { Origin = origin });
+        });
+
+        await vm.OpenStartupAsync(StartupArguments.Parse([path, "--lines", "--filter", WriteFilter("2-3")]));
+
+        Assert.Equal(FileTypeDetector.FileKind.Unidentified, loadedAs);
+    }
+
+    [Fact]
+    public async Task OpenSelection_ByBytes_TakesTheRangesAsGiven()
+    {
+        string path = WriteLinesFile(3);
+        string? loadedText = null;
+        var vm = CreateViewModel((_, origin, _) =>
+        {
+            loadedText = Gather(origin);
+            return Task.FromResult<IDocumentViewModel>(new FakeDocument { Origin = origin });
+        });
+
+        await vm.OpenStartupAsync(StartupArguments.Parse([path, "--bytes", "--filter", WriteFilter("0-7, 16-22")]));
+
+        Assert.Equal("{\"n\":1}\n{\"n\":3}\n", loadedText);
+        Assert.Equal("2 ranges selected", vm.ExcerptLabel);
+    }
+
+    [Theory]
+    [InlineData("1-2\nnope\n", "\"picks.txt\" Line 2: \"nope\" is not a line range.")]
+    [InlineData("# nothing yet\n", "\"picks.txt\" lists no lines.")]
+    [InlineData("11-20", "Nothing picks.txt lists is in \"lines.ndjson\".")]
+    public async Task OpenSelection_ThatSelectsNothing_OpensNothing_AndSaysWhy(string filter, string toast)
+    {
+        string path = WriteLinesFile(10);
+        string filterPath = WriteFilter(filter);
+        var vm = CreateViewModel((_, _, _) => throw new InvalidOperationException("nothing should load"));
+
+        var toasts = await Toasts(() => vm.OpenStartupAsync(StartupArguments.Parse([path, "--lines", "--filter", filterPath])));
+
+        Assert.False(vm.IsFileOpen);
+        Assert.Equal([toast], toasts);
+    }
+
+    [Fact]
+    public async Task OpenSelection_MissingFilterFile_SaysSo()
+    {
+        string path = WriteLinesFile(10);
+        var vm = CreateViewModel((_, _, _) => throw new InvalidOperationException("nothing should load"));
+
+        var toasts = await Toasts(() => vm.OpenStartupAsync(StartupArguments.Parse([path, "--lines", "--filter", Path.Combine(tempDir, "gone.txt")])));
+
+        Assert.Equal(["The filter file \"gone.txt\" doesn't exist."], toasts);
+    }
+
+    [Fact]
+    public async Task OpenSelection_RangesPastTheEnd_AreDropped_AndCounted()
+    {
+        string path = WriteLinesFile(10);
+        var vm = CreateViewModel((_, origin, _) => Task.FromResult<IDocumentViewModel>(new FakeDocument { Origin = origin }));
+
+        var toasts = await Toasts(() => vm.OpenStartupAsync(StartupArguments.Parse([path, "--lines", "--filter", WriteFilter("1, 20, 30-")])));
+
+        Assert.NotNull(vm.Selection);
+        Assert.Equal(["2 ranges in picks.txt are past the end of \"lines.ndjson\"."], toasts);
+    }
+
+    /// <summary>Filter files held in memory, whose change the test announces.</summary>
+    private sealed class FakeFilterFiles : ISelectionFilterFiles
+    {
+        public Dictionary<string, string> Text { get; } = new(StringComparer.Ordinal);
+
+        public Action? Changed { get; private set; }
+
+        public int Watching { get; private set; }
+
+        public SelectionFilter Read(string path, SelectionUnit unit)
+            => Text.TryGetValue(path, out var text)
+                ? SelectionFilter.Parse(new StringReader(text), unit)
+                : throw new FileNotFoundException(path);
+
+        public IDisposable Watch(string path, Action changed)
+        {
+            Changed = changed;
+            Watching++;
+            return new Unwatch(this);
+        }
+
+        private sealed class Unwatch(FakeFilterFiles owner) : IDisposable
+        {
+            public void Dispose() => owner.Watching--;
+        }
+    }
+
+    private static async Task WaitUntil(Func<bool> condition)
+    {
+        for (int i = 0; i < 500 && !condition(); i++)
+            await Task.Delay(10);
+
+        Assert.True(condition());
+    }
+
+    private MainWindowViewModel CreateFollowingViewModel(FakeFilterFiles filters, List<string> loaded)
+        => new(SettingsStore.InMemory(), TestSchemas.Catalog(), _ => Task.FromResult(true),
+            documentLoader: (_, origin, _) =>
+            {
+                loaded.Add(Gather(origin));
+                return Task.FromResult<IDocumentViewModel>(new FakeDocument { Origin = origin });
+            },
+            filterFiles: filters);
+
+    [Fact]
+    public async Task OpenSelection_FollowsItsFilterFile_AsItChanges()
+    {
+        string path = WriteLinesFile(10);
+        string filterPath = Path.Combine(tempDir, "picks.txt");
+        var filters = new FakeFilterFiles();
+        filters.Text[filterPath] = "2";
+        var loaded = new List<string>();
+        var vm = CreateFollowingViewModel(filters, loaded);
+
+        await vm.OpenStartupAsync(StartupArguments.Parse([path, "--lines", "--filter", filterPath]));
+        Assert.Equal(["{\"n\":2}\n"], loaded);
+        Assert.Equal(1, filters.Watching);
+
+        filters.Text[filterPath] = "2\n9";
+        filters.Changed!();
+        await WaitUntil(() => loaded.Count == 2);
+
+        Assert.Equal("{\"n\":2}\n{\"n\":9}\n", loaded[1]);
+        Assert.Equal("2 lines selected", vm.ExcerptLabel);
+        Assert.Equal(1, filters.Watching);
+    }
+
+    [Fact]
+    public async Task OpenSelection_KeepsWhatItShows_WhenTheFilterStopsReading()
+    {
+        string path = WriteLinesFile(10);
+        string filterPath = Path.Combine(tempDir, "picks.txt");
+        var filters = new FakeFilterFiles();
+        filters.Text[filterPath] = "2-3";
+        var loaded = new List<string>();
+        var vm = CreateFollowingViewModel(filters, loaded);
+        await vm.OpenStartupAsync(StartupArguments.Parse([path, "--lines", "--filter", filterPath]));
+        var shown = vm.Selection;
+
+        filters.Text[filterPath] = "2-3\noops";
+        var toasts = await Toasts(async () =>
+        {
+            filters.Changed!();
+            await Task.Delay(50);
+        });
+
+        Assert.Single(loaded);
+        Assert.Same(shown, vm.Selection);
+        Assert.Equal(["\"picks.txt\" Line 2: \"oops\" is not a line range. Still showing what it listed before."], toasts);
+    }
+
+    [Fact]
+    public async Task OpenSelection_ThatAChangeEmpties_StaysOpen_Empty()
+    {
+        string path = WriteLinesFile(10);
+        string filterPath = Path.Combine(tempDir, "picks.txt");
+        var filters = new FakeFilterFiles();
+        filters.Text[filterPath] = "4";
+        var loaded = new List<string>();
+        var vm = CreateFollowingViewModel(filters, loaded);
+        await vm.OpenStartupAsync(StartupArguments.Parse([path, "--lines", "--filter", filterPath]));
+
+        filters.Text[filterPath] = "# none for now";
+        filters.Changed!();
+        await WaitUntil(() => loaded.Count == 2);
+
+        Assert.Equal("", loaded[1]);
+        Assert.Equal("0 lines selected", vm.ExcerptLabel);
+        Assert.Equal(1, filters.Watching);
+    }
+
+    [Fact]
+    public async Task OpenSelection_StopsFollowing_WhenSomethingElseIsOpened()
+    {
+        string path = WriteLinesFile(10);
+        string filterPath = Path.Combine(tempDir, "picks.txt");
+        var filters = new FakeFilterFiles();
+        filters.Text[filterPath] = "4";
+        var loaded = new List<string>();
+        var vm = CreateFollowingViewModel(filters, loaded);
+        await vm.OpenStartupAsync(StartupArguments.Parse([path, "--lines", "--filter", filterPath]));
+
+        await vm.OpenWholeFileAsync();
+
+        Assert.Equal(0, filters.Watching);
+    }
+
+    [Fact]
+    public async Task OpenWholeFile_LeavesTheSelectionForItsFile()
+    {
+        string path = WriteLinesFile(10);
+        var loads = new List<IByteOrigin>();
+        var vm = CreateViewModel((_, origin, _) =>
+        {
+            loads.Add(origin);
+            return Task.FromResult<IDocumentViewModel>(new FakeDocument { Origin = origin });
+        });
+
+        await vm.OpenStartupAsync(StartupArguments.Parse([path, "--lines", "--filter", WriteFilter("3, 8")]));
+        await vm.OpenWholeFileAsync();
+
+        Assert.Null(vm.Selection);
+        Assert.False(vm.IsExcerpt);
+        Assert.Equal(Path.GetFullPath(path), loads[^1].Path);
     }
 
     [Fact]

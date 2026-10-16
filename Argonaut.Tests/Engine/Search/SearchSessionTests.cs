@@ -1,6 +1,7 @@
 using System.Text;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Search;
+using Argonaut.Engine.Selection;
 using Argonaut.Tests.Support;
 
 namespace Argonaut.Tests.Engine.Search;
@@ -283,5 +284,30 @@ public class SearchSessionTests
         {
             File.Delete(path);
         }
+    }
+
+    private static long[] SearchSelection(string file, string filter, string term, int chunkSize)
+    {
+        var whole = new MemoryByteOrigin(Encoding.UTF8.GetBytes(file), "big.txt");
+        var selection = LineSelectionLocator.Locate(whole.Open(), SelectionFilter.Parse(new StringReader(filter), SelectionUnit.Lines));
+        using var origin = new SelectionByteOrigin(whole, selection);
+        var session = SearchSession.Start(new ScanTarget(origin), new LiteralSearchMatcher(term), chunkSize: chunkSize);
+        session.ScanTask.GetAwaiter().GetResult();
+        Assert.True(session.AllItemsPublished);
+        return Offsets(session);
+    }
+
+    [Theory]
+    [InlineData(4)]
+    [InlineData(1 << 20)]
+    public void A_selection_is_searched_run_by_run_without_matching_across_a_seam(int chunkSize)
+    {
+        // View: "1 end\nstart 3\nend\n" - lines 1, 3 and 4. Lines 3 and 4 are neighbours in the
+        // file, so a match across them is real; lines 1 and 3 are not, so one across them is not.
+        const string file = "1 end\n2 mid\nstart 3\nend\n";
+
+        Assert.Empty(SearchSelection(file, "1, 3-4", "end\nstart", chunkSize));
+        Assert.Equal([12], SearchSelection(file, "1, 3-4", "3\nend", chunkSize));
+        Assert.Equal([2, 14], SearchSelection(file, "1, 3-4", "end", chunkSize));
     }
 }

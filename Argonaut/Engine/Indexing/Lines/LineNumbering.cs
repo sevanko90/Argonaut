@@ -56,6 +56,33 @@ public sealed class LineNumbering : IEquatable<LineNumbering>
         => new([new LineRun(1, 1, 0, firstOffset)], labelsLineStarts: true, lastOffset: Math.Max(0, length - 1));
 
     /// <summary>
+    /// A document of <paramref name="length"/> bytes made of stretches of its file, whose lines are
+    /// labelled by the file offset they start at - a selection of byte ranges, whose line numbers
+    /// in the file are not known. Only each run's <see cref="LineRun.ViewOffset"/> and
+    /// <see cref="LineRun.FileOffset"/> are read; lines are counted from 1.
+    /// </summary>
+    public static LineNumbering ByLineStarts(ReadOnlySpan<LineRun> runs, long length)
+    {
+        if (runs.IsEmpty)
+            return ByLineStarts(0, length);
+        if (runs[0].ViewOffset != 0)
+            throw new ArgumentException("The first run must start at view offset 0.", nameof(runs));
+
+        var counted = new LineRun[runs.Length];
+        for (int i = 0; i < runs.Length; i++)
+        {
+            if (i > 0 && runs[i].ViewOffset <= runs[i - 1].ViewOffset)
+                throw new ArgumentException($"Run {i} does not start after run {i - 1}.", nameof(runs));
+
+            // Lines count from 1 across the whole document, so every run numbers them as the first
+            // does; the line fields only have to keep the table in order.
+            counted[i] = runs[i] with { ViewLine = i + 1, FileLine = i + 1 };
+        }
+
+        return new LineNumbering(counted, labelsLineStarts: true, lastOffset: Math.Max(0, length - 1));
+    }
+
+    /// <summary>
     /// A document made of <paramref name="runs"/>, in view order. The first starts at view line 1
     /// and view offset 0, and each later one starts at a later view line and a later view offset.
     /// The file numbers are not checked against each other: a run may number from anywhere.
@@ -97,9 +124,13 @@ public sealed class LineNumbering : IEquatable<LineNumbering>
     public string? WidestLineStartLabel
         => LabelsLineStarts ? Offset(this.lastOffset).ToString("N0", CultureInfo.CurrentCulture) : null;
 
-    /// <summary>The number shown for 1-based line <paramref name="lineNumber"/> of the document.</summary>
+    /// <summary>The number shown for 1-based line <paramref name="lineNumber"/> of the document -
+    /// itself, when lines are labelled by where they start and their file numbers are unknown.</summary>
     public long Line(long lineNumber)
     {
+        if (LabelsLineStarts)
+            return lineNumber;
+
         ref readonly var run = ref runs[RunIndexByLine(lineNumber)];
         return run.FileLine + (lineNumber - run.ViewLine);
     }

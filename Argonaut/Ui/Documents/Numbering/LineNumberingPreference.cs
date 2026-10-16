@@ -1,5 +1,6 @@
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Indexing.Lines;
+using Argonaut.Engine.Selection;
 using Argonaut.Ui.ViewModels;
 
 namespace Argonaut.Ui.Documents.Numbering;
@@ -36,12 +37,19 @@ public sealed class LineNumberingPreference : ObservableObject
     }
 
     /// <summary>How <paramref name="origin"/>'s lines are numbered now: by the file for an
-    /// excerpt when that is the choice, from the start otherwise. An excerpt taken by bytes
-    /// does not know its first line number, so by the file it labels lines by where they start.</summary>
+    /// excerpt or a selection when that is the choice, from the start otherwise. One taken by
+    /// bytes does not know its line numbers, so by the file it labels lines by where they start.</summary>
     public LineNumbering For(IByteOrigin? origin)
-        => origin is ExcerptByteOrigin excerpt && NumberExcerptsFromSource
-            ? excerpt.Lines is { } lines
-                ? LineNumbering.Starting(lines.FirstLine, excerpt.Range.Offset)
-                : LineNumbering.ByLineStarts(excerpt.Range.Offset, excerpt.Range.Length)
-            : LineNumbering.FromStart;
+    {
+        if (!NumberExcerptsFromSource)
+            return LineNumbering.FromStart;
+
+        return origin switch
+        {
+            ExcerptByteOrigin { Lines: { } lines } excerpt => LineNumbering.Starting(lines.FirstLine, excerpt.Range.Offset),
+            ExcerptByteOrigin excerpt => LineNumbering.ByLineStarts(excerpt.Range.Offset, excerpt.Range.Length),
+            SelectionByteOrigin selection => selection.Numbering,
+            _ => LineNumbering.FromStart,
+        };
+    }
 }

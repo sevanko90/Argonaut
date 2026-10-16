@@ -7,6 +7,7 @@ using Argonaut.Engine.Detection;
 using Argonaut.Engine.Indexing;
 using Argonaut.Engine.Indexing.Lines;
 using Argonaut.Engine.Progress;
+using Argonaut.Engine.Selection;
 using Argonaut.Ui.Documents;
 using Argonaut.Ui.Documents.Numbering;
 using Argonaut.Ui.Find;
@@ -235,21 +236,27 @@ public sealed class CsvViewModel : IndexedDocumentViewModel
 
     /// <summary>
     /// The whole file's first line, split into fields, when <paramref name="origin"/> is an
-    /// excerpt starting past the start of the file - or null. Reads only the start of the file: a header longer than
-    /// <see cref="HeaderReadLimit"/> is not a header anyone can read in a column title, and the
-    /// columns fall back to their numbers.
+    /// excerpt or a selection starting past the start of the file - or null. Reads only the start
+    /// of the file: a header longer than <see cref="HeaderReadLimit"/> is not a header anyone can
+    /// read in a column title, and the columns fall back to their numbers.
     /// </summary>
     private static string[]? ReadWholeFileHeader(IByteOrigin origin, byte delimiter)
     {
-        if (origin is not ExcerptByteOrigin { Range.Offset: > 0 } excerpt)
+        var whole = origin switch
+        {
+            ExcerptByteOrigin { Range.Offset: > 0 } excerpt => excerpt.Whole,
+            SelectionByteOrigin { Selection.IsEmpty: false } selection when selection.Selection.Runs[0].FileOffset > 0 => selection.Whole,
+            _ => null,
+        };
+        if (whole is null)
             return null;
 
-        long length = Math.Min(excerpt.Whole.AvailableLength, HeaderReadLimit);
-        var start = excerpt.Whole.OpenRange(0, length);
+        long length = Math.Min(whole.AvailableLength, HeaderReadLimit);
+        var start = whole.OpenRange(0, length);
         try
         {
             if (LineRangeLocator.Locate(start, 1, 1) is not { } header
-                || (header.Range.End == length && length < excerpt.Whole.AvailableLength))
+                || (header.Range.End == length && length < whole.AvailableLength))
                 return null;
 
             return CsvFieldReader.ReadFields(start, new FileLineSpan(header.Range.Offset, (int)header.Range.Length), delimiter);

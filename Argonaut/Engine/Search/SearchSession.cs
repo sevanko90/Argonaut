@@ -124,6 +124,7 @@ public sealed class SearchSession : AppendLogIndexBase<SearchMatch>, IMatchSourc
             int effectiveChunk = (int)Math.Min(int.MaxValue, Math.Max(chunkSize, (long)overlap * 2));
 
             long chunkStart = 0;
+            bool seam = false;
 
             // Dedup cursor: matches are non-overlapping (editor semantics), and re-scanned
             // overlap bytes at a chunk boundary must not re-emit a match already recorded.
@@ -162,7 +163,17 @@ public sealed class SearchSession : AppendLogIndexBase<SearchMatch>, IMatchSourc
                     // hinting it whole as it opens still has its reads in flight together rather
                     // than one page fault at a time (see MMapFile.Prefetch).
                     view.Prefetch(0, size);
-                    var chunk = view.RequireContiguous(0, size);
+
+                    // Whole, except over a selection of lines, whose stretches of the file are
+                    // laid end to end: there a read stops where a stretch does. The chunk ends
+                    // there too, and the next starts there with no overlap - two stretches that
+                    // are not neighbours in the file must not make a match between them.
+                    var chunk = view.GetContiguousSpan(0, size);
+                    if (chunk.IsEmpty)
+                        return;
+
+                    seam = chunk.Length < size;
+                    size = chunk.Length;
 
                     int from = (int)(searchFrom - chunkStart);
                     while (matcher.TryFindNext(chunk, from, out int matchIndex, out int matchLength))
@@ -191,7 +202,7 @@ public sealed class SearchSession : AppendLogIndexBase<SearchMatch>, IMatchSourc
                 if (chunkStart + size >= length)
                     return;
 
-                chunkStart += size - overlap;
+                chunkStart += seam ? size : size - overlap;
                 searchFrom = Math.Max(searchFrom, chunkStart);
                 progressReporter?.Report("Searching", chunkStart, length);
             }

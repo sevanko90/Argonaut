@@ -1,4 +1,5 @@
 using Argonaut.Engine.Detection;
+using Argonaut.Engine.Selection;
 using Argonaut.Shell.CommandLine;
 
 namespace Argonaut.Tests.Shell.CommandLine;
@@ -79,7 +80,58 @@ public class StartupArgumentsTests
 
     [Fact]
     public void An_option_missing_its_value_is_an_error()
-        => Assert.Equal("--lines needs a value.", Parse("a.json", "--lines").Error);
+    {
+        Assert.Equal("--view needs a value.", Parse("a.json", "--view").Error);
+        Assert.Equal("--filter needs a file.", Parse("a.json", "--lines", "--filter").Error);
+    }
+
+    [Theory]
+    [InlineData("--lines")]
+    [InlineData("--bytes")]
+    public void A_range_option_with_neither_a_range_nor_a_filter_is_an_error(string option)
+        => Assert.Equal($"{option} needs a range, or --filter with a file of them.", Parse("a.csv", option).Error);
+
+    [Theory]
+    [InlineData("--lines", SelectionUnit.Lines)]
+    [InlineData("--bytes", SelectionUnit.Bytes)]
+    public void Reads_a_filter_file_for_lines_or_bytes(string option, SelectionUnit unit)
+    {
+        var parsed = Parse("big.ndjson", option, "--filter", "picks.txt");
+
+        Assert.Null(parsed.Error);
+        Assert.Equal("picks.txt", parsed.FilterPath);
+        Assert.Equal(unit, parsed.FilterUnit);
+        Assert.Null(parsed.Lines);
+        Assert.Null(parsed.Bytes);
+        Assert.Equal(["big.ndjson"], parsed.Paths);
+    }
+
+    [Fact]
+    public void A_filter_may_come_before_the_option_it_belongs_to()
+    {
+        var parsed = Parse("--filter=picks.txt", "big.ndjson", "--lines", "--view", "raw");
+
+        Assert.Null(parsed.Error);
+        Assert.Equal(SelectionUnit.Lines, parsed.FilterUnit);
+        Assert.Equal(FileTypeDetector.FileKind.Unidentified, parsed.View);
+    }
+
+    [Fact]
+    public void A_filter_needs_lines_or_bytes_to_say_what_it_lists()
+        => Assert.Equal("--filter needs --lines or --bytes, to say whether the file lists lines or bytes.",
+            Parse("a.csv", "--filter", "picks.txt").Error);
+
+    [Fact]
+    public void A_range_and_a_filter_together_are_an_error()
+        => Assert.Equal("Give --lines a range or --filter, not both.", Parse("a.csv", "--lines", "1-5", "--filter", "picks.txt").Error);
+
+    [Fact]
+    public void A_filter_opens_one_file_not_a_comparison()
+        => Assert.Equal("--bytes opens one file, not a comparison.", Parse("a.csv", "b.csv", "--bytes", "--filter", "picks.txt").Error);
+
+    [Fact]
+    public void A_filter_cannot_be_shown_as_json()
+        => Assert.Contains("--view json cannot show a selection", Parse("a.ndjson", "--lines", "--filter", "p.txt", "--view", "json").Error);
 
     [Fact]
     public void Lines_open_one_file_not_a_comparison()

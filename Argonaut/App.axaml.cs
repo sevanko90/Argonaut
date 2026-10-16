@@ -62,11 +62,14 @@ public partial class App : Application
 
             // Up to two positional paths: `argonaut a.json b.json` opens a diff when both are
             // JSON (see MainWindowViewModel.OpenPathsAsync); a third or later positional arg is
-            // ignored. --lines/--view shape how the first opens. Program has already answered
+            // ignored. --lines/--bytes/--filter/--view shape how the first opens. Program has already answered
             // --help and a bad command line wherever there was a terminal to answer in; one that
             // reaches here is shown in the window (see MainWindow.OpenStartupAsync).
             var startup = StartupArguments.Parse(desktop.Args ?? []);
-            foreach (var arg in startup.Paths)
+
+            // The filter file is a file argument too, which macOS re-signals like the others -
+            // and opening it as a document would replace the selection it describes.
+            foreach (var arg in startup.FilterPath is { } filter ? [.. startup.Paths, filter] : startup.Paths)
             {
                 try { startupArgPaths.Add(Path.GetFullPath(arg)); }
                 catch { /* malformed path - let OpenPathsAsync reject it normally */ }

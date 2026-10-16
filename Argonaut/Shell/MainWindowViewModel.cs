@@ -14,6 +14,7 @@ using Argonaut.Engine.Locations;
 using Argonaut.Engine.Logging;
 using Argonaut.Engine.Progress;
 using Argonaut.Engine.Saving;
+using Argonaut.Engine.Selection;
 using Argonaut.Engine.Settings;
 using Argonaut.Engine.Text;
 using Argonaut.Features.Json;
@@ -77,6 +78,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly FavouriteFiles favouriteFiles;
     private readonly JsonViewSettings jsonViewSettings;
     private readonly IConfigLocationSource? configLocations;
+    private readonly ISelectionFilterFiles filterFiles;
     private readonly Func<string, Task<bool>> confirmReplace;
     private readonly Func<Task<byte[]?>>? readClipboardBytes;
     private readonly DocumentLoader documentLoader;
@@ -174,13 +176,15 @@ public sealed class MainWindowViewModel : ObservableObject
         IFileReplacer? fileReplacer = null,
         ProgressBoard? progressBoard = null,
         IDiagnosticLog? log = null,
-        IConfigLocationSource? configLocations = null)
+        IConfigLocationSource? configLocations = null,
+        ISelectionFilterFiles? filterFiles = null)
     {
         this.appearance = settings.Get<AppearanceSettings>();
         this.recentFileHistory = settings.Get<RecentFileHistory>();
         this.favouriteFiles = settings.Get<FavouriteFiles>();
         this.jsonViewSettings = settings.Get<JsonViewSettings>();
         this.configLocations = configLocations;
+        this.filterFiles = filterFiles ?? new SelectionFilterFiles();
         this.confirmReplace = confirmReplace;
         this.readClipboardBytes = readClipboardBytes;
         this.lineNumbers = new LineNumberingPreference(settings.Get<LineNumberingSettings>());
@@ -232,7 +236,7 @@ public sealed class MainWindowViewModel : ObservableObject
     /// own <see cref="IDocumentViewModel.HeaderTitle"/>. Raised alongside <see cref="Title"/>, which
     /// changes whenever the document or its file does. An excerpt is named by its file; which
     /// lines it is, the excerpt control says.</summary>
-    public string HeaderTitle => Excerpt is { } excerpt ? excerpt.Whole.DisplayName : currentDocument?.HeaderTitle ?? FileName;
+    public string HeaderTitle => PartOf is { } whole ? whole.DisplayName : currentDocument?.HeaderTitle ?? FileName;
 
     /// <summary>True when a document is loaded; drives the toolbar's visibility.</summary>
     public bool IsFileOpen => currentFilePath is not null;
@@ -571,15 +575,18 @@ public sealed class MainWindowViewModel : ObservableObject
 
     /// <summary>
     /// What the command line asked to open (see <see cref="App"/>): one file or a pair to compare
-    /// (<see cref="OpenPathsAsync"/>), optionally in a forced view, or a run of one file's lines
-    /// as an excerpt (<see cref="OpenExcerptAsync"/>).
+    /// (<see cref="OpenPathsAsync"/>), optionally in a forced view, a run of one file's lines
+    /// as an excerpt (<see cref="OpenExcerptAsync"/>), or the lines a filter file lists
+    /// (<see cref="OpenSelectionAsync"/>).
     /// </summary>
     public async Task OpenStartupAsync(StartupArguments startup)
     {
         string? first = startup.Paths.Count > 0 ? startup.Paths[0] : null;
         string? second = startup.Paths.Count > 1 ? startup.Paths[1] : null;
 
-        if (startup.Lines is { } lines && first is not null)
+        if (startup.FilterPath is { } filterPath && startup.FilterUnit is { } unit && first is not null)
+            await OpenSelectionAsync(first, filterPath, unit, startup.View);
+        else if (startup.Lines is { } lines && first is not null)
             await OpenExcerptAsync(first, lines, startup.View);
         else if (startup.Bytes is { } bytes && first is not null)
             await OpenByteExcerptAsync(first, bytes, startup.View);
@@ -696,37 +703,315 @@ public sealed class MainWindowViewModel : ObservableObject
         await OpenOriginAsync(excerpt, addToRecents: false, view);
     }
 
+    /// <summary>
+    /// Opens the lines (or byte ranges) the filter file at <paramref name="filterPath"/> lists, of
+    /// the file at <paramref name="path"/>, as one read-only document
+    /// (<see cref="SelectionByteOrigin"/>). Finding a selection of lines reads the file up to the
+    /// last of them, so it runs on the background, on the progress board, and its Stop abandons the
+    /// open - as for an excerpt.
+    ///
+    /// The view is the one the whole file detects as, unless <paramref name="view"/> says
+    /// otherwise: a few lines of a file say less about what it is than its start does. A JSON
+    /// file's lines are not JSON documents, so its selection opens as raw text.
+    /// </summary>
+    public async Task OpenSelectionAsync(string path, string filterPath, SelectionUnit unit, FileTypeDetector.FileKind? view = null)
+    {
+        var normalizedPath = Path.GetFullPath(path);
+        if (!File.Exists(normalizedPath))
+        {
+            ToastService.Show($"\"{Path.GetFileName(normalizedPath)}\" doesn't exist.");
+            return;
+        }
+
+        string filterName = Path.GetFileName(filterPath);
+        SelectionFilter filter;
+        try
+        {
+            filter = this.filterFiles.Read(Path.GetFullPath(filterPath), unit);
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            ToastService.Show($"The filter file \"{filterName}\" doesn't exist.");
+            return;
+        }
+        catch (SelectionFilterException ex)
+        {
+            ToastService.Show($"\"{filterName}\" {ex.Message}");
+            return;
+        }
+        catch (Exception ex)
+        {
+            this.log.Write($"OpenSelection: reading the filter threw: {ex}");
+            ToastService.Show(CouldNotRead(filterName, ex));
+            return;
+        }
+
+        if (filter.Ranges.IsEmpty)
+        {
+            ToastService.Show($"\"{filterName}\" lists no {(unit == SelectionUnit.Lines ? "lines" : "byte ranges")}.");
+            return;
+        }
+
+        if (RefusedWhileSaving() || !await ResolveUnsavedChangesAsync($"opening \"{Path.GetFileName(normalizedPath)}\""))
+            return;
+
+        bool discardAgreed = HasUnsavedChanges;
+
+        var whole = new FileByteOrigin(normalizedPath);
+        var checkpoints = new LineCheckpoints();
+        var requestId = BeginOpenRequest();
+        using var stopping = new CancellationTokenSource();
+        locatingLines = stopping;
+        var progress = this.progressBoard.Begin($"Finding the {(unit == SelectionUnit.Lines ? "lines" : "ranges")} {filterName} lists in {whole.DisplayName}", stopping.Cancel);
+
+        LineSelection selection;
+        FileTypeDetector.FileKind kind;
+        try
+        {
+            (selection, kind) = await Task.Run(() =>
+            {
+                var source = whole.Open();
+                try
+                {
+                    var found = LineSelectionLocator.Locate(source, filter, progress, stopping.Token, checkpoints);
+                    var detected = view ?? FileTypeDetector.DetectFileType(whole);
+                    return (found, detected == FileTypeDetector.FileKind.Json ? FileTypeDetector.FileKind.Unidentified : detected);
+                }
+                finally
+                {
+                    source.Release();
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            if (ex is not OperationCanceledException)
+            {
+                this.log.Write($"OpenSelection: locating the selection threw: {ex}");
+                ToastService.Show(CouldNotRead(whole.DisplayName, ex));
+            }
+
+            whole.Dispose();
+            return;
+        }
+        finally
+        {
+            progress.Finish();
+            if (locatingLines == stopping)
+                locatingLines = null;
+        }
+
+        if (!openRequest.IsCurrent(requestId))
+        {
+            whole.Dispose();
+            return;
+        }
+
+        if (selection.IsEmpty)
+        {
+            ToastService.Show($"Nothing {filterName} lists is in \"{whole.DisplayName}\".");
+            whole.Dispose();
+            return;
+        }
+
+        if (RefusedWhileSaving()
+            || (!discardAgreed && !await ResolveUnsavedChangesAsync($"opening \"{whole.DisplayName}\""))
+            || !openRequest.IsCurrent(requestId))
+        {
+            whole.Dispose();
+            return;
+        }
+
+        if (selection.RangesPastEnd > 0)
+        {
+            ToastService.Show(selection.RangesPastEnd == 1
+                ? $"1 range in {filterName} is past the end of \"{whole.DisplayName}\"."
+                : $"{selection.RangesPastEnd:N0} ranges in {filterName} are past the end of \"{whole.DisplayName}\".");
+        }
+
+        StopFollowingFilter();
+        var origin = new SelectionByteOrigin(whole, selection);
+        this.selectionFilterName = filterName;
+        this.selectionFilterPath = Path.GetFullPath(filterPath);
+        this.selectionUnit = unit;
+        this.selectionCheckpoints = checkpoints;
+        this.followedSelection = origin;
+        await OpenOriginAsync(origin, addToRecents: false, kind);
+
+        if (ReferenceEquals(Selection, origin))
+            this.filterWatch = this.filterFiles.Watch(this.selectionFilterPath, () => _ = ReloadSelectionAsync());
+    }
+
+    /// <summary>
+    /// The filter file changed: reads it again, finds its lines - from the checkpoints the last
+    /// pass left, so a chunk or two per range rather than the file - and reopens the selection in
+    /// the same view, on the line that was selected (or the next one still in it). A filter that
+    /// no longer reads keeps the selection as it was. One reload at a time; a change during one
+    /// runs another after it.
+    /// </summary>
+    private async Task ReloadSelectionAsync()
+    {
+        if (this.reloadingSelection)
+        {
+            this.reloadAgain = true;
+            return;
+        }
+
+        this.reloadingSelection = true;
+        try
+        {
+            do
+            {
+                this.reloadAgain = false;
+                await ReloadSelectionOnceAsync();
+            }
+            while (this.reloadAgain);
+        }
+        finally
+        {
+            this.reloadingSelection = false;
+        }
+    }
+
+    private async Task ReloadSelectionOnceAsync()
+    {
+        if (this.followedSelection is not { Whole.Path: { } path } current || !ReferenceEquals(Selection, current)
+            || this.selectionFilterPath is not { } filterPath)
+        {
+            return;
+        }
+
+        string filterName = Path.GetFileName(filterPath);
+        SelectionFilter filter;
+        try
+        {
+            filter = this.filterFiles.Read(filterPath, this.selectionUnit);
+        }
+        catch (SelectionFilterException ex)
+        {
+            ToastService.Show($"\"{filterName}\" {ex.Message} Still showing what it listed before.");
+            return;
+        }
+        catch (Exception ex)
+        {
+            this.log.Write($"ReloadSelection: reading the filter threw: {ex}");
+            ToastService.Show($"\"{filterName}\" could not be read. Still showing what it listed before.");
+            return;
+        }
+
+        var whole = new FileByteOrigin(path);
+        var checkpoints = this.selectionCheckpoints;
+        LineSelection selection;
+        try
+        {
+            selection = await Task.Run(() =>
+            {
+                var source = whole.Open();
+                try
+                {
+                    return LineSelectionLocator.Locate(source, filter, checkpoints: checkpoints);
+                }
+                finally
+                {
+                    source.Release();
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            this.log.Write($"ReloadSelection: locating the selection threw: {ex}");
+            ToastService.Show(CouldNotRead(whole.DisplayName, ex));
+            whole.Dispose();
+            return;
+        }
+
+        // Something else was opened while the lines were being found.
+        if (!ReferenceEquals(Selection, current))
+        {
+            whole.Dispose();
+            return;
+        }
+
+        ByteRange? position = (CurrentDocument as IByteRangeNavigable)?.SelectedByteRange is { } selected
+            ? current.FileRangeOf(selected)
+            : null;
+        var next = new SelectionByteOrigin(whole, selection);
+        this.followedSelection = next;
+        var kind = currentKind == FileTypeDetector.FileKind.Unknown ? FileTypeDetector.FileKind.Unidentified : currentKind;
+        await OpenOriginAsync(next, addToRecents: false, kind);
+
+        if (position is { } file && ReferenceEquals(Selection, next) && CurrentDocument is IByteRangeNavigable navigable)
+            await navigable.RevealByteRangeAsync(next.ViewRangeOf(file));
+    }
+
+    /// <summary>Stops following the open selection's filter file - another input replaced it.</summary>
+    private void StopFollowingFilter()
+    {
+        this.filterWatch?.Dispose();
+        this.filterWatch = null;
+        this.followedSelection = null;
+        this.selectionCheckpoints = null;
+    }
+
     /// <summary>The excerpt that is open, or null when the input is a whole document - what the
     /// excerpt chip shows, and what <see cref="OpenWholeFileAsync"/> leaves.</summary>
     public ExcerptByteOrigin? Excerpt => this.ownedOrigins.Count == 1 ? this.ownedOrigins[0] as ExcerptByteOrigin : null;
+
+    /// <summary>The selection that is open, or null - what the same chip shows for a filter file.</summary>
+    public SelectionByteOrigin? Selection => this.ownedOrigins.Count == 1 ? this.ownedOrigins[0] as SelectionByteOrigin : null;
+
+    /// <summary>The filter file the open selection came from, by name. Kept with the open, since
+    /// the selection itself knows only what it found.</summary>
+    private string? selectionFilterName;
+
+    // The open selection's filter file, followed while the selection is open (ReloadSelectionAsync):
+    // where it is, what it counts, the watch on it, and the selection it last produced.
+    private string? selectionFilterPath;
+    private SelectionUnit selectionUnit;
+    private LineCheckpoints? selectionCheckpoints;
+    private IDisposable? filterWatch;
+    private SelectionByteOrigin? followedSelection;
+    private bool reloadingSelection;
+    private bool reloadAgain;
+
+    /// <summary>The whole file the open excerpt or selection is part of.</summary>
+    private IByteOrigin? PartOf => (IByteOrigin?)Excerpt?.Whole ?? Selection?.Whole;
 
     /// <summary>The switch between an excerpt's source line numbers and counting from its start,
     /// shared with every view that shows them.</summary>
     public LineNumberingPreference LineNumbers => this.lineNumbers;
 
-    /// <summary>True while the open input is an excerpt.</summary>
-    public bool IsExcerpt => Excerpt is not null;
+    /// <summary>True while the open input is part of a file: an excerpt or a selection.</summary>
+    public bool IsExcerpt => PartOf is not null;
 
-    /// <summary>Which part of the file the excerpt is, rounded to fit the title bar - "Lines
-    /// 1m–2m" - or empty.</summary>
-    public string ExcerptLabel => Excerpt is { } excerpt ? Capitalise(excerpt.ShortDescription) : string.Empty;
+    /// <summary>Which part of the file is open, rounded to fit the title bar - "Lines 1m–2m",
+    /// "1.2k lines selected" - or empty.</summary>
+    public string ExcerptLabel => Excerpt is { } excerpt ? Capitalise(excerpt.ShortDescription)
+        : Selection is { } selection ? Capitalise(selection.ShortDescription)
+        : string.Empty;
 
-    /// <summary>Exactly which part of which file the excerpt is - "Lines 1,000,000–2,000,000 of
-    /// big.ndjson" - or empty.</summary>
-    public string ExcerptDescription
-        => Excerpt is { } excerpt ? $"{Capitalise(excerpt.Description)} of {excerpt.Whole.DisplayName}" : string.Empty;
+    /// <summary>Exactly which part of which file is open - "Lines 1,000,000–2,000,000 of
+    /// big.ndjson", "1,204 lines of big.ndjson, as picks.txt lists them" - or empty.</summary>
+    public string ExcerptDescription => Excerpt is { } excerpt ? $"{Capitalise(excerpt.Description)} of {excerpt.Whole.DisplayName}"
+        : Selection is { } selection ? $"{Capitalise(selection.Description)} from {selection.Whole.DisplayName}, as {this.selectionFilterName} lists them"
+        : string.Empty;
 
-    /// <summary>The file the excerpt was taken from, by name - or empty.</summary>
-    public string ExcerptSourceName => Excerpt?.Whole.DisplayName ?? string.Empty;
+    /// <summary>The file the excerpt or selection was taken from, by name - or empty.</summary>
+    public string ExcerptSourceName => PartOf?.DisplayName ?? string.Empty;
 
-    /// <summary>What numbering an excerpt by its file shows: its line numbers from where it
-    /// starts, or for one taken by bytes - whose first line number is not known - each line
-    /// labelled by the file offset it starts at.</summary>
+    /// <summary>What numbering by the file shows: an excerpt's line numbers from where it
+    /// starts, a selection's own file line numbers, or for either taken by bytes - whose line
+    /// numbers are not known - each line labelled by the file offset it starts at.</summary>
     public string ExcerptSourceNumberingLabel => Excerpt switch
     {
         { Lines: { } lines } => $"As in the file, from line {lines.FirstLine:N0}",
         { } excerpt => $"File offsets, from byte {excerpt.Range.Offset:N0}",
-        _ => string.Empty,
+        _ => Selection switch
+        {
+            { Selection.Unit: SelectionUnit.Lines } => "As in the file",
+            { } => "File offsets",
+            _ => string.Empty,
+        },
     };
 
     /// <summary>Two-way face of <see cref="LineNumbers"/> for the excerpt controls.</summary>
@@ -739,25 +1024,31 @@ public sealed class MainWindowViewModel : ObservableObject
     private static string Capitalise(string text) => text.Length == 0 ? text : char.ToUpperInvariant(text[0]) + text[1..];
 
     /// <summary>
-    /// Leaves the excerpt for the whole file it came from, in the same view and at the same
-    /// place: what is selected in the excerpt (or its first line) is revealed in the file,
-    /// shifted by where the excerpt starts. No "replace?" question - it is the same file - but
-    /// unsaved edits to the excerpt are asked about, since they would be lost.
+    /// Leaves the excerpt or selection for the whole file it came from, in the same view and at
+    /// the same place: what is selected in it (or its first line) is revealed in the file, where
+    /// it is there. No "replace?" question - it is the same file - but unsaved edits to an
+    /// excerpt are asked about, since they would be lost.
     /// </summary>
     public async Task OpenWholeFileAsync()
     {
-        if (Excerpt is not { Whole.Path: { } path } excerpt || !File.Exists(path))
+        var part = (IByteOrigin?)Excerpt ?? Selection;
+        if (PartOf is not { Path: { } path } whole || !File.Exists(path))
             return;
 
-        if (RefusedWhileSaving() || !await ResolveUnsavedChangesAsync($"opening the whole of \"{excerpt.Whole.DisplayName}\""))
+        if (RefusedWhileSaving() || !await ResolveUnsavedChangesAsync($"opening the whole of \"{whole.DisplayName}\""))
             return;
 
         // The save the user may just have chosen ends the excerpt; nothing left to leave.
-        if (!ReferenceEquals(Excerpt, excerpt))
+        if (!ReferenceEquals((IByteOrigin?)Excerpt ?? Selection, part))
             return;
 
         var selected = (CurrentDocument as IByteRangeNavigable)?.SelectedByteRange ?? ByteRange.At(0);
-        var reveal = new ByteRange(excerpt.Range.Offset + selected.Offset, selected.Length);
+        var reveal = part switch
+        {
+            ExcerptByteOrigin excerpt => new ByteRange(excerpt.Range.Offset + selected.Offset, selected.Length),
+            SelectionByteOrigin selection => selection.FileRangeOf(selected),
+            _ => ByteRange.At(0),
+        };
         FileTypeDetector.FileKind? view = currentKind == FileTypeDetector.FileKind.Unknown ? null : currentKind;
 
         await OpenOriginAsync(new FileByteOrigin(path), addToRecents: true, view);
@@ -1112,7 +1403,24 @@ public sealed class MainWindowViewModel : ObservableObject
         string reason;
         try
         {
-            isPlausible = FileTypeDetector.IsPlausibleFor(kind, origin, out reason);
+            // A selection is lines from all over a file laid end to end, which is never one JSON
+            // document - and the JSON checks and view read whole values that would run across its
+            // seams, so it is turned down before either looks.
+            if (kind == FileTypeDetector.FileKind.Json && origin is SelectionByteOrigin)
+            {
+                isPlausible = false;
+                reason = "A selection of lines is not one JSON document. The NDJSON or Raw view shows it.";
+            }
+            else if (origin is SelectionByteOrigin { AvailableLength: 0 })
+            {
+                // A followed filter that selects nothing for now: an empty view, not a refusal.
+                isPlausible = true;
+                reason = "";
+            }
+            else
+            {
+                isPlausible = FileTypeDetector.IsPlausibleFor(kind, origin, out reason);
+            }
         }
         catch (Exception ex)
         {
@@ -1286,7 +1594,12 @@ public sealed class MainWindowViewModel : ObservableObject
 
         this.ownedOrigins.Clear();
         this.ownedOrigins.AddRange(origins);
+
+        // A reload adopts the selection it made; anything else ends the following.
+        if (this.filterWatch is not null && !(origins.Length == 1 && ReferenceEquals(origins[0], this.followedSelection)))
+            StopFollowingFilter();
         OnPropertyChanged(nameof(Excerpt));
+        OnPropertyChanged(nameof(Selection));
         OnPropertyChanged(nameof(IsExcerpt));
         OnPropertyChanged(nameof(ExcerptLabel));
         OnPropertyChanged(nameof(ExcerptDescription));

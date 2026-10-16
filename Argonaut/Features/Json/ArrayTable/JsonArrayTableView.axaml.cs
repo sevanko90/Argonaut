@@ -1,40 +1,26 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using Argonaut.Ui.Notifications;
+using Argonaut.Ui.Rows;
 using Argonaut.Ui.TableGrid;
-using Argonaut.Ui.ViewModels;
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Controls.Primitives;
-using Avalonia.Controls.Templates;
-using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
-using Avalonia.Layout;
-using Avalonia.Markup.Xaml.MarkupExtensions;
-using Avalonia.Media;
-using Avalonia.VisualTree;
-
 
 namespace Argonaut.Features.Json.ArrayTable;
 
 /// <summary>
-/// The array-table grid. Two jobs: keep the TableView's columns in step with the view model's
-/// <see cref="JsonArrayTableViewModel.Structure"/> (which a re-shape from the toolbar replaces),
-/// and dispose the document on detach as the idempotent safety net the shell doesn't drive
-/// (window close).
+/// The array-table grid. Three jobs: hand the surface the view model's rows, its
+/// <see cref="JsonArrayTableViewModel.Structure"/> and its route headers (which a re-shape from
+/// the toolbar or a header click replaces), turn the surface's clicks into what they open - a cell
+/// into the pane beside the grid, a header's link into its columns opened or collapsed - and
+/// dispose the document on detach as the idempotent safety net the shell doesn't drive (window
+/// close).
 ///
-/// The headers are built here too: a column's header is its route spelled out as pieces, and the
-/// pieces naming a container are links that open or collapse it. The click hands the work to
-/// <see cref="UiDeferral.AfterCurrentInput"/> rather than doing it inline - it replaces
-/// TableView.Columns, and the button that raised it lives inside one of those very columns'
-/// headers (see CLAUDE.md on re-entrant input paths).
-///
-/// The sticky header, its horizontal-scroll tracking and the column resizer all belong to
-/// TableView now; what used to be mirrored by hand here is gone.
-///
-/// No column scroll-into-view counterpart, because that exists for search reveals and this
-/// document has no search navigator in v1.
+/// The grid itself - header, cells, selection, resizing, the clickable cues - is the surface's;
+/// its scrollbars are driven by <see cref="RowScrollBars"/>.
 /// </summary>
 public partial class JsonArrayTableView : UserControl
 {
@@ -43,20 +29,26 @@ public partial class JsonArrayTableView : UserControl
     private const double DefaultDetailWidth = 380;
 
     /// <summary>What a click on a cell does, said in the cell's own tooltip. Nothing else in a
-    /// grid of values says the cells are clickable at all, so the grid's cues are this, the hover
-    /// mark and tint TableGridColumns and the styles draw, and nothing more.</summary>
+    /// grid of values says the cells are clickable at all, so the grid's cues are this and the
+    /// hover tint and mark the surface draws, and nothing more.</summary>
     private const string CellClickHint = "Click to open this cell in the detail pane";
 
-    private readonly TableGridColumns columns;
+    private const string OpensTip = "Click to expand this into its own columns";
+    private const string CollapsesTip = "Click to collapse these columns back into one";
+
+    private readonly RowScrollBars scrollBars;
     private JsonArrayTableViewModel? subscribedViewModel;
+    private IReadOnlyList<JsonArrayColumnHeader>? shownHeaders;
     private double detailWidth = DefaultDetailWidth;
 
     public JsonArrayTableView()
     {
         InitializeComponent();
 
-        this.columns = new TableGridColumns(Table);
-        Table.AddHandler(PointerPressedEvent, OnTablePointerPressed, RoutingStrategies.Tunnel);
+        this.scrollBars = new RowScrollBars(Surface, VerticalScrollBar, PanScrollBar);
+        Surface.CellClickHint = CellClickHint;
+        Surface.CellClicked += OnCellClicked;
+        Surface.HeaderLinkClicked += OnHeaderLinkClicked;
         DataContextChanged += OnDataContextChanged;
         DetachedFromVisualTree += OnDetachedFromVisualTree;
     }
@@ -67,39 +59,36 @@ public partial class JsonArrayTableView : UserControl
             this.subscribedViewModel.PropertyChanged -= OnViewModelPropertyChanged;
 
         this.subscribedViewModel = DataContext as JsonArrayTableViewModel;
+        Surface.SelectedIndex = -1;
+        this.scrollBars.ResetPan();
         if (this.subscribedViewModel is null)
+        {
+            ShowNothing();
             return;
+        }
 
         this.subscribedViewModel.PropertyChanged += OnViewModelPropertyChanged;
-        RebuildColumns(this.subscribedViewModel);
+        ShowDocument(this.subscribedViewModel);
         ShowDetail(this.subscribedViewModel.HasCellDetail);
     }
 
+    private void OnCellClicked(object? sender, TableCellPosition cell) => this.subscribedViewModel?.ShowCell(cell.Row, cell.Column);
+
     /// <summary>
-    /// Which cell was clicked. The cell control carries its own column, which is the reliable
-    /// answer; a click that lands on the row instead - an empty cell has no text to hit - falls
-    /// back to measuring the pointer against the columns' widths, so a missing property is still
-    /// a cell the reader can ask about.
+    /// A link piece of a header: the last piece is the column's own value, so it opens what is
+    /// inside it; every piece before it is a container already open around this column, so it
+    /// folds that container - and these columns - back up. Inline rather than deferred: the
+    /// surface has finished with the click before raising it, and there is no control under the
+    /// pointer for the re-shape to pull out from under it.
     /// </summary>
-    private void OnTablePointerPressed(object? sender, PointerPressedEventArgs e)
+    private void OnHeaderLinkClicked(object? sender, TableHeaderLink link)
     {
-        if (this.subscribedViewModel is not { } vm || e.ClickCount != 1)
+        if (this.subscribedViewModel is not { } vm || this.shownHeaders is not { } headers || link.Column >= headers.Count)
             return;
 
-        if (e.Source is not Visual source
-            || (source as TableViewRow ?? source.FindAncestorOfType<TableViewRow>()) is not { } row)
-            return;
-
-        int rowIndex = Table.IndexFromContainer(row);
-        if (rowIndex < 0)
-            return;
-
-        int column = (source as TableViewCell ?? source.FindAncestorOfType<TableViewCell>()) is { Column: { } cell }
-            ? this.columns.LogicalColumnIndex(cell)
-            : this.columns.LogicalColumnAt(e.GetPosition(row).X);
-
-        if (column >= 0)
-            vm.ShowCell(rowIndex, column);
+        var segments = headers[link.Column].Segments;
+        if (link.Piece < segments.Count && segments[link.Piece].Key is { } key)
+            vm.ToggleColumn(key);
     }
 
     private void OnCloseDetail(object? sender, RoutedEventArgs e) => this.subscribedViewModel?.CloseCellDetail();
@@ -136,8 +125,8 @@ public partial class JsonArrayTableView : UserControl
     }
 
     /// <summary>
-    /// The view model publishes a whole new <see cref="TableStructure"/> on load and on every
-    /// re-shape, so the columns are rebuilt from it rather than patched - the same "a new
+    /// The view model publishes a whole new <see cref="TableStructure"/> and header list on load
+    /// and on every re-shape, so the surface is handed both rather than patched - the same "a new
     /// structure replaces the old one" contract the row collection follows.
     /// </summary>
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -145,91 +134,75 @@ public partial class JsonArrayTableView : UserControl
         if (sender is not JsonArrayTableViewModel vm)
             return;
 
-        if (e.PropertyName is null or nameof(JsonArrayTableViewModel.Structure))
-            RebuildColumns(vm);
+        if (e.PropertyName is null or nameof(JsonArrayTableViewModel.Structure) or nameof(JsonArrayTableViewModel.Rows))
+            ShowDocument(vm);
 
         if (e.PropertyName is null or nameof(JsonArrayTableViewModel.HasCellDetail))
             ShowDetail(vm.HasCellDetail);
-
     }
 
-    private void RebuildColumns(JsonArrayTableViewModel vm)
+    private void ShowDocument(JsonArrayTableViewModel vm)
     {
-        // Structure throws until LoadAsync has published one; the first PropertyChanged for it
-        // is what says the grid has a shape at all.
+        // Rows and Structure throw until LoadAsync has published them.
         if (vm.ColumnCount == 0)
             return;
 
-        // The row collection is the fit source: a double-click on a resizer measures the rows it
-        // has already realized.
-        this.columns.Rebuild(vm.Structure, vm.Rows, highlightTerm: null, vm.Headers, HeaderTemplate(vm), CellClickHint);
+        Surface.Rows = vm.Rows;
+        Surface.FitSource = vm.Rows;
+        Surface.Structure = vm.Structure;
+
+        // A new header list is new columns - even at the same count and widths, which is where
+        // expanding a column can land - so it is only handed over when the view model replaced
+        // it: handing over a fresh copy of the same headers would throw away every width the
+        // user set.
+        if (!ReferenceEquals(vm.Headers, this.shownHeaders))
+        {
+            this.shownHeaders = vm.Headers;
+            Surface.ColumnHeaders = SurfaceHeaders(vm.Headers);
+        }
+
+        this.scrollBars.Refresh();
+    }
+
+    private void ShowNothing()
+    {
+        Surface.Rows = null;
+        Surface.Structure = null;
+        Surface.ColumnHeaders = null;
+        this.shownHeaders = null;
     }
 
     /// <summary>
     /// A header as its route's pieces: plain text for anything with nothing inside it, a link for
-    /// each container - the last piece opening one, the pieces before it collapsing back to it.
-    /// The link styling is the affordance; each link's own tooltip is what says which of the two
-    /// clicking it does, since accent-and-underline alone cannot tell open from collapse.
-    /// The whole route stays on the panel, so hovering the plain pieces still gives the path.
+    /// each container. Each link's tooltip is what says which of the two clicking it does, since
+    /// the link styling alone cannot tell open from collapse; the whole route is the tip over the
+    /// plain pieces.
     /// </summary>
-    private static IDataTemplate HeaderTemplate(JsonArrayTableViewModel vm)
-        => new FuncDataTemplate<JsonArrayColumnHeader>((header, _) =>
+    private static IReadOnlyList<TableColumnHeader> SurfaceHeaders(IReadOnlyList<JsonArrayColumnHeader> headers)
+    {
+        var shown = new TableColumnHeader[headers.Count];
+        for (int c = 0; c < shown.Length; c++)
         {
-            var pieces = new StackPanel { Orientation = Orientation.Horizontal };
-            pieces.SetValue(ToolTip.TipProperty, header.Display);
-
-            for (int i = 0; i < header.Segments.Count; i++)
+            var segments = headers[c].Segments;
+            var pieces = new TableHeaderPiece[segments.Count];
+            for (int i = 0; i < pieces.Length; i++)
             {
-                var segment = header.Segments[i];
-
-                // The last piece is this column's own value, so its link opens what is inside it;
-                // every piece before it is a container already open around this column, so its
-                // link folds that container - and these columns - back up.
-                pieces.Children.Add(segment.Key is { } key
-                    ? Link(segment.Text, key, vm, i == header.Segments.Count - 1)
-                    : Plain(segment.Text));
+                string? tip = segments[i].Key is null ? null : i == segments.Count - 1 ? OpensTip : CollapsesTip;
+                pieces[i] = new TableHeaderPiece(segments[i].Text, tip);
             }
 
-            return pieces;
-        }, supportsRecycling: false);
+            shown[c] = new TableColumnHeader(pieces, headers[c].Display);
+        }
 
-    private static Control Link(string text, string key, JsonArrayTableViewModel vm, bool opens)
-    {
-        // The link's own text carries the class the accent-and-underline styling selects on.
-        // A descendant selector would reach further than it looks: a tooltip's content is
-        // parented under the control it belongs to, so "Button.columnLink TextBlock" styled the
-        // tip that explains the link as though it were another link.
-        var label = Plain(text);
-        label.Classes.Add("columnLinkText");
-
-        var link = new Button
-        {
-            Content = label,
-            Classes = { "columnLink" },
-            Cursor = new Cursor(StandardCursorType.Hand),
-        };
-
-        link.SetValue(ToolTip.TipProperty, opens
-            ? "Click to expand this into its own columns"
-            : "Click to collapse these columns back into one");
-
-        // Deferred: this replaces the columns collection the clicked button is sitting inside.
-        link.Click += (_, _) => UiDeferral.AfterCurrentInput(() => vm.ToggleColumn(key));
-        return link;
+        return shown;
     }
 
-    private static TextBlock Plain(string text)
-    {
-        var block = new TextBlock { Text = text, FontWeight = FontWeight.SemiBold };
-        block.Bind(TextBlock.FontFamilyProperty, new DynamicResourceExtension("AppContentFontFamily"));
-        return block;
-    }
-
-    private void OnDetachedFromVisualTree(object? sender, Avalonia.VisualTreeAttachmentEventArgs e)
+    private void OnDetachedFromVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
     {
         DataContextChanged -= OnDataContextChanged;
         DetachedFromVisualTree -= OnDetachedFromVisualTree;
-        Table.RemoveHandler(PointerPressedEvent, OnTablePointerPressed);
+        Surface.CellClicked -= OnCellClicked;
+        Surface.HeaderLinkClicked -= OnHeaderLinkClicked;
 
         if (this.subscribedViewModel is not null)
         {
@@ -237,11 +210,11 @@ public partial class JsonArrayTableView : UserControl
             this.subscribedViewModel = null;
         }
 
-        // Columns first: their cell bindings are the last things reading the row collection.
-        this.columns.Dispose();
+        // The surface is the last thing reading the row collection.
+        ShowNothing();
+        this.scrollBars.Dispose();
 
-        // Disposed synchronously here (before the content swap's trailing ItemsSource walk):
-        // JsonArrayRowCollection reports empty once disposed, so that walk reads nothing.
+        // Disposed synchronously here: JsonArrayRowCollection reports empty once disposed.
         if (DataContext is IDisposable d)
             d.Dispose();
     }

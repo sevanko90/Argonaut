@@ -177,45 +177,34 @@ them). Keep this in sync when the ownership chain changes.
   subscriber — the same view-to-shell decoupling as `RawJumpService`) and published like a diff:
   directly, with `FileKind.Unknown`, never via `DocumentViewCatalog`. It reuses the
   shared grid types (`TableStructure`, `TableCell`, `TableRow`, in `Ui/TableGrid`) plus its own
-  `JsonArrayRowCollection`, and renders through the same grid `CsvView` does: Avalonia 12.1's
-  `TableView`. It derives from `ListBox`, so the lazily-realized row collections virtualize
-  exactly as the hand-rolled grid did (`TableGridVirtualizationTests`), and it owns the sticky
-  header, its horizontal-scroll tracking and the column resizer that both views used to build by
-  hand. Columns are data, not markup, so `TableGridColumns` — shared by both grids — builds them
-  in code-behind from the view model's `TableStructure`: one `TableViewColumn` per column, each
-  binding its cells by index (`Cells[i].Text`), plus the find-term binding `CsvView` needs to
-  highlight matches in cells and headers. A re-shape (a different column count or different
-  discovered widths) rebuilds them; a pure relabelling — CSV's "first row is header" tickbox —
-  only swaps the headers, so widths the user set survive it.
-  Drag widths are left un-policed: `TableView` has no min/max of its own and its `ActualWidth` is
-  read-only, so any bound could only be applied after the fact — the column springs back out from
-  under the pointer, which reads worse than the width it was preventing. What `TableGridColumns`
-  does add is fit-to-content: double-clicking a resizer widths the column to the longest text its
-  already-realized rows hold (`IColumnFitSource`, implemented by `JsonArrayRowCollection` over its
-  LRU cache — never a file scan, since the true widest value in a multi-GB array is a full walk
-  away). That width write must be deferred through `UiDeferral`: writing `TableViewColumn.Width`
-  inline, from inside the pointer event the resizer is still handling, throws `Cannot call Measure
-  using a size with NaN values` out of the layout pass.
+  `JsonArrayRowCollection`, and renders through the same grid `CsvView` does: `TableSurface`, a
+  `RowSurface` that draws itself — a pinned header, an optional pinned line-number gutter, and
+  only the rows and columns on screen, with no control per cell. Rows are a fixed height and
+  their count is known, so the rows on screen are arithmetic on the scroll offset; columns are
+  placed by a `TableColumnLayout`, so the columns on screen are a binary search on the pan. The
+  surface asks the row collection only for the rows it draws, and holds a screen's worth of
+  laid-out cell text, pruned as it scrolls.
+  Columns are data, not markup, so each view hands the surface its view model's
+  `TableStructure`. The same columns relabelled — CSV's "first row is header" tickbox — keep
+  every width, including the ones the user set; a structure of a different shape starts again
+  from the discovered widths. The array table also hands over its route headers
+  (`TableColumnHeader`: pieces, some of them links), and a new header list is new columns even at
+  the same count and widths, which is where expanding a column can land. A header's right edge
+  drags to resize its column, and a double-click there fits it to the longest text its
+  already-realized rows hold (`IColumnFitSource`, implemented by both row collections over their
+  caches — never a file scan, since the true widest value in a multi-GB array is a full walk
+  away). The array table's cells and header links are clickable: the surface raises
+  `CellClicked` and `HeaderLinkClicked` after it has finished with the click, so a handler may
+  re-shape the grid inline, and a grid given a `CellClickHint` teaches the gesture under the
+  pointer — a tint, a hand, an "open" mark drawn over the cell's right edge, and the hint in the
+  tooltip — none of which costs the column any width.
   Seed widths come from the text a cell will actually render, not the raw token: a container's own
   token is one byte (the brace) while its cell shows `{ 6 members }`, which is why every nested
-  column used to open at the minimum width. Turning that count into pixels is
-  `CellTextMetrics`, and both its terms are measured rather than chosen: the per-character advance
-  from the resolved content typeface at the resolved size (`FormattedText` over a sample — it is a
-  property of whichever face the platform picked out of `AppContentFontFamily`, not a number this
-  code gets to pick), and the cell inset from the first realized cell's padding, which is the only
-  place it is knowable (the cell theme's padding is a dynamic resource, and an unattached cell
-  never applies its theme). `TableGridColumns` reports that inset after the first layout following
-  a rebuild and re-applies the widths it seeded without it. Hard-coding either term caused the same
-  trimmed-text bug twice, so a cell template must not spend width the metrics do not know about — a
-  horizontal margin on the cell's TextBlock trims text the column was widthed to fit.
-  `CellTextMetrics.Current` is a settable seam for tests with no
-  Avalonia platform, where the fallback is one em per character: no face exceeds its em, so the
-  estimate errs wide rather than trimming. Because widths are derived rather than stored,
-  `TableColumn` keeps the character count and `TableCell` carries only text — a realized row holds no
-  geometry, so nothing goes stale when a column is resized or the content font is swapped. The
-  status bar's font toggle is wired through: `TableGridColumns` watches the two font resources,
-  re-measures the metrics and re-applies the discovered width to every column the user has not
-  sized themselves. Columns come from the sampled
+  column used to open at the minimum width. `TableStructure` keeps only a character count per
+  column, and the surface turns it into pixels with the widest advance of the font it is drawing
+  with, so a swap of the content font from the status bar re-widths every column the user has not
+  sized; `TableCell` carries only text, so a realized row holds no geometry and nothing goes stale
+  when a column is resized or the font changes. Columns come from the sampled
   elements: property names for an array of objects, a single `value` column otherwise — and the
   toolbar's reshape-into-N-columns picker is offered *only* in the second case, since an object
   array is already columned by its own data. Back reloads the origin as

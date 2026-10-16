@@ -3,6 +3,9 @@
 Findings from profiling a 6.8 MB Keepa result (`products`: 1422 elements, 97 discovered columns),
 reported as stuttering when scrolled. 2026-09-08.
 
+> Superseded 2026-10-16: the table now draws on `TableSurface`, which realizes no control per
+> cell, so `TableView`, `TableGridColumns` and the hover-mark adorner below are gone.
+
 ## The data layer is not the problem
 
 Measured against the real file, through `JsonArrayTableViewModel` + `JsonArrayRowCollection`:

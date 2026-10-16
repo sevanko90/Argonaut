@@ -144,6 +144,40 @@ Searches run against the underlying file, not the rendered display. This means t
 
 For the JSON Diff view, searches run across both files but the next/previous options move to the next or previous relevant row, not the specific search match. This is by design and keeps the next/previous behaviour intuitive. 
 
+### Command line
+
+    Argonaut [FILE [FILE2]] [--lines RANGE | --bytes RANGE | --lines --filter FILE | --bytes --filter FILE] [--view VIEW]
+
+Give two files to compare them, when both are JSON.
+
+#### Opening part of a file
+`--lines` and `--bytes` open just part of a file as a document of its own. Memory and indexing time follow the size of the part, not the file, so you can look at a slice of a multi-GB file straight away.
+
+- `--lines RANGE` opens those lines. Lines are numbered from 1. RANGE is `A-B`, `A-` (to the end), `A+COUNT`, or a single line `A`, and numbers can use `k` or `m`: `1m-2m`, `2.5m+500k`.
+- `--bytes RANGE` opens those bytes. Use it for files whose lines are too long to pick by line, such as minified JSON. Bytes count from 0 and the last byte is included, so `0-499` is the first 500. RANGE is `A-B`, `A-` or `A+COUNT`, and numbers can use `k`, `m` or `g` (thousands, millions, billions) or be hex: `0x1F400`. If the start lands inside a UTF-8 character, it moves back to where that character starts.
+
+A pill next to the file name in the title bar shows the range. From it you can switch between the file's own line numbers and numbering from 1, or open the whole file.
+
+#### Filtering lines or bytes
+Use `--filter FILE` with `--lines` or `--bytes`, in place of a range. Every line or byte range listed in FILE opens as one read-only view, in file order. Entries are ranges written as above, separated by commas or newlines, and `#` starts a comment. The view updates when FILE changes, so you can edit the list and watch it follow.
+
+    # picks.txt
+    1-100
+    5000+20, 1m+10
+
+#### Choosing the view
+`--view VIEW` opens the file in `json`, `ndjson`, `csv`, `tsv` or `raw` instead of the detected view.
+
+#### Examples
+
+    Argonaut big.ndjson --lines 1m-2m
+    Argonaut export.csv --lines 500k+1000 --view raw
+    Argonaut minified.json --bytes 1.5g+100m
+    Argonaut big.ndjson --lines --filter picks.txt
+    Argonaut before.json after.json
+
+`--help` (or `-h`, and `/?` on Windows) prints this reference. The About box has it too, under "Command-line options".
+
 ## Tech stack
 
 Argonaut is a .NET application built on [Avalonia](https://avaloniaui.net/), a cross-platform XAML-based UI framework. This gives it a single C#/XAML codebase that runs natively on Windows, macOS, and Linux.

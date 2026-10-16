@@ -212,7 +212,7 @@ public sealed class JsonTreePathsTests
     /// open for almost the whole document, and every seek into it rebuilds it as an ancestor.
     /// </summary>
     [Fact]
-    public void ASeekIntoAMemberStillOpenReadsItsName()
+    public async Task ASeekIntoAMemberStillOpenReadsItsName()
     {
         var text = new StringBuilder("{\"type\":\"FeatureCollection\",\"features\":[\n");
         for (int i = 0; i < 400; i++)
@@ -236,7 +236,7 @@ public sealed class JsonTreePathsTests
         finally
         {
             growing.Seal();
-            index.IndexingTask.Wait();
+            await index.IndexingTask;
         }
     }
 }

@@ -144,8 +144,8 @@ public sealed class TableGridHoverMarkTests
 
             // The cell's content is the text block itself. A panel here would mean the mark is
             // back inside every cell, which is the regression this guards.
-            Assert.Empty(cell.GetVisualDescendants().OfType<Panel>()
-                .Where(p => p.GetVisualChildren().OfType<TextBlock>().Any()));
+            Assert.DoesNotContain(cell.GetVisualDescendants().OfType<Panel>(),
+                p => p.GetVisualChildren().OfType<TextBlock>().Any());
             Assert.NotEmpty(cell.GetVisualDescendants().OfType<TextBlock>());
         }, ClickHint);
     }

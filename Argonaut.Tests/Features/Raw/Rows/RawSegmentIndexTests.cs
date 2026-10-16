@@ -507,10 +507,10 @@ public class RawSegmentIndexTests
     }
 
     [Fact]
-    public void LineQueries_OnAnEmptySource()
+    public async Task LineQueries_OnAnEmptySource()
     {
         var index = RawSegmentIndex.StartIndexing(new MemoryByteSource([]), 8);
-        index.IndexingTask.GetAwaiter().GetResult();
+        await index.IndexingTask;
 
         Assert.Equal((0L, 0, 1), index.LineStartContaining(0));
         Assert.Equal((0L, false, 0, 1), index.LineEndContaining(0));
@@ -542,7 +542,7 @@ public class RawSegmentIndexTests
     }
 
     [Fact]
-    public void DetachAnchors_FromAStoppedScan_IsNull()
+    public async Task DetachAnchors_FromAStoppedScan_IsNull()
     {
         string path = Path.GetTempFileName();
         try
@@ -550,7 +550,7 @@ public class RawSegmentIndexTests
             File.WriteAllBytes(path, new byte[1_000_000]);
             using var file = new MMapFile(path);
             var index = RawSegmentIndex.StartIndexing(file, 80, cancellationToken: new CancellationToken(canceled: true));
-            try { index.IndexingTask.GetAwaiter().GetResult(); } catch (OperationCanceledException) { }
+            try { await index.IndexingTask; } catch (OperationCanceledException) { }
 
             Assert.Null(index.DetachAnchors());
         }
@@ -573,11 +573,11 @@ public class RawSegmentIndexTests
     }
 
     [Fact]
-    public void TheScan_HintsTheBytesAheadOfIt()
+    public async Task TheScan_HintsTheBytesAheadOfIt()
     {
         var source = new PrefetchRecordingSource(System.Text.Encoding.UTF8.GetBytes(string.Concat(Enumerable.Repeat("a row\n", 1000))));
         var index = RawSegmentIndex.StartIndexing(source, 160);
-        index.IndexingTask.GetAwaiter().GetResult();
+        await index.IndexingTask;
 
         Assert.Equal(0, source.Hints[0].Offset);
     }

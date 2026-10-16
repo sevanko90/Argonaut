@@ -200,21 +200,6 @@ public sealed class JsonByteRangeNavigationTests : IDisposable
         });
     }
 
-    /// <summary>A document whose bytes arrive as <see cref="GrowingByteSource"/> releases them.</summary>
-    private sealed class GrowingOrigin(GrowingByteSource bytes) : IByteOrigin
-    {
-        private readonly MemoryByteOrigin kept = new([], "growing");
-
-        public string DisplayName => "growing";
-        public string? Path => null;
-        public long AvailableLength => bytes.AvailableLength;
-        public bool LengthSettled => bytes.LengthSettled;
-        public KeptIndexes KeptIndexes => kept.KeptIndexes;
-        public IByteSource Open() => bytes;
-        public IByteSource OpenRange(long offset, long length) => throw new NotSupportedException();
-        public void Dispose() => kept.Dispose();
-    }
-
     /// <summary>
     /// A reveal past what the index covers waits for it, and until then there is nothing for a
     /// view to show - a view attached meanwhile (a switch back from the text view lays its view
@@ -231,7 +216,7 @@ public sealed class JsonByteRangeNavigationTests : IDisposable
         var vm = new JsonViewModel(new JsonViewSettings(), new SchemaBindings(), TestSchemas.Catalog());
         try
         {
-            await vm.LoadAsync(new GrowingOrigin(growing));
+            await vm.LoadAsync(new GrowingByteOrigin(growing));
             long target = Encoding.UTF8.GetString(json).IndexOf("{\"id\":1500,", StringComparison.Ordinal);
 
             vm.Reveal(target);

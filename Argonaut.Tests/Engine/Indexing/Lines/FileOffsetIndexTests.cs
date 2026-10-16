@@ -380,11 +380,11 @@ public class FileOffsetIndexTests
     }
 
     [Fact]
-    public void TheScan_HintsTheBytesAheadOfIt()
+    public async Task TheScan_HintsTheBytesAheadOfIt()
     {
         var source = new PrefetchRecordingSource(System.Text.Encoding.UTF8.GetBytes(string.Concat(Enumerable.Repeat("{\"a\":1}\n", 1000))));
         var index = FileOffsetIndex.StartIndexing(source);
-        index.IndexingTask.GetAwaiter().GetResult();
+        await index.IndexingTask;
 
         Assert.Equal(0, source.Hints[0].Offset);
     }

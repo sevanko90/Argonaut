@@ -346,11 +346,11 @@ public class RawEditedRowIndexTests
     }
 
     [Fact]
-    public void ScanMustBeCompleteBeforeEditsAreLayeredOn()
+    public async Task ScanMustBeCompleteBeforeEditsAreLayeredOn()
     {
         var source = new MemoryByteSource(Bytes("alpha\n"));
         var index = RawSegmentIndex.StartIndexing(source, 80);
-        index.IndexingTask.GetAwaiter().GetResult();
+        await index.IndexingTask;
 
         // The guard itself: an index that has not finished is refused.
         var unfinished = RawSegmentIndex.StartIndexing(new MemoryByteSource(new byte[8 * 1024 * 1024]), 80);
@@ -360,7 +360,7 @@ public class RawEditedRowIndexTests
                 new RawEditedRowIndex(unfinished, new RawPieceTable(source)));
         }
 
-        unfinished.IndexingTask.GetAwaiter().GetResult();
+        await unfinished.IndexingTask;
     }
 
     [Theory]
@@ -690,7 +690,7 @@ public class RawEditedRowIndexTests
     }
 
     [Fact]
-    public void AnEditInA32MBLine_ScansOnlyWhatItInserted()
+    public async Task AnEditInA32MBLine_ScansOnlyWhatItInserted()
     {
         // Too big for the per-offset oracle, so spot checks: the row count, the rows around the
         // edit and at the line's end, and the first row after it.
@@ -706,7 +706,7 @@ public class RawEditedRowIndexTests
         Assert.Equal(1, document.Rows.HeldLines);
 
         var fresh = RawSegmentIndex.StartIndexing(new MemoryByteSource(document.Oracle.ToArray()), 80);
-        fresh.IndexingTask.GetAwaiter().GetResult();
+        await fresh.IndexingTask;
         Assert.Equal(fresh.RowCount, document.Rows.RowCount);
         foreach (int row in new[] { 0, 11, 12, 13, 5000, fresh.RowCount - 3, fresh.RowCount - 2, fresh.RowCount - 1 })
         {
@@ -1081,12 +1081,12 @@ public class RawEditedRowIndexTests
     }
 
     [Fact]
-    public void RewrapOntoAnUnfinishedScan_Throws()
+    public async Task RewrapOntoAnUnfinishedScan_Throws()
     {
         byte[] text = Bytes("alpha\nbeta\n");
         var source = new MemoryByteSource(text);
         var scan = RawSegmentIndex.StartIndexing(source, 80);
-        scan.IndexingTask.GetAwaiter().GetResult();
+        await scan.IndexingTask;
         var rows = new RawEditedRowIndex(scan, new RawPieceTable(source));
 
         // The same bytes, still arriving, so the scan over them cannot have finished.
@@ -1097,6 +1097,6 @@ public class RawEditedRowIndexTests
         Assert.Throws<ArgumentException>(() => rows.RewrapOnto(unfinished));
 
         arriving.Seal();
-        unfinished.IndexingTask.GetAwaiter().GetResult();
+        await unfinished.IndexingTask;
     }
 }

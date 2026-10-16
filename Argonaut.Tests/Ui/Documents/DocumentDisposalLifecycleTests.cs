@@ -55,12 +55,25 @@ public class DocumentDisposalLifecycleTests
         return WriteTemp(sb.ToString());
     }
 
-    private static string WriteLargeCsv()
+    private static string LargeCsv()
     {
         var sb = new StringBuilder("a,b,c\n");
         for (int i = 0; i < LargeElementCount; i++)
             sb.Append(i).Append(",value-").Append(i).Append(",z\n");
-        return WriteTemp(sb.ToString());
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// A CSV document whose indexing is still running for as long as the test needs: all its bytes
+    /// are there, but the source has not said they are all there is, so the scan reads them and
+    /// then waits for more until the document is torn down. A file would race - CSV's load does
+    /// enough after its first batch (the header, the column sample) that a fast machine finishes
+    /// indexing 500,000 short rows before it returns.
+    /// </summary>
+    private static GrowingByteOrigin StillIndexingCsv()
+    {
+        byte[] bytes = Encoding.UTF8.GetBytes(LargeCsv());
+        return new GrowingByteOrigin(new GrowingByteSource(bytes, initiallyAvailable: bytes.Length), "large.csv");
     }
 
     private static string WriteLargeNdJson()
@@ -186,30 +199,23 @@ public class DocumentDisposalLifecycleTests
     [Fact]
     public async Task Csv_CloseDuringIndexing_DoesNotHangOrCrash()
     {
-        string path = WriteLargeCsv();
-        try
-        {
-            var vm = new CsvViewModel();
-            await vm.LoadAsync(path, (byte)',');
-            Assert.False(vm.IndexingTask.IsCompleted);
+        var vm = new CsvViewModel();
+        await vm.LoadAsync(StillIndexingCsv(), (byte)',');
+        Assert.False(vm.IndexingTask.IsCompleted);
 
-            await DisposeWithTimeoutAsync(vm.Dispose);
-            Assert.True(vm.IndexingTask.IsCompleted);
-        }
-        finally
-        {
-            File.Delete(path);
-        }
+        await DisposeWithTimeoutAsync(vm.Dispose);
+        Assert.True(vm.IndexingTask.IsCompleted);
     }
 
     [Fact]
     public async Task Csv_CloseDuringIndexingWithActiveSearch_DoesNotHangOrCrash()
     {
-        string path = WriteLargeCsv();
+        // The search scans a file of the same rows, as find scans the document's input.
+        string path = WriteTemp(LargeCsv());
         try
         {
             var vm = new CsvViewModel();
-            await vm.LoadAsync(path, (byte)',');
+            await vm.LoadAsync(StillIndexingCsv(), (byte)',');
             Assert.False(vm.IndexingTask.IsCompleted);
 
             await DisposeDuringActiveSearchAsync(path, vm.Dispose);
@@ -449,7 +455,7 @@ public class DocumentDisposalLifecycleTests
             finally { File.Delete(path); }
         }
         {
-            string path = WriteLargeCsv();
+            string path = WriteTemp(LargeCsv());
             try
             {
                 var vm = new CsvViewModel();

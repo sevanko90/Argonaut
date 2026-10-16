@@ -84,7 +84,7 @@ public class LineRangeLocatorTests
     }
 
     [Fact]
-    public void Waits_for_a_growing_source_rather_than_stopping_at_what_has_arrived()
+    public async Task Waits_for_a_growing_source_rather_than_stopping_at_what_has_arrived()
     {
         byte[] bytes = Encoding.UTF8.GetBytes("a\nb\nc\nd\ne\n");
         var source = new GrowingByteSource(bytes, initiallyAvailable: 3);
@@ -95,7 +95,7 @@ public class LineRangeLocatorTests
         source.Reveal(4);
         source.Seal();
 
-        var located = locating.GetAwaiter().GetResult()!.Value;
+        var located = (await locating)!.Value;
         Assert.Equal(new ByteRange(2, 8), located.Range);
     }
 

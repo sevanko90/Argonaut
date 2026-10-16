@@ -797,7 +797,7 @@ public class JsonArrayTableViewModelTests
             // pane shows it cut into paragraphs - while copying still takes the value as it is.
             var detail = Assert.IsType<ValuePreview>(document.CellDetail);
             Assert.Equal(new string('x', 3000), detail.Text);
-            Assert.Contains('\n', detail.WrappableText);
+            Assert.Contains('\n', detail.WrappableText!);
             Assert.Equal(detail.Text, detail.WrappableText!.Replace("\n", ""));
             return Task.CompletedTask;
         });

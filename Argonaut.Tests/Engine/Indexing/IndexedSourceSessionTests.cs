@@ -256,10 +256,14 @@ public class IndexedSourceSessionTests
             var faulting = Task.Run(() => throw new InvalidOperationException("simulated scan fault"));
             try { await faulting; } catch { /* observed here only to know it has completed before registering */ }
 
+            // The event is process-wide, and the collection below finalizes every unobserved task
+            // in the process - including any another test left behind. Only this test's own fault
+            // is evidence against pruning.
             bool unobserved = false;
             void OnUnobserved(object? sender, UnobservedTaskExceptionEventArgs e)
             {
-                unobserved = true;
+                if (e.Exception.InnerExceptions.Any(ex => ex.Message == "simulated scan fault"))
+                    unobserved = true;
                 e.SetObserved();
             }
 

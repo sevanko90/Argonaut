@@ -282,7 +282,7 @@ public class RawEditControllerTests
     }
 
     [Fact]
-    public void Constructing_OverAnUnfinishedScan_Throws()
+    public async Task Constructing_OverAnUnfinishedScan_Throws()
     {
         // The append log is read lock-free because nothing already written ever changes;
         // layering a mutating coordinate system over one still being appended to would end that.
@@ -293,7 +293,7 @@ public class RawEditControllerTests
         Assert.Throws<ArgumentException>(() => new RawEditController(scan, source));
 
         source.Seal();
-        scan.IndexingTask.GetAwaiter().GetResult();
+        await scan.IndexingTask;
         Assert.True(RawEditController.CanEdit(scan));
     }
 
@@ -399,7 +399,7 @@ public class RawEditControllerTests
     }
 
     [Fact]
-    public void Rewrap_OverAnUnfinishedScan_Throws()
+    public async Task Rewrap_OverAnUnfinishedScan_Throws()
     {
         var (editor, _) = EditingWithSource("abc\n");
         var arriving = new GrowingByteSource(Encoding.UTF8.GetBytes("abc\n"));
@@ -408,6 +408,6 @@ public class RawEditControllerTests
         Assert.Throws<ArgumentException>(() => editor.Rewrap(unfinished));
 
         arriving.Seal();
-        unfinished.IndexingTask.GetAwaiter().GetResult();
+        await unfinished.IndexingTask;
     }
 }

@@ -1,0 +1,10 @@
+<Project>
+  <PropertyGroup>
+    <!-- A warning fails the build, so the count stays at zero rather than piling up unseen.
+         NuGet's "package has a known vulnerability" advisories are the exception: they arrive
+         from the feed, not from a change here, and must not break a build of unchanged code.
+         They still show as warnings to act on. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
+  </PropertyGroup>
+</Project>

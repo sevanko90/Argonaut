@@ -153,11 +153,11 @@ public sealed class JsonKeptStructureTests : IDisposable
     }
 
     [Fact]
-    public void Reopen_OverBytesOfAnotherLength_Throws()
+    public async Task Reopen_OverBytesOfAnotherLength_Throws()
     {
         byte[] json = Encoding.UTF8.GetBytes(Document(100));
         var index = JsonSparseIndex.StartIndexing(new MemoryByteSource(json));
-        index.IndexingTask.GetAwaiter().GetResult();
+        await index.IndexingTask;
         var kept = index.DetachStructure()!;
 
         Assert.Throws<ArgumentException>(() => JsonSparseIndex.Reopen(new MemoryByteSource(json[..^1]), kept));

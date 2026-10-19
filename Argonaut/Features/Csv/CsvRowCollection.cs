@@ -82,25 +82,22 @@ public sealed class CsvRowCollection : VirtualizingItemsSourceBase, IColumnFitSo
     }
 
     /// <summary>
-    /// The widest text this column has among the realized rows - what a fit-to-content
-    /// double-click on its resizer measures. Bounded to what has already been decoded on
-    /// purpose: the true widest field in a multi-gigabyte file is a full scan away, while the
-    /// cache is a free sample of exactly the rows the user has been looking at.
+    /// The text this column has among the realized rows - what a fit-to-content double-click on
+    /// its resizer measures. Bounded to what has already been decoded on purpose: the true
+    /// widest field in a multi-gigabyte file is a full scan away, while the cache is a free
+    /// sample of exactly the rows the user has been looking at.
     /// </summary>
-    public int LongestRealizedText(int columnIndex)
+    public IEnumerable<string> RealizedTexts(int columnIndex)
     {
         if (columnIndex < 0)
-            return 0;
+            yield break;
 
-        int longest = 0;
         foreach (var node in cacheOrder)
         {
             var cells = node.Row.Cells;
             if (columnIndex < cells.Count)
-                longest = Math.Max(longest, cells[columnIndex].Text.Length);
+                yield return cells[columnIndex].Text;
         }
-
-        return longest;
     }
 
     /// <summary>

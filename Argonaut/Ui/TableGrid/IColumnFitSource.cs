@@ -1,7 +1,9 @@
+using System.Collections.Generic;
+
 namespace Argonaut.Ui.TableGrid;
 
 /// <summary>
-/// A grid body that can say how wide a column's content actually is - answered from the rows it
+/// A grid body that can say what a column's content actually is - answered from the rows it
 /// has already realized, never by reading the file.
 ///
 /// That restriction is the whole design: fitting a column to its true widest value would mean a
@@ -12,8 +14,9 @@ namespace Argonaut.Ui.TableGrid;
 public interface IColumnFitSource
 {
     /// <summary>
-    /// The longest cell text, in characters, that <paramref name="columnIndex"/> has among the
-    /// currently cached rows - 0 when nothing is cached or the column has no cells.
+    /// The text of every cell <paramref name="columnIndex"/> has among the currently cached rows -
+    /// none when nothing is cached or the column has no cells. The grid measures them itself,
+    /// since in a proportional font the longest text is not necessarily the widest.
     /// </summary>
-    int LongestRealizedText(int columnIndex);
+    IEnumerable<string> RealizedTexts(int columnIndex);
 }

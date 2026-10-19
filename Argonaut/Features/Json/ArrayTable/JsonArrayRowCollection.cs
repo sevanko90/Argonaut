@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.Specialized;
 using Argonaut.Engine.Collections;
 using Argonaut.Engine.Indexing.Trees;
@@ -127,24 +128,21 @@ public sealed class JsonArrayRowCollection : VirtualizingItemsSourceBase, IColum
     }
 
     /// <summary>
-    /// The widest text this column has in the realized-row cache - what a fit-to-content
-    /// double-click on its resizer measures. Deliberately bounded to what has already been
-    /// decoded: the true widest value in a multi-gigabyte array is a full scan away, and the
-    /// cache is a free sample of exactly the rows the user has been looking at.
+    /// The text this column has in the realized-row cache - what a fit-to-content double-click
+    /// on its resizer measures. Deliberately bounded to what has already been decoded: the true
+    /// widest value in a multi-gigabyte array is a full scan away, and the cache is a free
+    /// sample of exactly the rows the user has been looking at.
     /// </summary>
-    public int LongestRealizedText(int columnIndex)
+    public IEnumerable<string> RealizedTexts(int columnIndex)
     {
         if (columnIndex < 0)
-            return 0;
+            yield break;
 
-        int longest = 0;
         foreach (var row in cache.Values)
         {
             if (columnIndex < row.Cells.Count)
-                longest = Math.Max(longest, row.Cells[columnIndex].Text.Length);
+                yield return row.Cells[columnIndex].Text;
         }
-
-        return longest;
     }
 
     private TableRow GetRow(int i)

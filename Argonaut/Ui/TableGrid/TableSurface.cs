@@ -447,8 +447,7 @@ public partial class TableSurface : RowSurface
     {
         DropCells();
         this.headers.Clear();
-        ResetWidestRowWidth();
-        RecordRowWidth(this.columns?.TotalWidth ?? 0);
+        ResetWidestRowWidth(this.columns?.TotalWidth ?? 0);
         InvalidateVisual();
     }
 
@@ -504,25 +503,45 @@ public partial class TableSurface : RowSurface
             return;
 
         this.gutterWidth = width;
-        ResetWidestRowWidth();
-        RecordRowWidth(this.columns?.TotalWidth ?? 0);
+        ResetWidestRowWidth(this.columns?.TotalWidth ?? 0);
         InvalidateVisual();
     }
 
     /// <summary>Fits <paramref name="column"/> to its widest value among the rows already read, and
-    /// its name - never a scan of the file for one double-click.</summary>
+    /// its name - never a scan of the file for one double-click. Each is measured as drawn, since
+    /// a character count widthed by the widest character overshoots in a proportional font; a
+    /// value too short to beat the widest so far is not laid out at all.</summary>
     private void FitColumn(int column)
     {
         if (this.columns is not { } layout || Structure is not { } structure)
             return;
 
-        int chars = Math.Max(FitSource?.LongestRealizedText(column) ?? 0, structure.Columns[column].Name.Length);
-        if (chars == 0)
+        var typeface = new Typeface(FontFamily);
+        string header = PiecedHeader(column) is { } pieced ? string.Concat(PieceTexts(pieced)) : structure.Columns[column].Name;
+        double widest = MeasuredWidth(header, new Typeface(FontFamily, weight: FontWeight.SemiBold));
+        if (FitSource is { } source)
+        {
+            foreach (string value in source.RealizedTexts(column))
+            {
+                // Twice the widest Latin character covers a wide CJK or emoji one.
+                if (value.Length * 2 * CharAdvance > widest)
+                    widest = Math.Max(widest, MeasuredWidth(value, typeface));
+            }
+        }
+
+        if (widest == 0)
             return;
 
-        layout.SetUserWidth(column, WidthForChars(chars), MinColumnWidth);
+        layout.SetUserWidth(column, Math.Ceiling(widest) + 2 * CellPaddingX, MinColumnWidth);
         OnColumnWidthsChanged();
     }
+
+    /// <summary>Test seam: the width fitting a column to <paramref name="value"/> alone gives it.</summary>
+    internal double MeasuredFitWidth(string value) => Math.Ceiling(MeasuredWidth(value, new Typeface(FontFamily))) + 2 * CellPaddingX;
+
+    /// <summary>How wide a value is drawn on one line, padding aside.</summary>
+    private double MeasuredWidth(string value, Typeface typeface)
+        => value.Length == 0 ? 0 : new TextLayout(ControlGlyphs.ForDisplay(value), typeface, FontSize, Brushes.Black).WidthIncludingTrailingWhitespace;
 
     // ---- drawing ------------------------------------------------------------------------
 

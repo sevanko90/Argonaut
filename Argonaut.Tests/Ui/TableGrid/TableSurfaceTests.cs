@@ -1,9 +1,11 @@
 using System.Collections;
 using System.Collections.Specialized;
 using Argonaut.Engine.Indexing.Lines;
+using Argonaut.Ui.Rows;
 using Argonaut.Ui.TableGrid;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Headless;
 using Avalonia.Input;
 using Avalonia.Threading;
@@ -50,8 +52,10 @@ public sealed class TableSurfaceTests
             CollectionChanged?.Invoke(this, new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Add, new object?[delta], start));
         }
 
-        /// <summary>The first column's values run to 30 characters among the rows read.</summary>
-        public int LongestRealizedText(int columnIndex) => columnIndex == 0 ? 30 : 6;
+        /// <summary>The first column's values run to 30 characters among the rows read - narrow
+        /// ones, beside a shorter run of wide ones that is the widest in a proportional font.</summary>
+        public IEnumerable<string> RealizedTexts(int columnIndex)
+            => columnIndex == 0 ? [new string('i', 30), new string('W', 24), "W"] : ["r0c1"];
 
         public IEnumerator GetEnumerator() => throw new InvalidOperationException("the grid must never walk its rows");
         public bool IsFixedSize => true;
@@ -94,6 +98,40 @@ public sealed class TableSurfaceTests
                 await PumpAsync();
                 window.UpdateLayout();
                 await test(surface, window, rows);
+                return true;
+            }
+            finally
+            {
+                window.Close();
+            }
+        }, CancellationToken.None);
+    }
+
+    /// <summary>A grid wider than its window, with the pan bar a view hosts it with.</summary>
+    private static Task RunWithPan(Func<TableSurface, Window, ScrollBar, Task> test)
+    {
+        var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(TableSurfaceTests).Assembly);
+        return session.Dispatch(async () =>
+        {
+            var rows = new Rows(1_000, 40);
+            var surface = new TableSurface { Rows = rows, FitSource = rows, Structure = Structure(40), WidestGutterLabel = "0000" };
+            var vertical = new ScrollBar { Orientation = Avalonia.Layout.Orientation.Vertical };
+            var pan = new ScrollBar { Orientation = Avalonia.Layout.Orientation.Horizontal };
+            var grid = new Grid { RowDefinitions = new RowDefinitions("*,Auto"), ColumnDefinitions = new ColumnDefinitions("*,Auto") };
+            Grid.SetColumn(vertical, 1);
+            Grid.SetRow(pan, 1);
+            grid.Children.Add(surface);
+            grid.Children.Add(vertical);
+            grid.Children.Add(pan);
+            var window = new Window { Width = 800, Height = 400, Content = grid };
+            using var bars = new RowScrollBars(surface, vertical, pan);
+            try
+            {
+                window.Show();
+                await PumpAsync();
+                window.UpdateLayout();
+                bars.Refresh();
+                await test(surface, window, pan);
                 return true;
             }
             finally
@@ -190,7 +228,46 @@ public sealed class TableSurfaceTests
         window.MouseUp(new Point(first, 10), MouseButton.Left);
         await PumpAsync();
 
-        Assert.Equal(surface.WidthForChars(30), columns.Width(0), 1);
+        // Whichever is widest as drawn: the 'i's here, where every glyph is as wide as the next;
+        // the 'W's in a proportional font.
+        double widest = Math.Max(surface.MeasuredFitWidth(new string('i', 30)), surface.MeasuredFitWidth(new string('W', 24)));
+        Assert.Equal(widest, columns.Width(0), 1);
+    });
+
+    /// <summary>A grid panned right stays where it is while a column is dragged or fitted, and
+    /// while new columns replace the old - the pan range is never emptied on the way, which once
+    /// dropped the view back to the left edge on the first move of every resize.</summary>
+    [Fact]
+    public Task Resizing_and_replacing_columns_keep_the_pan() => RunWithPan(async (surface, window, pan) =>
+    {
+        pan.Value = 300;
+        Assert.Equal(300, surface.PanOffset);
+
+        var columns = surface.Columns!;
+        int column = columns.ColumnAt(300 + 50);
+        double edge = surface.GutterWidth + columns.Right(column) - 300;
+        var widths = new List<double>();
+        surface.WidestRowWidthChanged += (_, _) => widths.Add(surface.WidestRowWidth);
+
+        window.MouseDown(new Point(edge, 10), MouseButton.Left);
+        window.MouseMove(new Point(edge + 25, 10));
+        window.MouseMove(new Point(edge + 60, 10));
+        window.MouseUp(new Point(edge + 60, 10), MouseButton.Left);
+        await PumpAsync();
+
+        Assert.Equal(300, pan.Value);
+        Assert.Equal(300, surface.PanOffset);
+        Assert.DoesNotContain(0, widths);
+
+        surface.ColumnHeaders = Enumerable.Range(0, columns.Count)
+            .Select(c => new TableColumnHeader([new TableHeaderPiece($"field{c}", "Open")], $"field{c}"))
+            .ToArray();
+        await PumpAsync();
+
+        Assert.NotSame(columns, surface.Columns);
+        Assert.Equal(300, pan.Value);
+        Assert.Equal(300, surface.PanOffset);
+        Assert.DoesNotContain(0, widths);
     });
 
     [Fact]

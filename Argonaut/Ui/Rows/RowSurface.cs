@@ -217,12 +217,15 @@ public abstract class RowSurface : Control
         NotifyWidestRowWidthChanged();
     }
 
-    protected void ResetWidestRowWidth()
+    /// <summary>Starts the high-water mark again from <paramref name="width"/> - in one step, so a
+    /// surface that knows its new width outright never shows the host an empty range on the way,
+    /// which would drop the pan back to the left edge.</summary>
+    protected void ResetWidestRowWidth(double width = 0)
     {
-        if (this.widestRowWidth == 0)
+        if (this.widestRowWidth == width)
             return;
 
-        this.widestRowWidth = 0;
+        this.widestRowWidth = width;
         NotifyWidestRowWidthChanged();
     }
 

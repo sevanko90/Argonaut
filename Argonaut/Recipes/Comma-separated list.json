@@ -1,0 +1,6 @@
+{
+  "kind": "template",
+  "description": "Joins lines with a comma. Reverse to split a comma-separated list into lines.",
+  "template": "{line}",
+  "separator": ", "
+}

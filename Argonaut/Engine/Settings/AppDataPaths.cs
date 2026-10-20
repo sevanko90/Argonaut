@@ -20,6 +20,14 @@ internal static class AppDataPaths
     /// </summary>
     public static string SchemasDirectory => Path.Combine(Root, "Schemas");
 
+    /// <summary>
+    /// Folder holding the user's own recipes (see
+    /// <see cref="Argonaut.Engine.Recipes.RecipeFolderStore"/>). Written to, unlike the schemas
+    /// folder, which the user fills by hand - so a Mac App Store build must check this resolves
+    /// inside its sandbox container (it is home-relative, and the sandbox moves home there).
+    /// </summary>
+    public static string RecipesDirectory => Path.Combine(Root, "Recipes");
+
     /// <summary>The diagnostic log a Debug build writes (see
     /// <see cref="Argonaut.Engine.Logging.FileDiagnosticLog"/>).</summary>
     public static string DebugLogFile => Path.Combine(Root, "debug.log");

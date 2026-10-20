@@ -1,0 +1,9 @@
+{
+  "kind": "template",
+  "description": "Quotes each line for a SQL IN (...) list. Reverse to get the values back.",
+  "template": "  '{line}'",
+  "escape": "sql",
+  "separator": ",\n",
+  "open": "(\n",
+  "close": "\n)"
+}

@@ -25,6 +25,8 @@
   <ItemGroup>
     <!-- Schemas the app ships with; JsonSchemaCatalog enumerates them from the output folder. -->
     <Content Include="Schemas\**\*.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Preset recipes; RecipeFolderStore enumerates them from the output folder. -->
+    <Content Include="Recipes\**\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

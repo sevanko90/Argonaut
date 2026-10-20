@@ -1,0 +1,6 @@
+{
+  "kind": "codec",
+  "description": "Escapes the text to sit inside a JSON string. Reverse to unescape.",
+  "codec": "jsonString",
+  "scope": "wholeText"
+}

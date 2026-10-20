@@ -1,0 +1,6 @@
+{
+  "kind": "codec",
+  "description": "Encodes the text as unpadded URL-safe base64. Reverse to decode.",
+  "codec": "base64Url",
+  "scope": "wholeText"
+}

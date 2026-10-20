@@ -1,0 +1,9 @@
+{
+  "kind": "template",
+  "description": "Makes each line a string in a JSON array. Reverse to get the strings back.",
+  "template": "  \"{line}\"",
+  "escape": "json",
+  "separator": ",\n",
+  "open": "[\n",
+  "close": "\n]"
+}

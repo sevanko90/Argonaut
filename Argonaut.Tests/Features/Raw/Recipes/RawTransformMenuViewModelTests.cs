@@ -63,10 +63,16 @@ public class RawTransformMenuViewModelTests
     }
 
     [Fact]
-    public async Task CanTransform_OnceTheDocumentCanBeEdited()
+    public async Task CanTransform_OnlyInEditMode()
     {
         using var vm = await LoadedAsync("a", recipes: null);
+        var menu = Menu(vm);
+        Assert.False(menu.CanTransform);
 
-        Assert.True(Menu(vm).CanTransform);
+        vm.SetEditing(true);
+        Assert.True(menu.CanTransform);
+
+        vm.SetEditing(false);
+        Assert.False(menu.CanTransform);
     }
 }

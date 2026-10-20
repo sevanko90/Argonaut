@@ -30,9 +30,10 @@ public sealed class RawTransformMenuViewModel : ObservableObject
         document.PropertyChanged += OnDocumentPropertyChanged;
     }
 
-    /// <summary>Whatever lets the document be saved lets it be transformed: an editable
-    /// document whose scan has finished, with no save or transform already reading it.</summary>
-    public bool CanTransform => this.document.CanSave;
+    /// <summary>Only in edit mode - a transform is an edit, and a document not being edited is
+    /// read-only to the user - and otherwise whatever lets the document be saved: a finished
+    /// scan, with no save or transform already reading it.</summary>
+    public bool CanTransform => this.document.IsEditing && this.document.CanSave;
 
     /// <summary>Encode or decode each line on its own rather than the document as one text.</summary>
     public bool EachLine
@@ -72,7 +73,7 @@ public sealed class RawTransformMenuViewModel : ObservableObject
 
     private void OnDocumentPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(RawViewModel.CanSave) or nameof(RawViewModel.CanEdit)
+        if (e.PropertyName is nameof(RawViewModel.IsEditing) or nameof(RawViewModel.CanSave) or nameof(RawViewModel.CanEdit)
             or nameof(RawViewModel.IsSaving) or nameof(RawViewModel.IsTransforming))
             OnPropertyChanged(nameof(CanTransform));
     }

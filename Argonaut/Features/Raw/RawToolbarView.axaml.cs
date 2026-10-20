@@ -3,6 +3,7 @@ using System.Threading.Tasks;
 using Argonaut.Engine.Transforms;
 using Argonaut.Features.Raw.Recipes;
 using Avalonia.Controls;
+using Avalonia.Interactivity;
 
 namespace Argonaut.Features.Raw;
 
@@ -21,20 +22,31 @@ public partial class RawToolbarView : UserControl
         InitializeComponent();
     }
 
-    /// <summary>
-    /// Builds the Transform menu afresh each time it opens: the encodings, then the saved recipes
-    /// (forward, with a submenu to run one in reverse), then the recipe dialog. Each item replaces
-    /// the whole document as one undoable edit.
-    /// </summary>
-    private void OnTransformMenuOpening(object? sender, EventArgs e)
-    {
-        if (sender is not MenuFlyout menu)
-            return;
+    /// <summary>The Transform menu last shown, for tests to look inside.</summary>
+    internal MenuFlyout? TransformMenu { get; private set; }
 
-        var items = menu.Items;
-        items.Clear();
+    /// <summary>
+    /// Builds the whole menu, then shows it - never filled in while opening, which left the real
+    /// app's popup measured empty: a sliver with nothing in it.
+    /// </summary>
+    private void OnTransformClick(object? sender, RoutedEventArgs e)
+    {
         if (DataContext is not RawToolbarViewModel { Transforms: { } transforms })
             return;
+
+        TransformMenu = BuildTransformMenu(transforms);
+        TransformMenu.ShowAt(TransformButton);
+    }
+
+    /// <summary>
+    /// The Transform menu: the encodings, then the saved recipes (forward, with a submenu to run
+    /// one in reverse), then the recipe dialog. Each item replaces the whole document as one
+    /// undoable edit.
+    /// </summary>
+    private MenuFlyout BuildTransformMenu(RawTransformMenuViewModel transforms)
+    {
+        var menu = new MenuFlyout { Placement = PlacementMode.BottomEdgeAlignedLeft };
+        var items = menu.Items;
 
         items.Add(CodecMenu("Encode", transforms, TransformDirection.Forward));
         items.Add(CodecMenu("Decode", transforms, TransformDirection.Reverse));
@@ -48,7 +60,7 @@ public partial class RawToolbarView : UserControl
         items.Add(eachLine);
 
         if (!transforms.HasRecipes)
-            return;
+            return menu;
 
         items.Add(new Separator());
         var recipes = transforms.ListRecipes();
@@ -64,6 +76,7 @@ public partial class RawToolbarView : UserControl
 
         items.Add(new Separator());
         items.Add(Item("Edit recipes…", () => EditRecipesAsync(transforms)));
+        return menu;
     }
 
     private static MenuItem CodecMenu(string header, RawTransformMenuViewModel transforms, TransformDirection direction)

@@ -122,7 +122,7 @@
         <Grid Grid.Row="4" ColumnDefinitions="*,Auto">
             <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
                 <TextBox Width="200"
-                         Watermark="Recipe name"
+                         PlaceholderText="Recipe name"
                          Text="{Binding SaveName, Mode=TwoWay}" />
                 <Button Content="Save recipe" Click="OnSave"
                         ToolTip.Tip="Save these settings under this name. A name already in the list is replaced." />

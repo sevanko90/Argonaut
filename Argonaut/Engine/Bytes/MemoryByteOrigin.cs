@@ -22,14 +22,19 @@ public sealed class MemoryByteOrigin : IByteOrigin
 {
     private readonly byte[] bytes;
 
-    public MemoryByteOrigin(byte[] bytes, string displayName)
+    /// <param name="startsEditable">See <see cref="IByteOrigin.StartsEditable"/>: true for a
+    /// paste or a new document, false for a download or a decoded value.</param>
+    public MemoryByteOrigin(byte[] bytes, string displayName, bool startsEditable = false)
     {
         ArgumentNullException.ThrowIfNull(bytes);
         ArgumentException.ThrowIfNullOrWhiteSpace(displayName);
 
         this.bytes = bytes;
         DisplayName = displayName;
+        StartsEditable = startsEditable;
     }
+
+    public bool StartsEditable { get; }
 
     public string DisplayName { get; }
 

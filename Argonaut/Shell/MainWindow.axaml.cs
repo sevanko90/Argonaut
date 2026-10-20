@@ -118,6 +118,7 @@ public partial class MainWindow : Window
 
         EmptyState.ChooseFileRequested += async (_, _) => await BrowseForFile();
         EmptyState.PasteRequested += async (_, _) => await viewModel.PasteAsync();
+        EmptyState.NewDocumentRequested += async (_, _) => await viewModel.NewDocumentAsync();
         EmptyState.SetPasteAvailable(viewModel.CanPaste);
         EmptyState.OpenRecentFileRequested += (_, path) => viewModel.OpenRecentFile(path);
         EmptyState.ClearRecentFilesRequested += (_, _) => viewModel.ClearRecentFiles();
@@ -405,6 +406,14 @@ public partial class MainWindow : Window
                 e.Handled = true;
             }
 
+            return;
+        }
+
+        // Always available: with a document open it asks first, as opening a file does.
+        if (e.Key == Key.N && cmdOrCtrl)
+        {
+            _ = viewModel.NewDocumentAsync();
+            e.Handled = true;
             return;
         }
 

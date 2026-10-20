@@ -941,6 +941,9 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
 
         StatusText = DocumentStatusLine.Compose(FilePath, $"{RowCount:N0} rows indexed so far");
         MonitorIndexing();
+
+        if (origin.StartsEditable)
+            _ = EnterEditingWhenIndexedAsync();
     }
 
     /// <summary>
@@ -1451,17 +1454,10 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         _ = RestoreAfterReopenAsync(caretOffset, wasEditing);
     }
 
-    /// <summary>
-    /// Puts the caret back where it was, then - if the save happened in edit mode - turns edit
-    /// mode back on once the fresh scan allows it. One sequence rather than two independent
-    /// continuations, so the caret is always placed before edit mode takes its position over.
-    /// </summary>
-    private async Task RestoreAfterReopenAsync(long caretOffset, bool resumeEditing)
+    /// <summary>Turns edit mode on once the scan allows it - what a document the user made rather
+    /// than opened (<see cref="IByteOrigin.StartsEditable"/>) and one saved while editing both want.</summary>
+    private async Task EnterEditingWhenIndexedAsync()
     {
-        await RevealRangeAsync(ByteRange.At(caretOffset), announceArrival: false);
-        if (!resumeEditing || IsDisposed)
-            return;
-
         var indexing = IndexingTask;
         try
         {
@@ -1474,6 +1470,20 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
 
         if (!IsDisposed && ReferenceEquals(indexing, IndexingTask) && CanEdit)
             SetEditing(true);
+    }
+
+    /// <summary>
+    /// Puts the caret back where it was, then - if the save happened in edit mode - turns edit
+    /// mode back on once the fresh scan allows it. One sequence rather than two independent
+    /// continuations, so the caret is always placed before edit mode takes its position over.
+    /// </summary>
+    private async Task RestoreAfterReopenAsync(long caretOffset, bool resumeEditing)
+    {
+        await RevealRangeAsync(ByteRange.At(caretOffset), announceArrival: false);
+        if (!resumeEditing || IsDisposed)
+            return;
+
+        await EnterEditingWhenIndexedAsync();
     }
 
     /// <summary>A save still copying, or a transform still reading, when the document closes is

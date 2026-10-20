@@ -66,6 +66,8 @@ public sealed class MainWindowViewModel : ObservableObject
     /// <summary>What a pasted document is called, since it has no file name.</summary>
     private const string PastedDocumentName = "Pasted text";
 
+    private const string NewDocumentName = "Untitled";
+
     /// <summary>
     /// Largest paste opened rather than declined. Not a clipboard limit - a clipboard will happily
     /// hold far more, and people do copy megabytes out of terminals and query grids. It is a
@@ -1268,8 +1270,12 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
-        await OpenBytesAsync(bytes, PastedDocumentName, "the clipboard contents");
+        await OpenBytesAsync(bytes, PastedDocumentName, "the clipboard contents", startsEditable: true);
     }
+
+    /// <summary>Opens an empty document in the raw view, ready to type or paste into.</summary>
+    public Task NewDocumentAsync() =>
+        OpenBytesAsync([], NewDocumentName, "a new document", startsEditable: true, view: FileTypeDetector.FileKind.Unidentified);
 
     /// <summary>
     /// Opens bytes that are not a file as the document - a paste, or a value a hint decoded - once
@@ -1277,7 +1283,11 @@ public sealed class MainWindowViewModel : ObservableObject
     /// </summary>
     /// <param name="description">What is being opened, for the questions asked first ("the
     /// clipboard contents").</param>
-    public async Task OpenBytesAsync(byte[] bytes, string displayName, string description)
+    /// <param name="startsEditable">The user made these bytes - a paste, a new document - so the
+    /// raw view opens them in edit mode (<see cref="IByteOrigin.StartsEditable"/>).</param>
+    /// <param name="view">The view to open in; detected from the bytes when null.</param>
+    public async Task OpenBytesAsync(byte[] bytes, string displayName, string description, bool startsEditable = false,
+        FileTypeDetector.FileKind? view = null)
     {
         if (RefusedWhileSaving())
             return;
@@ -1294,7 +1304,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 return;
         }
 
-        await OpenOriginAsync(new MemoryByteOrigin(bytes, displayName), addToRecents: false);
+        await OpenOriginAsync(new MemoryByteOrigin(bytes, displayName, startsEditable), addToRecents: false, view);
     }
 
     /// <summary>

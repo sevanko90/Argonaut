@@ -91,6 +91,9 @@
                     <Button x:Name="PasteButton" Content="Paste data" Classes="secondary"
                             Click="OnPaste"
                             ToolTip.Tip="Open the clipboard contents as a document" />
+                    <Button Content="New document" Classes="secondary"
+                            Click="OnNewDocument"
+                            ToolTip.Tip="Start an empty document to type or paste into (Ctrl+N or Cmd+N)" />
                 </StackPanel>
             </StackPanel>
         </Border>

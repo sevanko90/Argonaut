@@ -2,7 +2,10 @@ using System;
 using System.Threading.Tasks;
 using Argonaut.Engine.Transforms;
 using Argonaut.Features.Raw.Recipes;
+using Argonaut.Ui.Notifications;
+using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Interactivity;
 
 namespace Argonaut.Features.Raw;
@@ -91,14 +94,39 @@ public partial class RawToolbarView : UserControl
     private static MenuItem Item(string header, Func<Task> action)
     {
         var item = new MenuItem { Header = header };
-        item.Click += (_, _) => _ = action();
+        item.Click += async (_, _) =>
+        {
+            // Started from a click and not awaited by anyone, so a failure would otherwise vanish
+            // with the task - and the menu would look like it had done nothing.
+            try
+            {
+                await action();
+            }
+            catch (Exception ex)
+            {
+                ToastService.Show($"{header} failed: {ex.Message}");
+            }
+        };
         return item;
     }
 
     private async Task<bool> EditRecipesAsync(RawTransformMenuViewModel transforms)
     {
-        if (TopLevel.GetTopLevel(this) is not Window owner || transforms.CreateEditor() is not { } editor)
+        // The window this toolbar is in, or failing that the app's: by the time a menu item's
+        // click runs, the menu that held it may have gone.
+        var owner = TopLevel.GetTopLevel(this) as Window
+            ?? (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.MainWindow;
+        if (owner is null)
+        {
+            ToastService.Show("The recipe window could not be opened: no window to open it over.");
             return false;
+        }
+
+        if (transforms.CreateEditor() is not { } editor)
+        {
+            ToastService.Show("Recipes are not available for this document.");
+            return false;
+        }
 
         return await RecipeEditorDialog.ShowAsync(owner, editor) && await transforms.ApplyFromEditorAsync(editor);
     }

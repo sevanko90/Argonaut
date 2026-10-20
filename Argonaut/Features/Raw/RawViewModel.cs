@@ -495,10 +495,16 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         var cts = new CancellationTokenSource();
         this.transformCts = cts;
         IsTransforming = true;
+        bool unchanged;
         try
         {
-            this.transformRun = Task.Run(() => transform(document, output, cts.Token));
-            await this.transformRun;
+            var run = Task.Run(() =>
+            {
+                transform(document, output, cts.Token);
+                return Matches(document, output.Chunks);
+            });
+            this.transformRun = run;
+            unchanged = await run;
         }
         catch (TransformException ex)
         {
@@ -519,7 +525,44 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         if (IsDisposed || !ReferenceEquals(editor, this.editor))
             return false;
 
+        // Said rather than applied: an edit that changes nothing would only look like the menu
+        // had not worked, and leave an undo step that undoes nothing.
+        if (unchanged)
+        {
+            ToastService.Show("Nothing to change — the result is the same as the document.");
+            return false;
+        }
+
         return Report(editor.ReplaceAll(output.Chunks));
+    }
+
+    /// <summary>Whether <paramref name="chunks"/> hold exactly the bytes of
+    /// <paramref name="document"/>. On the transform's background thread, while nothing can edit.</summary>
+    private static bool Matches(IByteSource document, IReadOnlyList<FilledChunk> chunks)
+    {
+        long length = 0;
+        foreach (var chunk in chunks)
+            length += chunk.Length;
+
+        if (length != document.AvailableLength)
+            return false;
+
+        long offset = 0;
+        foreach (var chunk in chunks)
+        {
+            var expected = chunk.Span;
+            while (!expected.IsEmpty)
+            {
+                var run = document.GetContiguousSpan(offset, expected.Length);
+                if (run.IsEmpty || !run.SequenceEqual(expected[..run.Length]))
+                    return false;
+
+                offset += run.Length;
+                expected = expected[run.Length..];
+            }
+        }
+
+        return true;
     }
 
     private bool Report(RawEditOutcome? outcome)

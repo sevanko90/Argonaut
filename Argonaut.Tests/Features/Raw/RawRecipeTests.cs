@@ -101,4 +101,15 @@ public class RawRecipeTests
         vm.Undo();
         Assert.Equal("a\nb\n", DocumentText(vm));
     }
+
+    [Fact]
+    public async Task ATransformThatChangesNothing_LeavesNoUndoStep()
+    {
+        using var vm = await LoadedAsync("one line");
+
+        Assert.False(await vm.ApplyRecipeAsync(new Recipe { Separator = ", " }, TransformDirection.Forward));
+
+        Assert.False(vm.IsDirty);
+        Assert.False(vm.Undo());
+    }
 }

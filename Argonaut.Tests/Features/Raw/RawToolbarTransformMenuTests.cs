@@ -62,4 +62,87 @@ public sealed class RawToolbarTransformMenuTests
             window.Close();
         }, CancellationToken.None);
     }
+
+    private static async Task<(RawViewModel Vm, RawToolbarView Toolbar, Window Window)> ShownAsync(string content)
+    {
+        var store = new RecipeFolderStore(RecipeFolderStore.BundledDirectoryBesideApp,
+            Path.Combine(Path.GetTempPath(), "ArgonautTests", Guid.NewGuid().ToString("N")));
+        var vm = new RawViewModel(new RawViewSettings(), recipes: store);
+        await vm.LoadAsync(new MemoryByteOrigin(Encoding.UTF8.GetBytes(content), "Pasted text"));
+        await vm.IndexingTask;
+        vm.SetEditing(true);
+
+        var toolbar = new RawToolbarView { DataContext = vm.Toolbar };
+        var window = new Window { Content = toolbar };
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+        return (vm, toolbar, window);
+    }
+
+    private static MenuFlyout Open(RawToolbarView toolbar, Window window)
+    {
+        var button = toolbar.FindControl<Button>("TransformButton")!;
+        var centre = button.TranslatePoint(new Point(button.Bounds.Width / 2, button.Bounds.Height / 2), window)!.Value;
+        window.MouseDown(centre, Avalonia.Input.MouseButton.Left);
+        window.MouseUp(centre, Avalonia.Input.MouseButton.Left);
+        Dispatcher.UIThread.RunJobs();
+        return toolbar.TransformMenu!;
+    }
+
+    private static string DocumentText(RawViewModel vm)
+    {
+        var bytes = new byte[vm.Document!.AvailableLength];
+        vm.Document.CopyTo(0, bytes);
+        return Encoding.UTF8.GetString(bytes);
+    }
+
+    [Theory]
+    [InlineData("Comma-separated list", "a, b")]
+    [InlineData("SQL IN list", "(\n  'a',\n  'b'\n)")]
+    public Task EachPreset_FromTheMenu_TransformsTheDocument(string preset, string expected)
+    {
+        var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(RawToolbarTransformMenuTests).Assembly);
+        return session.Dispatch(async () =>
+        {
+            var (vm, toolbar, window) = await ShownAsync("a\nb\n");
+            using var _ = vm;
+            var menu = Open(toolbar, window);
+
+            var item = menu.Items.OfType<MenuItem>().Single(i => (string?)i.Header == preset);
+            item.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+            await WaitAsync(() => !vm.IsTransforming && DocumentText(vm) != "a\nb\n");
+
+            Assert.Equal(expected, DocumentText(vm));
+            window.Close();
+        }, CancellationToken.None);
+    }
+
+    [Fact]
+    public Task EditRecipes_OpensTheDialog()
+    {
+        var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(RawToolbarTransformMenuTests).Assembly);
+        return session.Dispatch(async () =>
+        {
+            var (vm, toolbar, window) = await ShownAsync("a\nb\n");
+            using var _ = vm;
+            var menu = Open(toolbar, window);
+
+            var item = menu.Items.OfType<MenuItem>().Single(i => (string?)i.Header == "Edit recipes…");
+            item.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+            Dispatcher.UIThread.RunJobs();
+
+            var dialog = Assert.Single(window.OwnedWindows.OfType<Argonaut.Features.Raw.Recipes.RecipeEditorDialog>());
+            dialog.Close();
+            window.Close();
+        }, CancellationToken.None);
+    }
+
+    private static async Task WaitAsync(Func<bool> condition)
+    {
+        for (int i = 0; i < 200 && !condition(); i++)
+        {
+            Dispatcher.UIThread.RunJobs();
+            await Task.Delay(10);
+        }
+    }
 }

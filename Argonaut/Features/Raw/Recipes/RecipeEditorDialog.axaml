@@ -1,0 +1,141 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:recipes="clr-namespace:Argonaut.Features.Raw.Recipes"
+        xmlns:transforms="clr-namespace:Argonaut.Engine.Transforms"
+        mc:Ignorable="d"
+        x:Class="Argonaut.Features.Raw.Recipes.RecipeEditorDialog"
+        x:DataType="recipes:RecipeEditorViewModel"
+        Title="Recipes"
+        Width="860" Height="660"
+        MinWidth="640" MinHeight="480"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource AppWindowBackgroundBrush}">
+    <!-- Settings above, the preview below and as wide as the dialog: the preview is the point,
+         so it gets every pixel the settings do not need. -->
+    <Grid Margin="20" RowDefinitions="Auto,Auto,Auto,*,Auto" RowSpacing="14">
+
+        <Grid Grid.Row="0" ColumnDefinitions="*,Auto" ColumnSpacing="16">
+            <StackPanel Grid.Column="0" Spacing="4">
+                <ComboBox ItemsSource="{Binding Entries}"
+                          SelectedItem="{Binding SelectedEntry, Mode=TwoWay}"
+                          HorizontalAlignment="Stretch"
+                          MaxWidth="360">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate x:DataType="transforms:RecipeEntry">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <TextBlock Text="{Binding DisplayName}" />
+                                <TextBlock Text="yours"
+                                           FontSize="11"
+                                           VerticalAlignment="Center"
+                                           Foreground="{DynamicResource AppMutedTextBrush}"
+                                           IsVisible="{Binding IsUser}" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
+                <TextBlock Text="{Binding Description}"
+                           FontSize="12"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource AppMutedTextBrush}"
+                           IsVisible="{Binding Description, Converter={x:Static ObjectConverters.IsNotNull}}" />
+            </StackPanel>
+            <CheckBox Grid.Column="1"
+                      VerticalAlignment="Top"
+                      IsChecked="{Binding Reverse, Mode=TwoWay}"
+                      Content="Reverse — take a list apart"
+                      ToolTip.Tip="Run the recipe backwards: each item of a list made this way becomes a line again." />
+        </Grid>
+
+        <Grid Grid.Row="1"
+              ColumnDefinitions="Auto,*,Auto,*"
+              RowDefinitions="Auto,Auto,Auto,Auto"
+              ColumnSpacing="10" RowSpacing="8">
+            <Grid.Styles>
+                <Style Selector="TextBlock.label">
+                    <Setter Property="VerticalAlignment" Value="Center" />
+                    <Setter Property="FontSize" Value="12" />
+                    <Setter Property="Foreground" Value="{DynamicResource AppMutedTextBrush}" />
+                </Style>
+                <Style Selector="TextBox.literal">
+                    <Setter Property="FontFamily" Value="{DynamicResource AppMonoFontFamily}" />
+                    <Setter Property="FontSize" Value="12" />
+                </Style>
+            </Grid.Styles>
+
+            <TextBlock Grid.Row="0" Grid.Column="0" Classes="label" Text="Each line becomes" />
+            <TextBox Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="3" Classes="literal"
+                     Text="{Binding Template, Mode=TwoWay}"
+                     ToolTip.Tip="{}{line} stands for the line. \n is a line break, \t a tab." />
+
+            <TextBlock Grid.Row="1" Grid.Column="0" Classes="label" Text="Between items" />
+            <TextBox Grid.Row="1" Grid.Column="1" Classes="literal"
+                     Text="{Binding Separator, Mode=TwoWay}"
+                     ToolTip.Tip="Written between items, never after the last. \n is a line break." />
+            <TextBlock Grid.Row="1" Grid.Column="2" Classes="label" Text="Escape" />
+            <ComboBox Grid.Row="1" Grid.Column="3"
+                      HorizontalAlignment="Stretch"
+                      ItemsSource="{x:Static recipes:RecipeEditorViewModel.EscapeChoices}"
+                      SelectedIndex="{Binding EscapeIndex, Mode=TwoWay}" />
+
+            <TextBlock Grid.Row="2" Grid.Column="0" Classes="label" Text="Before the first" />
+            <TextBox Grid.Row="2" Grid.Column="1" Classes="literal"
+                     Text="{Binding Open, Mode=TwoWay}" />
+            <TextBlock Grid.Row="2" Grid.Column="2" Classes="label" Text="After the last" />
+            <TextBox Grid.Row="2" Grid.Column="3" Classes="literal"
+                     Text="{Binding Close, Mode=TwoWay}" />
+
+            <StackPanel Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="3" Orientation="Horizontal" Spacing="20">
+                <CheckBox IsChecked="{Binding TrimLines, Mode=TwoWay}" Content="Trim spaces from each line" />
+                <CheckBox IsChecked="{Binding SkipBlankLines, Mode=TwoWay}" Content="Skip blank lines" />
+            </StackPanel>
+        </Grid>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="10">
+            <TextBlock Text="{Binding PreviewCaption}" FontSize="12" FontWeight="SemiBold" />
+            <TextBlock Text="modified" FontSize="11" VerticalAlignment="Center"
+                       Foreground="{DynamicResource AppMutedTextBrush}"
+                       IsVisible="{Binding IsModified}" />
+        </StackPanel>
+
+        <Border Grid.Row="3"
+                Background="{DynamicResource AppFieldBackgroundBrush}"
+                BorderBrush="{DynamicResource AppFieldBorderBrush}"
+                BorderThickness="1"
+                CornerRadius="6">
+            <Grid>
+                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                    <SelectableTextBlock Margin="10,8"
+                                         Text="{Binding PreviewText}"
+                                         FontFamily="{DynamicResource AppMonoFontFamily}"
+                                         FontSize="12" />
+                </ScrollViewer>
+                <TextBlock Margin="12,10"
+                           Text="{Binding PreviewProblem}"
+                           TextWrapping="Wrap"
+                           FontSize="12"
+                           IsVisible="{Binding PreviewProblem, Converter={x:Static ObjectConverters.IsNotNull}}" />
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="4" ColumnDefinitions="*,Auto">
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
+                <TextBox Width="200"
+                         Watermark="Recipe name"
+                         Text="{Binding SaveName, Mode=TwoWay}" />
+                <Button Content="Save recipe" Click="OnSave"
+                        ToolTip.Tip="Save these settings under this name. A name already in the list is replaced." />
+                <Button Content="Delete" Click="OnDelete" IsVisible="{Binding CanDelete}" />
+                <TextBlock Text="{Binding SaveProblem}" FontSize="12" VerticalAlignment="Center"
+                           Foreground="{DynamicResource AppMutedTextBrush}" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                <Button Content="Cancel" Click="OnCancel" IsCancel="True" />
+                <Button Content="{Binding ApplyLabel}" Click="OnApply" Classes="accent" IsDefault="True"
+                        IsEnabled="{Binding PreviewProblem, Converter={x:Static ObjectConverters.IsNull}}"
+                        ToolTip.Tip="Replace the document with the result. Undo gives it back." />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>

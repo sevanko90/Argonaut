@@ -6,6 +6,7 @@ using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Detection;
 using Argonaut.Engine.Progress;
 using Argonaut.Engine.Settings;
+using Argonaut.Engine.Transforms;
 using Argonaut.Features.Csv;
 using Argonaut.Features.Json;
 using Argonaut.Features.Json.Schema;
@@ -52,7 +53,9 @@ public sealed class DocumentViewCatalog
     /// <param name="lineNumbers">The excerpt numbering switch the views follow - the shell's, so
     /// the control that flips it and the views that show it share one; a new one over
     /// <paramref name="settings"/> when null.</param>
-    public DocumentViewCatalog(ISettingsStore settings, JsonSchemaCatalog schemaCatalog, LineNumberingPreference? lineNumbers = null)
+    /// <param name="recipes">The recipes the raw view offers; null offers none.</param>
+    public DocumentViewCatalog(ISettingsStore settings, JsonSchemaCatalog schemaCatalog, LineNumberingPreference? lineNumbers = null,
+        IRecipeStore? recipes = null)
     {
         lineNumbers ??= new LineNumberingPreference(settings.Get<LineNumberingSettings>());
         var jsonView = settings.Get<JsonViewSettings>();
@@ -64,7 +67,7 @@ public sealed class DocumentViewCatalog
             (() => new JsonViewModel(jsonView, schemaBindings, schemaCatalog), (vm, _, o, r) => ((JsonViewModel)vm).LoadAsync(o, r)),
             (() => new NdJsonViewModel(jsonView, schemaBindings, schemaCatalog, lineNumbers), (vm, _, o, r) => ((NdJsonViewModel)vm).LoadAsync(o, r)),
             (() => new CsvViewModel(lineNumbers), (vm, k, o, r) => ((CsvViewModel)vm).LoadAsync(o, k == FileTypeDetector.FileKind.Tsv ? (byte)'\t' : (byte)',', r)),
-            (() => new RawViewModel(rawView, lineNumbers: lineNumbers), (vm, _, o, r) => ((RawViewModel)vm).LoadAsync(o, r)),
+            (() => new RawViewModel(rawView, lineNumbers: lineNumbers, recipes: recipes), (vm, _, o, r) => ((RawViewModel)vm).LoadAsync(o, r)),
         ];
         kindToRegistration = BuildMap();
     }

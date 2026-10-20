@@ -17,6 +17,7 @@ using Argonaut.Features.Json.Preview;
 using Argonaut.Features.Raw.Editing;
 using Argonaut.Features.Raw.Highlighting;
 using Argonaut.Features.Raw.Hints;
+using Argonaut.Features.Raw.Recipes;
 using Argonaut.Features.Raw.Rows;
 using Argonaut.Ui.Documents;
 using Argonaut.Ui.Documents.Numbering;
@@ -95,12 +96,18 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
 
     private readonly LineNumberingPreference? lineNumbers;
 
+    private readonly IRecipeStore? recipes;
+
     /// <param name="settings">Where the wrap width is remembered.</param>
     /// <param name="progressBoard"><see cref="ProgressBoard.Shared"/> unless a test substitutes one.</param>
     /// <param name="lineNumbers">How an excerpt numbers its lines; null numbers from the start.</param>
-    public RawViewModel(RawViewSettings settings, ProgressBoard? progressBoard = null, LineNumberingPreference? lineNumbers = null)
+    /// <param name="recipes">The recipes the Transform menu offers; null offers only the built-in
+    /// encodings.</param>
+    public RawViewModel(RawViewSettings settings, ProgressBoard? progressBoard = null, LineNumberingPreference? lineNumbers = null,
+        IRecipeStore? recipes = null)
     {
         this.settings = settings;
+        this.recipes = recipes;
         this.lineNumbers = lineNumbers;
         this.progressBoard = progressBoard ?? ProgressBoard.Shared;
     }
@@ -867,7 +874,8 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         this.FilePath = origin.Path ?? origin.DisplayName;
         FollowLineNumbering(this.lineNumbers);
         this.wrapWidth = this.settings.WrapWidth;
-        this.toolbar = new RawToolbarViewModel(this.wrapWidth, ChooseWrapWidth, SetEditing, ChooseColours);
+        this.toolbar = new RawToolbarViewModel(this.wrapWidth, ChooseWrapWidth, SetEditing, ChooseColours,
+            new RawTransformMenuViewModel(this, this.recipes));
 
         var session = StartSession(origin, progressReporter);
 

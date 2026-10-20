@@ -15,6 +15,7 @@ using Argonaut.Engine.Locations;
 using Argonaut.Shell.FilePicking;
 using Argonaut.Engine.Logging;
 using Argonaut.Engine.Settings;
+using Argonaut.Engine.Transforms;
 using Argonaut.Features.Json.Schema;
 using Argonaut.Shell.CommandLine;
 using Argonaut.Shell.Dialogs;
@@ -57,8 +58,9 @@ public partial class MainWindow : Window
     /// hides the button.</param>
     /// <param name="openLogFolder">Shows the folder <paramref name="log"/> writes to, or null
     /// when there is none to show - which hides the status bar's button for it.</param>
+    /// <param name="recipes">The recipes the raw view offers; null offers none.</param>
     public MainWindow(ISettingsStore settings, JsonSchemaCatalog schemaCatalog, IDiagnosticLog log, Action? openLogFolder = null,
-        IConfigLocationSource? configLocations = null)
+        IConfigLocationSource? configLocations = null, IRecipeStore? recipes = null)
     {
         InitializeComponent();
 
@@ -92,7 +94,8 @@ public partial class MainWindow : Window
             reportFailure: message => ConfirmDialog.Inform(this, message),
             log: log,
             configLocations: configLocations,
-            filterFiles: new SelectionFilterFiles());
+            filterFiles: new SelectionFilterFiles(),
+            recipes: recipes);
         DataContext = viewModel;
         viewModel.PropertyChanged += OnViewModelPropertyChanged;
         viewModel.FindStatusChanged += status => FindBarControl.SetStatus(status);

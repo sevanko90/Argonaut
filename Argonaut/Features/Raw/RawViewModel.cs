@@ -4,10 +4,12 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Collections;
 using Argonaut.Engine.Detection;
 using Argonaut.Engine.Hints;
 using Argonaut.Engine.Indexing;
 using Argonaut.Engine.Progress;
+using Argonaut.Engine.Recipes;
 using Argonaut.Engine.Saving;
 using Argonaut.Engine.Search;
 using Argonaut.Engine.Settings;
@@ -77,6 +79,13 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     private Task saveCopy = Task.CompletedTask;
 
     private CancellationTokenSource? saveCts;
+
+    /// <summary>A recipe reading the document on the background, which disposal must stop and
+    /// join for the same reason as <see cref="saveCopy"/>.</summary>
+    private Task recipeRun = Task.CompletedTask;
+
+    private CancellationTokenSource? recipeCts;
+    private bool isApplyingRecipe;
 
     /// <summary>Where re-indexes this document starts itself are reported - a wrap-width change,
     /// or the reopen after a save. The shell reports the first load.</summary>
@@ -333,7 +342,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     /// <summary>See <see cref="ISaveableDocument.CanSave"/>. Waits for the scan for the same
     /// reason editing does, and because the save reopens the document over a fresh one. A pending
     /// re-wrap does not block it: <see cref="SaveAsync"/> stops it and carries its width across.</summary>
-    public bool CanSave => !IsSaving && CanEdit;
+    public bool CanSave => !IsSaving && !IsApplyingRecipe && CanEdit;
 
     /// <summary>
     /// Bumped by every edit, so the view drops the row text, layouts and decode maps it is
@@ -358,9 +367,9 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         if (IsDisposed || this.session is null || editing == IsEditing)
             return;
 
-        if (IsSaving)
+        if (IsSaving || IsApplyingRecipe)
         {
-            ToastService.Show("Wait for the save to finish.");
+            ToastService.Show(IsSaving ? "Wait for the save to finish." : "Wait for the recipe to finish.");
             SyncToolbarEditing();
             return;
         }
@@ -417,15 +426,80 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
 
     public bool Redo() => EditsPaused() || Report(this.editor?.Redo());
 
-    /// <summary>True - so the key counts as handled and goes nowhere else - when a save is
-    /// running and the edit must not happen. See <see cref="IsSaving"/>.</summary>
+    /// <summary>True - so the key counts as handled and goes nowhere else - when a save or a
+    /// recipe is reading the document and the edit must not happen. See <see cref="IsSaving"/>.</summary>
     private bool EditsPaused()
     {
-        if (!IsSaving || this.editor is null)
+        if (!(IsSaving || IsApplyingRecipe) || this.editor is null)
             return false;
 
-        ToastService.Show("Saving — editing resumes when it finishes.");
+        ToastService.Show(IsSaving ? "Saving — editing resumes when it finishes." : "Applying a recipe — editing resumes when it finishes.");
         return true;
+    }
+
+    // ---- recipes ------------------------------------------------------------------------
+
+    /// <summary>True while a recipe is reading the document on the background. Pauses edits,
+    /// saving and the edit toggle exactly as <see cref="IsSaving"/> does, for the same reason:
+    /// the piece table is not safe to change under a reader.</summary>
+    public bool IsApplyingRecipe
+    {
+        get => this.isApplyingRecipe;
+        private set
+        {
+            if (SetField(ref this.isApplyingRecipe, value))
+                OnPropertyChanged(nameof(CanSave));
+        }
+    }
+
+    /// <summary>
+    /// Runs <paramref name="recipe"/> over the whole document on the background and replaces the
+    /// document with the result as one undoable edit, entering edit mode first if it is not on.
+    /// The output is built in full before anything changes, so a recipe that fails part-way -
+    /// input it cannot read, or the document closing - leaves the document as it was. Returns
+    /// whether the document was replaced; a failure has already been shown to the user.
+    /// </summary>
+    public async Task<bool> ApplyRecipeAsync(Recipe recipe, RecipeDirection direction)
+    {
+        ArgumentNullException.ThrowIfNull(recipe);
+
+        if (IsDisposed || IsApplyingRecipe || IsSaving)
+            return false;
+
+        SetEditing(true);
+        if (this.editor is not { } editor || !IsEditing)
+            return false;
+
+        var document = editor.Document;
+        var output = new ChunkedByteWriter();
+        var cts = new CancellationTokenSource();
+        this.recipeCts = cts;
+        IsApplyingRecipe = true;
+        try
+        {
+            this.recipeRun = Task.Run(() => RecipeRunner.Run(recipe, direction, document, output, cts.Token));
+            await this.recipeRun;
+        }
+        catch (RecipeException ex)
+        {
+            ToastService.Show(ex.Message);
+            return false;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+        finally
+        {
+            IsApplyingRecipe = false;
+            this.recipeCts = null;
+            cts.Dispose();
+        }
+
+        if (IsDisposed || !ReferenceEquals(editor, this.editor))
+            return false;
+
+        return Report(editor.ReplaceAll(output.Chunks));
     }
 
     private bool Report(RawEditOutcome? outcome)
@@ -1338,12 +1412,14 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
             SetEditing(true);
     }
 
-    /// <summary>A save still copying when the document closes is stopped and joined here, before
-    /// the session releases the mapping the copy reads.</summary>
+    /// <summary>A save still copying, or a recipe still reading, when the document closes is
+    /// stopped and joined here, before the session releases the mapping it reads.</summary>
     protected override void DisposeCore()
     {
         this.saveCts?.Cancel();
+        this.recipeCts?.Cancel();
         try { this.saveCopy.Wait(); } catch { /* observed only to unblock disposal; SaveAsync reports it */ }
+        try { this.recipeRun.Wait(); } catch { /* observed only to unblock disposal; ApplyRecipeAsync reports it */ }
     }
 
     public override ISearchNavigator? CreateSearchNavigator() => new RawSearchNavigator(this);

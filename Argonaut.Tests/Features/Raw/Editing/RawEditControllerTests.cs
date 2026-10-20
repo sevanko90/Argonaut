@@ -1,5 +1,7 @@
+using System.Buffers;
 using System.Text;
 using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Collections;
 using Argonaut.Features.Raw.Editing;
 using Argonaut.Features.Raw.Rows;
 using Argonaut.Tests.Support;
@@ -409,5 +411,53 @@ public class RawEditControllerTests
 
         arriving.Seal();
         await unfinished.IndexingTask;
+    }
+
+    private static IReadOnlyList<FilledChunk> Replacement(string text)
+    {
+        var writer = new ChunkedByteWriter(chunkBytes: 16);
+        writer.Write(Encoding.UTF8.GetBytes(text));
+        return writer.Chunks;
+    }
+
+    [Fact]
+    public void ReplaceAll_ReplacesTheDocument_AsOneUndoStep()
+    {
+        var editor = Editing("a\nb\nc\n");
+        editor.Caret.PlaceAt(4);
+
+        Assert.Equal(RawEditOutcome.Applied, editor.ReplaceAll(Replacement("('a',\n'b',\n'c')")));
+
+        Assert.Equal("('a',\n'b',\n'c')", TextOf(editor));
+        Assert.Equal(0, editor.Caret.Caret.Offset);
+        Assert.Equal(3, editor.RowIndex.RowCount);
+
+        Assert.Equal(RawEditOutcome.Applied, editor.Undo());
+        Assert.Equal("a\nb\nc\n", TextOf(editor));
+        Assert.Equal(4, editor.Caret.Caret.Offset);
+        Assert.False(editor.CanUndo);
+
+        editor.Redo();
+        Assert.Equal("('a',\n'b',\n'c')", TextOf(editor));
+    }
+
+    [Fact]
+    public void ReplaceAll_ThenTyping_EditsTheReplacement()
+    {
+        var editor = Editing("one\n");
+        editor.ReplaceAll(Replacement("two\n"));
+
+        editor.Type(">");
+
+        Assert.Equal(">two\n", TextOf(editor));
+    }
+
+    [Fact]
+    public void ReplaceAll_OfAnEmptyDocumentWithNothing_DoesNothing()
+    {
+        var editor = Editing("");
+
+        Assert.Equal(RawEditOutcome.NothingToDo, editor.ReplaceAll(Replacement("")));
+        Assert.False(editor.CanUndo);
     }
 }

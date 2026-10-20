@@ -242,6 +242,26 @@ scrollbar; and the first epoch number laid out chose the raw view's date scheme,
 without a layout pass in between, so the lazy work runs inside the frame. Never assert on how
 many frames rendered - the headless compositor coalesces them depending on what else ran.
 
+## JSON-read types: settable properties, never `init`, when a file may leave fields out
+
+The source-generated `System.Text.Json` reader treats `init`-only properties like constructor
+parameters: it assigns **every** one, and a property missing from the file gets `null`/`false`/`0`
+- not the initialiser written on the property. The defaults in the class are silently ignored.
+Positional record parameters behave the same way.
+
+Real bug: `Recipe`'s properties were `init`, and the Comma-separated list preset leaves out `open`
+and `close`. They loaded as `null`, so applying the preset threw inside `Encoding.GetBytes`, the
+recipe dialog (which loads the first recipe) failed before its window appeared, and every file
+without `trimLines`/`skipBlankLines` had both quietly turned off. The presets that set every field
+worked, which hid it.
+
+- **A type read from a file someone may hand-edit, or that a later build may add fields to, uses
+  `{ get; set; }`.** The reader then constructs it with its initialisers and sets only what the
+  file has. A record keeps `with` and value equality either way.
+- **Test it with a sparse file**, not only a full one: `RecipeFolderStoreTests.ARecipeFileThatLeavesSettingsOut_GetsTheirDefaults`
+  is the pattern - load `{ "separator": ", " }` and assert it equals `new Recipe { Separator = ", " }`.
+- The settings blocks (`ISettingsBlock`) are all settable classes already; keep new ones that way.
+
 ## Naming: say what it means, not what it is
 
 Names carry intent. A member named for its *type* or its *mechanism* forces every reader to go

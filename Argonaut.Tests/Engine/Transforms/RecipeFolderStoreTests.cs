@@ -89,4 +89,29 @@ public sealed class RecipeFolderStoreTests : IDisposable
 
         Assert.Null(store.Load(new RecipeEntry("broken", path, IsUser: true)));
     }
+
+    [Fact]
+    public void ARecipeFileThatLeavesSettingsOut_GetsTheirDefaults()
+    {
+        Directory.CreateDirectory(Path.Combine(root, "Recipes"));
+        string path = Path.Combine(root, "Recipes", "sparse.json");
+        File.WriteAllText(path, """{ "separator": ", " }""");
+
+        var recipe = store.Load(new RecipeEntry("sparse", path, IsUser: true))!;
+
+        Assert.Equal(new Recipe { Separator = ", " }, recipe);
+    }
+
+    [Fact]
+    public void EveryPreset_HasEverySettingFilledIn()
+    {
+        foreach (var entry in store.Enumerate())
+        {
+            var recipe = store.Load(entry)!;
+            Assert.NotNull(recipe.Template);
+            Assert.NotNull(recipe.Separator);
+            Assert.NotNull(recipe.Open);
+            Assert.NotNull(recipe.Close);
+        }
+    }
 }

@@ -11,8 +11,14 @@ using Avalonia.VisualTree;
 
 namespace Argonaut.Tests.Features.Raw;
 
-/// <summary>The Transform menu is built on each click, so only clicking it in a real toolbar
-/// proves it opens with something in it - and is drawn with it.</summary>
+/// <summary>
+/// The Transform menu is built on each click, so only clicking it in a real toolbar proves it
+/// opens with something in it - and is drawn with it.
+///
+/// Every dispatched body ends <c>return true</c>: without a result the async lambda binds to
+/// <c>Dispatch&lt;Task&gt;</c>, whose task completes at the body's first await, and every
+/// assertion after it goes unobserved.
+/// </summary>
 public sealed class RawToolbarTransformMenuTests
 {
     [Fact]
@@ -60,6 +66,7 @@ public sealed class RawToolbarTransformMenuTests
 
             menu.Hide();
             window.Close();
+            return true;
         }, CancellationToken.None);
     }
 
@@ -114,6 +121,7 @@ public sealed class RawToolbarTransformMenuTests
 
             Assert.Equal(expected, DocumentText(vm));
             window.Close();
+            return true;
         }, CancellationToken.None);
     }
 
@@ -134,6 +142,7 @@ public sealed class RawToolbarTransformMenuTests
             var dialog = Assert.Single(window.OwnedWindows.OfType<Argonaut.Features.Raw.Recipes.RecipeEditorDialog>());
             dialog.Close();
             window.Close();
+            return true;
         }, CancellationToken.None);
     }
 

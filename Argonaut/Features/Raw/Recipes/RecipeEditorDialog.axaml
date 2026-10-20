@@ -20,8 +20,8 @@
             <StackPanel Grid.Column="0" Spacing="4">
                 <ComboBox ItemsSource="{Binding Entries}"
                           SelectedItem="{Binding SelectedEntry, Mode=TwoWay}"
-                          HorizontalAlignment="Stretch"
-                          MaxWidth="360">
+                          HorizontalAlignment="Left"
+                          Width="360">
                     <ComboBox.ItemTemplate>
                         <DataTemplate x:DataType="transforms:RecipeEntry">
                             <StackPanel Orientation="Horizontal" Spacing="8">

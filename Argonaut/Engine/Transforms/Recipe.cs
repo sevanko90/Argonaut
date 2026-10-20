@@ -35,6 +35,11 @@ public enum TextEscape
 ///
 /// Fixed encodings are not recipes - nothing about them can be changed - and live in
 /// <see cref="CodecRunner"/> instead.
+///
+/// The properties are settable rather than <c>init</c> for the JSON reader's sake: the source
+/// generator assigns every init-only property, missing ones as null or false, which turned a
+/// preset that left out <c>open</c> into a null and quietly cleared both trimming options.
+/// Settable, it sets only what the file has, and a setting left out keeps its default here.
 /// </summary>
 public sealed record Recipe
 {
@@ -42,28 +47,28 @@ public sealed record Recipe
     public const string LinePlaceholder = "{line}";
 
     /// <summary>One sentence for the picker; optional.</summary>
-    public string? Description { get; init; }
+    public string? Description { get; set; }
 
     /// <summary>The text each line becomes, with <see cref="LinePlaceholder"/> where the line
     /// goes. Reversing needs exactly one placeholder, to know where an item starts and ends.</summary>
-    public string Template { get; init; } = LinePlaceholder;
+    public string Template { get; set; } = LinePlaceholder;
 
-    public TextEscape Escape { get; init; } = TextEscape.None;
+    public TextEscape Escape { get; set; } = TextEscape.None;
 
     /// <summary>Written between items, never after the last - which is the part a plain search
     /// and replace gets wrong.</summary>
-    public string Separator { get; init; } = "";
+    public string Separator { get; set; } = "";
 
     /// <summary>Written once before the first item, e.g. <c>(</c>.</summary>
-    public string Open { get; init; } = "";
+    public string Open { get; set; } = "";
 
     /// <summary>Written once after the last item, e.g. <c>)</c>.</summary>
-    public string Close { get; init; } = "";
+    public string Close { get; set; } = "";
 
     /// <summary>Trim spaces and tabs from each line before it goes into the template.</summary>
-    public bool TrimLines { get; init; } = true;
+    public bool TrimLines { get; set; } = true;
 
-    public bool SkipBlankLines { get; init; } = true;
+    public bool SkipBlankLines { get; set; } = true;
 }
 
 [JsonSourceGenerationOptions(

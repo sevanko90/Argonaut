@@ -22,7 +22,7 @@ internal static class AppDataPaths
 
     /// <summary>
     /// Folder holding the user's own recipes (see
-    /// <see cref="Argonaut.Engine.Recipes.RecipeFolderStore"/>). Written to, unlike the schemas
+    /// <see cref="Argonaut.Engine.Transforms.RecipeFolderStore"/>). Written to, unlike the schemas
     /// folder, which the user fills by hand - so a Mac App Store build must check this resolves
     /// inside its sandbox container (it is home-relative, and the sandbox moves home there).
     /// </summary>

@@ -1,6 +1,6 @@
-using Argonaut.Engine.Recipes;
+using Argonaut.Engine.Transforms;
 
-namespace Argonaut.Tests.Engine.Recipes;
+namespace Argonaut.Tests.Engine.Transforms;
 
 /// <summary>The presets shipped beside the app, plus a temp user folder per test.</summary>
 public sealed class RecipeFolderStoreTests : IDisposable
@@ -35,8 +35,7 @@ public sealed class RecipeFolderStoreTests : IDisposable
 
         var recipe = store.Load(entry);
 
-        Assert.Equal(RecipeKind.Template, recipe!.Kind);
-        Assert.Equal(TextEscape.Sql, recipe.Escape);
+        Assert.Equal(TextEscape.Sql, recipe!.Escape);
         Assert.Equal(",\n", recipe.Separator);
     }
 

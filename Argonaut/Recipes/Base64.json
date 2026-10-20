@@ -1,6 +1,0 @@
-{
-  "kind": "codec",
-  "description": "Encodes the text as base64. Reverse to decode.",
-  "codec": "base64",
-  "scope": "wholeText"
-}

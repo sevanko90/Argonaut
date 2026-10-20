@@ -2,10 +2,10 @@ using System;
 using System.Buffers;
 using System.Text;
 
-namespace Argonaut.Engine.Recipes;
+namespace Argonaut.Engine.Transforms;
 
 /// <summary>
-/// The byte-level escapes recipes apply, both ways. Each works on UTF-8 bytes and is
+/// The byte-level escapes recipes and codecs apply, both ways. Each works on UTF-8 bytes and is
 /// stateless across calls, so a whole-text run can feed it one contiguous run at a time; the
 /// escape forms copy unescaped stretches with a single vectorised search rather than byte by byte.
 /// </summary>
@@ -133,7 +133,7 @@ internal static class TextEscaping
         {
             output.Write(text[..at]);
             if (at + 1 >= text.Length)
-                throw new RecipeException("ends with an incomplete escape '\\'");
+                throw new TransformException("ends with an incomplete escape '\\'");
 
             byte kind = text[at + 1];
             int consumed = 2;
@@ -151,7 +151,7 @@ internal static class TextEscaping
                     consumed = WriteUnicodeEscape(text[at..], output);
                     break;
                 default:
-                    throw new RecipeException($"has an unknown escape '\\{(char)kind}'");
+                    throw new TransformException($"has an unknown escape '\\{(char)kind}'");
             }
 
             text = text[(at + consumed)..];
@@ -186,14 +186,14 @@ internal static class TextEscaping
     private static int ReadHex4(ReadOnlySpan<byte> escape)
     {
         if (escape.Length < 6)
-            throw new RecipeException("ends with an incomplete escape '\\u'");
+            throw new TransformException("ends with an incomplete escape '\\u'");
 
         int code = 0;
         for (int i = 2; i < 6; i++)
         {
             int digit = HexValue(escape[i]);
             if (digit < 0)
-                throw new RecipeException($"has an invalid escape '{Encoding.UTF8.GetString(escape[..6])}'");
+                throw new TransformException($"has an invalid escape '{Encoding.UTF8.GetString(escape[..6])}'");
 
             code = (code << 4) | digit;
         }
@@ -229,7 +229,7 @@ internal static class TextEscaping
             int high = at + 2 < text.Length ? HexValue(text[at + 1]) : -1;
             int low = high >= 0 ? HexValue(text[at + 2]) : -1;
             if (low < 0)
-                throw new RecipeException("has a '%' that is not followed by two hex digits");
+                throw new TransformException("has a '%' that is not followed by two hex digits");
 
             output.Write([(byte)((high << 4) | low)]);
             text = text[(at + 3)..];

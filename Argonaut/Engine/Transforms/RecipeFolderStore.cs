@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 
-namespace Argonaut.Engine.Recipes;
+namespace Argonaut.Engine.Transforms;
 
 /// <summary>
 /// Recipes as one JSON file each, in two folders: the presets shipped beside the app, and the

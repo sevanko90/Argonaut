@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace Argonaut.Engine.Recipes;
+namespace Argonaut.Engine.Transforms;
 
 /// <summary>One recipe on offer. <paramref name="DisplayName"/> is the file stem, as a schema's
 /// is; <paramref name="IsUser"/> is false for one shipped with the app, which cannot be

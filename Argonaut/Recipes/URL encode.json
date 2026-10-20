@@ -1,6 +1,0 @@
-{
-  "kind": "codec",
-  "description": "Percent-encodes each line. Reverse to decode.",
-  "codec": "url",
-  "scope": "eachLine"
-}

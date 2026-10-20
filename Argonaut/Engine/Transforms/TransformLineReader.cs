@@ -1,8 +1,9 @@
 using System;
 using System.Buffers;
+using System.Threading;
 using Argonaut.Engine.Bytes;
 
-namespace Argonaut.Engine.Recipes;
+namespace Argonaut.Engine.Transforms;
 
 /// <summary>
 /// Walks a settled source line by line. A line that sits inside one contiguous run is returned
@@ -14,9 +15,12 @@ namespace Argonaut.Engine.Recipes;
 /// an empty last line, so <c>"a\nb\n"</c> is two lines - and <see cref="EndedWithNewline"/>
 /// records that it was there, for a transform that wants to keep it.
 /// </summary>
-internal sealed class RecipeLineReader : IDisposable
+internal sealed class TransformLineReader : IDisposable
 {
     internal const int ScanChunkBytes = 64 * 1024;
+
+    /// <summary>What trimming a line removes: spaces and tabs, never line breaks.</summary>
+    public static ReadOnlySpan<byte> SpacesAndTabs => " \t"u8;
 
     private readonly IByteSource source;
     private readonly long length;
@@ -25,13 +29,13 @@ internal sealed class RecipeLineReader : IDisposable
     private bool sawTerminator;
     private bool crlf;
 
-    /// <param name="source">Must be settled: a recipe runs over a finished document (a
+    /// <param name="source">Must be settled: a transform runs over a finished document (a
     /// paste, or an edited one, which needs a completed scan), so the length is read once here,
     /// as <see cref="ByteSourceReading.WriteTo"/> does for the same reason.</param>
-    public RecipeLineReader(IByteSource source)
+    public TransformLineReader(IByteSource source)
     {
         if (!source.LengthSettled)
-            throw new InvalidOperationException("A recipe runs over a document that has finished arriving.");
+            throw new InvalidOperationException("A transform runs over a document that has finished arriving.");
 
         this.source = source;
         this.length = source.AvailableLength;
@@ -127,6 +131,14 @@ internal sealed class RecipeLineReader : IDisposable
 
         EndedWithNewline = this.position >= this.length;
         return hadReturn ? line[..^1] : line;
+    }
+
+    /// <summary>Checks for a stop request every thousand or so lines - often enough to stop a
+    /// run promptly, rarely enough to cost nothing per line.</summary>
+    public void ThrowIfStopping(CancellationToken stopping)
+    {
+        if (LineNumber % 1024 == 0)
+            stopping.ThrowIfCancellationRequested();
     }
 
     public void Dispose()

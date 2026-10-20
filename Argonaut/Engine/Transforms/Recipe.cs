@@ -1,22 +1,11 @@
 using System.Text.Json.Serialization;
 
-namespace Argonaut.Engine.Recipes;
+namespace Argonaut.Engine.Transforms;
 
-/// <summary>What a recipe does to its input.</summary>
-public enum RecipeKind
-{
-    /// <summary>Each line is placed into <see cref="Recipe.Template"/> and the results joined -
-    /// quoting a column of values for a SQL <c>IN</c>, or joining lines with a comma. Reversed,
-    /// it takes such a list apart again, one item per line.</summary>
-    Template,
-
-    /// <summary>The input is encoded with <see cref="Recipe.Codec"/>; reversed, decoded.</summary>
-    Codec,
-}
-
-/// <summary>Which way a recipe runs. A recipe is saved once and offered both ways, so
-/// "quote for SQL" and "unquote a SQL list" are one recipe rather than two to keep in step.</summary>
-public enum RecipeDirection
+/// <summary>Which way a transform runs. A recipe is saved once and offered both ways, so
+/// "quote for SQL" and "unquote a SQL list" are one recipe rather than two to keep in step; a
+/// codec encodes forward and decodes in reverse.</summary>
+public enum TransformDirection
 {
     Forward,
     Reverse,
@@ -38,38 +27,19 @@ public enum TextEscape
     Json,
 }
 
-public enum RecipeCodec
-{
-    /// <summary>The body of a JSON string - escaped without the surrounding quotes.</summary>
-    JsonString,
-
-    /// <summary>Percent-encoding of every byte outside RFC 3986's unreserved set.</summary>
-    Url,
-
-    Base64,
-
-    /// <summary>The URL- and filename-safe alphabet of RFC 4648 §5, unpadded.</summary>
-    Base64Url,
-}
-
-/// <summary>Whether a codec treats each line as its own text or the input as one text.</summary>
-public enum RecipeScope
-{
-    EachLine,
-    WholeText,
-}
-
 /// <summary>
-/// A text transformation the user can apply to a document, saved as one JSON file (see
-/// <see cref="IRecipeStore"/>). Settings not used by <see cref="Kind"/> are carried but ignored,
-/// so switching kind in the editor and back loses nothing.
+/// A line template the user can edit, save and apply to a document: each line is placed into
+/// <see cref="Template"/> and the results joined - quoting a column of values for a SQL
+/// <c>IN</c>, or joining lines with a comma. Reversed, it takes such a list apart again, one item
+/// per line. Saved as one JSON file (see <see cref="IRecipeStore"/>).
+///
+/// Fixed encodings are not recipes - nothing about them can be changed - and live in
+/// <see cref="CodecRunner"/> instead.
 /// </summary>
 public sealed record Recipe
 {
     /// <summary>Stands for the line in <see cref="Template"/>.</summary>
     public const string LinePlaceholder = "{line}";
-
-    public RecipeKind Kind { get; init; } = RecipeKind.Template;
 
     /// <summary>One sentence for the picker; optional.</summary>
     public string? Description { get; init; }
@@ -94,10 +64,6 @@ public sealed record Recipe
     public bool TrimLines { get; init; } = true;
 
     public bool SkipBlankLines { get; init; } = true;
-
-    public RecipeCodec Codec { get; init; } = RecipeCodec.Base64;
-
-    public RecipeScope Scope { get; init; } = RecipeScope.WholeText;
 }
 
 [JsonSourceGenerationOptions(

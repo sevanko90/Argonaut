@@ -1,12 +1,12 @@
 using System.Text;
 using Argonaut.Engine.Bytes;
-using Argonaut.Engine.Recipes;
+using Argonaut.Engine.Transforms;
 using Argonaut.Features.Raw;
 
 namespace Argonaut.Tests.Features.Raw;
 
-/// <summary>Applying a recipe to the raw document: one undoable replacement, and nothing
-/// changed when the recipe cannot read the input.</summary>
+/// <summary>Applying a recipe or codec to the raw document: one undoable replacement, and
+/// nothing changed when the input cannot be read.</summary>
 public class RawRecipeTests
 {
     private static readonly Recipe SqlInList = new()
@@ -40,11 +40,11 @@ public class RawRecipeTests
         using var vm = await LoadedAsync("a@x.com\nb@y.com\n");
         Assert.False(vm.IsEditing);
 
-        Assert.True(await vm.ApplyRecipeAsync(SqlInList, RecipeDirection.Forward));
+        Assert.True(await vm.ApplyRecipeAsync(SqlInList, TransformDirection.Forward));
 
         Assert.True(vm.IsEditing);
         Assert.True(vm.IsDirty);
-        Assert.False(vm.IsApplyingRecipe);
+        Assert.False(vm.IsTransforming);
         Assert.Equal("(\n'a@x.com',\n'b@y.com'\n)", DocumentText(vm));
         Assert.Equal(4, vm.RowCount);
 
@@ -57,22 +57,33 @@ public class RawRecipeTests
     {
         using var vm = await LoadedAsync("('a', 'b')");
 
-        Assert.True(await vm.ApplyRecipeAsync(SqlInList, RecipeDirection.Reverse));
+        Assert.True(await vm.ApplyRecipeAsync(SqlInList, TransformDirection.Reverse));
 
         Assert.Equal("a\nb", DocumentText(vm));
     }
 
     [Fact]
-    public async Task ARecipeThatCannotReadTheInput_LeavesTheDocumentAlone()
+    public async Task ACodecThatCannotReadTheInput_LeavesTheDocumentAlone()
     {
         using var vm = await LoadedAsync("not base64 at all!");
-        var decode = new Recipe { Kind = RecipeKind.Codec, Codec = RecipeCodec.Base64, Scope = RecipeScope.WholeText };
 
-        Assert.False(await vm.ApplyRecipeAsync(decode, RecipeDirection.Reverse));
+        Assert.False(await vm.ApplyCodecAsync(TextCodec.Base64, TransformDirection.Reverse, CodecScope.WholeText));
 
         Assert.Equal("not base64 at all!", DocumentText(vm));
         Assert.False(vm.IsDirty);
-        Assert.False(vm.IsApplyingRecipe);
+        Assert.False(vm.IsTransforming);
+    }
+
+    [Fact]
+    public async Task ACodec_ReplacesTheDocument_AndUndoes()
+    {
+        using var vm = await LoadedAsync("hello");
+
+        Assert.True(await vm.ApplyCodecAsync(TextCodec.Base64, TransformDirection.Forward, CodecScope.WholeText));
+        Assert.Equal("aGVsbG8=", DocumentText(vm));
+
+        Assert.True(vm.Undo());
+        Assert.Equal("hello", DocumentText(vm));
     }
 
     [Fact]
@@ -81,8 +92,8 @@ public class RawRecipeTests
         using var vm = await LoadedAsync("a\nb\n");
         var commaList = new Recipe { Separator = "," };
 
-        await vm.ApplyRecipeAsync(commaList, RecipeDirection.Forward);
-        await vm.ApplyRecipeAsync(SqlInList, RecipeDirection.Forward);
+        await vm.ApplyRecipeAsync(commaList, TransformDirection.Forward);
+        await vm.ApplyRecipeAsync(SqlInList, TransformDirection.Forward);
         Assert.Equal("(\n'a,b'\n)", DocumentText(vm));
 
         vm.Undo();

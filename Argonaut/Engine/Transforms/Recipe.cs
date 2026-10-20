@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Argonaut.Engine.Transforms;
@@ -71,9 +72,14 @@ public sealed record Recipe
     public bool SkipBlankLines { get; set; } = true;
 }
 
+/// <summary>Writes <see cref="TextEscape"/> as the presets spell it - <c>"sql"</c>, not
+/// <c>"Sql"</c> - so a recipe the app saved reads like one written by hand. Reading ignores case
+/// either way.</summary>
+internal sealed class CamelCaseEscapeConverter() : JsonStringEnumConverter<TextEscape>(JsonNamingPolicy.CamelCase);
+
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
-    UseStringEnumConverter = true,
+    Converters = [typeof(CamelCaseEscapeConverter)],
     WriteIndented = true,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     ReadCommentHandling = System.Text.Json.JsonCommentHandling.Skip,

@@ -50,6 +50,7 @@ public sealed class RecipeFolderStoreTests : IDisposable
         Assert.True(entry.IsUser);
         Assert.Equal(saved, entry);
         Assert.Equal(mine, store.Load(entry));
+        Assert.Contains("\"escape\": \"csv\"", File.ReadAllText(saved.FilePath));
     }
 
     [Fact]

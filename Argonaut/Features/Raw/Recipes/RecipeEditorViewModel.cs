@@ -11,10 +11,20 @@ using Argonaut.Ui.ViewModels;
 
 namespace Argonaut.Features.Raw.Recipes;
 
+/// <summary>One row of the recipe list: a section heading, or a recipe.</summary>
+public sealed record RecipeListRow(string Text, RecipeEntry? Entry)
+{
+    public bool IsHeading => Entry is null;
+}
+
 /// <summary>
-/// The recipe dialog: pick a recipe, change its settings, see the result on the start of the
-/// document as you type, and save it as one of your own. Applying is the caller's - the dialog
-/// only decides <see cref="CurrentRecipe"/> and <see cref="Direction"/>.
+/// The recipe dialog: a list of recipes (presets, then the user's own), the selected one's
+/// settings, and the result on the start of the document as you type. Applying is the caller's -
+/// the dialog only decides <see cref="CurrentRecipe"/> and <see cref="Direction"/>.
+///
+/// Edits to the settings are a draft until <see cref="SaveChanges"/>: choosing another recipe
+/// drops them, as <see cref="Revert"/> does. Saving a preset's changes saves the user's own recipe
+/// of the same name, which then stands in for the preset - deleting it brings the preset back.
 ///
 /// The preview re-runs on every change, synchronously, over at most
 /// <see cref="PreviewInputBytes"/> of the document read once when the dialog opens - small
@@ -27,13 +37,15 @@ public sealed class RecipeEditorViewModel : ObservableObject
     internal const int PreviewInputBytes = 64 * 1024;
     internal const int PreviewOutputChars = 64 * 1024;
 
+    internal const string NewRecipeName = "New recipe";
+
     /// <summary>The escapes, in <see cref="TextEscape"/>'s order, as the combo shows them.</summary>
     public static IReadOnlyList<string> EscapeChoices { get; } =
     [
         "None",
-        "SQL — doubles '",
-        "CSV — doubles \"",
-        "JSON — backslash escapes",
+        "SQL '",
+        "CSV \"",
+        "JSON \\",
     ];
 
     private readonly IRecipeStore store;
@@ -42,7 +54,8 @@ public sealed class RecipeEditorViewModel : ObservableObject
     private readonly bool previewIsPartial;
 
     private Recipe loaded = new();
-    private RecipeEntry? selectedEntry;
+    private RecipeListRow? selectedRow;
+    private string name = "";
     private string template = "";
     private int escapeIndex;
     private string separator = "";
@@ -52,9 +65,9 @@ public sealed class RecipeEditorViewModel : ObservableObject
     private bool skipBlankLines;
     private bool reverse;
     private string previewText = "";
+    private string previewLineNumbers = "";
     private string? previewProblem;
-    private string saveName = "";
-    private string? saveProblem;
+    private string? storeProblem;
 
     /// <param name="document">The document the recipe will apply to; its start is read once,
     /// here, for the preview.</param>
@@ -64,42 +77,48 @@ public sealed class RecipeEditorViewModel : ObservableObject
         this.store = store;
         (this.previewInput, this.previewInputLines, this.previewIsPartial) = ReadPreviewInput(document);
 
-        Entries = new ObservableCollection<RecipeEntry>(store.Enumerate());
-        SelectedEntry = initial is { } wanted && Entries.Contains(wanted) ? wanted
-            : Entries.Count > 0 ? Entries[0]
-            : null;
-
+        Rows = new ObservableCollection<RecipeListRow>();
+        Reload(initial);
         if (SelectedEntry is null)
             Load(new Recipe());
     }
 
-    public ObservableCollection<RecipeEntry> Entries { get; }
+    /// <summary>The list: a "Presets" heading and the shipped recipes, then "Yours" and the
+    /// user's. A heading row is not selectable.</summary>
+    public ObservableCollection<RecipeListRow> Rows { get; }
 
-    /// <summary>Bound to the recipe combo. Loading the recipe into the fields neither closes a
-    /// popup nor replaces <see cref="Entries"/>, so it needs no deferral (see CLAUDE.md).</summary>
-    public RecipeEntry? SelectedEntry
+    /// <summary>
+    /// Bound to the list. Loading the recipe into the fields neither closes a popup nor replaces
+    /// <see cref="Rows"/>, so it needs no deferral (see CLAUDE.md); a heading is refused, keeping
+    /// the selection where it was.
+    /// </summary>
+    public RecipeListRow? SelectedRow
     {
-        get => this.selectedEntry;
+        get => this.selectedRow;
         set
         {
-            if (!SetField(ref this.selectedEntry, value))
+            if (value is { IsHeading: true } || !SetField(ref this.selectedRow, value))
                 return;
 
-            OnPropertyChanged(nameof(CanDelete));
-            if (value is { } entry)
-            {
-                SaveName = entry.DisplayName;
-                if (this.store.Load(entry) is { } recipe)
-                {
-                    Load(recipe);
-                }
-                else
-                {
-                    Load(new Recipe());
-                    PreviewProblem = $"“{entry.DisplayName}” could not be read.";
-                }
-            }
+            OnPropertyChanged(nameof(SelectedEntry));
+            OnPropertyChanged(nameof(IsUserRecipe));
+            StoreProblem = null;
+            if (value?.Entry is { } entry)
+                LoadEntry(entry);
         }
+    }
+
+    public RecipeEntry? SelectedEntry => SelectedRow?.Entry;
+
+    /// <summary>The selected recipe is the user's own: it can be renamed and deleted.</summary>
+    public bool IsUserRecipe => SelectedEntry is { IsUser: true };
+
+    /// <summary>The selected recipe's name. Editable for the user's own recipes, and taking
+    /// effect at <see cref="Rename"/>.</summary>
+    public string Name
+    {
+        get => this.name;
+        set => SetField(ref this.name, value);
     }
 
     public string? Description => this.loaded.Description;
@@ -163,14 +182,22 @@ public sealed class RecipeEditorViewModel : ObservableObject
             if (!SetField(ref this.reverse, value))
                 return;
 
+            OnPropertyChanged(nameof(IsForward));
             OnPropertyChanged(nameof(ApplyLabel));
             RefreshPreview();
         }
     }
 
+    /// <summary>The other half of the direction switch, so each of its buttons binds one way.</summary>
+    public bool IsForward
+    {
+        get => !Reverse;
+        set => Reverse = !value;
+    }
+
     public TransformDirection Direction => Reverse ? TransformDirection.Reverse : TransformDirection.Forward;
 
-    public string ApplyLabel => Reverse ? "Reverse" : "Apply";
+    public string ApplyLabel => Reverse ? "Take apart" : "Apply";
 
     /// <summary>The recipe as the fields now describe it.</summary>
     public Recipe CurrentRecipe => new()
@@ -194,6 +221,13 @@ public sealed class RecipeEditorViewModel : ObservableObject
         private set => SetField(ref this.previewText, value);
     }
 
+    /// <summary>"1\n2\n…", one per line of <see cref="PreviewText"/>, for the gutter beside it.</summary>
+    public string PreviewLineNumbers
+    {
+        get => this.previewLineNumbers;
+        private set => SetField(ref this.previewLineNumbers, value);
+    }
+
     /// <summary>Why there is no preview: the input does not fit the recipe. Applying would fail
     /// the same way.</summary>
     public string? PreviewProblem
@@ -203,54 +237,106 @@ public sealed class RecipeEditorViewModel : ObservableObject
     }
 
     public string PreviewCaption => this.previewIsPartial
-        ? $"Preview · first {this.previewInputLines:N0} lines"
-        : "Preview · whole document";
+        ? $"first {this.previewInputLines:N0} lines"
+        : "whole document";
 
-    public string SaveName
+    /// <summary>Why the last save, rename or delete did not happen.</summary>
+    public string? StoreProblem
     {
-        get => this.saveName;
-        set
+        get => this.storeProblem;
+        private set => SetField(ref this.storeProblem, value);
+    }
+
+    /// <summary>Saves the fields over the selected recipe - as the user's own when it is a
+    /// preset.</summary>
+    public bool SaveChanges()
+    {
+        if (SelectedEntry is not { } entry)
+            return false;
+
+        return TrySave(entry.DisplayName, CurrentRecipe) is not null;
+    }
+
+    /// <summary>Puts the fields back to the selected recipe as saved.</summary>
+    public void Revert()
+    {
+        if (SelectedEntry is { } entry)
+            LoadEntry(entry);
+    }
+
+    /// <summary>Adds a recipe of the user's from the current fields, under a name not yet
+    /// taken, and selects it - ready to be renamed.</summary>
+    public bool CreateFromCurrent()
+    {
+        var taken = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in this.store.Enumerate())
+            taken.Add(entry.DisplayName);
+
+        string candidate = NewRecipeName;
+        for (int n = 2; taken.Contains(candidate); n++)
+            candidate = $"{NewRecipeName} {n}";
+
+        return TrySave(candidate, CurrentRecipe with { Description = null }) is not null;
+    }
+
+    /// <summary>
+    /// Renames the selected user recipe to <see cref="Name"/>, carrying the fields as they are.
+    /// Rebuilds <see cref="Rows"/>, so a caller reacting to focus leaving the name box must
+    /// defer this past the input that moved it (see CLAUDE.md) - a click on the list would
+    /// otherwise land on rows this has just replaced.
+    /// </summary>
+    public bool Rename()
+    {
+        if (SelectedEntry is not { IsUser: true } entry)
+            return false;
+
+        string wanted = Name.Trim();
+        if (string.Equals(wanted, entry.DisplayName, StringComparison.Ordinal))
+            return true;
+
+        if (wanted.Length == 0)
         {
-            if (SetField(ref this.saveName, value))
-                SaveProblem = null;
+            Name = entry.DisplayName;
+            return false;
         }
-    }
 
-    public string? SaveProblem
-    {
-        get => this.saveProblem;
-        private set => SetField(ref this.saveProblem, value);
-    }
+        foreach (var existing in this.store.Enumerate())
+        {
+            if (existing.IsUser && !existing.Equals(entry)
+                && string.Equals(existing.DisplayName, wanted, StringComparison.OrdinalIgnoreCase))
+            {
+                StoreProblem = $"You already have a recipe called “{existing.DisplayName}”.";
+                Name = entry.DisplayName;
+                return false;
+            }
+        }
 
-    /// <summary>Only the user's own recipes can be deleted; a preset can only be shadowed.</summary>
-    public bool CanDelete => SelectedEntry is { IsUser: true };
+        var draft = CurrentRecipe;
+        bool modified = IsModified;
+        if (TrySave(wanted, this.loaded, select: false) is not { } renamed)
+        {
+            Name = entry.DisplayName;
+            return false;
+        }
 
-    /// <summary>Saves the fields as the user's recipe <see cref="SaveName"/> and selects it.
-    /// Returns false, with <see cref="SaveProblem"/> saying why, when it could not.</summary>
-    public bool Save()
-    {
-        RecipeEntry saved;
-        var recipe = CurrentRecipe;
         try
         {
-            saved = this.store.Save(SaveName, recipe);
-        }
-        catch (ArgumentException)
-        {
-            SaveProblem = "Give the recipe a name.";
-            return false;
+            this.store.Delete(entry);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            SaveProblem = $"Could not save: {ex.Message}";
-            return false;
+            StoreProblem = $"Saved as “{renamed.DisplayName}”, but the old one could not be removed: {ex.Message}";
         }
 
-        Reload(saved);
+        Reload(renamed);
+        if (modified)
+            LoadDraft(draft);
+
         return true;
     }
 
-    /// <summary>Deletes the selected user recipe and selects the first remaining one.</summary>
+    /// <summary>Deletes the selected user recipe - bringing back a preset it stood in for - and
+    /// selects the first remaining recipe.</summary>
     public void Delete()
     {
         if (SelectedEntry is not { IsUser: true } entry)
@@ -262,35 +348,99 @@ public sealed class RecipeEditorViewModel : ObservableObject
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            SaveProblem = $"Could not delete: {ex.Message}";
+            StoreProblem = $"Could not delete: {ex.Message}";
             return;
         }
 
         Reload(null);
     }
 
-    /// <summary>Re-lists the store and selects <paramref name="select"/> (matched by name, since
-    /// a save may have shadowed a preset), or the first recipe.</summary>
-    private void Reload(RecipeEntry? select)
+    private RecipeEntry? TrySave(string displayName, Recipe recipe, bool select = true)
     {
-        Entries.Clear();
-        foreach (var entry in this.store.Enumerate())
-            Entries.Add(entry);
-
-        RecipeEntry? match = null;
-        foreach (var entry in Entries)
+        RecipeEntry saved;
+        try
         {
-            if (select is { } wanted && string.Equals(entry.DisplayName, wanted.DisplayName, StringComparison.OrdinalIgnoreCase))
-                match = entry;
+            saved = this.store.Save(displayName, recipe);
+        }
+        catch (ArgumentException)
+        {
+            StoreProblem = "A recipe needs a name.";
+            return null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            StoreProblem = $"Could not save: {ex.Message}";
+            return null;
         }
 
-        this.selectedEntry = null;
-        SelectedEntry = match ?? (Entries.Count > 0 ? Entries[0] : null);
+        if (select)
+            Reload(saved);
+
+        return saved;
+    }
+
+    /// <summary>Re-lists the store and selects <paramref name="select"/> (matched by name and
+    /// owner, since a save may have shadowed a preset), or the first recipe.</summary>
+    private void Reload(RecipeEntry? select)
+    {
+        var presets = new List<RecipeEntry>();
+        var mine = new List<RecipeEntry>();
+        foreach (var entry in this.store.Enumerate())
+            (entry.IsUser ? mine : presets).Add(entry);
+
+        Rows.Clear();
+        AddSection("Presets", presets);
+        AddSection("Yours", mine);
+
+        RecipeListRow? match = null, first = null;
+        foreach (var row in Rows)
+        {
+            if (row.Entry is not { } entry)
+                continue;
+
+            first ??= row;
+            if (select is { } wanted && entry.IsUser == wanted.IsUser
+                && string.Equals(entry.DisplayName, wanted.DisplayName, StringComparison.OrdinalIgnoreCase))
+                match = row;
+        }
+
+        this.selectedRow = null;
+        SelectedRow = match ?? first;
+    }
+
+    private void AddSection(string heading, List<RecipeEntry> entries)
+    {
+        if (entries.Count == 0)
+            return;
+
+        Rows.Add(new RecipeListRow(heading, null));
+        foreach (var entry in entries)
+            Rows.Add(new RecipeListRow(entry.DisplayName, entry));
+    }
+
+    private void LoadEntry(RecipeEntry entry)
+    {
+        Name = entry.DisplayName;
+        if (this.store.Load(entry) is { } recipe)
+        {
+            Load(recipe);
+        }
+        else
+        {
+            Load(new Recipe());
+            PreviewProblem = $"“{entry.DisplayName}” could not be read.";
+        }
     }
 
     private void Load(Recipe recipe)
     {
         this.loaded = recipe;
+        LoadDraft(recipe);
+    }
+
+    /// <summary>Puts <paramref name="recipe"/> in the fields without making it the saved state.</summary>
+    private void LoadDraft(Recipe recipe)
+    {
         this.template = RecipeFieldText.ToDisplay(recipe.Template);
         this.escapeIndex = (int)recipe.Escape;
         this.separator = RecipeFieldText.ToDisplay(recipe.Separator);
@@ -299,16 +449,16 @@ public sealed class RecipeEditorViewModel : ObservableObject
         this.trimLines = recipe.TrimLines;
         this.skipBlankLines = recipe.SkipBlankLines;
 
-        foreach (string name in new[] { nameof(Template), nameof(EscapeIndex), nameof(Separator), nameof(Open),
+        foreach (string changed in new[] { nameof(Template), nameof(EscapeIndex), nameof(Separator), nameof(Open),
                      nameof(Close), nameof(TrimLines), nameof(SkipBlankLines), nameof(Description), nameof(IsModified) })
-            OnPropertyChanged(name);
+            OnPropertyChanged(changed);
 
         RefreshPreview();
     }
 
-    private void SetSetting<T>(ref T field, T value, [System.Runtime.CompilerServices.CallerMemberName] string? name = null)
+    private void SetSetting<T>(ref T field, T value, [System.Runtime.CompilerServices.CallerMemberName] string? changed = null)
     {
-        if (!SetField(ref field, value, name))
+        if (!SetField(ref field, value, changed))
             return;
 
         OnPropertyChanged(nameof(IsModified));
@@ -326,12 +476,37 @@ public sealed class RecipeEditorViewModel : ObservableObject
         {
             PreviewProblem = ex.Message;
             PreviewText = "";
+            PreviewLineNumbers = "";
             return;
         }
 
         PreviewProblem = null;
         string text = Encoding.UTF8.GetString(output.WrittenSpan);
         PreviewText = text.Length > PreviewOutputChars ? text[..PreviewOutputChars] + "\n…" : text;
+        PreviewLineNumbers = LineNumbers(PreviewText);
+    }
+
+    private static string LineNumbers(string text)
+    {
+        if (text.Length == 0)
+            return "";
+
+        int lines = 1;
+        foreach (char c in text)
+        {
+            if (c == '\n')
+                lines++;
+        }
+
+        // A final newline ends the last line rather than starting another.
+        if (text[^1] == '\n')
+            lines--;
+
+        var numbers = new StringBuilder(lines * 4);
+        for (int i = 1; i <= lines; i++)
+            numbers.Append(i).Append(i < lines ? "\n" : "");
+
+        return numbers.ToString();
     }
 
     /// <summary>The start of the document, cut after <see cref="PreviewLines"/> lines or

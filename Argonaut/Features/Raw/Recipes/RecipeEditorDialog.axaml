@@ -3,139 +3,291 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:recipes="clr-namespace:Argonaut.Features.Raw.Recipes"
-        xmlns:transforms="clr-namespace:Argonaut.Engine.Transforms"
+        xmlns:icons="clr-namespace:Argonaut.Ui.Icons"
         mc:Ignorable="d"
         x:Class="Argonaut.Features.Raw.Recipes.RecipeEditorDialog"
         x:DataType="recipes:RecipeEditorViewModel"
         Title="Recipes"
         Width="860" Height="660"
-        MinWidth="640" MinHeight="480"
+        MinWidth="680" MinHeight="480"
         WindowStartupLocation="CenterOwner"
         Background="{DynamicResource AppWindowBackgroundBrush}">
-    <!-- Settings above, the preview below and as wide as the dialog: the preview is the point,
-         so it gets every pixel the settings do not need. -->
-    <Grid Margin="20" RowDefinitions="Auto,Auto,Auto,*,Auto" RowSpacing="14">
+    <Window.Styles>
+        <Style Selector="TextBlock.fieldlabel">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Foreground" Value="{DynamicResource AppMutedTextBrush}" />
+            <Setter Property="Margin" Value="0,0,0,4" />
+        </Style>
+        <Style Selector="TextBox.literal">
+            <Setter Property="FontFamily" Value="{DynamicResource AppMonoFontFamily}" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="MinHeight" Value="28" />
+            <Setter Property="Padding" Value="8,5" />
+        </Style>
+        <Style Selector="ComboBox.compact">
+            <Setter Property="MinHeight" Value="28" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Padding" Value="10,4" />
+        </Style>
+        <Style Selector="CheckBox.compact">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="MinHeight" Value="24" />
+        </Style>
+        <Style Selector="Button.dialog">
+            <Setter Property="MinHeight" Value="30" />
+            <Setter Property="Padding" Value="14,0" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="FontSize" Value="13" />
+        </Style>
+        <Style Selector="Button.quiet">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource AppMutedTextBrush}" />
+        </Style>
 
-        <Grid Grid.Row="0" ColumnDefinitions="*,Auto" ColumnSpacing="16">
-            <StackPanel Grid.Column="0" Spacing="4">
-                <ComboBox ItemsSource="{Binding Entries}"
-                          SelectedItem="{Binding SelectedEntry, Mode=TwoWay}"
-                          HorizontalAlignment="Left"
-                          Width="360">
-                    <ComboBox.ItemTemplate>
-                        <DataTemplate x:DataType="transforms:RecipeEntry">
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                <TextBlock Text="{Binding DisplayName}" />
-                                <TextBlock Text="yours"
-                                           FontSize="11"
-                                           VerticalAlignment="Center"
+        <!-- The direction switch: two buttons in a well, the chosen one raised. -->
+        <Style Selector="Border.segments">
+            <Setter Property="Background" Value="{DynamicResource AppFieldBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="2" />
+        </Style>
+        <Style Selector="Button.segment">
+            <Setter Property="MinHeight" Value="26" />
+            <Setter Property="Padding" Value="12,0" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource AppMutedTextBrush}" />
+        </Style>
+        <Style Selector="Button.segment.chosen">
+            <Setter Property="Background" Value="{DynamicResource AppControlFillBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+        </Style>
+
+        <!-- The recipe list: compact rows; a section heading is not a row you can pick. -->
+        <Style Selector="ListBox.sourcelist">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Padding" Value="8,4" />
+        </Style>
+        <Style Selector="ListBox.sourcelist ListBoxItem">
+            <Setter Property="MinHeight" Value="28" />
+            <Setter Property="Padding" Value="8,0" />
+            <Setter Property="Margin" Value="0,1" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style Selector="ListBox.sourcelist ListBoxItem:selected /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource AppAccentSurfaceBrush}" />
+        </Style>
+        <Style Selector="ListBox.sourcelist ListBoxItem:disabled">
+            <Setter Property="MinHeight" Value="20" />
+            <Setter Property="Margin" Value="0,10,0,2" />
+        </Style>
+    </Window.Styles>
+
+    <Grid ColumnDefinitions="210,*">
+
+        <!-- The list of recipes, with add and delete beneath it. -->
+        <Border Grid.Column="0"
+                Background="{DynamicResource AppPanelBackgroundBrush}"
+                BorderBrush="{DynamicResource AppBorderBrush}"
+                BorderThickness="0,0,1,0">
+            <Grid RowDefinitions="*,Auto">
+                <ListBox Grid.Row="0"
+                         Classes="sourcelist"
+                         ItemsSource="{Binding Rows}"
+                         SelectedItem="{Binding SelectedRow, Mode=TwoWay}">
+                    <ListBox.Styles>
+                        <Style Selector="ListBoxItem" x:DataType="recipes:RecipeListRow">
+                            <Setter Property="IsEnabled" Value="{Binding !IsHeading}" />
+                            <Setter Property="Focusable" Value="{Binding !IsHeading}" />
+                        </Style>
+                    </ListBox.Styles>
+                    <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="recipes:RecipeListRow">
+                            <Panel>
+                                <TextBlock Text="{Binding Text}"
+                                           FontSize="11" FontWeight="SemiBold"
                                            Foreground="{DynamicResource AppMutedTextBrush}"
-                                           IsVisible="{Binding IsUser}" />
-                            </StackPanel>
+                                           IsVisible="{Binding IsHeading}" />
+                                <TextBlock Text="{Binding Text}"
+                                           FontSize="13"
+                                           TextTrimming="CharacterEllipsis"
+                                           Foreground="{DynamicResource AppTextBrush}"
+                                           IsVisible="{Binding !IsHeading}" />
+                            </Panel>
                         </DataTemplate>
-                    </ComboBox.ItemTemplate>
-                </ComboBox>
-                <TextBlock Text="{Binding Description}"
-                           FontSize="12"
-                           TextWrapping="Wrap"
-                           Foreground="{DynamicResource AppMutedTextBrush}"
-                           IsVisible="{Binding Description, Converter={x:Static ObjectConverters.IsNotNull}}" />
-            </StackPanel>
-            <CheckBox Grid.Column="1"
-                      VerticalAlignment="Top"
-                      IsChecked="{Binding Reverse, Mode=TwoWay}"
-                      Content="Reverse — take a list apart"
-                      ToolTip.Tip="Run the recipe backwards: each item of a list made this way becomes a line again." />
-        </Grid>
-
-        <Grid Grid.Row="1"
-              ColumnDefinitions="Auto,*,Auto,*"
-              RowDefinitions="Auto,Auto,Auto,Auto"
-              ColumnSpacing="10" RowSpacing="8">
-            <Grid.Styles>
-                <Style Selector="TextBlock.label">
-                    <Setter Property="VerticalAlignment" Value="Center" />
-                    <Setter Property="FontSize" Value="12" />
-                    <Setter Property="Foreground" Value="{DynamicResource AppMutedTextBrush}" />
-                </Style>
-                <Style Selector="TextBox.literal">
-                    <Setter Property="FontFamily" Value="{DynamicResource AppMonoFontFamily}" />
-                    <Setter Property="FontSize" Value="12" />
-                </Style>
-            </Grid.Styles>
-
-            <TextBlock Grid.Row="0" Grid.Column="0" Classes="label" Text="Each line becomes" />
-            <TextBox Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="3" Classes="literal"
-                     Text="{Binding Template, Mode=TwoWay}"
-                     ToolTip.Tip="{}{line} stands for the line. \n is a line break, \t a tab." />
-
-            <TextBlock Grid.Row="1" Grid.Column="0" Classes="label" Text="Between items" />
-            <TextBox Grid.Row="1" Grid.Column="1" Classes="literal"
-                     Text="{Binding Separator, Mode=TwoWay}"
-                     ToolTip.Tip="Written between items, never after the last. \n is a line break." />
-            <TextBlock Grid.Row="1" Grid.Column="2" Classes="label" Text="Escape" />
-            <ComboBox Grid.Row="1" Grid.Column="3"
-                      HorizontalAlignment="Stretch"
-                      ItemsSource="{x:Static recipes:RecipeEditorViewModel.EscapeChoices}"
-                      SelectedIndex="{Binding EscapeIndex, Mode=TwoWay}" />
-
-            <TextBlock Grid.Row="2" Grid.Column="0" Classes="label" Text="Before the first" />
-            <TextBox Grid.Row="2" Grid.Column="1" Classes="literal"
-                     Text="{Binding Open, Mode=TwoWay}" />
-            <TextBlock Grid.Row="2" Grid.Column="2" Classes="label" Text="After the last" />
-            <TextBox Grid.Row="2" Grid.Column="3" Classes="literal"
-                     Text="{Binding Close, Mode=TwoWay}" />
-
-            <StackPanel Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="3" Orientation="Horizontal" Spacing="20">
-                <CheckBox IsChecked="{Binding TrimLines, Mode=TwoWay}" Content="Trim spaces from each line" />
-                <CheckBox IsChecked="{Binding SkipBlankLines, Mode=TwoWay}" Content="Skip blank lines" />
-            </StackPanel>
-        </Grid>
-
-        <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="10">
-            <TextBlock Text="{Binding PreviewCaption}" FontSize="12" FontWeight="SemiBold" />
-            <TextBlock Text="modified" FontSize="11" VerticalAlignment="Center"
-                       Foreground="{DynamicResource AppMutedTextBrush}"
-                       IsVisible="{Binding IsModified}" />
-        </StackPanel>
-
-        <Border Grid.Row="3"
-                Background="{DynamicResource AppFieldBackgroundBrush}"
-                BorderBrush="{DynamicResource AppFieldBorderBrush}"
-                BorderThickness="1"
-                CornerRadius="6">
-            <Grid>
-                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-                    <SelectableTextBlock Margin="10,8"
-                                         Text="{Binding PreviewText}"
-                                         FontFamily="{DynamicResource AppMonoFontFamily}"
-                                         FontSize="12" />
-                </ScrollViewer>
-                <TextBlock Margin="12,10"
-                           Text="{Binding PreviewProblem}"
-                           TextWrapping="Wrap"
-                           FontSize="12"
-                           IsVisible="{Binding PreviewProblem, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                    </ListBox.ItemTemplate>
+                </ListBox>
+                <Border Grid.Row="1"
+                        BorderBrush="{DynamicResource AppBorderBrush}"
+                        BorderThickness="0,1,0,0"
+                        Padding="8,6">
+                    <StackPanel Orientation="Horizontal" Spacing="2">
+                        <Button Classes="iconbutton" Click="OnCreate"
+                                ToolTip.Tip="New recipe from these settings">
+                            <icons:LucideIcon Data="{StaticResource Icon.Add}" />
+                        </Button>
+                        <Button Classes="iconbutton" Click="OnDelete"
+                                IsEnabled="{Binding IsUserRecipe}"
+                                ToolTip.Tip="Delete this recipe of yours. A preset it replaced comes back.">
+                            <icons:LucideIcon Data="{StaticResource Icon.Remove}" />
+                        </Button>
+                    </StackPanel>
+                </Border>
             </Grid>
         </Border>
 
-        <Grid Grid.Row="4" ColumnDefinitions="*,Auto">
-            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
-                <TextBox Width="200"
-                         PlaceholderText="Recipe name"
-                         Text="{Binding SaveName, Mode=TwoWay}" />
-                <Button Content="Save recipe" Click="OnSave"
-                        ToolTip.Tip="Save these settings under this name. A name already in the list is replaced." />
-                <Button Content="Delete" Click="OnDelete" IsVisible="{Binding CanDelete}" />
-                <TextBlock Text="{Binding SaveProblem}" FontSize="12" VerticalAlignment="Center"
+        <Grid Grid.Column="1" Margin="22,18,22,18" RowDefinitions="Auto,Auto,*,Auto" RowSpacing="16">
+
+            <!-- Which recipe, whether it has unsaved changes, and which way it runs. -->
+            <Grid Grid.Row="0" ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                <StackPanel Grid.Column="0" Spacing="3">
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <TextBox x:Name="NameBox"
+                                 Text="{Binding Name, Mode=TwoWay}"
+                                 IsVisible="{Binding IsUserRecipe}"
+                                 FontSize="17" FontWeight="SemiBold"
+                                 MinWidth="200" MinHeight="30"
+                                 Padding="6,2"
+                                 Margin="-7,-2,0,-2"
+                                 ToolTip.Tip="Rename this recipe"
+                                 KeyDown="OnNameKeyDown"
+                                 LostFocus="OnNameLostFocus" />
+                        <TextBlock Text="{Binding Name}"
+                                   IsVisible="{Binding !IsUserRecipe}"
+                                   FontSize="17" FontWeight="SemiBold"
+                                   VerticalAlignment="Center" />
+                        <TextBlock Text="● Modified"
+                                   FontSize="11"
+                                   VerticalAlignment="Center"
+                                   Foreground="{DynamicResource AppEditMarkBrush}"
+                                   IsVisible="{Binding IsModified}" />
+                    </StackPanel>
+                    <TextBlock Text="{Binding Description}"
+                               FontSize="12"
+                               TextWrapping="Wrap"
+                               Foreground="{DynamicResource AppMutedTextBrush}"
+                               IsVisible="{Binding Description, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                </StackPanel>
+                <Border Grid.Column="1" Classes="segments" VerticalAlignment="Top">
+                    <StackPanel Orientation="Horizontal">
+                        <Button Classes="segment" Classes.chosen="{Binding IsForward}" Click="OnForward"
+                                Content="Make a list"
+                                ToolTip.Tip="Each line becomes an item of the list" />
+                        <Button Classes="segment" Classes.chosen="{Binding Reverse}" Click="OnReverse"
+                                Content="Take it apart"
+                                ToolTip.Tip="Each item of a list made this way becomes a line again" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <!-- The recipe's settings, labels above their fields. -->
+            <StackPanel Grid.Row="1" Spacing="10">
+                <StackPanel>
+                    <TextBlock Classes="fieldlabel" Text="Each line becomes" />
+                    <TextBox Classes="literal"
+                             Text="{Binding Template, Mode=TwoWay}"
+                             ToolTip.Tip="{}{line} stands for the line. \n is a line break, \t a tab." />
+                </StackPanel>
+                <Grid ColumnDefinitions="*,*,*,*" ColumnSpacing="10">
+                    <StackPanel Grid.Column="0">
+                        <TextBlock Classes="fieldlabel" Text="Between items" />
+                        <TextBox Classes="literal" Text="{Binding Separator, Mode=TwoWay}"
+                                 ToolTip.Tip="Written between items, never after the last. \n is a line break." />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1">
+                        <TextBlock Classes="fieldlabel" Text="Before the first" />
+                        <TextBox Classes="literal" Text="{Binding Open, Mode=TwoWay}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="2">
+                        <TextBlock Classes="fieldlabel" Text="After the last" />
+                        <TextBox Classes="literal" Text="{Binding Close, Mode=TwoWay}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="3">
+                        <TextBlock Classes="fieldlabel" Text="Escape" />
+                        <ComboBox Classes="compact"
+                                  HorizontalAlignment="Stretch"
+                                  ItemsSource="{x:Static recipes:RecipeEditorViewModel.EscapeChoices}"
+                                  SelectedIndex="{Binding EscapeIndex, Mode=TwoWay}"
+                                  ToolTip.Tip="How a quote in a line is escaped, so it stays inside the template's quotes" />
+                    </StackPanel>
+                </Grid>
+                <StackPanel Orientation="Horizontal" Spacing="20">
+                    <CheckBox Classes="compact" IsChecked="{Binding TrimLines, Mode=TwoWay}" Content="Trim spaces" />
+                    <CheckBox Classes="compact" IsChecked="{Binding SkipBlankLines, Mode=TwoWay}" Content="Skip blank lines" />
+                </StackPanel>
+            </StackPanel>
+
+            <!-- The result on the start of the document, with line numbers like the raw view's. -->
+            <Border Grid.Row="2"
+                    Background="{DynamicResource AppFieldBackgroundBrush}"
+                    BorderBrush="{DynamicResource AppBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    ClipToBounds="True">
+                <Grid RowDefinitions="30,*">
+                    <Border Grid.Row="0"
+                            BorderBrush="{DynamicResource AppBorderBrush}"
+                            BorderThickness="0,0,0,1"
+                            Padding="12,0">
+                        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                            <TextBlock Text="Preview" FontSize="11" FontWeight="SemiBold" />
+                            <TextBlock Text="·" FontSize="11" Foreground="{DynamicResource AppMutedTextBrush}" />
+                            <TextBlock Text="{Binding PreviewCaption}" FontSize="11" Foreground="{DynamicResource AppMutedTextBrush}" />
+                        </StackPanel>
+                    </Border>
+                    <ScrollViewer Grid.Row="1"
+                                  HorizontalScrollBarVisibility="Auto"
+                                  VerticalScrollBarVisibility="Auto">
+                        <Grid ColumnDefinitions="Auto,*" Margin="0,8">
+                            <TextBlock Grid.Column="0"
+                                       Text="{Binding PreviewLineNumbers}"
+                                       MinWidth="28"
+                                       Margin="0,0,12,0"
+                                       TextAlignment="Right"
+                                       FontFamily="{DynamicResource AppMonoFontFamily}"
+                                       FontSize="12" LineHeight="20"
+                                       Foreground="{DynamicResource AppSubtleIconBrush}" />
+                            <SelectableTextBlock Grid.Column="1"
+                                                 Text="{Binding PreviewText}"
+                                                 Margin="0,0,12,0"
+                                                 FontFamily="{DynamicResource AppMonoFontFamily}"
+                                                 FontSize="12" LineHeight="20" />
+                        </Grid>
+                    </ScrollViewer>
+                    <TextBlock Grid.Row="1"
+                               Margin="12,10"
+                               Text="{Binding PreviewProblem}"
+                               TextWrapping="Wrap"
+                               FontSize="12"
+                               IsVisible="{Binding PreviewProblem, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                </Grid>
+            </Border>
+
+            <Grid Grid.Row="3" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
+                    <Button Classes="dialog" Content="Save changes" Click="OnSaveChanges"
+                            IsEnabled="{Binding IsModified}"
+                            ToolTip.Tip="Keep these settings in this recipe. Changing a preset saves it as yours." />
+                    <Button Classes="dialog quiet" Content="Revert" Click="OnRevert"
+                            IsVisible="{Binding IsModified}" />
+                </StackPanel>
+                <TextBlock Grid.Column="1"
+                           Text="{Binding StoreProblem}"
+                           FontSize="12"
+                           TextTrimming="CharacterEllipsis"
+                           VerticalAlignment="Center"
                            Foreground="{DynamicResource AppMutedTextBrush}" />
-            </StackPanel>
-            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
-                <Button Content="Cancel" Click="OnCancel" IsCancel="True" />
-                <Button Content="{Binding ApplyLabel}" Click="OnApply" Classes="accent" IsDefault="True"
-                        IsEnabled="{Binding PreviewProblem, Converter={x:Static ObjectConverters.IsNull}}"
-                        ToolTip.Tip="Replace the document with the result. Undo gives it back." />
-            </StackPanel>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+                    <Button Classes="dialog" Content="Cancel" Click="OnCancel" IsCancel="True" />
+                    <Button Classes="dialog accent" Content="{Binding ApplyLabel}" Click="OnApply" IsDefault="True"
+                            IsEnabled="{Binding PreviewProblem, Converter={x:Static ObjectConverters.IsNull}}"
+                            ToolTip.Tip="Replace the document with the result. Undo gives it back." />
+                </StackPanel>
+            </Grid>
         </Grid>
     </Grid>
 </Window>

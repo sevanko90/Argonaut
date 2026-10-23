@@ -446,7 +446,7 @@ public sealed class RawViewModelTests : IDisposable
             await vm.LoadAsync(WriteFile(content));
             await vm.IndexingTask;
 
-            Assert.Equal(3, vm.RowCount);
+            Assert.Equal(4, vm.RowCount);
 
             var row0 = Assert.IsType<RawVisibleRow>(vm.Rows[0]);
             Assert.Equal(1, row0.LineNumber);
@@ -461,6 +461,11 @@ public sealed class RawViewModelTests : IDisposable
             var row2 = Assert.IsType<RawVisibleRow>(vm.Rows[2]);
             Assert.Equal(2, row2.LineNumber);
             Assert.Equal("ab", row2.Text);
+
+            // The empty line after the final newline.
+            var row3 = Assert.IsType<RawVisibleRow>(vm.Rows[3]);
+            Assert.Equal(3, row3.LineNumber);
+            Assert.Equal("", row3.Text);
         }
         finally
         {
@@ -626,7 +631,7 @@ public sealed class RawViewModelTests : IDisposable
             await second.IndexingTask;
 
             Assert.NotSame(anchors.Log, second.Index!.DetachAnchors()!.Log);
-            Assert.Equal(2, second.RowCount);
+            Assert.Equal(2, second.Index.RowCount);
         }
         finally
         {

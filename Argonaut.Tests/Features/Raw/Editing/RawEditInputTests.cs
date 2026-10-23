@@ -338,10 +338,10 @@ public sealed class RawEditInputTests : IDisposable
     /// <summary>Rows a fresh scan of what the document now reads as would have.</summary>
     private static int FreshRowCount(RawViewModel vm, int width)
     {
-        var bytes = Encoding.UTF8.GetBytes(DocumentText(vm));
-        var scan = RawSegmentIndex.StartIndexing(new MemoryByteSource(bytes), width);
+        var source = new MemoryByteSource(Encoding.UTF8.GetBytes(DocumentText(vm)));
+        var scan = RawSegmentIndex.StartIndexing(source, width);
         scan.IndexingTask.GetAwaiter().GetResult();
-        return scan.RowCount;
+        return new RawTrailingLineRows(scan, source).RowCount;
     }
 
     [Fact]

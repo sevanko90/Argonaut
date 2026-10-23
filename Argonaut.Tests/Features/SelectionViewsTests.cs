@@ -37,7 +37,7 @@ public class SelectionViewsTests
             await vm.LoadAsync(Select(Lines(50, n => $"line {n}"), "3, 10-11, 50"));
             await vm.IndexingTask;
 
-            Assert.Equal(["line 3", "line 10", "line 11", "line 50"],
+            Assert.Equal(["line 3", "line 10", "line 11", "line 50", ""],
                 Enumerable.Range(0, vm.RowCount).Select(i => ((RawVisibleRow)vm.Rows[i]!).Text));
         }
         finally

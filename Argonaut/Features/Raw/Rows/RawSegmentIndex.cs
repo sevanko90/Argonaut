@@ -131,9 +131,10 @@ public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IBackgro
     /// bytes, and anchors for part of a file would reopen as the whole of it.
     /// </summary>
     public RawRowAnchors? DetachAnchors() =>
-        IndexingTask.IsCompletedSuccessfully && Failure is null && this.source.LengthSettled
-            ? new RawRowAnchors(this.items, RowCount, WrapWidth, this.source.AvailableLength)
-            : null;
+        CoversAllBytes ? new RawRowAnchors(this.items, RowCount, WrapWidth, this.source.AvailableLength) : null;
+
+    /// <summary>The scan ran to the end of settled data, so every byte is in a published row.</summary>
+    internal bool CoversAllBytes => IndexingTask.IsCompletedSuccessfully && Failure is null && this.source.LengthSettled;
 
     public int WrapWidth { get; }
 

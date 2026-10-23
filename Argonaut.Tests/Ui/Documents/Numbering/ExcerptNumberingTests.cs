@@ -106,9 +106,10 @@ public class ExcerptNumberingTests
             await vm.IndexingTask;
 
             var rows = vm.RowIndex!;
-            var last = rows.GetRowInfo(rows.RowCount - 1);
+            // The excerpt's lines, then the empty line after its final newline.
+            var last = rows.GetRowInfo(rows.RowCount - 2);
             Assert.Equal(100, vm.LineNumbering.Line(1));
-            Assert.Equal(401, rows.RowCount);
+            Assert.Equal(402, rows.RowCount);
             Assert.Equal(401, last.LineNumber);
             var source = vm.Origin!.Open();
             try

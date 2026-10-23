@@ -494,7 +494,7 @@ public sealed class RawViewVirtualizationTests : IDisposable
                 window.UpdateLayout();
 
                 var surface = SurfaceOf(window);
-                int rowCount = vm.RowCount;
+                int rowCount = vm.Index!.RowCount;
 
                 void Visit(int row)
                 {

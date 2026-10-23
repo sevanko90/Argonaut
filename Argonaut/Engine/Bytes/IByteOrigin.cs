@@ -92,4 +92,10 @@ public interface IByteOrigin : IDisposable
     /// For a document whose bytes are not one thing the user could sensibly write out - a
     /// selection of lines from all over a file.</summary>
     bool IsReadOnly => false;
+
+    /// <summary>True when the user made this document rather than opened it - a paste, or a new
+    /// empty document - so a view that can edit opens it ready to type into. Anything opened
+    /// from somewhere (a file, a download, a value a hint decoded) starts read-only, and the user
+    /// asks for editing.</summary>
+    bool StartsEditable => false;
 }

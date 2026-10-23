@@ -23,7 +23,10 @@ public sealed class RawCaretController
     {
         ArgumentNullException.ThrowIfNull(rows);
         ArgumentNullException.ThrowIfNull(source);
-        this.rows = rows;
+
+        // Through the trailing line, so the caret can sit on the empty line after a final '\n'
+        // and on an empty document's line 1.
+        this.rows = new RawTrailingLineRows(rows, source);
         this.source = source;
     }
 

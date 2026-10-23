@@ -10,6 +10,7 @@ using Avalonia.Platform.Storage;
 using Argonaut.Engine.Locations;
 using Argonaut.Engine.Logging;
 using Argonaut.Engine.Settings;
+using Argonaut.Engine.Transforms;
 using Argonaut.Features.Json.Schema;
 using Argonaut.Shell;
 using Argonaut.Shell.CommandLine;
@@ -53,8 +54,10 @@ public partial class App : Application
             var schemaCatalog = new JsonSchemaCatalog(JsonSchemaCatalog.BundledDirectoryBesideApp, AppDataPaths.SchemasDirectory,
                 revealDirectory: RevealDirectory);
 
+            var recipes = new RecipeFolderStore(RecipeFolderStore.BundledDirectoryBesideApp, AppDataPaths.RecipesDirectory);
+
             var window = new MainWindow(settings, schemaCatalog, log, OpenLogFolderAction(),
-                ConfigLocationSource.ForCurrentPlatform());
+                ConfigLocationSource.ForCurrentPlatform(), recipes);
             mainWindow = window;
             desktop.MainWindow = window;
 

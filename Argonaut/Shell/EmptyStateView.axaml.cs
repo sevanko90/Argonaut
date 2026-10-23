@@ -14,6 +14,7 @@ public partial class EmptyStateView : UserControl
 {
     public event EventHandler? ChooseFileRequested;
     public event EventHandler? PasteRequested;
+    public event EventHandler? NewDocumentRequested;
     public event EventHandler? ClearRecentFilesRequested;
     public event EventHandler<string>? OpenRecentFileRequested;
     public event EventHandler<string>? ToggleFavouriteRequested;
@@ -78,6 +79,11 @@ public partial class EmptyStateView : UserControl
     private void OnPaste(object? sender, RoutedEventArgs e)
     {
         PasteRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void OnNewDocument(object? sender, RoutedEventArgs e)
+    {
+        NewDocumentRequested?.Invoke(this, EventArgs.Empty);
     }
 
     private void OnClearRecentFiles(object? sender, RoutedEventArgs e)

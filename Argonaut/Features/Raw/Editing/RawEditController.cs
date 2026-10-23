@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Text;
 using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Collections;
 using Argonaut.Features.Raw.Rows;
 
 namespace Argonaut.Features.Raw.Editing;
@@ -243,6 +245,37 @@ public sealed class RawEditController
             return RawEditOutcome.NothingToDo;
 
         return Apply(start, removed, bytes);
+    }
+
+    /// <summary>
+    /// Replaces the whole document with <paramref name="replacement"/> as one undoable edit - a
+    /// recipe's output, adopted without a copy (<see cref="RawPieceTable.ReplaceAdopting"/>). The
+    /// caret goes to the start, and undo puts back the document and the caret as they were.
+    /// </summary>
+    public RawEditOutcome ReplaceAll(IReadOnlyList<FilledChunk> replacement)
+    {
+        ArgumentNullException.ThrowIfNull(replacement);
+
+        long length = Document.AvailableLength;
+        bool empty = true;
+        foreach (var chunk in replacement)
+            empty &= chunk.Length == 0;
+
+        if (length == 0 && empty)
+            return RawEditOutcome.NothingToDo;
+
+        if (!RowIndex.CanAbsorbEditAt(0))
+            return RawEditOutcome.NoRoomForAnotherEditSite;
+
+        long caretBefore = Caret.Caret.Offset;
+        var extent = Document.ReplaceAdopting(0, length, replacement);
+
+        RowIndex.ApplyEdit(extent);
+        this.journal.Record(extent, caretBefore, 0);
+
+        Changed?.Invoke(this, EventArgs.Empty);
+        MoveCaretForOwnEdit(0);
+        return RawEditOutcome.Applied;
     }
 
     /// <summary>

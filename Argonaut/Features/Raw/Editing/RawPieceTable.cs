@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Collections;
 
 namespace Argonaut.Features.Raw.Editing;
 
@@ -303,6 +304,47 @@ public sealed class RawPieceTable : IByteSource
         InsertCore(offset, bytes);
         EndChange();
         return new RawEditExtent(offset, length, bytes.Length);
+    }
+
+    /// <summary>
+    /// <see cref="Replace(long, long, ReadOnlySpan{byte})"/> with bytes that are already in
+    /// arrays: the arrays become scratch chunks as they are, one piece each, rather than being
+    /// copied in. This is how a whole-document transformation lands without its output existing
+    /// twice. The table takes ownership - nothing may write to the arrays afterwards.
+    /// </summary>
+    public RawEditExtent ReplaceAdopting(long offset, long length, IReadOnlyList<FilledChunk> replacement)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(offset);
+        ArgumentOutOfRangeException.ThrowIfNegative(length);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(offset + length, AvailableLength);
+        ArgumentNullException.ThrowIfNull(replacement);
+
+        BeginChange(offset, length);
+        DeleteCore(offset, length);
+
+        var adopted = new List<RawPiece>(replacement.Count);
+        long inserted = 0;
+        foreach (var chunk in replacement)
+        {
+            if (chunk.Length == 0)
+                continue;
+
+            this.scratchChunks.Add(chunk.Buffer);
+            this.scratchFill = chunk.Length;
+            adopted.Add(new RawPiece(this.scratchChunks.Count - 1, 0, chunk.Length, 0));
+            inserted += chunk.Length;
+        }
+
+        if (adopted.Count > 0)
+        {
+            int at = SplitAt(offset);
+            this.pieces.InsertRange(at, adopted);
+            AvailableLength += inserted;
+            RenumberFrom(at);
+        }
+
+        EndChange();
+        return new RawEditExtent(offset, length, inserted);
     }
 
     /// <summary>Scratch chunks allocated so far.</summary>

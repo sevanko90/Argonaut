@@ -4,10 +4,12 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Collections;
 using Argonaut.Engine.Detection;
 using Argonaut.Engine.Hints;
 using Argonaut.Engine.Indexing;
 using Argonaut.Engine.Progress;
+using Argonaut.Engine.Transforms;
 using Argonaut.Engine.Saving;
 using Argonaut.Engine.Search;
 using Argonaut.Engine.Settings;
@@ -15,6 +17,7 @@ using Argonaut.Features.Json.Preview;
 using Argonaut.Features.Raw.Editing;
 using Argonaut.Features.Raw.Highlighting;
 using Argonaut.Features.Raw.Hints;
+using Argonaut.Features.Raw.Recipes;
 using Argonaut.Features.Raw.Rows;
 using Argonaut.Ui.Documents;
 using Argonaut.Ui.Documents.Numbering;
@@ -78,6 +81,13 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
 
     private CancellationTokenSource? saveCts;
 
+    /// <summary>A recipe or codec reading the document on the background, which disposal must
+    /// stop and join for the same reason as <see cref="saveCopy"/>.</summary>
+    private Task transformRun = Task.CompletedTask;
+
+    private CancellationTokenSource? transformCts;
+    private bool isTransforming;
+
     /// <summary>Where re-indexes this document starts itself are reported - a wrap-width change,
     /// or the reopen after a save. The shell reports the first load.</summary>
     private readonly ProgressBoard progressBoard;
@@ -86,12 +96,18 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
 
     private readonly LineNumberingPreference? lineNumbers;
 
+    private readonly IRecipeStore? recipes;
+
     /// <param name="settings">Where the wrap width is remembered.</param>
     /// <param name="progressBoard"><see cref="ProgressBoard.Shared"/> unless a test substitutes one.</param>
     /// <param name="lineNumbers">How an excerpt numbers its lines; null numbers from the start.</param>
-    public RawViewModel(RawViewSettings settings, ProgressBoard? progressBoard = null, LineNumberingPreference? lineNumbers = null)
+    /// <param name="recipes">The recipes the Transform menu offers; null offers only the built-in
+    /// encodings.</param>
+    public RawViewModel(RawViewSettings settings, ProgressBoard? progressBoard = null, LineNumberingPreference? lineNumbers = null,
+        IRecipeStore? recipes = null)
     {
         this.settings = settings;
+        this.recipes = recipes;
         this.lineNumbers = lineNumbers;
         this.progressBoard = progressBoard ?? ProgressBoard.Shared;
     }
@@ -167,8 +183,27 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         return shown;
     }
 
-    /// <summary>The rows of <see cref="Document"/>.</summary>
-    internal IRawRowIndex? RowIndex => (IRawRowIndex?)this.editor?.RowIndex ?? this.session?.Index;
+    /// <summary>The rows of <see cref="Document"/>, with the empty line after a final '\n' (see
+    /// <see cref="RawTrailingLineRows"/>).</summary>
+    internal IRawRowIndex? RowIndex
+    {
+        get
+        {
+            if (ContentRows is not { } rows || Document is not { } document)
+                return null;
+
+            // Kept rather than made per read: the view asks for this many times a frame.
+            if (!ReferenceEquals(this.trailingLineRows?.Rows, rows))
+                this.trailingLineRows = new RawTrailingLineRows(rows, document);
+
+            return this.trailingLineRows;
+        }
+    }
+
+    private RawTrailingLineRows? trailingLineRows;
+
+    /// <summary>The rows of <see cref="Document"/> that hold bytes - what the status line counts.</summary>
+    private IRawRowIndex? ContentRows => (IRawRowIndex?)this.editor?.RowIndex ?? this.session?.Index;
 
     /// <summary>Fires when this document begins tearing down, for
     /// <see cref="ISearchNavigator.DocumentTearingDown"/>. Deliberately the mapping-lifetime
@@ -177,6 +212,8 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     internal CancellationToken TearingDown => this.session?.TearingDown ?? default;
 
     public int RowCount => RowIndex?.RowCount ?? 0;
+
+    private int ContentRowCount => ContentRows?.RowCount ?? 0;
 
     /// <summary>Byte cap per display row. Observable so the view can recompute its pan range.</summary>
     public int WrapWidth
@@ -333,7 +370,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     /// <summary>See <see cref="ISaveableDocument.CanSave"/>. Waits for the scan for the same
     /// reason editing does, and because the save reopens the document over a fresh one. A pending
     /// re-wrap does not block it: <see cref="SaveAsync"/> stops it and carries its width across.</summary>
-    public bool CanSave => !IsSaving && CanEdit;
+    public bool CanSave => !IsSaving && !IsTransforming && CanEdit;
 
     /// <summary>
     /// Bumped by every edit, so the view drops the row text, layouts and decode maps it is
@@ -358,9 +395,9 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         if (IsDisposed || this.session is null || editing == IsEditing)
             return;
 
-        if (IsSaving)
+        if (IsSaving || IsTransforming)
         {
-            ToastService.Show("Wait for the save to finish.");
+            ToastService.Show(IsSaving ? "Wait for the save to finish." : "Wait for the transform to finish.");
             SyncToolbarEditing();
             return;
         }
@@ -417,14 +454,135 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
 
     public bool Redo() => EditsPaused() || Report(this.editor?.Redo());
 
-    /// <summary>True - so the key counts as handled and goes nowhere else - when a save is
-    /// running and the edit must not happen. See <see cref="IsSaving"/>.</summary>
+    /// <summary>True - so the key counts as handled and goes nowhere else - when a save or a
+    /// transform is reading the document and the edit must not happen. See <see cref="IsSaving"/>.</summary>
     private bool EditsPaused()
     {
-        if (!IsSaving || this.editor is null)
+        if (!(IsSaving || IsTransforming) || this.editor is null)
             return false;
 
-        ToastService.Show("Saving — editing resumes when it finishes.");
+        ToastService.Show(IsSaving ? "Saving — editing resumes when it finishes." : "Transforming — editing resumes when it finishes.");
+        return true;
+    }
+
+    // ---- recipes and codecs -------------------------------------------------------------
+
+    /// <summary>True while a recipe or codec is reading the document on the background. Pauses edits,
+    /// saving and the edit toggle exactly as <see cref="IsSaving"/> does, for the same reason:
+    /// the piece table is not safe to change under a reader.</summary>
+    public bool IsTransforming
+    {
+        get => this.isTransforming;
+        private set
+        {
+            if (SetField(ref this.isTransforming, value))
+                OnPropertyChanged(nameof(CanSave));
+        }
+    }
+
+    /// <summary>Applies <paramref name="recipe"/> to the whole document; see
+    /// <see cref="TransformAsync"/>.</summary>
+    public Task<bool> ApplyRecipeAsync(Recipe recipe, TransformDirection direction)
+    {
+        ArgumentNullException.ThrowIfNull(recipe);
+        return TransformAsync((document, output, stopping) => RecipeRunner.Run(recipe, direction, document, output, stopping));
+    }
+
+    /// <summary>Encodes (forward) or decodes (reverse) the whole document; see
+    /// <see cref="TransformAsync"/>.</summary>
+    public Task<bool> ApplyCodecAsync(TextCodec codec, TransformDirection direction, CodecScope scope) =>
+        TransformAsync((document, output, stopping) => CodecRunner.Run(codec, direction, scope, document, output, stopping));
+
+    private delegate void DocumentTransform(IByteSource document, ChunkedByteWriter output, CancellationToken stopping);
+
+    /// <summary>
+    /// Runs <paramref name="transform"/> over the whole document on the background and replaces
+    /// the document with the result as one undoable edit, entering edit mode first if it is not
+    /// on. The output is built in full before anything changes, so a transform that fails
+    /// part-way - input it cannot read, or the document closing - leaves the document as it was.
+    /// Returns whether the document was replaced; a failure has already been shown to the user.
+    /// </summary>
+    private async Task<bool> TransformAsync(DocumentTransform transform)
+    {
+        if (IsDisposed || IsTransforming || IsSaving)
+            return false;
+
+        SetEditing(true);
+        if (this.editor is not { } editor || !IsEditing)
+            return false;
+
+        var document = editor.Document;
+        var output = new ChunkedByteWriter();
+        var cts = new CancellationTokenSource();
+        this.transformCts = cts;
+        IsTransforming = true;
+        bool unchanged;
+        try
+        {
+            var run = Task.Run(() =>
+            {
+                transform(document, output, cts.Token);
+                return Matches(document, output.Chunks);
+            });
+            this.transformRun = run;
+            unchanged = await run;
+        }
+        catch (TransformException ex)
+        {
+            ToastService.Show(ex.Message);
+            return false;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+        finally
+        {
+            IsTransforming = false;
+            this.transformCts = null;
+            cts.Dispose();
+        }
+
+        if (IsDisposed || !ReferenceEquals(editor, this.editor))
+            return false;
+
+        // Said rather than applied: an edit that changes nothing would only look like the menu
+        // had not worked, and leave an undo step that undoes nothing.
+        if (unchanged)
+        {
+            ToastService.Show("Nothing to change — the result is the same as the document.");
+            return false;
+        }
+
+        return Report(editor.ReplaceAll(output.Chunks));
+    }
+
+    /// <summary>Whether <paramref name="chunks"/> hold exactly the bytes of
+    /// <paramref name="document"/>. On the transform's background thread, while nothing can edit.</summary>
+    private static bool Matches(IByteSource document, IReadOnlyList<FilledChunk> chunks)
+    {
+        long length = 0;
+        foreach (var chunk in chunks)
+            length += chunk.Length;
+
+        if (length != document.AvailableLength)
+            return false;
+
+        long offset = 0;
+        foreach (var chunk in chunks)
+        {
+            var expected = chunk.Span;
+            while (!expected.IsEmpty)
+            {
+                var run = document.GetContiguousSpan(offset, expected.Length);
+                if (run.IsEmpty || !run.SequenceEqual(expected[..run.Length]))
+                    return false;
+
+                offset += run.Length;
+                expected = expected[run.Length..];
+            }
+        }
+
         return true;
     }
 
@@ -511,7 +669,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         // it), so its own notification cannot be relied on to refresh what is under it.
         RefreshCaretReadout();
 
-        StatusText = DocumentStatusLine.Compose(FilePath, $"{RowCount:N0} rows · edited, not saved");
+        StatusText = DocumentStatusLine.Compose(FilePath, $"{ContentRowCount:N0} rows · edited, not saved");
     }
 
     private void SyncToolbarEditing()
@@ -780,7 +938,8 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         this.FilePath = origin.Path ?? origin.DisplayName;
         FollowLineNumbering(this.lineNumbers);
         this.wrapWidth = this.settings.WrapWidth;
-        this.toolbar = new RawToolbarViewModel(this.wrapWidth, ChooseWrapWidth, SetEditing, ChooseColours);
+        this.toolbar = new RawToolbarViewModel(this.wrapWidth, ChooseWrapWidth, SetEditing, ChooseColours,
+            new RawTransformMenuViewModel(this, this.recipes));
 
         var session = StartSession(origin, progressReporter);
 
@@ -801,8 +960,11 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         OnPropertyChanged(nameof(RowCount));
         OnPropertyChanged(nameof(Lexer));
 
-        StatusText = DocumentStatusLine.Compose(FilePath, $"{RowCount:N0} rows indexed so far");
+        StatusText = DocumentStatusLine.Compose(FilePath, $"{ContentRowCount:N0} rows indexed so far");
         MonitorIndexing();
+
+        if (origin.StartsEditable)
+            _ = EnterEditingWhenIndexedAsync();
     }
 
     /// <summary>
@@ -949,7 +1111,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         OnPropertyChanged(nameof(Rows));
         OnPropertyChanged(nameof(RowCount));
 
-        StatusText = DocumentStatusLine.Compose(FilePath, $"{RowCount:N0} rows indexed so far");
+        StatusText = DocumentStatusLine.Compose(FilePath, $"{ContentRowCount:N0} rows indexed so far");
         MonitorIndexing();
     }
 
@@ -1038,7 +1200,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         Caret = editor.Caret;
 
         OnPropertyChanged(nameof(RowCount));
-        StatusText = DocumentStatusLine.Compose(FilePath, IsDirty ? $"{RowCount:N0} rows · edited, not saved" : $"{RowCount:N0} rows");
+        StatusText = DocumentStatusLine.Compose(FilePath, IsDirty ? $"{ContentRowCount:N0} rows · edited, not saved" : $"{ContentRowCount:N0} rows");
     }
 
     /// <summary>Opens <paramref name="origin"/> and starts scanning it, reading through a
@@ -1307,23 +1469,16 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         OnPropertyChanged(nameof(CanEdit));
         OnPropertyChanged(nameof(CanSave));
 
-        StatusText = DocumentStatusLine.Compose(FilePath, $"saved · {RowCount:N0} rows indexed so far");
+        StatusText = DocumentStatusLine.Compose(FilePath, $"saved · {ContentRowCount:N0} rows indexed so far");
         MonitorIndexing();
 
         _ = RestoreAfterReopenAsync(caretOffset, wasEditing);
     }
 
-    /// <summary>
-    /// Puts the caret back where it was, then - if the save happened in edit mode - turns edit
-    /// mode back on once the fresh scan allows it. One sequence rather than two independent
-    /// continuations, so the caret is always placed before edit mode takes its position over.
-    /// </summary>
-    private async Task RestoreAfterReopenAsync(long caretOffset, bool resumeEditing)
+    /// <summary>Turns edit mode on once the scan allows it - what a document the user made rather
+    /// than opened (<see cref="IByteOrigin.StartsEditable"/>) and one saved while editing both want.</summary>
+    private async Task EnterEditingWhenIndexedAsync()
     {
-        await RevealRangeAsync(ByteRange.At(caretOffset), announceArrival: false);
-        if (!resumeEditing || IsDisposed)
-            return;
-
         var indexing = IndexingTask;
         try
         {
@@ -1338,12 +1493,28 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
             SetEditing(true);
     }
 
-    /// <summary>A save still copying when the document closes is stopped and joined here, before
-    /// the session releases the mapping the copy reads.</summary>
+    /// <summary>
+    /// Puts the caret back where it was, then - if the save happened in edit mode - turns edit
+    /// mode back on once the fresh scan allows it. One sequence rather than two independent
+    /// continuations, so the caret is always placed before edit mode takes its position over.
+    /// </summary>
+    private async Task RestoreAfterReopenAsync(long caretOffset, bool resumeEditing)
+    {
+        await RevealRangeAsync(ByteRange.At(caretOffset), announceArrival: false);
+        if (!resumeEditing || IsDisposed)
+            return;
+
+        await EnterEditingWhenIndexedAsync();
+    }
+
+    /// <summary>A save still copying, or a transform still reading, when the document closes is
+    /// stopped and joined here, before the session releases the mapping it reads.</summary>
     protected override void DisposeCore()
     {
         this.saveCts?.Cancel();
+        this.transformCts?.Cancel();
         try { this.saveCopy.Wait(); } catch { /* observed only to unblock disposal; SaveAsync reports it */ }
+        try { this.transformRun.Wait(); } catch { /* observed only to unblock disposal; TransformAsync reports it */ }
     }
 
     public override ISearchNavigator? CreateSearchNavigator() => new RawSearchNavigator(this);
@@ -1364,7 +1535,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     /// covering a wrap-width restart retiring this index mid-monitor.</summary>
     protected override void OnIndexingCompleted()
     {
-        StatusText = DocumentStatusLine.Compose(FilePath, $"{RowCount:N0} rows");
+        StatusText = DocumentStatusLine.Compose(FilePath, $"{ContentRowCount:N0} rows");
         KeepAnchors();
 
         // Editing waits for the scan, so this is the moment the toggle becomes usable.

@@ -29,7 +29,8 @@ public sealed partial class LucideIconsTests
             {
                 var geometry = Assert.IsAssignableFrom<Geometry>(resource);
                 var bounds = geometry.Bounds;
-                Assert.True(bounds.Width > 0 && bounds.Height > 0, $"{key} is empty");
+                // Either way, not both: a single stroke ("minus") is flat but still draws.
+                Assert.True(bounds.Width > 0 || bounds.Height > 0, $"{key} is empty");
                 Assert.True(bounds.X >= -0.01 && bounds.Y >= -0.01 && bounds.Right <= 24.01 && bounds.Bottom <= 24.01,
                     $"{key} spills off the 24x24 grid: {bounds}");
             }

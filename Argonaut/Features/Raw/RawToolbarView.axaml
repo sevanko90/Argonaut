@@ -18,6 +18,19 @@
                       ToolTip.Tip="Edit: type to change the document. Changes are held in memory until you save (Ctrl+S or Cmd+S).">
             <icons:LucideIcon Data="{StaticResource Icon.Edit}" />
         </ToggleButton>
+        <!-- The menu is built whole on each click (OnTransformClick), so a recipe saved since the
+             last time is listed without anything watching the folder. -->
+        <Button x:Name="TransformButton"
+                Classes="tool"
+                Click="OnTransformClick"
+                IsVisible="{Binding Transforms, Converter={x:Static ObjectConverters.IsNotNull}}"
+                IsEnabled="{Binding Transforms.CanTransform, FallbackValue=False}"
+                ToolTip.Tip="Transform: encode, decode or apply a recipe to the whole document. Undo gives it back.">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+                <icons:LucideIcon Data="{StaticResource Icon.Transform}" />
+                <icons:LucideIcon Classes="chevron" Data="{StaticResource Icon.ChevronDown}" />
+            </StackPanel>
+        </Button>
         <Button x:Name="WrapWidthButton"
                 IsEnabled="{Binding CanChangeWrapWidth}"
                 Classes="tool"

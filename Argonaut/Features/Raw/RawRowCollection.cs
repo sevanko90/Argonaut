@@ -90,9 +90,9 @@ public sealed class RawRowCollection : VirtualizingItemsSourceBase
     /// </summary>
     public RawRowCollection(IRawRowIndex index, IByteSource bytes)
     {
-        this.index = index;
+        this.index = new RawTrailingLineRows(index, bytes);
         this.bytes = bytes;
-        notifiedCount = index.RowCount;
+        notifiedCount = this.index.RowCount;
 
         this.scan = index as RawSegmentIndex;
 

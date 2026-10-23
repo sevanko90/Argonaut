@@ -64,6 +64,11 @@ public sealed class RawViewportPositionTests
                 vm.Dispose();
                 File.Delete(path);
             }
+
+            // A result, so the lambda binds to Dispatch's Task<TResult> overload, which awaits the
+            // body - without one it binds to Dispatch<Task>, finishes at the first await, and no
+            // assertion below it is ever observed.
+            return true;
         }, CancellationToken.None);
     }
 }

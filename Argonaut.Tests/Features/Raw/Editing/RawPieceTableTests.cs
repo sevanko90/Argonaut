@@ -1,4 +1,6 @@
+using System.Buffers;
 using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Collections;
 using Argonaut.Features.Raw.Editing;
 using Argonaut.Tests.Features.Raw.Rows;
 
@@ -376,5 +378,65 @@ public class RawPieceTableTests
         table.Delete(5, 3);
 
         Assert.Empty(EditedRanges(table));
+    }
+
+    private static List<FilledChunk> ChunksOf(int chunkBytes, string text)
+    {
+        var writer = new ChunkedByteWriter(chunkBytes);
+        foreach (char c in text)
+            writer.Write([(byte)c]);
+        return writer.Chunks.ToList();
+    }
+
+    [Fact]
+    public void ReplaceAdopting_ReadsAsTheChunksInOrder_WithoutCopyingThem()
+    {
+        var table = TableOver("hello world");
+        var chunks = ChunksOf(16, "a replacement longer than one chunk");
+
+        var extent = table.ReplaceAdopting(0, 11, chunks);
+
+        Assert.Equal(Bytes("a replacement longer than one chunk"), ReadAll(table));
+        Assert.Equal(new RawEditExtent(0, 11, 35), extent);
+
+        // Adopted, not copied: a piece reads straight out of the writer's own array.
+        chunks[0].Buffer[0] = (byte)'A';
+        Assert.Equal((byte)'A', table.ByteAt(0));
+    }
+
+    [Fact]
+    public void ReplaceAdopting_IsOneChange_ThatUndoesAndRedoes()
+    {
+        var table = TableOver("hello world");
+        table.ReplaceAdopting(6, 5, ChunksOf(16, "there, everybody"));
+        var change = table.LastChange();
+
+        table.UndoChange(change);
+        Assert.Equal(Bytes("hello world"), ReadAll(table));
+
+        table.RedoChange(change);
+        Assert.Equal(Bytes("hello there, everybody"), ReadAll(table));
+    }
+
+    [Fact]
+    public void TypingAfterReplaceAdopting_LandsCorrectly()
+    {
+        var table = TableOver("x");
+        table.ReplaceAdopting(0, 1, ChunksOf(16, "abc"));
+
+        table.Insert(3, Bytes("d"));
+        table.Insert(0, Bytes(">"));
+
+        Assert.Equal(Bytes(">abcd"), ReadAll(table));
+    }
+
+    [Fact]
+    public void ReplaceAdopting_OfAnEmptyTable_InsertsTheChunks()
+    {
+        var table = TableOver("");
+
+        table.ReplaceAdopting(0, 0, ChunksOf(16, "new"));
+
+        Assert.Equal(Bytes("new"), ReadAll(table));
     }
 }

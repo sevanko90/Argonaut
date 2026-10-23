@@ -147,9 +147,10 @@ public sealed class RawSaveTests : IDisposable
             Assert.Equal(target, vm.WrapWidth);
             Assert.False(vm.IsRewrapping);
 
-            var fresh = Argonaut.Features.Raw.Rows.RawSegmentIndex.StartIndexing(new MemoryByteSource(File.ReadAllBytes(path)), target);
+            var saved = new MemoryByteSource(File.ReadAllBytes(path));
+            var fresh = Argonaut.Features.Raw.Rows.RawSegmentIndex.StartIndexing(saved, target);
             await fresh.IndexingTask;
-            Assert.Equal(fresh.RowCount, vm.RowCount);
+            Assert.Equal(new Argonaut.Features.Raw.Rows.RawTrailingLineRows(fresh, saved).RowCount, vm.RowCount);
         }
         finally
         {

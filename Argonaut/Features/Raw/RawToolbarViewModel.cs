@@ -1,6 +1,7 @@
 using System;
 using System.Globalization;
 using Argonaut.Features.Raw.Highlighting;
+using Argonaut.Features.Raw.Recipes;
 using Argonaut.Ui.ViewModels;
 
 namespace Argonaut.Features.Raw;
@@ -25,9 +26,12 @@ public sealed class RawToolbarViewModel : ObservableObject
     private bool isEditing;
     private bool canChangeWrapWidth = true;
 
+    /// <param name="transforms">The Transform menu; null hides it.</param>
     public RawToolbarViewModel(
-        int initialWrapWidth, Action<int> applyWrapWidth, Action<bool> applyEditing, Action<RawColourChoice>? applyColours = null)
+        int initialWrapWidth, Action<int> applyWrapWidth, Action<bool> applyEditing, Action<RawColourChoice>? applyColours = null,
+        RawTransformMenuViewModel? transforms = null)
     {
+        Transforms = transforms;
         this.applyColours = applyColours;
         this.applyWrapWidth = applyWrapWidth;
         this.applyEditing = applyEditing;
@@ -36,6 +40,9 @@ public sealed class RawToolbarViewModel : ObservableObject
         if (wrapWidthIndex < 0)
             wrapWidthIndex = Array.IndexOf(RawViewSettings.Widths, RawViewSettings.DefaultWrapWidth);
     }
+
+    /// <summary>The Transform menu: encodings and recipes applied to the whole document.</summary>
+    public RawTransformMenuViewModel? Transforms { get; }
 
     /// <summary>Bound two-way to the wrap-width choices. The &lt; 0 guard absorbs a -1 from a
     /// selector being torn down.</summary>

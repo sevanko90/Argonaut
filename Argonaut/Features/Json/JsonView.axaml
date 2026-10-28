@@ -3,9 +3,7 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:json="clr-namespace:Argonaut.Features.Json"
-             xmlns:jsontree="clr-namespace:Argonaut.Features.Json.Tree"
-             xmlns:tree="clr-namespace:Argonaut.Ui.Tree"
-             xmlns:icons="clr-namespace:Argonaut.Ui.Icons"
+              xmlns:tree="clr-namespace:Argonaut.Ui.Tree"
              xmlns:preview="clr-namespace:Argonaut.Features.Json.Preview"
              x:Class="Argonaut.Features.Json.JsonView"
              x:DataType="json:JsonViewModel">
@@ -62,95 +60,17 @@
                            Minimum="0" />
             </Grid>
 
-            <!-- The path bar: where the selection is, and where to go. Clicking its empty space,
-                 the go-to button or Ctrl/Cmd+L turns it into an entry for a JSONPath, prefilled
-                 with the selection's, so jumping somewhere near is an edit rather than a retype. -->
-            <Border Grid.Row="1"
-                    x:Name="PathBar"
-                    BorderBrush="{DynamicResource AppBorderBrush}"
-                    BorderThickness="0,1,0,0"
-                    Background="{DynamicResource AppPanelBackgroundBrush}"
-                    Height="30"
-                    Padding="10,0,6,0">
-                <Grid ColumnDefinitions="Auto,*,Auto">
-                    <icons:LucideIcon Grid.Column="0"
-                                      Data="{StaticResource Icon.Json}"
-                                      Size="13"
-                                      Margin="0,0,8,0"
-                                      VerticalAlignment="Center"
-                                      Foreground="{DynamicResource AppSubtleIconBrush}" />
-
-                    <!-- Hit-testable background, so a click anywhere along the bar opens the entry. -->
-                    <Border Grid.Column="1"
-                            x:Name="PathDisplay"
-                            Background="Transparent"
-                            Cursor="IBeam"
-                            PointerPressed="OnPathBarPressed">
-                        <Panel VerticalAlignment="Center">
-                            <TextBlock Text="No selection — click to go to a path"
-                                       FontSize="11"
-                                       VerticalAlignment="Center"
-                                       IsVisible="{Binding SelectedPath, Converter={x:Static json:IsNullConverter.Instance}}"
-                                       Foreground="{DynamicResource AppSubtleIconBrush}" />
-                            <ItemsControl ItemsSource="{Binding SelectedPathSegments}"
-                                          IsVisible="{Binding SelectedPath, Converter={x:Static json:IsNotNullConverter.Instance}}"
-                                          HorizontalAlignment="Left"
-                                          VerticalAlignment="Center">
-                                <ItemsControl.ItemsPanel>
-                                    <ItemsPanelTemplate>
-                                        <StackPanel Orientation="Horizontal" />
-                                    </ItemsPanelTemplate>
-                                </ItemsControl.ItemsPanel>
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate x:DataType="jsontree:JsonTreePathSegment">
-                                        <Button Content="{Binding Label}"
-                                                Click="OnPathSegmentClick"
-                                                Classes="pathlink"
-                                                FontSize="11"
-                                                FontFamily="{DynamicResource AppContentFontFamily}" />
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </Panel>
-                    </Border>
-
-                    <TextBox Grid.Column="1"
-                             x:Name="PathEntry"
-                             IsVisible="False"
-                             MinHeight="22"
-                             Height="22"
-                             Padding="6,2"
-                             FontSize="11"
-                             VerticalAlignment="Center"
-                             FontFamily="{DynamicResource AppContentFontFamily}"
-                             PlaceholderText="$.path.to[0]"
-                             KeyDown="OnPathEntryKeyDown"
-                             LostFocus="OnPathEntryLostFocus" />
-
-                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2" Margin="8,0,0,0">
-                        <Button x:Name="GoToPathButton"
-                                Classes="iconbutton compact"
-                                Click="OnGoToPathClick"
-                                ToolTip.Tip="Go to a JSONPath (Ctrl+L / Cmd+L)">
-                            <icons:LucideIcon Data="{StaticResource Icon.GoTo}" Size="14" />
-                        </Button>
-                        <Button x:Name="CopyValueButton"
-                                Classes="iconbutton compact"
-                                Click="OnCopyValueClick"
-                                IsEnabled="{Binding SelectedPath, Converter={x:Static json:IsNotNullConverter.Instance}}"
-                                ToolTip.Tip="Copy value">
-                            <icons:LucideIcon Data="{StaticResource Icon.CopyValue}" Size="14" />
-                        </Button>
-                        <Button x:Name="CopyPathButton"
-                                Classes="iconbutton compact"
-                                Click="OnCopyPathClick"
-                                IsEnabled="{Binding SelectedPath, Converter={x:Static json:IsNotNullConverter.Instance}}"
-                                ToolTip.Tip="Copy JSONPath">
-                            <icons:LucideIcon Data="{StaticResource Icon.CopyPath}" Size="14" />
-                        </Button>
-                    </StackPanel>
-                </Grid>
-            </Border>
+            <!-- The path bar: where the selection is, and where to go - here as a JSONPath. -->
+            <tree:TreePathBar Grid.Row="1"
+                              x:Name="PathBar"
+                              Icon="{StaticResource Icon.Json}"
+                              RootPath="$"
+                              EntryPlaceholder="$.path.to[0]"
+                              EmptyText="No selection — click to go to a path"
+                              GoToTooltip="Go to a JSONPath (Ctrl+L / Cmd+L)"
+                              CopyPathTooltip="Copy JSONPath"
+                              CopiedPathMessage="JSONPath copied to clipboard"
+                              FocusTarget="{Binding #Surface}" />
 
             <preview:HintCard x:Name="HintCard"
                               Anchor="{Binding #Surface}"

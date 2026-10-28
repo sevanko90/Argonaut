@@ -4,15 +4,9 @@ using System.Text;
 using Argonaut.Engine.Indexing.Trees;
 using Argonaut.Features.Json.Indexing;
 using Argonaut.Features.Json.Paths;
+using Argonaut.Ui.Tree;
 
 namespace Argonaut.Features.Json.Tree;
-
-/// <summary>One clickable piece of a JSONPath - <c>$</c>, <c>.nested</c>, <c>[2]</c> - and the
-/// byte offset of the row it names, which revealing it lands on.</summary>
-public readonly record struct JsonTreePathSegment(string Label, long Target);
-
-/// <summary>Where a JSONPath leads: the target row's start, or why it leads nowhere.</summary>
-public readonly record struct JsonTreePathResult(long? Target, string? Error);
 
 /// <summary>
 /// JSONPaths for the JSON tree, in <see cref="JsonPathSyntax"/>'s grammar: built from a row and
@@ -25,26 +19,26 @@ public static class JsonTreePaths
 {
     /// <summary>The path to the cursor's row, a segment per level. A close row's path is its
     /// container's.</summary>
-    public static IReadOnlyList<JsonTreePathSegment> Segments(TreeCursor cursor, JsonTreeText text)
+    public static IReadOnlyList<TreePathSegment> Segments(TreeCursor cursor, JsonTreeText text)
     {
         var chain = cursor.Ancestors.ToList();
         var current = cursor.Current;
         chain.Add(current.Shape == TreeRowShape.Close ? current with { Shape = TreeRowShape.Open, Start = current.Node.RowStart } : current);
 
-        var segments = new List<JsonTreePathSegment>(chain.Count);
+        var segments = new List<TreePathSegment>(chain.Count);
         for (int i = 0; i < chain.Count; i++)
         {
             var row = chain[i];
             if (i == 0)
             {
-                segments.Add(new JsonTreePathSegment("$", row.Start));
+                segments.Add(new TreePathSegment("$", row.Start));
                 continue;
             }
 
             string label = row.ParentKind == (byte)JsonTokenKind.StartArray
                 ? $"[{row.Ordinal}]"
                 : JsonPathSyntax.FormatMember(DecodedName(row, text));
-            segments.Add(new JsonTreePathSegment(label[0] == '[' ? label : "." + label, row.Start));
+            segments.Add(new TreePathSegment(label[0] == '[' ? label : "." + label, row.Start));
         }
 
         return segments;
@@ -57,7 +51,7 @@ public static class JsonTreePaths
         return JsonPathSyntax.DecodeName(text.Bytes, start, (int)(text.NameEnd(row) - 1 - start));
     }
 
-    public static string Format(IReadOnlyList<JsonTreePathSegment> segments)
+    public static string Format(IReadOnlyList<TreePathSegment> segments)
     {
         var path = new StringBuilder();
         foreach (var segment in segments)
@@ -65,24 +59,24 @@ public static class JsonTreePaths
         return path.ToString();
     }
 
-    public static JsonTreePathResult Resolve(SparseContainerIndex index, JsonTreeReader reader, JsonTreeText text, string path)
+    public static TreePathResult Resolve(SparseContainerIndex index, JsonTreeReader reader, JsonTreeText text, string path)
     {
         if (!JsonPathSyntax.TryParse(path, out var segments, out string? parseError))
-            return new JsonTreePathResult(null, parseError);
+            return new TreePathResult(null, parseError);
 
         long position = 0;
         if (!reader.TryReadChild(JsonTreeReader.Document, ref position, out var current, out _))
-            return new JsonTreePathResult(null, "File is empty.");
+            return new TreePathResult(null, "File is empty.");
 
         for (int s = 0; s < segments.Count; s++)
         {
             var segment = segments[s];
             var kind = (JsonTokenKind)current.FormatKind;
             if (segment.IsArrayIndex && kind != JsonTokenKind.StartArray)
-                return new JsonTreePathResult(null,
+                return new TreePathResult(null,
                     $"{JsonPathSyntax.FormatPath(segments, s)} is {JsonPathSyntax.DescribeKind(kind)}, not an array - can't index into it with [{segment.ArrayIndex}].");
             if (!segment.IsArrayIndex && kind != JsonTokenKind.StartObject)
-                return new JsonTreePathResult(null,
+                return new TreePathResult(null,
                     $"{JsonPathSyntax.FormatPath(segments, s)} is {JsonPathSyntax.DescribeKind(kind)}, not an object - can't look up member '{segment.Name}'.");
 
             var found = segment.IsArrayIndex
@@ -91,13 +85,13 @@ public static class JsonTreePaths
             if (found is not { } next)
             {
                 string label = segment.IsArrayIndex ? $"[{segment.ArrayIndex}]" : $".{JsonPathSyntax.FormatMember(segment.Name!)}";
-                return new JsonTreePathResult(null, $"No {label} found under {JsonPathSyntax.FormatPath(segments, s)}.");
+                return new TreePathResult(null, $"No {label} found under {JsonPathSyntax.FormatPath(segments, s)}.");
             }
 
             current = next;
         }
 
-        return new JsonTreePathResult(current.RowStart, null);
+        return new TreePathResult(current.RowStart, null);
     }
 
     /// <summary>Element <paramref name="ordinal"/> of an array, read from the nearest resume

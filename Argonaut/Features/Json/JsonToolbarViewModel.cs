@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Argonaut.Engine.Hints;
 using Argonaut.Ui.Hints;
 using Argonaut.Features.Json.Schema;
+using Argonaut.Ui.Tree;
 using Argonaut.Ui.ViewModels;
 
 namespace Argonaut.Features.Json;
@@ -12,7 +13,7 @@ namespace Argonaut.Features.Json;
 /// <summary>
 /// Header toolbar for the JSON tree view: date-hint scheme/time-zone radio groups (behind a
 /// single "Date" dropdown button) bound to a document's <see cref="DateHintSettings"/>, the
-/// default-expand-depth picker, and (JSON documents only) a "jump to JSONPath" text entry.
+/// shared tree controls (<see cref="TreeToolbarState"/>: expand depth, indent guides), and (JSON documents only) a "jump to JSONPath" text entry.
 /// Shared by JsonViewModel and NdJsonViewModel, which expose an identical surface (a
 /// DateHintSettings instance and a SetDefaultExpandDepth callback) and previously drove these
 /// same combos through the shell via type-switches. NdJsonViewModel omits
@@ -34,15 +35,11 @@ public sealed class JsonToolbarViewModel : ObservableObject
 
     private readonly DateHintSettings settings;
     private readonly JsonSchemaSettings schemaSettings;
-    private readonly Action<int> applyExpandDepth;
-    private readonly Action<bool>? applyIndentGuides;
     private readonly Func<string, Task>? navigateToPath;
     private readonly Func<Task>? refreshSchemaEntries;
     private readonly Action? openSchemaFolder;
     private int dateHintSchemeIndex;
     private int timeZoneModeIndex;
-    private int expandDepthIndex;
-    private bool showIndentGuides;
     private string jsonPathInput = string.Empty;
     private IReadOnlyList<string> schemaItems = Array.Empty<string>();
     private int selectedSchemaIndex;
@@ -58,16 +55,13 @@ public sealed class JsonToolbarViewModel : ObservableObject
     {
         this.settings = settings;
         this.schemaSettings = schemaSettings;
-        this.applyExpandDepth = applyExpandDepth;
         this.navigateToPath = navigateToPath;
         this.refreshSchemaEntries = refreshSchemaEntries;
         this.openSchemaFolder = openSchemaFolder;
-        this.showIndentGuides = showIndentGuides;
-        this.applyIndentGuides = applyIndentGuides;
+        TreeControls = new TreeToolbarState(initialExpandDepthIndex, applyExpandDepth, showIndentGuides, applyIndentGuides);
 
         dateHintSchemeIndex = (int)settings.FileDefaultScheme;
         timeZoneModeIndex = (int)settings.TimeZoneMode;
-        expandDepthIndex = initialExpandDepthIndex;
 
         SchemaRootPicker = new SchemaRootPickerViewModel(schemaSettings, closeRequested: () => IsSchemaFlyoutOpen = false);
 
@@ -245,33 +239,8 @@ public sealed class JsonToolbarViewModel : ObservableObject
         }
     }
 
-    /// <summary>Bound two-way to the expand-depth choices; the value is the depth itself. Reports the choice to the owning
-    /// document, which remembers it and applies it live to its tree.</summary>
-    public int ExpandDepthIndex
-    {
-        get => expandDepthIndex;
-        set
-        {
-            if (value < 0 || !SetField(ref expandDepthIndex, value))
-                return;
-
-            applyExpandDepth(value);
-        }
-    }
-
-    /// <summary>Bound two-way to the indent-guides toggle. Reports the choice to the owning
-    /// document, which remembers it and applies it live to its tree.</summary>
-    public bool ShowIndentGuides
-    {
-        get => showIndentGuides;
-        set
-        {
-            if (!SetField(ref showIndentGuides, value))
-                return;
-
-            applyIndentGuides?.Invoke(value);
-        }
-    }
+    /// <summary>The expand-depth and indent-guides controls every tree toolbar shares.</summary>
+    public TreeToolbarState TreeControls { get; }
 
     /// <summary>Inference completing in the background updates FileDefaultScheme - reflect it
     /// live in the combo.</summary>

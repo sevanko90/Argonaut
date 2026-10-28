@@ -7,6 +7,7 @@ using Argonaut.Engine.Indexing.Trees;
 using Argonaut.Engine.Text;
 using Argonaut.Features.Json.Indexing;
 using Argonaut.Features.Json.Tree;
+using Argonaut.Ui.Tree;
 
 namespace Argonaut.Features.Json.Diff;
 
@@ -207,10 +208,10 @@ public sealed class JsonDiffDocument
         return JsonTreePaths.Format(all.Skip(skip).ToList());
     }
 
-    private IReadOnlyList<JsonTreePathSegment> Segments(long valueStart)
+    private IReadOnlyList<TreePathSegment> Segments(long valueStart)
     {
         if (!locator.SeekTo(valueStart))
-            return Array.Empty<JsonTreePathSegment>();
+            return Array.Empty<TreePathSegment>();
         return JsonTreePaths.Segments(locator, Text);
     }
 }

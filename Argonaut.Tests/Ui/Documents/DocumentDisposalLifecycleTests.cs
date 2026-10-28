@@ -8,6 +8,7 @@ using Argonaut.Features.Json.ArrayTable;
 using Argonaut.Features.Json.Diff;
 using Argonaut.Features.NdJson;
 using Argonaut.Features.Raw;
+using Argonaut.Features.Xml;
 using Argonaut.Tests.Support;
 
 namespace Argonaut.Tests.Ui.Documents;
@@ -221,6 +222,60 @@ public class DocumentDisposalLifecycleTests
             Assert.False(vm.IndexingTask.IsCompleted);
 
             await DisposeDuringActiveSearchAsync(path, vm.Dispose);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    private static string LargeXml()
+    {
+        var sb = new StringBuilder("<root>");
+        for (int i = 0; i < LargeElementCount; i++)
+            sb.Append("<item id=\"").Append(i).Append("\"><v>").Append(i).Append("</v></item>");
+        return sb.Append("</root>").ToString();
+    }
+
+    [Fact]
+    public async Task Xml_CloseDuringIndexing_DoesNotHangOrCrash()
+    {
+        var vm = new XmlViewModel(new XmlViewSettings());
+        await vm.LoadAsync(StillIndexing(LargeXml(), "large.xml"));
+        Assert.False(vm.IndexingTask.IsCompleted);
+
+        await DisposeWithTimeoutAsync(vm.Dispose);
+        Assert.True(vm.IndexingTask.IsCompleted);
+    }
+
+    [Fact]
+    public async Task Xml_CloseDuringIndexingWithActiveSearch_DoesNotHangOrCrash()
+    {
+        string path = WriteTemp(LargeXml());
+        try
+        {
+            var vm = new XmlViewModel(new XmlViewSettings());
+            await vm.LoadAsync(StillIndexing(LargeXml(), "large.xml"));
+            Assert.False(vm.IndexingTask.IsCompleted);
+
+            await DisposeDuringActiveSearchAsync(path, vm.Dispose);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task Xml_DoubleDisposeAfterMidScanClose_IsANoOp()
+    {
+        string path = WriteTemp(LargeXml());
+        try
+        {
+            var vm = new XmlViewModel(new XmlViewSettings());
+            await vm.LoadAsync(path);
+            await DisposeWithTimeoutAsync(vm.Dispose);
+            vm.Dispose();
         }
         finally
         {

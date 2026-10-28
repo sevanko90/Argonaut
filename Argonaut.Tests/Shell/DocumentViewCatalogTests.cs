@@ -5,6 +5,7 @@ using Argonaut.Features.Csv;
 using Argonaut.Features.Json;
 using Argonaut.Features.NdJson;
 using Argonaut.Features.Raw;
+using Argonaut.Features.Xml;
 using Argonaut.Shell;
 using Argonaut.Tests.Support;
 using Argonaut.Ui.Documents;
@@ -36,8 +37,9 @@ public class DocumentViewCatalogTests
         Assert.Contains(FileTypeDetector.FileKind.Ndjson, kinds);
         Assert.Contains(FileTypeDetector.FileKind.Csv, kinds);
         Assert.Contains(FileTypeDetector.FileKind.Tsv, kinds);
+        Assert.Contains(FileTypeDetector.FileKind.Xml, kinds);
         Assert.Contains(FileTypeDetector.FileKind.Unidentified, kinds);
-        Assert.Equal(5, kinds.Count);
+        Assert.Equal(6, kinds.Count);
     }
 
     [Fact]
@@ -50,7 +52,12 @@ public class DocumentViewCatalogTests
         Assert.Equal("CSV", byKind[FileTypeDetector.FileKind.Csv]);
         Assert.Equal("TSV", byKind[FileTypeDetector.FileKind.Tsv]);
         Assert.Equal("Raw text", byKind[FileTypeDetector.FileKind.Unidentified]);
+        Assert.Equal("XML", byKind[FileTypeDetector.FileKind.Xml]);
     }
+
+    [Fact]
+    public void Options_ListTheTreesFirst()
+        => Assert.Equal(["JSON", "NDJSON", "XML", "CSV", "TSV", "Raw text"], DocumentViewCatalog.Options.Select(o => o.DisplayName).ToList());
 
     [Theory]
     [InlineData(FileTypeDetector.FileKind.Json, typeof(JsonViewModel))]
@@ -58,6 +65,7 @@ public class DocumentViewCatalogTests
     [InlineData(FileTypeDetector.FileKind.Csv, typeof(CsvViewModel))]
     [InlineData(FileTypeDetector.FileKind.Tsv, typeof(CsvViewModel))]
     [InlineData(FileTypeDetector.FileKind.Unidentified, typeof(RawViewModel))]
+    [InlineData(FileTypeDetector.FileKind.Xml, typeof(XmlViewModel))]
     public async Task LoadAsync_ResolvesToTheViewModelThatClaimsTheKind(FileTypeDetector.FileKind kind, Type expectedType)
     {
         string path = WriteTempFile("""{"a":1}"""); // structurally valid enough for every loader to succeed

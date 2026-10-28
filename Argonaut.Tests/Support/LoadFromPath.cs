@@ -10,6 +10,7 @@ using Argonaut.Features.Json.ArrayTable;
 using Argonaut.Features.Json.Diff;
 using Argonaut.Features.NdJson;
 using Argonaut.Features.Raw;
+using Argonaut.Features.Xml;
 using Argonaut.Shell;
 using Argonaut.Ui.Documents;
 
@@ -33,6 +34,9 @@ internal static class LoadFromPath
     public static Task LoadAsync(this JsonViewModel vm, string path, long offset, long length,
         IProgressReporter? progressReporter = null)
         => vm.LoadAsync(Origin(path), offset, length, progressReporter);
+
+    public static Task LoadAsync(this XmlViewModel vm, string path, IProgressReporter? progressReporter = null)
+        => vm.LoadAsync(Origin(path), progressReporter);
 
     public static Task LoadAsync(this NdJsonViewModel vm, string path, IProgressReporter? progressReporter = null)
         => vm.LoadAsync(Origin(path), progressReporter);

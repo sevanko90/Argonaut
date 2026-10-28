@@ -6,6 +6,7 @@ using Argonaut.Features.Json;
 using Argonaut.Features.Json.ArrayTable;
 using Argonaut.Features.NdJson;
 using Argonaut.Features.Raw;
+using Argonaut.Features.Xml;
 using Argonaut.Tests.Support;
 
 namespace Argonaut.Tests.Ui.Documents;
@@ -68,6 +69,29 @@ public class CollectionDisposedEmptyTests
         try
         {
             var vm = new JsonViewModel(new JsonViewSettings(), new SchemaBindings(), TestSchemas.Catalog());
+            await vm.LoadAsync(path);
+            await vm.IndexingTask;
+            var tree = vm.Tree!;
+            bool closed = false;
+            tree.Closing += (_, _) => closed = true;
+
+            vm.Dispose();
+
+            Assert.True(closed);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task XmlTree_AfterDispose_IsLetGoOfBySurfaces()
+    {
+        string path = WriteTempFile("<root a=\"1\"><b>2</b><c><d/></c></root>");
+        try
+        {
+            var vm = new XmlViewModel(new XmlViewSettings());
             await vm.LoadAsync(path);
             await vm.IndexingTask;
             var tree = vm.Tree!;

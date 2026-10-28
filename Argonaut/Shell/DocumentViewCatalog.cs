@@ -12,6 +12,7 @@ using Argonaut.Features.Json;
 using Argonaut.Features.Json.Schema;
 using Argonaut.Features.NdJson;
 using Argonaut.Features.Raw;
+using Argonaut.Features.Xml;
 using Argonaut.Ui.Documents;
 using Argonaut.Ui.Documents.Numbering;
 using Argonaut.Ui.Launching;
@@ -44,6 +45,7 @@ public sealed class DocumentViewCatalog
     {
         (FileTypeDetector.FileKind.Json, "JSON"),
         (FileTypeDetector.FileKind.Ndjson, "NDJSON"),
+        (FileTypeDetector.FileKind.Xml, "XML"),
         (FileTypeDetector.FileKind.Csv, "CSV"),
         (FileTypeDetector.FileKind.Tsv, "TSV"),
         (FileTypeDetector.FileKind.Unidentified, "Raw text"),
@@ -61,6 +63,7 @@ public sealed class DocumentViewCatalog
     {
         lineNumbers ??= new LineNumberingPreference(settings.Get<LineNumberingSettings>());
         var jsonView = settings.Get<JsonViewSettings>();
+        var xmlView = settings.Get<XmlViewSettings>();
         var schemaBindings = settings.Get<SchemaBindings>();
         var rawView = settings.Get<RawViewSettings>();
 
@@ -68,13 +71,14 @@ public sealed class DocumentViewCatalog
         [
             (() => new JsonViewModel(jsonView, schemaBindings, schemaCatalog, launcher), (vm, _, o, r) => ((JsonViewModel)vm).LoadAsync(o, r)),
             (() => new NdJsonViewModel(jsonView, schemaBindings, schemaCatalog, lineNumbers, launcher), (vm, _, o, r) => ((NdJsonViewModel)vm).LoadAsync(o, r)),
+            (() => new XmlViewModel(xmlView, launcher), (vm, _, o, r) => ((XmlViewModel)vm).LoadAsync(o, r)),
             (() => new CsvViewModel(lineNumbers), (vm, k, o, r) => ((CsvViewModel)vm).LoadAsync(o, k == FileTypeDetector.FileKind.Tsv ? (byte)'\t' : (byte)',', r)),
             (() => new RawViewModel(rawView, lineNumbers: lineNumbers, recipes: recipes, launcher: launcher), (vm, _, o, r) => ((RawViewModel)vm).LoadAsync(o, r)),
         ];
         kindToRegistration = BuildMap();
     }
 
-    /// <summary>All switchable views, in display order: JSON, NDJSON, CSV, TSV, Raw text.</summary>
+    /// <summary>All switchable views, in display order: JSON, NDJSON, XML, CSV, TSV, Raw text.</summary>
     public static IReadOnlyList<DocumentViewOption> Options { get; } =
         DisplayOrder.Select(e => new DocumentViewOption(e.Kind, e.DisplayName)).ToArray();
 

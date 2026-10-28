@@ -178,7 +178,7 @@ it in (see "Saving" in architecture.md).
   `bin/Debug` copy, an installed bundle - which can be stale or gone after a clean build or a
   reinstall, so a remembered binding silently shows an old schema or none. Store a bundled schema
   by its bundled name and resolve it against the current bundled folder; keep absolute paths for
-  the user folder and sidecars.
+  the user folder.
 - **Not planned, stated for completeness:** `oneOf`/`anyOf` branches are merged rather than
   discriminated against values; enum matching is textual; remote `$ref`, `patternProperties` and
   `if`/`then`/`else` are ignored; root matching reads names only, never values.
@@ -293,7 +293,7 @@ either store would be an additional channel built from the same tags. Reasoning 
 - **Microsoft Store (MSIX).** Cheap: full-trust packaging, no sandbox, no code change beyond
   compiling the Velopack update check out of the store build.
 - **Mac App Store.** Expensive, mostly for sandbox reasons: the macOS replacer (Editing), the
-  sandboxed settings (Settings), the schema sidecar and folder reworked, a second signing identity
+  sandboxed settings (Settings), the schema folder reworked, a second signing identity
   and a yearly fee. Only with a concrete reason to be in that store.
 - **Open questions from the Velopack rollout:** a Developer ID and notarization for smoother
   macOS updates (today an update needs manual Gatekeeper approval); whether to keep publishing the

@@ -1,7 +1,8 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
-using System.Diagnostics;
+using System;
+using Argonaut.Ui.Launching;
 using System.Threading.Tasks;
 
 namespace Argonaut.Shell.Dialogs;
@@ -12,6 +13,10 @@ namespace Argonaut.Shell.Dialogs;
 /// </summary>
 public partial class NoticesDialog : Window
 {
+    // Set by ShowNotices before the dialog is shown. Not a constructor parameter, because the XAML
+    // runtime loader needs a parameterless one.
+    private ISystemLauncher? launcher;
+
     public NoticesDialog()
     {
         InitializeComponent();
@@ -38,20 +43,12 @@ public partial class NoticesDialog : Window
 
     private void OnHomepageLinkClicked(object? sender, RoutedEventArgs e)
     {
-        if (HomepageLinkButton.Content is not string homepage)
-            return;
-
-        try
-        {
-            Process.Start(new ProcessStartInfo(homepage) { UseShellExecute = true });
-        }
-        catch
-        {
-            // Best-effort - opening the browser must never crash the dialog.
-        }
+        if (HomepageLinkButton.Content is string homepage && Uri.TryCreate(homepage, UriKind.Absolute, out var address))
+            launcher?.OpenAddress(address);
     }
 
     private void OnClose(object? sender, RoutedEventArgs e) => Close();
 
-    public static Task ShowNotices(Window owner) => new NoticesDialog().ShowDialog(owner);
+    public static Task ShowNotices(Window owner, ISystemLauncher launcher)
+        => new NoticesDialog { launcher = launcher }.ShowDialog(owner);
 }

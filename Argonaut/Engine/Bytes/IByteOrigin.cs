@@ -35,8 +35,8 @@ public interface IByteOrigin : IDisposable
 
     /// <summary>
     /// The file on disk these bytes are, or null when there is none - a paste, or a download
-    /// served from memory. This is the one thing the path-keyed features consult: recent files,
-    /// the <c>&lt;file&gt;.schema.json</c> sidecar, and the remembered schema binding. Each of
+    /// served from memory. This is the one thing the path-keyed features consult: recent files
+    /// and the remembered schema binding. Each of
     /// those skips a document with no path rather than substituting <see cref="DisplayName"/> -
     /// two pastes would collide in a path-keyed store.
     /// </summary>

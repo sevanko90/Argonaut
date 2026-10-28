@@ -32,6 +32,7 @@ using Argonaut.Ui.Notifications;
 using Argonaut.Ui.Progress;
 using Argonaut.Ui.ViewModels;
 using Avalonia.Threading;
+using Argonaut.Ui.Launching;
 
 namespace Argonaut.Shell;
 
@@ -173,6 +174,8 @@ public sealed class MainWindowViewModel : ObservableObject
     /// places to browse from. Without one there are none to offer.</param>
     /// <param name="recipes">The recipes the raw view offers. Without one it offers only the
     /// built-in encodings.</param>
+    /// <param name="launcher">Opens the links the views' value hints offer. Without one they
+    /// open nothing.</param>
     public MainWindowViewModel(ISettingsStore settings, JsonSchemaCatalog schemaCatalog, Func<string, Task<bool>> confirmReplace,
         Func<Task<byte[]?>>? readClipboardBytes = null, DocumentLoader? documentLoader = null,
         Func<IByteOrigin, Task<string?>>? pickSaveDestination = null,
@@ -183,7 +186,8 @@ public sealed class MainWindowViewModel : ObservableObject
         IDiagnosticLog? log = null,
         IConfigLocationSource? configLocations = null,
         ISelectionFilterFiles? filterFiles = null,
-        IRecipeStore? recipes = null)
+        IRecipeStore? recipes = null,
+        ISystemLauncher? launcher = null)
     {
         this.appearance = settings.Get<AppearanceSettings>();
         this.recentFileHistory = settings.Get<RecentFileHistory>();
@@ -195,7 +199,7 @@ public sealed class MainWindowViewModel : ObservableObject
         this.readClipboardBytes = readClipboardBytes;
         this.lineNumbers = new LineNumberingPreference(settings.Get<LineNumberingSettings>());
         this.lineNumbers.PropertyChanged += (_, _) => OnPropertyChanged(nameof(NumberExcerptFromSource));
-        this.documentLoader = documentLoader ?? new DocumentViewCatalog(settings, schemaCatalog, this.lineNumbers, recipes).LoadAsync;
+        this.documentLoader = documentLoader ?? new DocumentViewCatalog(settings, schemaCatalog, this.lineNumbers, recipes, launcher).LoadAsync;
         this.pickSaveDestination = pickSaveDestination;
         this.askAboutUnsavedChanges = askAboutUnsavedChanges;
         this.reportFailure = reportFailure;

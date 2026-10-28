@@ -9,6 +9,12 @@
     <ApplicationIcon>Assets\Icon\argonaut.ico</ApplicationIcon>
   </PropertyGroup>
 
+  <!-- The Mac App Store build: `dotnet publish -p:MacAppStore=true`. Code the sandbox does not
+       allow is compiled out under MAC_APP_STORE (see Shell/Launching/SystemLaunchers). -->
+  <PropertyGroup Condition="'$(MacAppStore)' == 'true'">
+    <DefineConstants>$(DefineConstants);MAC_APP_STORE</DefineConstants>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="12.1.0" />
     <PackageReference Include="Avalonia.Desktop" Version="12.1.0" />

@@ -18,6 +18,7 @@ using Argonaut.Ui.Documents;
 using Argonaut.Ui.Documents.Numbering;
 using Argonaut.Ui.Documents.Navigation;
 using Argonaut.Ui.Find;
+using Argonaut.Ui.Launching;
 using Argonaut.Ui.ViewModels;
 
 namespace Argonaut.Features.NdJson;
@@ -154,6 +155,7 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
     private readonly JsonViewSettings viewSettings;
     private readonly SchemaBindings schemaBindings;
     private readonly JsonSchemaCatalog schemaCatalog;
+    private readonly ISystemLauncher? launcher;
     private readonly LineNumberingPreference? lineNumbers;
 
     /// <param name="viewSettings">Where the default expand depth is remembered; also handed to
@@ -161,9 +163,12 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
     /// <param name="schemaBindings">Where the schema chosen for each document is remembered.</param>
     /// <param name="schemaCatalog">The schemas a document can be bound to.</param>
     /// <param name="lineNumbers">How an excerpt numbers its lines; null numbers from the start.</param>
+    /// <param name="launcher">Handed to each line's nested tree, to open the links its value
+    /// hints offer; null opens none.</param>
     public NdJsonViewModel(JsonViewSettings viewSettings, SchemaBindings schemaBindings, JsonSchemaCatalog schemaCatalog,
-        LineNumberingPreference? lineNumbers = null)
+        LineNumberingPreference? lineNumbers = null, ISystemLauncher? launcher = null)
     {
+        this.launcher = launcher;
         this.lineNumbers = lineNumbers;
         this.viewSettings = viewSettings;
         this.schemaBindings = schemaBindings;
@@ -297,7 +302,7 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
         MonitorIndexing();
     }
 
-    /// <summary>Populates the schema catalog and applies any sidecar/remembered binding for the
+    /// <summary>Populates the schema catalog and applies any remembered binding for the
     /// NDJSON file - see <see cref="JsonSchemaCatalog.GatherForDocument"/>.</summary>
     private async Task ApplyInitialSchemaAsync(string? documentPath)
     {
@@ -429,7 +434,7 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
     private async Task LoadSelectedLineJsonAsync(long requestId, FileLineSpan lineSpan)
     {
         var trimmed = LineReader.TrimTrailingNewline(this.Bytes!, lineSpan);
-        var jsonViewModel = new JsonViewModel(viewSettings, schemaBindings, schemaCatalog) { DefaultExpandDepth = DefaultExpandDepth };
+        var jsonViewModel = new JsonViewModel(viewSettings, schemaBindings, schemaCatalog, launcher) { DefaultExpandDepth = DefaultExpandDepth };
         try
         {
             await jsonViewModel.LoadAsync(Origin!, trimmed.Offset, trimmed.Length);

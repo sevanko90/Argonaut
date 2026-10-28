@@ -52,10 +52,6 @@ public sealed class JsonSchemaCatalog(string bundledDirectory, string userDirect
         return entries;
     }
 
-    /// <summary>Suffix that makes a schema file the sidecar of the document beside it:
-    /// <c>orders.json</c> is documented by <c>orders.json.schema.json</c>.</summary>
-    public const string SidecarSuffix = ".schema.json";
-
     /// <summary>
     /// Suffix marking a schema as reference material rather than something to bind to. Files
     /// named this way are skipped by <see cref="Enumerate"/> and so never reach the dropdown -
@@ -67,17 +63,15 @@ public sealed class JsonSchemaCatalog(string bundledDirectory, string userDirect
 
     /// <summary>
     /// The catalog as offered for one specific document, plus the entry that should be bound
-    /// immediately: a <c>&lt;file&gt;.schema.json</c> sidecar if there is one, otherwise the
-    /// schema last bound to this path. Both a sidecar and a remembered schema outside the
-    /// catalog folders are added as transient entries, so the combo can always show what's bound.
+    /// immediately: the schema last bound to this path. A remembered schema outside the catalog
+    /// folders is added as a transient entry, so the combo can always show what's bound.
     ///
     /// Pure filesystem work (two directory listings) - call it off the UI thread.
     /// </summary>
     /// <param name="documentPath">
     /// The document's own path, or null when it has no path on disk - a clipboard paste, or a
-    /// download served from memory. Both of the document-specific bindings are keyed by path (the
-    /// <c>&lt;file&gt;.schema.json</c> sidecar, and the schema last chosen for this path), so
-    /// with no path there is nothing to preselect and the user folder's schemas are all that can
+    /// download served from memory. The document-specific binding is keyed by path, so with no
+    /// path there is nothing to preselect and the user folder's schemas are all that can
     /// be offered. That is a real, usable result rather than an error: the user can still pick a
     /// schema by hand, it just cannot be remembered for next time.
     /// </param>
@@ -92,14 +86,7 @@ public sealed class JsonSchemaCatalog(string bundledDirectory, string userDirect
         if (documentPath is null)
             return (entries, null, null);
 
-        string sidecarPath = documentPath + SidecarSuffix;
-        if (SafeExists(sidecarPath))
-        {
-            var sidecar = new SchemaCatalogEntry(Path.GetFileName(sidecarPath), sidecarPath, IsUser: true);
-            entries.Insert(0, sidecar);
-            preselected = sidecar;
-        }
-        else if (SchemaBindings.Find(bindings, documentPath) is { } remembered)
+        if (SchemaBindings.Find(bindings, documentPath) is { } remembered)
         {
             // Carried even when the schema file itself can't be found: harmless if unused, and
             // the loader drops a root name the schema no longer offers.

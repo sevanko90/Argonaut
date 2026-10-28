@@ -662,7 +662,7 @@ public sealed class MainWindowViewModelTests : IDisposable
 
     /// <summary>
     /// The origin reaches the document, so anything that needs to know whether these bytes are a
-    /// file on disk (recent files, the schema sidecar, save, reveal in folder) can ask rather
+    /// file on disk (recent files, the remembered schema binding, save, reveal in folder) can ask rather
     /// than inferring it from a display string.
     /// </summary>
     [Fact]

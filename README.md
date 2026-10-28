@@ -26,8 +26,8 @@ everything else working as normal.
 A few things differ, because a pasted document isn't a file:
 
 - It won't appear in your recent files - there'd be nothing to reopen.
-- The per-file schema conveniences don't apply (no `<file>.schema.json` sidecar, and your schema
-  choice isn't remembered for next time). You can still pick a schema from the toolbar by hand.
+- Your schema choice isn't remembered for next time. You can still pick a schema from the
+  toolbar by hand.
 - There's a 64 MB ceiling. Clipboards will happily hold more, but at that point you're better off
   saving it to a file and opening that - which is what Argonaut is built for anyway.
 
@@ -96,8 +96,8 @@ Bind a JSON Schema to an open document and Argonaut shows what the data *means* 
 `description` from the schema, in a resizable gutter down the left, with the full text on hover.
 This is documentation only - we're not validating correctness. Argonaut attempts to match any selected schema to the document by testing properties, nothing bad happens if it can't find a match. 
 
-- Pick a schema from the toolbar - bundled ones, or your own dropped in the schemas folder. A
-  `<file>.schema.json` sidecar is picked up automatically, and your choice is remembered per file.
+- Pick a schema from the toolbar - bundled ones, or your own dropped in the schemas folder. Your
+  choice is remembered per file.
 - Documents object properties, positional array slots (`prefixItems`) and enum value labels.
 - Files holding many schemas (`$defs`, or an OpenAPI document's components) offer a type picker,
   ranked by how well each type matches the document.

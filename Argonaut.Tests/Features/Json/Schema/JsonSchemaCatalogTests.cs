@@ -5,7 +5,7 @@ namespace Argonaut.Tests.Features.Json.Schema;
 
 /// <summary>
 /// Covers the bundled/user schema merge, user-shadows-bundled, and the per-document gather
-/// (sidecar and remembered selection). The user folder is a temp folder per test, and revealing
+/// (the remembered selection). The user folder is a temp folder per test, and revealing
 /// it is recorded rather than opening a file manager.
 /// </summary>
 public sealed class JsonSchemaCatalogTests : IDisposable
@@ -316,28 +316,7 @@ public sealed class JsonSchemaCatalogTests : IDisposable
     }
 
     [Fact]
-    public void GatherForDocument_PrefersSidecar()
-    {
-        string document = Path.GetTempFileName();
-        string sidecar = document + JsonSchemaCatalog.SidecarSuffix;
-        try
-        {
-            File.WriteAllText(sidecar, """{ "title": "Sidecar" }""");
-
-            var (entries, preselected, _) = catalog.GatherForDocument(document, []);
-
-            Assert.Equal(sidecar, preselected!.Value.FilePath);
-            Assert.Contains(entries, e => e.FilePath == sidecar);
-        }
-        finally
-        {
-            File.Delete(sidecar);
-            File.Delete(document);
-        }
-    }
-
-    [Fact]
-    public void GatherForDocument_WithNoSidecarOrMemory_PreselectsNothing()
+    public void GatherForDocument_WithNoMemory_PreselectsNothing()
     {
         string document = Path.GetTempFileName();
         try

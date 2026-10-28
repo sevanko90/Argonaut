@@ -22,6 +22,7 @@ using Argonaut.Features.Json.Tree;
 using Argonaut.Ui.Documents;
 using Argonaut.Ui.Documents.Navigation;
 using Argonaut.Ui.Find;
+using Argonaut.Ui.Launching;
 using Argonaut.Ui.Notifications;
 using Argonaut.Ui.Tree;
 
@@ -184,12 +185,16 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable, IB
     private readonly JsonViewSettings viewSettings;
     private readonly SchemaBindings schemaBindings;
     private readonly JsonSchemaCatalog schemaCatalog;
+    private readonly ISystemLauncher? launcher;
 
     /// <param name="viewSettings">Where the default expand depth is remembered.</param>
     /// <param name="schemaBindings">Where the schema chosen for each document is remembered.</param>
     /// <param name="schemaCatalog">The schemas a document can be bound to.</param>
-    public JsonViewModel(JsonViewSettings viewSettings, SchemaBindings schemaBindings, JsonSchemaCatalog schemaCatalog)
+    /// <param name="launcher">Opens the links value hints offer; null opens none.</param>
+    public JsonViewModel(JsonViewSettings viewSettings, SchemaBindings schemaBindings, JsonSchemaCatalog schemaCatalog,
+        ISystemLauncher? launcher = null)
     {
+        this.launcher = launcher;
         this.viewSettings = viewSettings;
         this.schemaBindings = schemaBindings;
         this.schemaCatalog = schemaCatalog;
@@ -303,6 +308,15 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable, IB
         }
 
         return new TreeCurrentMatch(shown.Key, occurrence);
+    }
+
+    /// <summary>Opens a value hint's address with the system's handler for it. Only the schemes
+    /// <see cref="UrlHintProvider.IsSafe"/> allows go out: the address comes from the document,
+    /// and a document must never be able to launch a file or a custom URL scheme.</summary>
+    public void OpenAddress(Uri address)
+    {
+        if (UrlHintProvider.IsSafe(address))
+            launcher?.OpenAddress(address);
     }
 
     /// <summary>
@@ -591,10 +605,9 @@ public sealed class JsonViewModel : IndexedDocumentViewModel, IPathNavigable, IB
     }
 
     /// <summary>
-    /// Populates the schema catalog for this document and applies the initial binding, if any: a
-    /// <c>&lt;file&gt;.schema.json</c> sidecar wins, otherwise the schema last bound to this path
-    /// (see <see cref="SchemaBindings"/>). Nothing here is ever an error - a missing sidecar and
-    /// an unreadable schema folder both just mean "no schema".
+    /// Populates the schema catalog for this document and applies the initial binding, if any: the
+    /// schema last bound to this path (see <see cref="SchemaBindings"/>). Nothing here is ever an
+    /// error - a missing schema and an unreadable schema folder both just mean "no schema".
     /// </summary>
     private async Task ApplyInitialSchemaAsync(string? documentPath)
     {

@@ -37,8 +37,8 @@ public sealed class JsonSchemaSettings : ObservableObject
     private IReadOnlyList<SchemaRootMatch> rootMatches = Array.Empty<SchemaRootMatch>();
     private bool matchesDescribeArrayElements;
 
-    /// <summary>Schemas offered for selection: the catalog, plus any transient sidecar entry
-    /// discovered next to the open document.</summary>
+    /// <summary>Schemas offered for selection: the catalog, plus a transient entry for a
+    /// remembered schema that has left the catalog folders.</summary>
     public IReadOnlyList<SchemaCatalogEntry> Entries
     {
         get => entries;

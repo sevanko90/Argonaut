@@ -76,21 +76,30 @@ for this codebase:
   each time a recent entry is reopened. This is a real, non-trivial implementation
   item, not just a build-config change.
 - **The schema features read files the user never picked, and would silently lose them.**
-  Three path-keyed behaviours in [JsonSchemaCatalog.cs](../Argonaut/Features/Json/Schema/JsonSchemaCatalog.cs)
+  Two path-keyed behaviours in [JsonSchemaCatalog.cs](../Argonaut/Features/Json/Schema/JsonSchemaCatalog.cs)
   assume ordinary file-system access:
-  - The `<file>.schema.json` sidecar is a *sibling* of the opened document. A picker or drop
-    grant covers the document only, so the sidecar is unreadable and simply never offered.
-    Fixing it means asking for the folder (a folder picker, or a bookmark to it), not just the file.
   - The remembered schema binding can name a schema outside the catalog folders, stored as a
     plain path - the same relaunch problem as recent files, and the same bookmark fix.
-  - "Open schema folder…" (`OpenUserDirectory`) reveals `AppDataPaths.GetSchemasDirectory()`
-    with `Process.Start`. Under the sandbox, application data resolves inside
+  - "Open schema folder…" (`OpenUserDirectory`) reveals `AppDataPaths.SchemasDirectory`.
+    Under the sandbox, application data resolves inside
     `~/Library/Containers/<bundle id>/…`, which users do not browse to and which is hard to drop
     schemas into; the folder is the catalog's whole mechanism for user schemas, so this wants
     a rethink (an "Add schema…" picker that copies into the container) rather than a path fix.
-    Whether the `Process.Start` reveal itself works sandboxed is unverified.
 
-  Pasted documents are unaffected: they have no path, so all three already skip them.
+  Pasted documents are unaffected: they have no path, so both already skip them.
+- **Opening folders and links goes through `ISystemLauncher`** (`Ui/Launching`): the schema
+  folder, the Debug log folder, the About and Notices links, and the value hints' links in the
+  JSON and raw views (through their view models, never Avalonia's `Launcher`, which on macOS
+  shells out to `open`). Every macOS build uses `MacSystemLauncher` (`NSWorkspace.openURL:`, no
+  child process), so the ordinary build already behaves as the store build will. The
+  shell-executing `ProcessSystemLauncher`, its fallback outside the store, is compiled out of a
+  build made with `-p:MacAppStore=true` (`MAC_APP_STORE`).
+- **The config locations would list the container, not the user's folders.** Inside the
+  sandbox the home folder resolves to `~/Library/Containers/<bundle id>/Data`, so
+  `ConfigLocationSource` (fed the home folder by the composition root) would offer the
+  container's `.config` rather than the user's. The store build needs the real home folder
+  (`getpwuid(getuid())->pw_dir`). The Open panel it starts in is `NSOpenPanel` already, which
+  the sandbox allows and which grants access to what is picked.
 - **Saving needs a sandbox-specific implementation.** A picker grant covers the chosen file, not
   its folder, so the shipped save (`SiblingFileReplacer`, a temp file beside the original) is
   denied. The save path is built behind `IFileReplacer` for this reason - see
@@ -124,7 +133,7 @@ entirely for that distribution.
 | | Velopack + GitHub Releases | Microsoft Store (MSIX) | Mac App Store |
 |---|---|---|---|
 | Source of truth | GH tag/release (this stays true regardless) | Same GH tag, packaged downstream | Same GH tag, packaged downstream |
-| Code changes required | None beyond the update plumbing itself | None expected (full-trust Desktop Bridge) | Real: sandbox entitlements, security-scoped bookmarks (recent files, remembered schemas), schema sidecar and schema folder rework, sandboxed save |
+| Code changes required | None beyond the update plumbing itself | None expected (full-trust Desktop Bridge) | Real: sandbox entitlements, security-scoped bookmarks (recent files, remembered schemas), schema folder rework, sandboxed save |
 | New signing identity | Optional (Developer ID improves macOS UX) | Store-managed | Required, separate from Developer ID |
 | Monetary cost | $0 (or $99/yr Apple if adding notarization) | $0 (free as of 2026) | $99/yr Apple Developer Program |
 | Release latency | Immediate — publish = live | Hours–days (store review) | Hours–days, sometimes longer (App Review) |
@@ -142,8 +151,8 @@ latency, needs no sandboxing rework, and is built and already the source of trut
   (discoverability, org policies that only allow Store-installed software) — no
   sandbox rework, no recurring cost, and a fairly light CI addition.
 - **Mac App Store is the more expensive of the two** — it requires the security-scoped
-  bookmark work for recent files and remembered schemas, rework of the schema sidecar and
-  schema folder, a second signing identity, a recurring $99/yr, and
+  bookmark work for recent files and remembered schemas, rework of the schema
+  folder, a second signing identity, a recurring $99/yr, and
   decouples release cadence from GH tagging via App Review turnaround. Worth doing
   only if there's a concrete reason (e.g. users specifically expect to find/update the
   app through the Mac App Store) rather than by default.

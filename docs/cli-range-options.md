@@ -78,8 +78,8 @@ the range: a mapping of only the range, an index of only the range, and a scroll
 the range. **That is the real win over A: indexing and memory scale with the range, not the
 file.** One million lines out of a 20 GB file indexes in about the time of a 500 MB file.
 
-`Path => null` is the right value. It is the documented signal for "not a file", so recent files,
-the schema sidecar and the schema binding skip it without new code. The shell's save turns into
+`Path => null` is the right value. It is the documented signal for "not a file", so recent files
+and the remembered schema binding skip it without new code. The shell's save turns into
 Save As (`MainWindowViewModel` line ~1152: `chooseDestination || Path is null`), so editing the
 slice and saving writes **a new file** and never overwrites the original. That doubles as
 "extract lines to file".

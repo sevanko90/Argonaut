@@ -292,7 +292,7 @@ public sealed class JsonToolbarViewModel : ObservableObject
         SetField(ref timeZoneModeIndex, (int)settings.TimeZoneMode, nameof(TimeZoneModeIndex));
     }
 
-    /// <summary>The catalog is populated asynchronously after the document opens, and a sidecar
+    /// <summary>The catalog is populated asynchronously after the document opens, and a remembered
     /// schema selects itself - both have to light up the combo without the user touching it.</summary>
     private void OnSchemaSettingsPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {

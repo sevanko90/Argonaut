@@ -24,6 +24,7 @@ using Argonaut.Ui.Documents.Numbering;
 using Argonaut.Ui.Documents.Navigation;
 using Argonaut.Ui.Find;
 using Argonaut.Ui.Hints;
+using Argonaut.Ui.Launching;
 using Argonaut.Ui.Notifications;
 using Argonaut.Ui.Progress;
 
@@ -97,17 +98,20 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     private readonly LineNumberingPreference? lineNumbers;
 
     private readonly IRecipeStore? recipes;
+    private readonly ISystemLauncher? launcher;
 
     /// <param name="settings">Where the wrap width is remembered.</param>
     /// <param name="progressBoard"><see cref="ProgressBoard.Shared"/> unless a test substitutes one.</param>
     /// <param name="lineNumbers">How an excerpt numbers its lines; null numbers from the start.</param>
     /// <param name="recipes">The recipes the Transform menu offers; null offers only the built-in
     /// encodings.</param>
+    /// <param name="launcher">Opens the links value hints offer; null opens none.</param>
     public RawViewModel(RawViewSettings settings, ProgressBoard? progressBoard = null, LineNumberingPreference? lineNumbers = null,
-        IRecipeStore? recipes = null)
+        IRecipeStore? recipes = null, ISystemLauncher? launcher = null)
     {
         this.settings = settings;
         this.recipes = recipes;
+        this.launcher = launcher;
         this.lineNumbers = lineNumbers;
         this.progressBoard = progressBoard ?? ProgressBoard.Shared;
     }
@@ -154,6 +158,15 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     ], HintSettings);
 
     private RawValueHints? valueHints;
+
+    /// <summary>Opens a value hint's address with the system's handler for it. Only the schemes
+    /// <see cref="UrlHintProvider.IsSafe"/> allows go out: the address comes from the document,
+    /// and a document must never be able to launch a file or a custom URL scheme.</summary>
+    public void OpenAddress(Uri address)
+    {
+        if (UrlHintProvider.IsSafe(address))
+            launcher?.OpenAddress(address);
+    }
 
     /// <summary>
     /// What a hinted value encodes, ready for a card: its content copied out of the document on

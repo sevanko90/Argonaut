@@ -19,6 +19,8 @@ using Argonaut.Engine.Transforms;
 using Argonaut.Features.Json.Schema;
 using Argonaut.Shell.CommandLine;
 using Argonaut.Shell.Dialogs;
+using Argonaut.Shell.Launching;
+using Argonaut.Ui.Launching;
 using Argonaut.Shell.Updates;
 using Argonaut.Ui.Documents.Navigation;
 using Argonaut.Ui.Notifications;
@@ -43,6 +45,7 @@ public partial class MainWindow : Window
     private readonly IDiagnosticLog log;
     private readonly IFilePicker filePicker;
     private readonly Action? openLogFolder;
+    private readonly ISystemLauncher launcher;
     private readonly UpdateSettings updateSettings;
     private DispatcherTimer? toastTimer;
 
@@ -59,8 +62,11 @@ public partial class MainWindow : Window
     /// <param name="openLogFolder">Shows the folder <paramref name="log"/> writes to, or null
     /// when there is none to show - which hides the status bar's button for it.</param>
     /// <param name="recipes">The recipes the raw view offers; null offers none.</param>
+    /// <param name="launcher">Opens folders and links - About, Notices and the views' value hints;
+    /// null takes this build's own
+    /// (see <see cref="SystemLaunchers.ForThisBuild"/>).</param>
     public MainWindow(ISettingsStore settings, JsonSchemaCatalog schemaCatalog, IDiagnosticLog log, Action? openLogFolder = null,
-        IConfigLocationSource? configLocations = null, IRecipeStore? recipes = null)
+        IConfigLocationSource? configLocations = null, IRecipeStore? recipes = null, ISystemLauncher? launcher = null)
     {
         InitializeComponent();
 
@@ -83,6 +89,7 @@ public partial class MainWindow : Window
         var windowPicker = new AvaloniaFilePicker(this);
         filePicker = OperatingSystem.IsMacOS() ? new MacFilePicker(windowPicker) : windowPicker;
         this.openLogFolder = openLogFolder;
+        this.launcher = launcher ?? SystemLaunchers.ForThisBuild();
         OpenLogFolderButton.IsVisible = openLogFolder is not null;
         updateSettings = settings.Get<UpdateSettings>();
         updateService = new UpdateService(updateSettings);
@@ -95,7 +102,8 @@ public partial class MainWindow : Window
             log: log,
             configLocations: configLocations,
             filterFiles: new SelectionFilterFiles(),
-            recipes: recipes);
+            recipes: recipes,
+            launcher: this.launcher);
         DataContext = viewModel;
         viewModel.PropertyChanged += OnViewModelPropertyChanged;
         viewModel.FindStatusChanged += status => FindBarControl.SetStatus(status);
@@ -631,7 +639,7 @@ public partial class MainWindow : Window
 
     private async void OnShowAbout(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        await AboutDialog.ShowAbout(this, updateSettings);
+        await AboutDialog.ShowAbout(this, updateSettings, launcher);
     }
 
     /// <summary>

@@ -14,6 +14,7 @@ using Argonaut.Features.NdJson;
 using Argonaut.Features.Raw;
 using Argonaut.Ui.Documents;
 using Argonaut.Ui.Documents.Numbering;
+using Argonaut.Ui.Launching;
 
 namespace Argonaut.Shell;
 
@@ -54,8 +55,9 @@ public sealed class DocumentViewCatalog
     /// the control that flips it and the views that show it share one; a new one over
     /// <paramref name="settings"/> when null.</param>
     /// <param name="recipes">The recipes the raw view offers; null offers none.</param>
+    /// <param name="launcher">Opens the links the views' value hints offer; null opens none.</param>
     public DocumentViewCatalog(ISettingsStore settings, JsonSchemaCatalog schemaCatalog, LineNumberingPreference? lineNumbers = null,
-        IRecipeStore? recipes = null)
+        IRecipeStore? recipes = null, ISystemLauncher? launcher = null)
     {
         lineNumbers ??= new LineNumberingPreference(settings.Get<LineNumberingSettings>());
         var jsonView = settings.Get<JsonViewSettings>();
@@ -64,10 +66,10 @@ public sealed class DocumentViewCatalog
 
         registrations =
         [
-            (() => new JsonViewModel(jsonView, schemaBindings, schemaCatalog), (vm, _, o, r) => ((JsonViewModel)vm).LoadAsync(o, r)),
-            (() => new NdJsonViewModel(jsonView, schemaBindings, schemaCatalog, lineNumbers), (vm, _, o, r) => ((NdJsonViewModel)vm).LoadAsync(o, r)),
+            (() => new JsonViewModel(jsonView, schemaBindings, schemaCatalog, launcher), (vm, _, o, r) => ((JsonViewModel)vm).LoadAsync(o, r)),
+            (() => new NdJsonViewModel(jsonView, schemaBindings, schemaCatalog, lineNumbers, launcher), (vm, _, o, r) => ((NdJsonViewModel)vm).LoadAsync(o, r)),
             (() => new CsvViewModel(lineNumbers), (vm, k, o, r) => ((CsvViewModel)vm).LoadAsync(o, k == FileTypeDetector.FileKind.Tsv ? (byte)'\t' : (byte)',', r)),
-            (() => new RawViewModel(rawView, lineNumbers: lineNumbers, recipes: recipes), (vm, _, o, r) => ((RawViewModel)vm).LoadAsync(o, r)),
+            (() => new RawViewModel(rawView, lineNumbers: lineNumbers, recipes: recipes, launcher: launcher), (vm, _, o, r) => ((RawViewModel)vm).LoadAsync(o, r)),
         ];
         kindToRegistration = BuildMap();
     }

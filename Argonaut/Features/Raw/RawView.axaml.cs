@@ -85,8 +85,8 @@ public partial class RawView : UserControl
             _ = ShowHintCardAsync(vm, hit);
         else if (hint.Kind == ValueHintKind.Date)
             DateSchemeMenu(vm).ShowAt(Surface, showAtPointer: true);
-        else if (hint.Address is { } address && UrlHintProvider.IsSafe(address))
-            _ = TopLevel.GetTopLevel(this)?.Launcher.LaunchUriAsync(address);
+        else if (hint.Address is { } address)
+            vm.OpenAddress(address);
     }
 
     private async Task ShowHintCardAsync(RawViewModel vm, RawHintHit hit)

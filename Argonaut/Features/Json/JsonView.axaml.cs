@@ -184,8 +184,8 @@ public partial class JsonView : UserControl
             case ExpandHintLink expand:
                 _ = ShowHintCardAsync(expand, e.Bounds);
                 break;
-            case OpenUrlLink url when UrlHintProvider.IsSafe(url.Address):
-                _ = TopLevel.GetTopLevel(this)?.Launcher.LaunchUriAsync(url.Address);
+            case OpenUrlLink url:
+                subscribedViewModel?.OpenAddress(url.Address);
                 break;
         }
     }

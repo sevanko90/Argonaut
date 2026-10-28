@@ -468,10 +468,10 @@ public sealed class JsonToolbarViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task SidecarAutoSelection_LightsUpTheCombo()
+    public async Task RememberedSchemaSelection_LightsUpTheCombo()
     {
         var schemaSettings = new JsonSchemaSettings();
-        var entry = WriteSchema("sidecar");
+        var entry = WriteSchema("remembered");
         schemaSettings.SetEntries(new[] { WriteSchema("other"), entry });
         var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
 

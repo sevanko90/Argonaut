@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using Avalonia;
@@ -14,6 +13,8 @@ using Argonaut.Engine.Transforms;
 using Argonaut.Features.Json.Schema;
 using Argonaut.Shell;
 using Argonaut.Shell.CommandLine;
+using Argonaut.Shell.Launching;
+using Argonaut.Ui.Launching;
 
 namespace Argonaut;
 
@@ -51,13 +52,14 @@ public partial class App : Application
             if (log is IDisposable ownedLog)
                 desktop.Exit += (_, _) => ownedLog.Dispose();
 
+            var launcher = SystemLaunchers.ForThisBuild();
             var schemaCatalog = new JsonSchemaCatalog(JsonSchemaCatalog.BundledDirectoryBesideApp, AppDataPaths.SchemasDirectory,
-                revealDirectory: RevealDirectory);
+                revealDirectory: launcher.ShowFolder);
 
             var recipes = new RecipeFolderStore(RecipeFolderStore.BundledDirectoryBesideApp, AppDataPaths.RecipesDirectory);
 
-            var window = new MainWindow(settings, schemaCatalog, log, OpenLogFolderAction(),
-                ConfigLocationSource.ForCurrentPlatform(), recipes);
+            var window = new MainWindow(settings, schemaCatalog, log, OpenLogFolderAction(launcher),
+                ConfigLocationSource.ForCurrentPlatform(), recipes, launcher);
             mainWindow = window;
             desktop.MainWindow = window;
 
@@ -96,21 +98,17 @@ public partial class App : Application
         base.OnFrameworkInitializationCompleted();
     }
 
-    /// <summary>Opens <paramref name="path"/> in the platform's file manager.</summary>
-    private static void RevealDirectory(string path) =>
-        Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
-
     /// <summary>What the status bar's log-folder button does: Debug builds only, since no other
     /// build writes a log. Creates the folder first, because the log's writer creates it in the
     /// background and may not have got there yet.</summary>
-    private static Action? OpenLogFolderAction()
+    private static Action? OpenLogFolderAction(ISystemLauncher launcher)
     {
 #if DEBUG
         return () =>
         {
             string folder = Path.GetDirectoryName(AppDataPaths.DebugLogFile)!;
             Directory.CreateDirectory(folder);
-            RevealDirectory(folder);
+            launcher.ShowFolder(folder);
         };
 #else
         return null;

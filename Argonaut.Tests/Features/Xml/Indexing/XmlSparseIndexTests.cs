@@ -114,13 +114,13 @@ public class XmlSparseIndexTests
     }
 
     [Fact]
-    public void ATextOnlyElementFarPastThePromotionSizeIsNeverRecorded()
+    public async Task ATextOnlyElementFarPastThePromotionSizeIsNeverRecorded()
     {
         // The shape of a CityGML gml:posList: one element of text a thousand times the promotion size.
         string coordinates = string.Join(' ', Enumerable.Range(0, 40_000).Select(i => $"{i}.5"));
         byte[] xml = Encoding.UTF8.GetBytes($"<root>\n  <a>x</a>\n  <posList srsDimension=\"3\">{coordinates}</posList>\n  <b/>\n</root>");
         var index = XmlSparseIndex.StartIndexing(new MemoryByteSource(xml), promotionBytes: 256, checkpointBytes: 64);
-        index.IndexingTask.GetAwaiter().GetResult();
+        await index.IndexingTask;
 
         Assert.Equal(1, index.Structure.ContainerCount);
         Assert.Equal(0, index.Structure.GetContainer(0).Start);
@@ -305,7 +305,7 @@ public class XmlSparseIndexTests
     }
 
     [Fact]
-    public void ARecordedContainerStillOpenHasNoTotalYet()
+    public async Task ARecordedContainerStillOpenHasNoTotalYet()
     {
         byte[] xml = Encoding.UTF8.GetBytes("<root>" + string.Concat(Enumerable.Range(0, 500).Select(i => $"<item>{i}</item>")) + "</root>");
         var growing = new GrowingByteSource(xml, initiallyAvailable: xml.Length / 2);
@@ -317,7 +317,7 @@ public class XmlSparseIndexTests
 
         growing.Reveal(xml.Length);
         growing.Seal();
-        index.IndexingTask.GetAwaiter().GetResult();
+        await index.IndexingTask;
         Assert.True(index.SiblingCounts.TryGetTotal(0, KeyOf("item"), out long total));
         Assert.Equal(500, total);
     }

@@ -64,12 +64,12 @@ public sealed class XmlTreePainterTests
     }
 
     [Fact]
-    public void ACollapsedElementShowsItsStartTagItsChildCountAndItsCloseTag()
+    public void ACollapsedElementShowsItsTagsAroundAnEllipsisAndItsChildCountAsANote()
     {
         var child = Rows(Sample, defaultDepth: 1).Single(r => r.Shown.StartsWith("<child>", StringComparison.Ordinal));
 
-        Assert.EndsWith("</child>", child.Shown);
-        Assert.Contains(child.Runs, r => r.Text.Contains("2 children", StringComparison.Ordinal));
+        Assert.Equal("<child> … </child>", child.Shown);
+        Assert.Contains(child.Runs, r => r.Style == TreeRunStyle.Note && r.Text == "2 children");
         Assert.True(child.Row.Node.IsContainer);
         Assert.False(child.Row.IsExpanded);
     }
@@ -90,6 +90,26 @@ public sealed class XmlTreePainterTests
         Assert.All(rows.Single(r => r.Shown == "<!-- top -->").Runs, r => Assert.Equal(TreeRunStyle.Comment, r.Style));
         Assert.Contains(rows.Single(r => r.Shown == "text run").Runs, r => r.Style == TreeRunStyle.String);
         Assert.Null(new XmlTreePainter(Text(Sample)).Marker(rows[0].Row));
+    }
+
+    [Fact]
+    public void NamespacePrefixesAndDeclarationsAreRunsOfTheirOwn()
+    {
+        var rows = Rows("<g:root xmlns:g=\"urn:g\" xmlns=\"urn:d\" g:id=\"1\"><g:a>x</g:a></g:root>", defaultDepth: int.MaxValue);
+
+        var root = rows[0].Runs;
+        Assert.Equal(["<", "g:", "root"], root.Take(3).Select(r => r.Text).ToList());
+        Assert.Equal([TreeRunStyle.Punctuation, TreeRunStyle.Namespace, TreeRunStyle.Name], root.Take(3).Select(r => r.Style).ToList());
+        Assert.All(root.Where(r => r.Text is "xmlns:g" or "xmlns" or "\"urn:g\"" or "\"urn:d\""), r => Assert.Equal(TreeRunStyle.Namespace, r.Style));
+        int id = root.FindIndex(r => r.Text == "id");
+        Assert.Equal((TreeRunStyle.Namespace, "g:"), (root[id - 1].Style, root[id - 1].Text));
+        Assert.Equal(TreeRunStyle.AttributeName, root[id].Style);
+        Assert.Contains(root, r => r.Style == TreeRunStyle.AttributeValue && r.Text == "\"1\"");
+
+        var leaf = rows[1].Runs;
+        Assert.Contains(leaf, r => r.Style == TreeRunStyle.Namespace && r.Text == "g:");
+        Assert.Contains(leaf, r => r.Style == TreeRunStyle.Name && r.Text == "a");
+        Assert.Equal("<g:root xmlns:g=\"urn:g\" xmlns=\"urn:d\" g:id=\"1\">", rows[0].Shown);
     }
 
     [Fact]

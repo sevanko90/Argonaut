@@ -7,9 +7,9 @@ namespace Argonaut.Features.Xml.Tree;
 
 /// <summary>
 /// The XML tree's colours: which theme brush each run style draws in - element names in the
-/// accent, attribute names and values and text in the colours JSON gives numbers and strings,
-/// punctuation and comments quiet. Looked up from the theme so a theme change is one call. These
-/// are starting points; the look is settled from screenshots.
+/// accent, attribute names in the colour JSON gives keywords, values and text in its string
+/// colour, and punctuation, comments, namespace prefixes and declarations quiet, so the local
+/// names lead. Looked up from the theme so a theme change is one call.
 /// </summary>
 public static class XmlTreePalette
 {
@@ -23,7 +23,8 @@ public static class XmlTreePalette
         }
 
         Add(TreeRunStyle.Name, "AppAccentBrush");
-        Add(TreeRunStyle.AttributeName, "AppJsonNumberBrush");
+        Add(TreeRunStyle.AttributeName, "AppJsonBoolBrush");
+        Add(TreeRunStyle.Namespace, "AppMutedTextBrush");
         Add(TreeRunStyle.AttributeValue, "AppJsonStringBrush");
         Add(TreeRunStyle.String, "AppJsonStringBrush");
         Add(TreeRunStyle.Keyword, "AppJsonBoolBrush");

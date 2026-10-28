@@ -801,6 +801,17 @@ public class TreeSurface : RowSurface
         return entry;
     }
 
+    /// <summary>
+    /// Ligatures and contextual alternates off: a row shows a document's characters as written,
+    /// and a font that draws <c>-&gt;</c> as an arrow turns the end of an XML comment, or an arrow
+    /// written in a value, into a character the document does not hold.
+    /// </summary>
+    private static readonly FontFeatureCollection LiteralGlyphs =
+    [
+        new FontFeature { Tag = "liga", Value = 0 },
+        new FontFeature { Tag = "calt", Value = 0 },
+    ];
+
     private PaneLayout LayOutPane(List<TreeRun> runs, string? markerLabel, Typeface typeface, double fontSize)
     {
         var foreground = Foreground ?? Brushes.Black;
@@ -821,7 +832,7 @@ public class TreeSurface : RowSurface
 
             var brush = runBrushes is not null && runBrushes.TryGetValue(run.Style, out var styled) ? styled : foreground;
             overrides.Add(new ValueSpan<TextRunProperties>(text.Length, run.Text.Length,
-                new GenericTextRunProperties(typeface, fontSize, foregroundBrush: brush)));
+                new GenericTextRunProperties(typeface, fontSize, foregroundBrush: brush, fontFeatures: LiteralGlyphs)));
             if (run.Link is { } link)
                 (links ??= new()).Add((text.Length, run.Text.Length, link));
             text.Append(run.Text);
@@ -832,7 +843,7 @@ public class TreeSurface : RowSurface
         // the runs and links above still line up.
         string content = ControlGlyphs.ForDisplay(text.ToString());
         var layout = new TextLayout(content, typeface, fontSize, foreground, TextAlignment.Left, TextWrapping.NoWrap,
-            textStyleOverrides: overrides);
+            fontFeatures: LiteralGlyphs, textStyleOverrides: overrides);
 
         TextLayout? marker = null;
         if (markerLabel is { } label)

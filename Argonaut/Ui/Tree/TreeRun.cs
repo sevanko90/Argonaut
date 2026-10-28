@@ -20,6 +20,10 @@ public enum TreeRunStyle : byte
     /// <summary>A literal that is neither a string, a number nor a keyword - JSON's null.</summary>
     Literal,
     Punctuation,
+
+    /// <summary>What qualifies a name rather than being it - an XML namespace prefix, or a
+    /// namespace declaration.</summary>
+    Namespace,
     Summary,
     Comment,
 

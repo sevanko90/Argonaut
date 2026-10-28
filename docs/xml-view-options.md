@@ -199,13 +199,17 @@ break or tab - between attributes, inside a comment, in text - shows as one spac
 trimmed, and an element of only whitespace shows as `<name></name>`. Copy value keeps the bytes
 as written.
 
-**`XmlTreePainter`** (`ITreeRowPainter`): runs per node kind, in the existing `TreeRunStyle`s -
-`Punctuation` for `<`, `</`, `>`, `/>`, `=` and quotes; `Name` for element names;
-`AttributeName`, `AttributeValue`; `String` for text and CDATA content; `Comment` for comments
-and the DOCTYPE; processing instructions as `Keyword` target and `Plain` data. A close row is
-`</name>`. A collapsed container is its start tag, a muted child count, and `</name>`. A
-truncated text gets the size note and "Open in raw" action JSON's long strings get. No marker.
-`XmlTreePalette` maps the styles to theme brushes. The proposals here are defaults until step 7.
+**`XmlTreePainter`** (`ITreeRowPainter`): runs per node kind - `Punctuation` for `<`, `</`, `>`,
+`/>`, `=` and quotes; `Name` for an element's local name; `Namespace` for a prefix (`gml:`) and
+for a whole namespace declaration (`xmlns:gml="..."`); `AttributeName`, `AttributeValue`;
+`String` for text and CDATA content; `Comment` for comments and the DOCTYPE; processing
+instructions as `Keyword` target and `Plain` data. A close row is `</name>`. A collapsed
+container is `<name ...> … </name>`, then its child count as a note. A truncated text gets the
+size note and "Open in raw" action JSON's long strings get. No marker. `XmlTreePalette`: local
+names in the accent, attribute names in JSON's keyword colour, values and text in its string
+colour, and punctuation, comments and namespaces muted (chosen from screenshots, step 7).
+Tree rows draw with ligatures and contextual alternates off, so a font never turns `-->` into an
+arrow.
 
 ### XPaths (`Features/Xml/Tree/XmlTreePaths`, `Features/Xml/Paths/XmlPathSyntax`)
 
@@ -305,7 +309,7 @@ the main thread and the user.
        `comment()`, `processing-instruction()`, `[1]` left out for a unique name, kept while indexing);
        same-name `k` across checkpoints equals a naive count; for every row of random documents,
        resolving its formatted path returns that row; each unsupported syntax gives its message.
-7. [ ] **Look** (main thread with the user): screenshots of the CityGML sample in two or three
+7. [x] **Look** (main thread with the user): screenshots of the CityGML sample in two or three
        variants per open choice - attribute colours, `xmlns` declarations muted or plain, prefixes
        muted or not, the collapsed summary - published side by side for the user to pick from. Then
        the palette and painter are set to the picks.
@@ -323,6 +327,11 @@ the main thread and the user.
        remains (below).
 
 ## Not in this plan
+
+To revisit (user, after step 7): how containers are drawn. A chevron beside a start tag reads
+oddly, and a wrapper element holding a single child (`core:cityObjectMember` around each
+building) spends three rows on one object; folding such a wrapper into its child's row was
+offered and declined for now.
 
 Kept for the roadmap once this lands: namespace-correct "copy strict XPath", namespace URIs on
 hover, attributes as child rows, XSD-labelled rows (the JSON schema gutter's counterpart),

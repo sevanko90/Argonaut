@@ -11,7 +11,9 @@ namespace Argonaut.Features.Xml.Tree;
 /// What an XML tree row says: markup as written, in runs by role - punctuation, the element's
 /// name, each attribute's name and value, text - so the palette can colour each. An element that
 /// holds only text is one row, <c>&lt;name&gt;text&lt;/name&gt;</c>; a collapsed element shows its
-/// start tag, how many children it has, and its close tag. A text, CDATA section, comment or other
+/// start tag, an ellipsis and its close tag, then how many children it has as a note. Namespace
+/// prefixes and declarations are runs of their own, so the palette can quiet them and the local
+/// names carry the row. A text, CDATA section, comment or other
 /// leaf too long to show is capped, followed by its size and an action that opens the raw view at
 /// it. Rows have no marker: an XML sibling's position is part of its path, not of the row.
 /// </summary>
@@ -73,8 +75,10 @@ public sealed class XmlTreePainter(XmlTreeText text) : ITreeRowPainter
         if (row.IsExpanded)
             return;
 
-        runs.Add(new TreeRun(text.Summary(row.Node.ValueStart), TreeRunStyle.Summary));
+        runs.Add(new TreeRun(" … ", TreeRunStyle.Summary));
         AppendCloseTag(name, runs);
+        if (text.ChildCountLabel(row.Node.ValueStart) is { } count)
+            runs.Add(new TreeRun(count, TreeRunStyle.Note));
     }
 
     private void AppendTextElement(TreeNode node, List<TreeRun> runs)
@@ -151,7 +155,7 @@ public sealed class XmlTreePainter(XmlTreeText text) : ITreeRowPainter
     private static void AppendCloseTag(string name, List<TreeRun> runs)
     {
         runs.Add(new TreeRun("</", TreeRunStyle.Punctuation));
-        runs.Add(new TreeRun(name, TreeRunStyle.Name));
+        AddName(name, TreeRunStyle.Name, runs);
         runs.Add(new TreeRun(">", TreeRunStyle.Punctuation));
     }
 
@@ -173,8 +177,9 @@ public sealed class XmlTreePainter(XmlTreeText text) : ITreeRowPainter
 
         string name = tag[i..nameEnd];
         if (name.Length > 0)
-            runs.Add(new TreeRun(name, TreeRunStyle.Name));
+            AddName(name, TreeRunStyle.Name, runs);
         i = nameEnd;
+        bool inDeclaration = false;
 
         while (i < tag.Length)
         {
@@ -195,15 +200,16 @@ public sealed class XmlTreePainter(XmlTreeText text) : ITreeRowPainter
             }
             else if (c == '=')
             {
-                runs.Add(new TreeRun("=", TreeRunStyle.Punctuation));
+                runs.Add(new TreeRun("=", inDeclaration ? TreeRunStyle.Namespace : TreeRunStyle.Punctuation));
                 i++;
             }
             else if (c is '"' or '\'')
             {
                 int close = tag.IndexOf(c, i + 1);
                 int valueEnd = close < 0 ? tag.Length : close + 1;
-                runs.Add(new TreeRun(tag[i..valueEnd], TreeRunStyle.AttributeValue));
+                runs.Add(new TreeRun(tag[i..valueEnd], inDeclaration ? TreeRunStyle.Namespace : TreeRunStyle.AttributeValue));
                 i = valueEnd;
+                inDeclaration = false;
             }
             else
             {
@@ -212,12 +218,34 @@ public sealed class XmlTreePainter(XmlTreeText text) : ITreeRowPainter
                     attributeEnd++;
                 if (attributeEnd == i)
                     attributeEnd++; // a stray byte: shown, never looped on
-                runs.Add(new TreeRun(tag[i..attributeEnd], TreeRunStyle.AttributeName));
+                string attribute = tag[i..attributeEnd];
+                inDeclaration = attribute == "xmlns" || attribute.StartsWith("xmlns:", StringComparison.Ordinal);
+                if (inDeclaration)
+                    runs.Add(new TreeRun(attribute, TreeRunStyle.Namespace));
+                else
+                    AddName(attribute, TreeRunStyle.AttributeName, runs);
                 i = attributeEnd;
             }
         }
 
         return name;
+    }
+
+    /// <summary>A qualified name as two runs, its prefix in the namespace style and its local name
+    /// in <paramref name="style"/>, so a column of <c>gml:</c> and <c>bldg:</c> names reads by
+    /// what follows the colon. A name with no prefix is one run.</summary>
+    private static void AddName(string name, TreeRunStyle style, List<TreeRun> runs)
+    {
+        int colon = name.IndexOf(':');
+        if (colon > 0 && colon < name.Length - 1)
+        {
+            runs.Add(new TreeRun(name[..(colon + 1)], TreeRunStyle.Namespace));
+            runs.Add(new TreeRun(name[(colon + 1)..], style));
+        }
+        else
+        {
+            runs.Add(new TreeRun(name, style));
+        }
     }
 
     private static bool IsSpace(char c) => c is ' ' or '\t' or '\r' or '\n';

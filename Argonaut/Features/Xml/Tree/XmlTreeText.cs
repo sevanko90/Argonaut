@@ -90,16 +90,15 @@ public sealed class XmlTreeText(IByteSource bytes, SparseContainerIndex index, X
         return Fold(DisplayText.Read(bytes, contentOffset, (int)Math.Min(int.MaxValue, fullLength), out truncated));
     }
 
-    /// <summary>An element's summary when collapsed: its child count, "…" while the count is not
-    /// known yet.</summary>
-    public string Summary(long containerStart)
+    /// <summary>How many children a collapsed element has, as its row's note - "1 child",
+    /// "26 children", "50000+ children" - or null while the count is not known yet.</summary>
+    public string? ChildCountLabel(long containerStart)
     {
         long count = ChildCount(containerStart);
         if (count < 0)
-            return " … ";
+            return null;
 
-        string counted = count > ChildCountCap ? $"{ChildCountCap}+ children" : $"{count} {(count == 1 ? "child" : "children")}";
-        return $" … {counted} … ";
+        return count > ChildCountCap ? $"{ChildCountCap}+ children" : $"{count} {(count == 1 ? "child" : "children")}";
     }
 
     /// <summary>The element's child count: recorded by the index for a large closed one, counted

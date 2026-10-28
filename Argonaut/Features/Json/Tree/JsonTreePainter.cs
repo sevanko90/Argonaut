@@ -85,7 +85,7 @@ public sealed class JsonTreePainter(JsonTreeText text, IReadOnlyList<IValueHintP
 
     /// <summary>What clicking a hint's chip does: a date's opens its scheme menu, one hiding a
     /// document shows it, an address opens it.</summary>
-    private static JsonRowLink? LinkOf(in TreeRow row, ValueHint hint)
+    private static object? LinkOf(in TreeRow row, ValueHint hint)
     {
         if (hint.Expands)
             return new ExpandHintLink(row.Node.ValueStart, row.Node.ValueEnd, hint.Kind);

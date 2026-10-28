@@ -1,7 +1,11 @@
+using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Detection;
+using Argonaut.Engine.Hints;
+using Argonaut.Features.Json.Preview;
+using Argonaut.Ui.Hints;
 using Argonaut.Engine.Indexing;
 using Argonaut.Engine.Indexing.Trees;
 using Argonaut.Engine.Progress;
@@ -41,9 +45,18 @@ public sealed class XmlViewModel : TreeDocumentViewModel
     // "declared ISO-8859-1, shown as UTF-8" when the XML declaration names another encoding.
     private string? encodingNote;
 
+    private IReadOnlyList<IValueHintProvider>? hintProviders;
+
     public XmlViewModel(XmlViewSettings viewSettings, ISystemLauncher? launcher = null) : base(viewSettings, launcher)
     {
+        HintSettings.HintsChanged += OnHintsChanged;
     }
+
+    /// <summary>The date-hint choices for this document - how a number reads as a date, and the
+    /// time zone shown. XML text needs no default scheme inferred: its dates are ISO.</summary>
+    public DateHintSettings HintSettings { get; } = new();
+
+    private void OnHintsChanged(object? sender, EventArgs e) => InvalidateRows();
 
     /// <summary>The sparse index, once loading has started.</summary>
     internal XmlSparseIndex? Index => (XmlSparseIndex?)TreeSession?.Index;
@@ -56,7 +69,7 @@ public sealed class XmlViewModel : TreeDocumentViewModel
     {
         AdoptOrigin(origin, new ScanTarget(origin));
         DefaultExpandDepth = ViewSettings.ExpandDepth;
-        toolbar = new XmlToolbarViewModel(DefaultExpandDepth, ChooseExpandDepth, ShowIndentGuides, ChooseIndentGuides);
+        toolbar = new XmlToolbarViewModel(HintSettings, DefaultExpandDepth, ChooseExpandDepth, ShowIndentGuides, ChooseIndentGuides);
 
         indexBasis = IndexBasis.Of(origin);
         return LoadCore(origin.Open(), progressReporter, indexBasis?.FindKept<XmlKeptStructure>(XmlKeptStructure.Key));
@@ -82,7 +95,8 @@ public sealed class XmlViewModel : TreeDocumentViewModel
 
         reader = new XmlTreeReader(session.Bytes);
         text = new XmlTreeText(session.Bytes, session.Index.Structure, reader);
-        ShowTree(reader, new XmlTreePainter(text), []);
+        hintProviders = ValueHintProviders.Standard(HintSettings, TimeProvider.System);
+        ShowTree(reader, new XmlTreePainter(text, hintProviders), []);
 
         string? declared = XmlDeclaredEncoding.Read(session.Bytes);
         encodingNote = XmlDeclaredEncoding.IsNotUtf8(declared) ? $"declared {declared}, shown as UTF-8" : null;
@@ -118,6 +132,36 @@ public sealed class XmlViewModel : TreeDocumentViewModel
             ? $"{f.Message} at line {f.Line?.ToString("N0") ?? "?"}, column {f.Column?.ToString("N0") ?? "?"}"
             : "indexing failed";
         StatusText = Status(detail);
+    }
+
+    /// <summary>
+    /// What a hint's value encodes, ready to show: the text's bytes are copied out, their entity
+    /// and character references decoded and the result escaped as a JSON string's content, which
+    /// is the form the decoders read, and decoded off the UI thread, so nothing reads the
+    /// document from another thread. Null when it does not decode after all, or the document
+    /// closed meanwhile.
+    /// </summary>
+    public async Task<HintPreview?> PreviewHintAsync(ExpandHintLink link)
+    {
+        if (Bytes is not { } bytes)
+            return null;
+
+        long length = link.ValueEnd - link.ValueStart;
+        if (HintPreviews.TooLarge(length) is { } tooLarge)
+            return tooLarge;
+
+        var written = bytes.RequireContiguous(link.ValueStart, (int)length);
+        var decoded = XmlUnescape.Decode(written, new byte[written.Length]);
+        byte[] raw = new byte[XmlHintText.EscapedLength(decoded)];
+        XmlHintText.Escaped(decoded, raw).CopyTo(raw);
+        var shown = await HintPreviews.DecodeAsync(link.Kind, raw, hintProviders, HintSettings.TimeZoneMode);
+        if (IsDisposed)
+        {
+            shown?.Preview.Dispose();
+            return null;
+        }
+
+        return shown;
     }
 
     protected override IReadOnlyList<TreePathSegment> PathSegmentsOf(TreeCursor cursor) => XmlTreePaths.Segments(cursor, text!, Index!);

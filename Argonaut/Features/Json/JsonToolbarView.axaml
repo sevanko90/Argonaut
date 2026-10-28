@@ -7,6 +7,7 @@
              xmlns:icons="clr-namespace:Argonaut.Ui.Icons"
              xmlns:conv="clr-namespace:Argonaut.Ui.Converters"
              xmlns:tree="clr-namespace:Argonaut.Ui.Tree"
+             xmlns:hints="clr-namespace:Argonaut.Ui.Hints"
              mc:Ignorable="d"
              x:Class="Argonaut.Features.Json.JsonToolbarView"
              x:DataType="json:JsonToolbarViewModel">
@@ -15,51 +16,7 @@
     <StackPanel Orientation="Horizontal"
                 Spacing="2"
                 VerticalAlignment="Center">
-        <Button x:Name="DateButton"
-                Classes="tool"
-                ToolTip.Tip="Hints: date interpretation and time format">
-            <StackPanel Orientation="Horizontal" Spacing="6">
-                <icons:LucideIcon Data="{StaticResource Icon.Hints}" />
-                <icons:LucideIcon Classes="chevron" Data="{StaticResource Icon.ChevronDown}" />
-            </StackPanel>
-            <Button.Flyout>
-                <Flyout Placement="BottomEdgeAlignedLeft">
-                    <StackPanel Margin="12" Spacing="12" MinWidth="170">
-                        <StackPanel Spacing="2">
-                            <TextBlock Classes="flyouthead" Text="Date interpretation" />
-                            <RadioButton GroupName="dateHintScheme"
-                                         Content="Off"
-                                         FontSize="12"
-                                         IsChecked="{Binding DateHintSchemeIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=0}" />
-                            <RadioButton GroupName="dateHintScheme"
-                                         Content="JS milliseconds"
-                                         FontSize="12"
-                                         IsChecked="{Binding DateHintSchemeIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=1}" />
-                            <RadioButton GroupName="dateHintScheme"
-                                         Content="JS seconds"
-                                         FontSize="12"
-                                         IsChecked="{Binding DateHintSchemeIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=2}" />
-                            <RadioButton GroupName="dateHintScheme"
-                                         Content="Keepa minutes"
-                                         FontSize="12"
-                                         IsChecked="{Binding DateHintSchemeIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=3}" />
-                        </StackPanel>
-                        <Border Height="1" Background="{DynamicResource AppBorderBrush}" />
-                        <StackPanel Spacing="2">
-                            <TextBlock Classes="flyouthead" Text="Time format" />
-                            <RadioButton GroupName="dateHintTimeZone"
-                                         Content="Local time"
-                                         FontSize="12"
-                                         IsChecked="{Binding TimeZoneModeIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=0}" />
-                            <RadioButton GroupName="dateHintTimeZone"
-                                         Content="UTC"
-                                         FontSize="12"
-                                         IsChecked="{Binding TimeZoneModeIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=1}" />
-                        </StackPanel>
-                    </StackPanel>
-                </Flyout>
-            </Button.Flyout>
-        </Button>
+        <hints:DateHintToolbarControls DataContext="{Binding DateHintControls}" />
         <!-- One control, not two: the schema file and the type within it are a single question,
              and a flyout is the only surface that can host a filter box AND descriptions AND a
              match-ranked shortlist - which a combo or a menu cannot. Merging them also halves

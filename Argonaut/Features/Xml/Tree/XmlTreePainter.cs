@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Generic;
+using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Hints;
 using Argonaut.Engine.Indexing.Trees;
 using Argonaut.Engine.Text;
 using Argonaut.Features.Xml.Indexing;
+using Argonaut.Ui.Hints;
 using Argonaut.Ui.Tree;
 
 namespace Argonaut.Features.Xml.Tree;
@@ -15,12 +18,18 @@ namespace Argonaut.Features.Xml.Tree;
 /// prefixes and declarations are runs of their own, so the palette can quiet them and the local
 /// names carry the row. A text, CDATA section, comment or other
 /// leaf too long to show is capped, followed by its size and an action that opens the raw view at
-/// it. Rows have no marker: an XML sibling's position is part of its path, not of the row.
+/// it. The content of a text-only element and a text node is also read for value hints - dates,
+/// addresses, colours, tokens - by shape, from the text with its references decoded, and the row
+/// still shows it as written. Rows have no marker: an XML sibling's position is part of its path, not of the row.
 /// </summary>
-public sealed class XmlTreePainter(XmlTreeText text) : ITreeRowPainter
+public sealed class XmlTreePainter(XmlTreeText text, IReadOnlyList<IValueHintProvider>? hintProviders = null) : ITreeRowPainter
 {
     private const string CDataOpen = "<![CDATA[";
     private const string CDataClose = "]]>";
+
+    // Room for a text's hint form: quotes and line breaks double, so a text of ordinary prose fits
+    // many times over; one that does not is not hinted.
+    private const int EscapeBufferLength = 4 * DisplayText.MaxLength;
 
     public void AppendRuns(in TreeRow row, List<TreeRun> runs)
     {
@@ -86,17 +95,35 @@ public sealed class XmlTreePainter(XmlTreeText text) : ITreeRowPainter
         string name = AppendStartTag(node.ValueStart, runs, out long tagEnd, out _);
         long closeStart = text.CloseStart(node.ValueStart, node.ValueEnd);
         string content = text.Content(tagEnd, closeStart, out bool truncated, out long contentOffset, out long fullLength);
-        runs.Add(new TreeRun(content, TreeRunStyle.String));
+        var hint = Hint(contentOffset, fullLength, truncated);
+        runs.Add(new TreeRun(content, TreeRunStyle.String, hint?.Address is { } address ? new OpenUrlLink(address) : null));
         AppendCloseTag(name, runs);
-        AppendTruncation(truncated, contentOffset, fullLength, runs);
+        AppendNotes(truncated, contentOffset, fullLength, hint, runs);
     }
 
-    /// <summary>A text run's trimmed content, with its truncation notice if it was capped.</summary>
+    /// <summary>A text run's trimmed content, with its hint and truncation notice if it was capped.</summary>
     private void AppendContent(long start, long end, List<TreeRun> runs)
     {
         string content = text.Content(start, end, out bool truncated, out long contentOffset, out long fullLength);
-        runs.Add(new TreeRun(content, TreeRunStyle.String));
-        AppendTruncation(truncated, contentOffset, fullLength, runs);
+        var hint = Hint(contentOffset, fullLength, truncated);
+        runs.Add(new TreeRun(content, TreeRunStyle.String, hint?.Address is { } address ? new OpenUrlLink(address) : null));
+        AppendNotes(truncated, contentOffset, fullLength, hint, runs);
+    }
+
+    /// <summary>What the value looks like, by its shape alone: its content with entity and
+    /// character references decoded, at most the display cap of it. Most hints read whole values,
+    /// which are never near the cap; past it only the ones that classify from a prefix are asked.</summary>
+    private ValueHint? Hint(long contentOffset, long fullLength, bool truncated)
+    {
+        if (hintProviders is null || fullLength <= 0)
+            return null;
+
+        int readLength = (int)Math.Min(fullLength, DisplayText.MaxLength);
+        var raw = text.Bytes.RequireContiguous(contentOffset, readLength);
+        Span<byte> decodeBuffer = stackalloc byte[DisplayText.MaxLength];
+        Span<byte> escapeBuffer = stackalloc byte[EscapeBufferLength];
+        var forHints = XmlHintText.ForHints(raw, decodeBuffer, escapeBuffer, out bool fits);
+        return fits ? ValueHints.Read(hintProviders, ValueShape.String, forHints, truncated ? fullLength : forHints.Length, contentOffset) : null;
     }
 
     private void AppendCData(TreeNode node, List<TreeRun> runs)
@@ -144,12 +171,34 @@ public sealed class XmlTreePainter(XmlTreeText text) : ITreeRowPainter
     /// <summary>The size of what was capped and a way to read the rest: information first, then
     /// what appears on hover, so showing it moves nothing.</summary>
     private static void AppendTruncation(bool truncated, long contentOffset, long fullLength, List<TreeRun> runs)
-    {
-        if (!truncated)
-            return;
+        => AppendNotes(truncated, contentOffset, fullLength, null, runs);
 
-        runs.Add(new TreeRun(ByteLengthText.Format(fullLength), TreeRunStyle.Note));
-        runs.Add(new TreeRun("Open in raw", TreeRunStyle.Action, new ViewInRawLink(contentOffset), TreeRunIcon.FullText));
+    /// <summary>After a value: the truncation size, then the hint's chip, then "Open in raw" -
+    /// information first, and what appears on hover last, so showing it moves nothing.</summary>
+    private static void AppendNotes(bool truncated, long contentOffset, long fullLength, ValueHint? hint, List<TreeRun> runs)
+    {
+        if (truncated)
+            runs.Add(new TreeRun(ByteLengthText.Format(fullLength), TreeRunStyle.Note));
+
+        if (hint is not null)
+        {
+            runs.Add(new TreeRun(hint.Text, ValueHintLook.StyleOf(hint), LinkOf(contentOffset, fullLength, hint), ValueHintLook.IconOf(hint.Symbol),
+                ValueHintLook.SwatchOf(hint), ValueHintLook.Opens(hint)));
+        }
+
+        if (truncated)
+            runs.Add(new TreeRun("Open in raw", TreeRunStyle.Action, new ViewInRawLink(contentOffset), TreeRunIcon.FullText));
+    }
+
+    /// <summary>What clicking a hint's chip does: a date's opens its scheme menu, one hiding a
+    /// document shows it, an address opens it.</summary>
+    private static object? LinkOf(long contentOffset, long fullLength, ValueHint hint)
+    {
+        if (hint.Expands)
+            return new ExpandHintLink(contentOffset, contentOffset + fullLength, hint.Kind);
+        if (hint.Kind == ValueHintKind.Date)
+            return new DateSchemeLink(contentOffset);
+        return hint.Address is { } address ? new OpenUrlLink(address) : null;
     }
 
     private static void AppendCloseTag(string name, List<TreeRun> runs)

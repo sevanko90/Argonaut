@@ -313,7 +313,7 @@ the main thread and the user.
        variants per open choice - attribute colours, `xmlns` declarations muted or plain, prefixes
        muted or not, the collapsed summary - published side by side for the user to pick from. Then
        the palette and painter are set to the picks.
-8. [ ] **Value hints on text.** Text rows and `TextElement`s get the JSON tree's value hints (dates,
+8. [x] **Value hints on text.** Text rows and `TextElement`s get the JSON tree's value hints (dates,
        URLs, colours, JWTs, embedded JSON, Base64) through `ValueHints.Read`, by shape as always,
        from the content with its entity and character references decoded - so `?a=1&amp;b=2`
        opens as `?a=1&b=2` - while the row still shows the text as written. Names, attributes,

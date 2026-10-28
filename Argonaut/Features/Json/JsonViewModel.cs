@@ -289,12 +289,7 @@ public sealed class JsonViewModel : TreeDocumentViewModel
         reader = new JsonTreeReader(session.Bytes);
         text = new JsonTreeText(session.Bytes, session.Index.Structure, reader);
         schemaResolver = new JsonSchemaResolver(session.Index.Structure, reader, text) { Schema = SchemaSettings.Document };
-        hintProviders = new IValueHintProvider[]
-        {
-            new DateHintProvider(HintSettings), new IsoDateHintProvider(HintSettings, TimeProvider.System), new ColourHintProvider(),
-            new JwtHintProvider(TimeProvider.System), new UrlHintProvider(), new CronHintProvider(HintSettings, TimeProvider.System),
-            new EmbeddedJsonHintProvider(), new Base64HintProvider(),
-        };
+        hintProviders = ValueHintProviders.Standard(HintSettings, TimeProvider.System);
         var painter = new JsonTreePainter(text, hintProviders, SupportsArrayTable);
         var gutters = new ITreeGutter[] { new JsonSchemaGutter(schemaResolver, text) };
         ShowTree(reader, painter, gutters);

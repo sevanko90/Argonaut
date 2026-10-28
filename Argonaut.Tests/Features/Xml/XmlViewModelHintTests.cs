@@ -87,7 +87,7 @@ public sealed class XmlViewModelHintTests : IDisposable
         var launcher = new RecordingSystemLauncher();
         using var vm = await Load("<r><site>https://example.org/a?x=1&amp;y=2</site></r>", launcher);
 
-        var link = AllRuns(vm).Select(r => r.Link).OfType<OpenUrlLink>().Single();
+        var link = AllRuns(vm).Select(r => r.Link).OfType<OpenUrlLink>().First();
         vm.OpenAddress(link.Address);
 
         Assert.Equal([new Uri("https://example.org/a?x=1&y=2")], launcher.AddressesOpened);

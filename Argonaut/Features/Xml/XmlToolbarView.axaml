@@ -4,12 +4,14 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:xv="clr-namespace:Argonaut.Features.Xml"
              xmlns:tree="clr-namespace:Argonaut.Ui.Tree"
+             xmlns:hints="clr-namespace:Argonaut.Ui.Hints"
              mc:Ignorable="d"
              x:Class="Argonaut.Features.Xml.XmlToolbarView"
              x:DataType="xv:XmlToolbarViewModel">
     <StackPanel Orientation="Horizontal"
                 Spacing="2"
                 VerticalAlignment="Center">
+        <hints:DateHintToolbarControls DataContext="{Binding DateHintControls}" />
         <tree:TreeToolbarControls DataContext="{Binding TreeControls}" />
     </StackPanel>
 </UserControl>

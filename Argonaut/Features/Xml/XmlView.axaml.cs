@@ -1,8 +1,10 @@
 using System;
 using System.ComponentModel;
+using System.Threading.Tasks;
 using Argonaut.Engine.Bytes;
 using Argonaut.Features.Xml.Tree;
 using Argonaut.Ui.Documents.Navigation;
+using Argonaut.Ui.Hints;
 using Argonaut.Ui.Notifications;
 using Argonaut.Ui.Rows;
 using Argonaut.Ui.Tree;
@@ -27,6 +29,7 @@ public partial class XmlView : UserControl
 {
     private XmlViewModel? subscribedViewModel;
     private MenuFlyout? nodeMenu;
+    private DateSchemeFlyout? dateSchemeFlyout;
 
     private readonly RowScrollBars scrollBars;
 
@@ -159,8 +162,39 @@ public partial class XmlView : UserControl
 
     private void OnLinkClicked(object? sender, TreeLinkClickedEventArgs e)
     {
-        if (e.Link is ViewInRawLink raw)
-            RawJumpService.Request(ByteRange.At((subscribedViewModel?.ScanTarget.Offset ?? 0) + raw.Offset));
+        switch (e.Link)
+        {
+            case ViewInRawLink raw:
+                RawJumpService.Request(ByteRange.At((subscribedViewModel?.ScanTarget.Offset ?? 0) + raw.Offset));
+                break;
+            case DateSchemeLink hint:
+                if (subscribedViewModel is { } hinted)
+                    (dateSchemeFlyout ??= new DateSchemeFlyout()).Show(Surface, hinted.HintSettings, hint.ValueOffset);
+                break;
+            case ExpandHintLink expand:
+                _ = ShowHintCardAsync(expand, e.Bounds);
+                break;
+            case OpenUrlLink url:
+                subscribedViewModel?.OpenAddress(url.Address);
+                break;
+        }
+    }
+
+    /// <summary>Opens the card by the clicked chip with what its value encodes, decoded first off
+    /// the UI thread.</summary>
+    private async Task ShowHintCardAsync(ExpandHintLink link, Rect chip)
+    {
+        if (subscribedViewModel is not { } vm)
+            return;
+
+        var shown = await vm.PreviewHintAsync(link);
+        if (shown is null)
+        {
+            ToastService.Show("That value doesn't decode after all.");
+            return;
+        }
+
+        HintCard.Show(shown, chip);
     }
 
     /// <summary>

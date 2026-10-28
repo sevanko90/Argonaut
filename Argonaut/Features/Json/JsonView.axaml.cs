@@ -6,6 +6,7 @@ using Argonaut.Engine.Hints;
 using Argonaut.Features.Json.Preview;
 using Argonaut.Features.Json.Tree;
 using Argonaut.Ui.Documents.Navigation;
+using Argonaut.Ui.Hints;
 using Argonaut.Ui.Notifications;
 using Argonaut.Ui.Rows;
 using Argonaut.Ui.Tree;
@@ -29,9 +30,8 @@ namespace Argonaut.Features.Json;
 public partial class JsonView : UserControl
 {
     private JsonViewModel? subscribedViewModel;
-    private MenuFlyout? hintFlyout;
+    private DateSchemeFlyout? dateSchemeFlyout;
     private MenuFlyout? nodeMenu;
-    private long hintFlyoutValueOffset = -1;
 
     private readonly RowScrollBars scrollBars;
 
@@ -174,8 +174,8 @@ public partial class JsonView : UserControl
                 subscribedViewModel?.RequestArrayTable(table.ArrayStart);
                 break;
             case DateSchemeLink hint:
-                hintFlyoutValueOffset = hint.ValueOffset;
-                (hintFlyout ??= BuildHintFlyout()).ShowAt(Surface, showAtPointer: true);
+                if (subscribedViewModel is { } hinted)
+                    (dateSchemeFlyout ??= new DateSchemeFlyout()).Show(Surface, hinted.HintSettings, hint.ValueOffset);
                 break;
             case ExpandHintLink expand:
                 _ = ShowHintCardAsync(expand, e.Bounds);
@@ -201,28 +201,6 @@ public partial class JsonView : UserControl
         }
 
         HintCard.Show(shown, chip);
-    }
-
-    private MenuFlyout BuildHintFlyout()
-    {
-        var flyout = new MenuFlyout();
-        AddHintSchemeItem(flyout, "File default", null);
-        AddHintSchemeItem(flyout, "Off", DateDecodingScheme.Off);
-        AddHintSchemeItem(flyout, "JS milliseconds", DateDecodingScheme.JsMilliseconds);
-        AddHintSchemeItem(flyout, "JS seconds", DateDecodingScheme.JsSeconds);
-        AddHintSchemeItem(flyout, "Keepa minutes", DateDecodingScheme.KeepaMinutes);
-        return flyout;
-    }
-
-    private void AddHintSchemeItem(MenuFlyout flyout, string header, DateDecodingScheme? scheme)
-    {
-        var item = new MenuItem { Header = header };
-        item.Click += (_, _) =>
-        {
-            if (DataContext is JsonViewModel vm && hintFlyoutValueOffset >= 0)
-                vm.HintSettings.SetValueOverride(hintFlyoutValueOffset, scheme);
-        };
-        flyout.Items.Add(item);
     }
 
     /// <summary>

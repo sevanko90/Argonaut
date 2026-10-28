@@ -1,0 +1,54 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:hints="clr-namespace:Argonaut.Ui.Hints"
+             xmlns:icons="clr-namespace:Argonaut.Ui.Icons"
+             xmlns:conv="clr-namespace:Argonaut.Ui.Converters"
+             x:Class="Argonaut.Ui.Hints.DateHintToolbarControls"
+             x:DataType="hints:DateHintToolbarState">
+    <!-- The date-hint choices a format's toolbar shares: how numbers read as dates, and the time zone. -->
+    <Button x:Name="DateButton"
+            Classes="tool"
+            ToolTip.Tip="Hints: date interpretation and time format">
+        <StackPanel Orientation="Horizontal" Spacing="6">
+            <icons:LucideIcon Data="{StaticResource Icon.Hints}" />
+            <icons:LucideIcon Classes="chevron" Data="{StaticResource Icon.ChevronDown}" />
+        </StackPanel>
+        <Button.Flyout>
+            <Flyout Placement="BottomEdgeAlignedLeft">
+                <StackPanel Margin="12" Spacing="12" MinWidth="170">
+                    <StackPanel Spacing="2">
+                        <TextBlock Classes="flyouthead" Text="Date interpretation" />
+                        <RadioButton GroupName="dateHintScheme"
+                                     Content="Off"
+                                     FontSize="12"
+                                     IsChecked="{Binding DateHintSchemeIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=0}" />
+                        <RadioButton GroupName="dateHintScheme"
+                                     Content="JS milliseconds"
+                                     FontSize="12"
+                                     IsChecked="{Binding DateHintSchemeIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=1}" />
+                        <RadioButton GroupName="dateHintScheme"
+                                     Content="JS seconds"
+                                     FontSize="12"
+                                     IsChecked="{Binding DateHintSchemeIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=2}" />
+                        <RadioButton GroupName="dateHintScheme"
+                                     Content="Keepa minutes"
+                                     FontSize="12"
+                                     IsChecked="{Binding DateHintSchemeIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=3}" />
+                    </StackPanel>
+                    <Border Height="1" Background="{DynamicResource AppBorderBrush}" />
+                    <StackPanel Spacing="2">
+                        <TextBlock Classes="flyouthead" Text="Time format" />
+                        <RadioButton GroupName="dateHintTimeZone"
+                                     Content="Local time"
+                                     FontSize="12"
+                                     IsChecked="{Binding TimeZoneModeIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=0}" />
+                        <RadioButton GroupName="dateHintTimeZone"
+                                     Content="UTC"
+                                     FontSize="12"
+                                     IsChecked="{Binding TimeZoneModeIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=1}" />
+                    </StackPanel>
+                </StackPanel>
+            </Flyout>
+        </Button.Flyout>
+    </Button>
+</UserControl>

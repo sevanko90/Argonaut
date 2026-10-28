@@ -4,6 +4,7 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:xv="clr-namespace:Argonaut.Features.Xml"
              xmlns:tree="clr-namespace:Argonaut.Ui.Tree"
+             xmlns:preview="clr-namespace:Argonaut.Features.Json.Preview"
              x:Class="Argonaut.Features.Xml.XmlView"
              x:DataType="xv:XmlViewModel">
     <!-- Edge to edge: the tree is the window's content, not a card inside it. -->
@@ -65,6 +66,10 @@
                               CopyPathTooltip="Copy XPath"
                               CopiedPathMessage="XPath copied"
                               FocusTarget="{Binding #Surface}" />
+
+            <preview:HintCard x:Name="HintCard"
+                              Anchor="{Binding #Surface}"
+                              ShowIndentGuides="{Binding ShowIndentGuides}" />
         </Grid>
     </Border>
 </UserControl>

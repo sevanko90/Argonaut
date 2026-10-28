@@ -12,6 +12,7 @@
         xmlns:diff="clr-namespace:Argonaut.Features.Json.Diff"
         xmlns:ndjson="clr-namespace:Argonaut.Features.NdJson"
         xmlns:csv="clr-namespace:Argonaut.Features.Csv"
+        xmlns:xmlview="clr-namespace:Argonaut.Features.Xml"
         xmlns:raw="clr-namespace:Argonaut.Features.Raw"
         xmlns:progress="clr-namespace:Argonaut.Ui.Progress"
         xmlns:icons="clr-namespace:Argonaut.Ui.Icons"
@@ -25,6 +26,9 @@
         </DataTemplate>
         <DataTemplate DataType="ndjson:NdJsonViewModel">
             <ndjson:NdJsonView />
+        </DataTemplate>
+        <DataTemplate DataType="xmlview:XmlViewModel">
+            <xmlview:XmlView />
         </DataTemplate>
         <DataTemplate DataType="csv:CsvViewModel">
             <csv:CsvView />
@@ -40,6 +44,9 @@
         </DataTemplate>
         <DataTemplate DataType="json:JsonToolbarViewModel">
             <json:JsonToolbarView />
+        </DataTemplate>
+        <DataTemplate DataType="xmlview:XmlToolbarViewModel">
+            <xmlview:XmlToolbarView />
         </DataTemplate>
         <DataTemplate DataType="diff:JsonDiffToolbarViewModel">
             <diff:JsonDiffToolbarView />

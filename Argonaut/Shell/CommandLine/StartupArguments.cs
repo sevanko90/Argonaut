@@ -71,6 +71,7 @@ public sealed class StartupArguments
     [
         ("json", FileTypeDetector.FileKind.Json),
         ("ndjson", FileTypeDetector.FileKind.Ndjson),
+        ("xml", FileTypeDetector.FileKind.Xml),
         ("csv", FileTypeDetector.FileKind.Csv),
         ("tsv", FileTypeDetector.FileKind.Tsv),
         ("raw", FileTypeDetector.FileKind.Unidentified),
@@ -168,6 +169,9 @@ public sealed class StartupArguments
 
         if (error is null && filterPath is not null && view == FileTypeDetector.FileKind.Json)
             error = "--view json cannot show a selection of lines. Use ndjson, csv, tsv or raw.";
+
+        if (error is null && filterPath is not null && view == FileTypeDetector.FileKind.Xml)
+            error = "--view xml cannot show a selection of lines. Use ndjson, csv, tsv or raw.";
 
         if (error is null && paths.Count > 1 && anyAsked)
             error = $"{(linesAsked || bytesAsked ? unitName : "--view")} opens one file, not a comparison.";

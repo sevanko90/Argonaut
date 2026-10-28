@@ -5,6 +5,7 @@ using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Indexing;
 using Argonaut.Engine.Indexing.Trees;
 using Argonaut.Engine.Progress;
+using Argonaut.Ui.Tree;
 
 namespace Argonaut.Features.Xml.Indexing;
 
@@ -55,7 +56,7 @@ public sealed class XmlDocumentInvalidException(string message) : Exception(mess
 /// after sibling from the last resume point - and the first one in document order is reported once
 /// the index is complete, with its line and column.
 /// </summary>
-public sealed class XmlSparseIndex : IBackgroundIndex
+public sealed class XmlSparseIndex : ITreeIndex
 {
     public const int DefaultPromotionBytes = 64 * 1024;
     public const int DefaultCheckpointBytes = 64 * 1024;

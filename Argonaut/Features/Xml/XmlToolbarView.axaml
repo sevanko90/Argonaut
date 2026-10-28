@@ -1,0 +1,15 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:xv="clr-namespace:Argonaut.Features.Xml"
+             xmlns:tree="clr-namespace:Argonaut.Ui.Tree"
+             mc:Ignorable="d"
+             x:Class="Argonaut.Features.Xml.XmlToolbarView"
+             x:DataType="xv:XmlToolbarViewModel">
+    <StackPanel Orientation="Horizontal"
+                Spacing="2"
+                VerticalAlignment="Center">
+        <tree:TreeToolbarControls DataContext="{Binding TreeControls}" />
+    </StackPanel>
+</UserControl>

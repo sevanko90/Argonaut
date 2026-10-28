@@ -59,7 +59,7 @@ public class StartupArgumentsTests
 
     [Fact]
     public void Names_the_views_when_one_is_unknown()
-        => Assert.Equal("--view: \"tree\" is not a view. Use one of: json, ndjson, csv, tsv, raw.", Parse("a.json", "--view", "tree").Error);
+        => Assert.Equal("--view: \"tree\" is not a view. Use one of: json, ndjson, xml, csv, tsv, raw.", Parse("a.json", "--view", "tree").Error);
 
     [Fact]
     public void Keeps_positional_paths_in_order_around_options()

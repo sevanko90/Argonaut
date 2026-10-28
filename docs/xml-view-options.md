@@ -215,7 +215,8 @@ truncated text gets the size note and "Open in raw" action JSON's long strings g
 kind. `[1]` is left out when the sibling is the only one of its name - known exactly for a small
 container (counted by reading it, at most the promotion size) and for a recorded container once
 it has closed (its totals); while a recorded container is still being indexed, `[k]` is always
-shown. CDATA and text are numbered together as `text()`, as XPath does, though touching ones
+shown. A document has one root element, so the root's step is never numbered; other top-level
+nodes are numbered until the index is complete. CDATA and text are numbered together as `text()`, as XPath does, though touching ones
 are separate rows here. The XML declaration and a DOCTYPE are not XPath nodes: their path is
 `/`, which Go-to resolves to the document's first row.
 
@@ -300,7 +301,7 @@ the main thread and the user.
        the disposal and lifecycle tests (`DocumentDisposalLifecycleTests`, `CollectionDisposedEmptyTests`)
        include the XML view; `--view xml` parses and `--view xml --filter` is refused; a non-UTF-8
        encoding declaration shows its status note.
-6. [ ] **XPaths.** Tests: segments for known rows of a fixture (default namespace, `text()`,
+6. [x] **XPaths.** Tests: segments for known rows of a fixture (default namespace, `text()`,
        `comment()`, `processing-instruction()`, `[1]` left out for a unique name, kept while indexing);
        same-name `k` across checkpoints equals a naive count; for every row of random documents,
        resolving its formatted path returns that row; each unsupported syntax gives its message.

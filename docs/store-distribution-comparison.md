@@ -100,6 +100,12 @@ for this codebase:
   container's `.config` rather than the user's. The store build needs the real home folder
   (`getpwuid(getuid())->pw_dir`). The Open panel it starts in is `NSOpenPanel` already, which
   the sandbox allows and which grants access to what is picked.
+- **The command-line options are GitHub-build only** (decided). A sandboxed app gets no access to
+  a path in its arguments - only to what the user opens through Finder, the Open panel or a
+  drop - so a file path argument, `--lines`/`--bytes` excerpts and `--filter` selections (and
+  the watch that follows the filter file) cannot work there. The store build drops them under
+  `MAC_APP_STORE`: they are not parsed, `--help` and the About box's "Command-line options" are
+  left out, and the README says the options need the GitHub download. Not built yet.
 - **Saving needs a sandbox-specific implementation.** A picker grant covers the chosen file, not
   its folder, so the shipped save (`SiblingFileReplacer`, a temp file beside the original) is
   denied. The save path is built behind `IFileReplacer` for this reason - see
@@ -133,7 +139,7 @@ entirely for that distribution.
 | | Velopack + GitHub Releases | Microsoft Store (MSIX) | Mac App Store |
 |---|---|---|---|
 | Source of truth | GH tag/release (this stays true regardless) | Same GH tag, packaged downstream | Same GH tag, packaged downstream |
-| Code changes required | None beyond the update plumbing itself | None expected (full-trust Desktop Bridge) | Real: sandbox entitlements, security-scoped bookmarks (recent files, remembered schemas), schema folder rework, sandboxed save |
+| Code changes required | None beyond the update plumbing itself | None expected (full-trust Desktop Bridge) | Real: sandbox entitlements, security-scoped bookmarks (recent files, remembered schemas), schema folder rework, sandboxed save, command-line options left out |
 | New signing identity | Optional (Developer ID improves macOS UX) | Store-managed | Required, separate from Developer ID |
 | Monetary cost | $0 (or $99/yr Apple if adding notarization) | $0 (free as of 2026) | $99/yr Apple Developer Program |
 | Release latency | Immediate — publish = live | Hours–days (store review) | Hours–days, sometimes longer (App Review) |

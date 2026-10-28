@@ -287,7 +287,7 @@ the main thread and the user.
        - Same-name snapshots equal naive counts at every checkpoint; a container with 17 distinct
          child names stores none.
        - `Reopen` / `DetachStructure` as `JsonKeptStructureTests` does.
-4. [ ] **Reader, text and painter.** Tests:
+4. [x] **Reader, text and painter.** Tests:
        - A `TreeCursor` walk over `XmlTreeReader` gives the naive model's rows (shape, depth, ordinal,
          kind) for random documents, fully expanded and at default depths; stepping backward gives the
          same rows reversed.

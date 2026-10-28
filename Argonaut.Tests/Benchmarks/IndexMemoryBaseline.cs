@@ -8,6 +8,7 @@ using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Indexing;
 using Argonaut.Engine.Indexing.Lines;
 using Argonaut.Features.Json.Indexing;
+using Argonaut.Features.Xml.Indexing;
 using Argonaut.Features.Raw;
 using Argonaut.Features.Raw.Rows;
 
@@ -48,6 +49,7 @@ public static class IndexMemoryBaseline
         JsonRecords,
         JsonTokenDense,
         JsonRecordsWithHashes,
+        Xml,
     }
 
     private static readonly (Kind Kind, string Indexer, string Describes)[] Cases =
@@ -58,6 +60,7 @@ public static class IndexMemoryBaseline
         (Kind.JsonRecords, "JsonSparseIndex", "one root array of records (JsonShape.RecordArray)"),
         (Kind.JsonTokenDense, "JsonSparseIndex", "one root array of short numbers (JsonShape.TokenDenseArray)"),
         (Kind.JsonRecordsWithHashes, "JsonSparseIndex + content hashes", "as JSON records, indexed the way a diff indexes"),
+        (Kind.Xml, "XmlSparseIndex", "one root of CityGML-like records: namespaces, attributes, nested geometry"),
     ];
 
     public static int Run(string[] args)
@@ -239,6 +242,13 @@ public static class IndexMemoryBaseline
                 return (session, () => session.Index.LineCount);
             }
 
+            case Kind.Xml:
+            {
+                var session = IndexedSourceSession<XmlSparseIndex>.Start(new MMapFile(path), XmlSparseIndex.StartIndexing);
+                session.IndexingTask.GetAwaiter().GetResult();
+                return (session, () => session.Index.Structure.ContainerCount + session.Index.Structure.CheckpointCount);
+            }
+
             default:
             {
                 var session = IndexedSourceSession<JsonSparseIndex>.Start(new MMapFile(path),
@@ -283,6 +293,12 @@ public static class IndexMemoryBaseline
         using var writer = new StreamWriter(stream, new UTF8Encoding(false), 1 << 20) { NewLine = "\n" };
         if (kind == Kind.Csv)
             writer.WriteLine("id,timestamp,level,region,account,amount,currency,quantity,ratio,flag,description,notes");
+        if (kind == Kind.Xml)
+        {
+            writer.WriteLine("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
+            writer.WriteLine("<core:CityModel xmlns:core=\"http://www.opengis.net/citygml/2.0\" xmlns:bldg=\"http://www.opengis.net/citygml/building/2.0\""
+                + " xmlns:gml=\"http://www.opengis.net/gml\" xmlns:xAL=\"urn:oasis:names:tc:ciq:xsdschema:xAL:2.0\">");
+        }
 
         var line = new StringBuilder();
         for (long row = 0; stream.Position + 64 * 1024 < size; row++)
@@ -292,6 +308,7 @@ public static class IndexMemoryBaseline
             {
                 case Kind.Text: TextLine(line, random, row); break;
                 case Kind.Csv: CsvLine(line, random, row); break;
+                case Kind.Xml: XmlRecord(line, random, row); break;
                 default: NdJsonLine(line, random, row); break;
             }
 
@@ -299,6 +316,9 @@ public static class IndexMemoryBaseline
             if (row % 4096 == 0)
                 writer.Flush();
         }
+
+        if (kind == Kind.Xml)
+            writer.WriteLine("</core:CityModel>");
     }
 
     private static readonly string[] Words =
@@ -324,6 +344,35 @@ public static class IndexMemoryBaseline
             line.Append("payload=").Append('x', 40 * 1024);
         else
             Sentence(line, random, 4, 22);
+    }
+
+    /// <summary>One city object as CityGML writes it: a member wrapping a building with an id,
+    /// text-only properties, a code list attribute, a polygon's coordinates and an address - the
+    /// mix of attributes, namespaces, one-line elements and nesting the XML index walks.</summary>
+    private static void XmlRecord(StringBuilder line, Random random, long row)
+    {
+        if (row % 1000 == 0)
+            line.Append("  <!-- district ").Append(row / 1000).Append(" -->\n");
+        line.Append("  <core:cityObjectMember>\n    <bldg:Building gml:id=\"BLDG_").Append(row).Append("\">\n")
+            .Append("      <gml:name>").Append(Words[random.Next(Words.Length)]).Append(' ').Append(row).Append("</gml:name>\n")
+            .Append("      <core:creationDate>2026-").Append(1 + random.Next(12)).Append('-').Append(1 + random.Next(28)).Append("</core:creationDate>\n")
+            .Append("      <bldg:function codeSpace=\"http://www.sig3d.org/codelists/function.xml\">31001_").Append(1000 + random.Next(9) * 10).Append("</bldg:function>\n")
+            .Append("      <bldg:measuredHeight uom=\"urn:adv:uom:m\">").Append((random.NextDouble() * 40).ToString("F2", CultureInfo.InvariantCulture)).Append("</bldg:measuredHeight>\n")
+            .Append("      <bldg:lod2MultiSurface>\n        <gml:MultiSurface srsDimension=\"3\">\n          <gml:surfaceMember>\n")
+            .Append("            <gml:Polygon gml:id=\"P_").Append(row).Append("\"><gml:exterior><gml:LinearRing><gml:posList>");
+        for (int i = 0; i < 5; i++)
+        {
+            line.Append(i == 0 ? "" : " ")
+                .Append((385000 + random.NextDouble() * 1000).ToString("F3", CultureInfo.InvariantCulture)).Append(' ')
+                .Append((5818000 + random.NextDouble() * 1000).ToString("F3", CultureInfo.InvariantCulture)).Append(' ')
+                .Append((30 + random.NextDouble() * 20).ToString("F3", CultureInfo.InvariantCulture));
+        }
+
+        line.Append("</gml:posList></gml:LinearRing></gml:exterior></gml:Polygon>\n")
+            .Append("          </gml:surfaceMember>\n        </gml:MultiSurface>\n      </bldg:lod2MultiSurface>\n")
+            .Append("      <bldg:address><xAL:ThoroughfareName>").Append(Words[random.Next(Words.Length)]).Append("straße</xAL:ThoroughfareName>")
+            .Append("<xAL:ThoroughfareNumber>").Append(1 + random.Next(200)).Append("</xAL:ThoroughfareNumber></bldg:address>\n")
+            .Append("    </bldg:Building>\n  </core:cityObjectMember>");
     }
 
     private static void CsvLine(StringBuilder line, Random random, long row)

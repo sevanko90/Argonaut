@@ -325,11 +325,11 @@ the main thread and the user.
        `Features/Json/Preview` as the raw view does. The date-hint settings join the XML toolbar,
        shared with JSON's from `Ui/Hints`. No default date scheme is inferred for XML: ISO dates
        need none. Tests: `XmlTreeHintTests`, `XmlViewModelHintTests`.
-9. [ ] **Benchmark.** An `Xml` document kind in `IndexMemoryBaseline` (a CityGML-like generator in
+9. [x] **Benchmark.** An `Xml` document kind in `IndexMemoryBaseline` (a CityGML-like generator in
        the harness, so no file is kept), run at the usual size, and a section added to
        `index-benchmarks.md`. Target: at least JSON's speed (about 500 MiB/s on the M5), allocation
        independent of the file's size, index kept within about 1.5 MB per GB.
-10. [ ] **Docs.** `architecture.md` gains the XML view; the roadmap's XML entry is replaced by what
+10. [x] **Docs.** `architecture.md` gains the XML view; the roadmap's XML entry is replaced by what
        remains (below).
 
 ## Not in this plan

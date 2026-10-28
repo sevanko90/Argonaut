@@ -206,8 +206,21 @@ rendering gives up. Reasoning in [markdown-options.md](markdown-options.md).
 
 ## XML
 
-Planned in [xml-view-options.md](xml-view-options.md): a tree view of XML on the shared tree
-machinery, with XPaths, search and value hints. Nothing of it is built yet.
+The XML tree view is built (see "The XML tree" in architecture.md). What remains:
+
+- **How containers are drawn.** A chevron beside a start tag reads oddly, and a wrapper element
+  holding a single child (CityGML's `core:cityObjectMember` around each building) spends three
+  rows on one object. Folding such a wrapper into its child's row was offered and declined for
+  now.
+- **A namespace-correct "copy strict XPath"**, resolving prefixes to URIs, for pasting into
+  other tools. Paths today are as written and lexical.
+- **Namespace URIs on hover**, which needs the ancestors' declarations read on demand.
+- **Attributes as child rows**, for an element whose start tag is past the display cap.
+- **XSD-labelled rows**, the XML counterpart of the JSON schema gutter.
+- **Decoding non-UTF-8 encodings.** A file declaring another encoding is shown as UTF-8 with a
+  status note; UTF-16 is not detected as XML.
+- **Hints in CDATA**, which is not entity-decoded and so needs its own path.
+- **XML colouring in the Raw view**, and XML in the diff.
 
 ## Input sources
 

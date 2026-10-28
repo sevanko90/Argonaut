@@ -257,8 +257,17 @@ Measure against [index-benchmarks.md](index-benchmarks.md), rerun the same way.
   on the UI thread (~43ms per 480MB, so ~400ms at 4.5GB). Moving it off-thread needs a synchronous
   "release visible items" phase before the swap plus a background unmap, and the shell as the sole
   disposal owner to avoid racing the view's detach.
-- **Span-based unescape for quoted CSV fields.** `CsvFieldReader.DecodeField` allocates twice for
-  a quoted field. Never measured; only if CSV load ever profiles as hot.
+- **Not planned, unless testing or real-world use shows an impact:** two micro-optimisations
+  costed and turned down.
+  - *Span-based unescape for quoted CSV fields.* `CsvFieldReader.DecodeField` allocates a second
+    string for a field holding a doubled quote. It runs only for rows on screen, on fields capped
+    at `DisplayText.MaxLength`, so the garbage is a few KB per scroll. Revisit if fields are ever
+    decoded inside a scan (sort, filter, export).
+  - *One-pass line index for a line selection.* The selection view indexes the selected bytes
+    after `LineSelectionLocator` has already read them. The second pass reads warm pages at index
+    speed, about 0.1-0.2 s per selected GB. CSV and NDJSON could take anchors from the locator
+    through `FileLineAnchors`; Raw cannot, because its anchors depend on the wrap width. Revisit
+    for selections larger than RAM, where the second pass goes back to disk.
 
 ## Settings
 

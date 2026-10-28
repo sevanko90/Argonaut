@@ -88,9 +88,10 @@ per place the filter points at rather than the file. The selection reopens in th
 the line that was selected (or the next one still in it). A filter that no longer reads keeps
 the last good view and says why in a toast. Opening anything else stops the watch.
 
-**Later: one pass.** The locator already knows each selected line's start and length, so it could
-hand the view a ready-made line index instead of the view scanning the selected bytes again. That
-needs index constructors that take already-scanned data, so it waits until the rest works.
+**One pass: not planned.** The locator could hand the view a ready-made line index instead of the
+view scanning the selected bytes again. The second pass reads warm pages at about 0.1-0.2 s per
+selected GB, so it is not built unless testing or real-world use shows an impact (see "Memory and
+performance" in [roadmap.md](roadmap.md)).
 
 ## Steps
 
@@ -102,6 +103,6 @@ needs index constructors that take already-scanned data, so it waits until the r
 5. [x] Numbering from the origin's runs (lines and offsets)
 6. [x] Shell: open flow, pill and flyout, `--help` text
 7. [x] Live updates: the watcher service, reload keeping the file line, toast on a bad filter
-8. [ ] Later: the one-pass line index
+8. [-] The one-pass line index: not planned (see "One pass" above)
 
 About 4-5 days to step 7. The CSV gutter (step 2 of the excerpt plan) follows this.

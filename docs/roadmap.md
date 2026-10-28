@@ -206,24 +206,8 @@ rendering gives up. Reasoning in [markdown-options.md](markdown-options.md).
 
 ## XML
 
-Not designed beyond this. The tree machinery is already format-agnostic -
-`SparseContainerIndex`, `TreeCursor` over an `ITreeFormatReader`, `TreeSurface` over an
-`ITreeRowSource`, painters as styled runs, gutters as providers - and the test-only S-expression
-format keeps it honest. An XML view adds a scanner, a reader and a painter.
-
-- **Detection** in `FileTypeDetector`: the document starts with `<?xml`, or its first characters
-  form a tag, after a BOM and whitespace. A bare tag is also how HTML starts, so that case may want
-  a second signal.
-- **A structural scanner**, span-based over `IByteSource` in the `Utf8JsonReader` mould rather than
-  `XmlReader`, which allocates a string for every name and value. It feeds `SparseContainerIndex`
-  with elements as containers and checkpoints at child boundaries.
-- **Where XML differs from JSON**, and the generic types must allow: close tags are real rows;
-  text, comments, CDATA and processing instructions are leaf rows between elements, and a
-  checkpoint may land before any of them; resuming at a checkpoint needs the namespace bindings in
-  scope, so the reader re-reads each ancestor's start tag (one short read per ancestor); attributes
-  sit inline in the element's row, clipped by the display cap, and whether they can also expand as
-  child rows is the view's decision.
-- **Syntax colouring**: element names, attribute names and values as `TreeRunStyle`s, which exist.
+Planned in [xml-view-options.md](xml-view-options.md): a tree view of XML on the shared tree
+machinery, with XPaths, search and value hints. Nothing of it is built yet.
 
 ## Input sources
 

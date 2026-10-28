@@ -314,11 +314,17 @@ the main thread and the user.
        muted or not, the collapsed summary - published side by side for the user to pick from. Then
        the palette and painter are set to the picks.
 8. [ ] **Value hints on text.** Text rows and `TextElement`s get the JSON tree's value hints (dates,
-       URLs, colours, JWTs, ...) through `ValueHints.Read`, by shape as always. The generic link
-       records (`OpenUrlLink`, `ViewInRawLink`, `DateSchemeLink`, `ExpandHintLink`) move down to
-       `Ui/Tree` for both views; the hint settings join the XML toolbar. Tests: a date hint on
-       `core:creationDate`, a URL on `core:informationSystem` that opens through `OpenAddress`,
-       a colour on `gen:value` `#8B4513`.
+       URLs, colours, JWTs, embedded JSON, Base64) through `ValueHints.Read`, by shape as always,
+       from the content with its entity and character references decoded - so `?a=1&amp;b=2`
+       opens as `?a=1&b=2` - while the row still shows the text as written. Names, attributes,
+       comments and instructions are not hinted. The provider list JSON builds inline moves to
+       `ValueHintProviders.Standard` in `Ui/Hints` for both views; the generic link records
+       (`OpenUrlLink`, `DateSchemeLink`, `ExpandHintLink`) move down to `Ui/Tree`, an
+       `ExpandHintLink` carrying the value's bytes as written (JSON strips its quotes, XML
+       decodes its entities, each in its own `PreviewHintAsync`); the hint card is composed from
+       `Features/Json/Preview` as the raw view does. The date-hint settings join the XML toolbar,
+       shared with JSON's from `Ui/Hints`. No default date scheme is inferred for XML: ISO dates
+       need none. Tests: `XmlTreeHintTests`, `XmlViewModelHintTests`.
 9. [ ] **Benchmark.** An `Xml` document kind in `IndexMemoryBaseline` (a CityGML-like generator in
        the harness, so no file is kept), run at the usual size, and a section added to
        `index-benchmarks.md`. Target: at least JSON's speed (about 500 MiB/s on the M5), allocation

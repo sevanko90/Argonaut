@@ -194,7 +194,10 @@ ancestors' start tags.
 an element's qualified name, its attributes as (name, value) spans, text content trimmed, and a
 container's child count for its summary (the same capped, cached count JSON's summary uses).
 Text keeps its entity and character references as written, as JSON shows escapes, so search
-highlights line up with the bytes.
+highlights line up with the bytes. A row is one line, so a run of whitespace holding a line
+break or tab - between attributes, inside a comment, in text - shows as one space; text is
+trimmed, and an element of only whitespace shows as `<name></name>`. Copy value keeps the bytes
+as written.
 
 **`XmlTreePainter`** (`ITreeRowPainter`): runs per node kind, in the existing `TreeRunStyle`s -
 `Punctuation` for `<`, `</`, `>`, `/>`, `=` and quotes; `Name` for element names;

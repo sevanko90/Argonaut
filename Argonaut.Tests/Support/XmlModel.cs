@@ -1,5 +1,6 @@
 using System.Text;
 using System.Xml;
+using Argonaut.Engine.Indexing.Trees;
 using Argonaut.Features.Xml.Indexing;
 
 namespace Argonaut.Tests.Support;
@@ -36,6 +37,13 @@ internal static class XmlModel
         /// <c>#text</c> for text and CDATA, <c>#comment</c>, or <c>#pi:</c> and the target.</summary>
         public string Key { get; set; } = "";
 
+        /// <summary>For an element, one past its start tag - where its content, and a seek into
+        /// its children, begins.</summary>
+        public long ContentStart { get; set; }
+
+        /// <summary>For an element with a close tag, where that tag's <c>&lt;</c> is.</summary>
+        public long CloseStart { get; set; } = -1;
+
         public override string ToString() => $"{Kind} {Start}-{End} depth {Depth} #{Ordinal} children {Children.Count} {Key}";
     }
 
@@ -51,6 +59,61 @@ internal static class XmlModel
         for (int i = 0; i < topLevel.Count; i++)
             Flatten(raw, topLevel[i], parent: -1, depth: 0, ordinal: i, nodes);
         return nodes;
+    }
+
+    /// <summary>One display row: a node's own, or an expanded container's close row.</summary>
+    public readonly record struct Row(int Node, bool IsClose);
+
+    /// <summary>The rows a tree shows for <paramref name="expand"/>, in order.</summary>
+    public static List<Row> Rows(List<Node> nodes, TreeExpandState expand)
+    {
+        var rows = new List<Row>();
+        void Append(int i)
+        {
+            rows.Add(new Row(i, false));
+            var node = nodes[i];
+            if (node.Kind != XmlNodeKind.Element || !expand.IsExpanded(node.Start, node.Depth))
+                return;
+            foreach (int child in node.Children)
+                Append(child);
+            rows.Add(new Row(i, true));
+        }
+
+        foreach (int top in TopLevel(nodes))
+            Append(top);
+        return rows;
+    }
+
+    public static IEnumerable<int> TopLevel(List<Node> nodes) => Enumerable.Range(0, nodes.Count).Where(i => nodes[i].Parent < 0);
+
+    /// <summary>Which of <paramref name="rows"/> shows <paramref name="offset"/>: the deepest
+    /// visible node holding it - a collapsed ancestor's row if it is hidden - or, between nodes,
+    /// the next one; inside an expanded element's start tag, the element's own row; inside its
+    /// close tag, the close row; past the end, the last row.</summary>
+    public static int RowShowing(long offset, List<Node> nodes, TreeExpandState expand, List<Row> rows)
+    {
+        IEnumerable<int> siblings = TopLevel(nodes);
+        int? enclosing = null;
+        while (true)
+        {
+            int target = siblings.FirstOrDefault(i => offset < nodes[i].End, -1);
+            if (target < 0)
+            {
+                return enclosing is int container
+                    ? rows.FindIndex(r => r.Node == container && r.IsClose)
+                    : rows.Count - 1;
+            }
+
+            var node = nodes[target];
+            if (node.Kind == XmlNodeKind.Element && expand.IsExpanded(node.Start, node.Depth) && offset >= node.ContentStart)
+            {
+                enclosing = target;
+                siblings = node.Children;
+                continue;
+            }
+
+            return rows.FindIndex(r => r.Node == target && !r.IsClose);
+        }
     }
 
     /// <summary>The model's containers - its <see cref="XmlNodeKind.Element"/> nodes.</summary>
@@ -92,6 +155,8 @@ internal static class XmlModel
     {
         public long Start;
         public long End;
+        public long ContentStart;
+        public long CloseStart = -1;
         public XmlNodeKind Kind;
         public int Parent = -1;
         public int Index;
@@ -160,7 +225,9 @@ internal static class XmlModel
             else if (StartsWith(doc, i, "</"))
             {
                 int end = IndexOf(doc, i, ">") + 1;
-                raw[open.Pop()].End = end;
+                var closing = raw[open.Pop()];
+                closing.End = end;
+                closing.CloseStart = i;
                 i = end;
             }
             else
@@ -168,6 +235,7 @@ internal static class XmlModel
                 int end = TagEnd(doc, i);
                 bool selfClosing = doc[end - 2] == (byte)'/';
                 var node = Add(i, end, selfClosing ? XmlNodeKind.EmptyElement : XmlNodeKind.Element, NameAt(doc, i + 1));
+                node.ContentStart = end;
                 if (!selfClosing)
                     open.Push(node.Index);
                 i = end;
@@ -196,7 +264,11 @@ internal static class XmlModel
 
     private static void Flatten(List<RawNode> raw, RawNode node, int parent, int depth, long ordinal, List<Node> nodes)
     {
-        var flat = new Node { Start = node.Start, End = node.End, Kind = node.Kind, Parent = parent, Depth = depth, Ordinal = ordinal, Key = node.Key };
+        var flat = new Node
+        {
+            Start = node.Start, End = node.End, Kind = node.Kind, Parent = parent, Depth = depth, Ordinal = ordinal, Key = node.Key,
+            ContentStart = node.ContentStart, CloseStart = node.CloseStart,
+        };
         int index = nodes.Count;
         nodes.Add(flat);
         if (parent >= 0)

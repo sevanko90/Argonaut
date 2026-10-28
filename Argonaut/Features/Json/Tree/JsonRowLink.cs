@@ -6,10 +6,6 @@ namespace Argonaut.Features.Json.Tree;
 /// <c>TreeRun.Link</c> and handed back by the surface when it is clicked.</summary>
 public abstract record JsonRowLink;
 
-/// <summary>Open the raw view at a value too long to show in full.</summary>
-/// <param name="Offset">The value's content offset in the document.</param>
-public sealed record ViewInRawLink(long Offset) : JsonRowLink;
-
 /// <summary>Change how the date hint on this value is decoded.</summary>
 /// <param name="ValueOffset">The value's start - the key its override is stored under.</param>
 public sealed record DateSchemeLink(long ValueOffset) : JsonRowLink;

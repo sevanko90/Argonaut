@@ -39,13 +39,13 @@ public class XmlTreeReaderTests
 
     [Theory]
     [MemberData(nameof(Cases))]
-    public void TheIndexAndTheReaderAgreeOnWhichElementsAreContainers(int seed, int _)
+    public async Task TheIndexAndTheReaderAgreeOnWhichElementsAreContainers(int seed, int _)
     {
         byte[] xml = RandomXml.LargeContainers(new Random(seed), elements: 20, wideChildren: 6);
         var model = XmlModel.Parse(xml);
         var source = new MemoryByteSource(xml);
         var index = XmlSparseIndex.StartIndexing(source, promotionBytes: 1, checkpointBytes: 1);
-        index.IndexingTask.GetAwaiter().GetResult();
+        await index.IndexingTask;
 
         // At promotion 1 every container is recorded, so the index's containers are exactly the
         // elements the scanner decided were containers.
@@ -68,12 +68,12 @@ public class XmlTreeReaderTests
     }
 
     [Fact]
-    public void TheDocumentLevelHoldsTheProlog()
+    public async Task TheDocumentLevelHoldsTheProlog()
     {
         byte[] xml = "<?xml version=\"1.0\"?>\n<!-- c -->\n<!DOCTYPE r [ <!ENTITY e \"]>\"> ]>\n<?pi x?>\n<r><a/></r>\n<!-- end -->\n"u8.ToArray();
         var source = new MemoryByteSource(xml);
         var index = XmlSparseIndex.StartIndexing(source);
-        index.IndexingTask.GetAwaiter().GetResult();
+        await index.IndexingTask;
         var cursor = new TreeCursor(index.Structure, new XmlTreeReader(source), new TreeExpandState(0));
 
         var kinds = new List<XmlNodeKind>();

@@ -153,8 +153,10 @@ required whole. It turns markup into builder events:
   a container the index has not opened.
 - **A close tag** is compared with the open element's name, by bytes: the start tag's name
   offset and length are kept on a stack, and the close tag's name read with `RequireContiguous`
-  (names over 4 KB are a failure). A mismatch records the first failure and closes the open
-  element anyway. Then `Close(end, isEmpty)`.
+  (names over 4 KB are a failure). A mismatch records the failure, then recovers the way a
+  reader of the file would: if an element further up is open under that name, everything inside
+  it closes at the close tag, and so does it; if none is, the close tag is skipped. So one stray
+  or missing tag does not nest the rest of the file a level deeper. Then `Close(end, isEmpty)`.
 - **At the end**, open elements close where the data ends and the scan fails, as JSON's does.
 
 Failures are `IndexFailure`s carrying offset, line and column. Line and column are worked out only

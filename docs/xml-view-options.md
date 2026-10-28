@@ -296,7 +296,7 @@ the main thread and the user.
        - **The scanner and the reader agree on containers** for every element of the random documents.
        - Painter runs for every node kind; a collapsed summary; a 20 MB text is capped with its note and
          Open in raw; attribute values holding `>` and both quote styles.
-5. [ ] **View model, view, toolbar and shell.** Tests: the catalog maps `Xml`; a headless load of a
+5. [x] **View model, view, toolbar and shell.** Tests: the catalog maps `Xml`; a headless load of a
        sample document shows the expected rows (as `JsonViewTests`); a search match reveals its row;
        the disposal and lifecycle tests (`DocumentDisposalLifecycleTests`, `CollectionDisposedEmptyTests`)
        include the XML view; `--view xml` parses and `--view xml --filter` is refused; a non-UTF-8

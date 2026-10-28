@@ -216,7 +216,8 @@ kind. `[1]` is left out when the sibling is the only one of its name - known exa
 container (counted by reading it, at most the promotion size) and for a recorded container once
 it has closed (its totals); while a recorded container is still being indexed, `[k]` is always
 shown. CDATA and text are numbered together as `text()`, as XPath does, though touching ones
-are separate rows here.
+are separate rows here. The XML declaration and a DOCTYPE are not XPath nodes: their path is
+`/`, which Go-to resolves to the document's first row.
 
 `k` for a row in a recorded container: the snapshot at the nearest checkpoint at or before the
 row, plus a read of at most 64 KB of siblings from there. Selection stays a cheap UI-thread
@@ -263,14 +264,14 @@ the main thread and the user.
 
 0. [x] Test file: `make-test-json.py --xml` (CityGML 2.0, ~500 MB), checked well-formed with
        expat's namespace-aware parser.
-1. [ ] **Move the shared tree-view code down** (Design, first section). Tests: the existing JSON
+1. [x] **Move the shared tree-view code down** (Design, first section). Tests: the existing JSON
        view, view model, search and disposal tests pass unchanged; `ArchitectureTests` passes. No
        new behaviour, so no new tests beyond moving any that test the moved types.
-2. [ ] **Detection.** Tests in `FileTypeDetectorTests`: `<?xml` with and without a BOM, a bare root,
+2. [x] **Detection.** Tests in `FileTypeDetectorTests`: `<?xml` with and without a BOM, a bare root,
        a leading comment, a non-HTML DOCTYPE, a processing instruction first; `<!DOCTYPE html>`,
        `<!doctype html>`, `<html>`, `<HTML lang="en">` after a comment are not XML; a UTF-16 BOM is
        not XML; JSON, NDJSON, CSV, TSV and INI detection unchanged; `IsPlausibleFor(Xml)`.
-3. [ ] **Scanner and index.** A `RandomXml` generator in `Tests/Support` (elements, attributes with
+3. [x] **Scanner and index.** A `RandomXml` generator in `Tests/Support` (elements, attributes with
        both quotes and `>` inside values, text, mixed content, CDATA holding `<` and `]]`, comments,
        processing instructions, a DOCTYPE with an internal subset, namespaces, self-closing and
        empty elements, whitespace-only runs, multi-byte UTF-8). Tests, at small promotion and

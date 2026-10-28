@@ -22,7 +22,7 @@ namespace Argonaut.Features.Json;
 
 /// <summary>
 /// The JSON tree: a <see cref="TreeSurface"/> over the view model's <see cref="JsonViewModel.Tree"/>,
-/// a pan scrollbar under it, and the path bar. Everything a row does beyond selecting and
+/// a pan scrollbar under it, and the <see cref="TreePathBar"/>. Everything a row does beyond selecting and
 /// expanding arrives as a link the surface raises - a date hint's scheme menu, the jump to the raw
 /// view for a truncated value, "view as table" - and is acted on here.
 /// </summary>
@@ -53,10 +53,6 @@ public partial class JsonView : UserControl
         // Right-click opens the node menu. The surface has already selected the row on the
         // press, so the menu acts on what is now selected.
         Surface.AddHandler(PointerReleasedEvent, OnSurfacePointerReleased, RoutingStrategies.Bubble, handledEventsToo: true);
-
-        // Ctrl/Cmd+L opens the path entry from anywhere in the view, the browser's "go to
-        // address" key. Tunnelling, so the tree's own key handling never sees it.
-        AddHandler(KeyDownEvent, OnViewKeyDown, RoutingStrategies.Tunnel);
     }
 
     private void OnLoaded(object? sender, RoutedEventArgs e)
@@ -229,99 +225,6 @@ public partial class JsonView : UserControl
         flyout.Items.Add(item);
     }
 
-    private void OnPathSegmentClick(object? sender, RoutedEventArgs e)
-    {
-        if (sender is Control { DataContext: JsonTreePathSegment segment } && DataContext is JsonViewModel vm)
-            vm.Reveal(segment.Target);
-    }
-
-    // ---- path entry ----------------------------------------------------------------------
-
-    private void OnViewKeyDown(object? sender, KeyEventArgs e)
-    {
-        var command = OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control;
-        if (e.Key == Key.L && e.KeyModifiers == command)
-        {
-            OpenPathEntry();
-            e.Handled = true;
-        }
-    }
-
-    private void OnPathBarPressed(object? sender, PointerPressedEventArgs e)
-    {
-        // A press on a segment is the segment's; only the bar's own space opens the entry.
-        if (e.Source is Visual source && source.FindAncestorOfType<Button>(includeSelf: true) is not null)
-            return;
-
-        OpenPathEntry();
-        e.Handled = true;
-    }
-
-    private void OnGoToPathClick(object? sender, RoutedEventArgs e)
-    {
-        if (PathEntry.IsVisible)
-            _ = GoToEnteredPathAsync();
-        else
-            OpenPathEntry();
-    }
-
-    /// <summary>Swaps the breadcrumb for an entry holding the selection's path, all selected, so
-    /// typing replaces it and an arrow key edits it.</summary>
-    private void OpenPathEntry()
-    {
-        PathEntry.Text = (DataContext as JsonViewModel)?.SelectedPath ?? "$";
-        PathDisplay.IsVisible = false;
-        PathEntry.IsVisible = true;
-        PathEntry.Focus();
-        PathEntry.SelectAll();
-    }
-
-    private void ClosePathEntry()
-    {
-        PathEntry.IsVisible = false;
-        PathDisplay.IsVisible = true;
-    }
-
-    private async System.Threading.Tasks.Task GoToEnteredPathAsync()
-    {
-        string path = PathEntry.Text?.Trim() ?? string.Empty;
-        ClosePathEntry();
-        Surface.Focus();
-        if (path.Length > 0 && DataContext is JsonViewModel vm)
-            await vm.NavigateToPathAsync(path);
-    }
-
-    private void OnPathEntryKeyDown(object? sender, KeyEventArgs e)
-    {
-        if (e.Key == Key.Enter)
-        {
-            _ = GoToEnteredPathAsync();
-            e.Handled = true;
-        }
-        else if (e.Key == Key.Escape)
-        {
-            ClosePathEntry();
-            Surface.Focus();
-            e.Handled = true;
-        }
-    }
-
-    private void OnPathEntryLostFocus(object? sender, RoutedEventArgs e) => ClosePathEntry();
-
-    private async void OnCopyPathClick(object? sender, RoutedEventArgs e)
-    {
-        if (DataContext is not JsonViewModel { SelectedPath: { } path })
-            return;
-
-        var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
-        if (clipboard is not null)
-            await clipboard.SetTextAsync(path);
-
-        ToastService.Show("JSONPath copied to clipboard");
-    }
-
-    private async void OnCopyValueClick(object? sender, RoutedEventArgs e) => await CopySelectedValueAsync();
-
     /// <summary>
     /// Right-click offers what can be done with the node under the pointer. The menu's items act
     /// on the selection, as the footer's buttons do, and the press has already selected the row
@@ -353,20 +256,11 @@ public partial class JsonView : UserControl
         menu.Items.Add(item);
     }
 
+    private async void OnCopyValueClick(object? sender, RoutedEventArgs e) => await PathBar.CopyValueAsync();
+
+    private async void OnCopyPathClick(object? sender, RoutedEventArgs e) => await PathBar.CopyPathAsync();
+
     private void OnShowInTextClick(object? sender, RoutedEventArgs e) => subscribedViewModel?.ShowSelectionInText();
-
-    private async System.Threading.Tasks.Task CopySelectedValueAsync()
-    {
-        if (DataContext is not JsonViewModel { SelectedValueText: { } value })
-            return;
-
-        var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
-        if (clipboard is null)
-            return;
-
-        await clipboard.SetTextAsync(value);
-        ToastService.Show("Value copied to clipboard");
-    }
 
     private void OnSurfaceSizeChanged(object? sender, SizeChangedEventArgs e) => ApplyPendingReveal();
 }

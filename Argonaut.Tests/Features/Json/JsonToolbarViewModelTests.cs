@@ -43,7 +43,7 @@ public sealed class JsonToolbarViewModelTests : IDisposable
 
         Assert.Equal((int)DateDecodingScheme.JsSeconds, toolbar.DateHintSchemeIndex);
         Assert.Equal((int)DateHintTimeZoneMode.Utc, toolbar.TimeZoneModeIndex);
-        Assert.Equal(3, toolbar.ExpandDepthIndex);
+        Assert.Equal(3, toolbar.TreeControls.ExpandDepthIndex);
     }
 
     [Fact]
@@ -77,7 +77,7 @@ public sealed class JsonToolbarViewModelTests : IDisposable
 
         toolbar.DateHintSchemeIndex = -1;
         toolbar.TimeZoneModeIndex = -1;
-        toolbar.ExpandDepthIndex = -1;
+        toolbar.TreeControls.ExpandDepthIndex = -1;
 
         Assert.Equal(DateDecodingScheme.Off, settings.FileDefaultScheme);
         Assert.False(settings.IsUserSelected);
@@ -569,11 +569,11 @@ public sealed class JsonToolbarViewModelTests : IDisposable
         var applied = new List<int>();
         var toolbar = new JsonToolbarViewModel(settings, new JsonSchemaSettings(), 0, applied.Add);
 
-        toolbar.ExpandDepthIndex = 4;
+        toolbar.TreeControls.ExpandDepthIndex = 4;
 
         Assert.Equal(new[] { 4 }, applied);
 
-        toolbar.ExpandDepthIndex = 4;
+        toolbar.TreeControls.ExpandDepthIndex = 4;
 
         Assert.Equal(new[] { 4 }, applied);
     }
@@ -584,10 +584,10 @@ public sealed class JsonToolbarViewModelTests : IDisposable
         var applied = new List<bool>();
         var toolbar = new JsonToolbarViewModel(new DateHintSettings(), new JsonSchemaSettings(), 0, _ => { },
             showIndentGuides: true, applyIndentGuides: applied.Add);
-        Assert.True(toolbar.ShowIndentGuides);
+        Assert.True(toolbar.TreeControls.ShowIndentGuides);
 
-        toolbar.ShowIndentGuides = false;
-        toolbar.ShowIndentGuides = false;
+        toolbar.TreeControls.ShowIndentGuides = false;
+        toolbar.TreeControls.ShowIndentGuides = false;
 
         Assert.Equal(new[] { false }, applied);
     }

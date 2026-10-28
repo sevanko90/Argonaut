@@ -1,0 +1,112 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:tree="clr-namespace:Argonaut.Ui.Tree"
+             xmlns:icons="clr-namespace:Argonaut.Ui.Icons"
+             x:Class="Argonaut.Ui.Tree.TreePathBar"
+             x:Name="Bar"
+             x:DataType="tree:TreeDocumentViewModel">
+    <UserControl.Styles>
+        <!-- A breadcrumb, not a row of hyperlinks: plain text that shows it can be clicked on hover. -->
+        <Style Selector="Button.pathlink">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+        </Style>
+        <Style Selector="Button.pathlink:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource AppAccentBrush}" />
+            <Setter Property="TextBlock.TextDecorations" Value="Underline" />
+        </Style>
+    </UserControl.Styles>
+
+    <!-- The path bar: where the selection is, and where to go. Clicking its empty space, the
+         go-to button or Ctrl/Cmd+L turns it into an entry for a path, prefilled with the
+         selection's, so jumping somewhere near is an edit rather than a retype. -->
+    <Border BorderBrush="{DynamicResource AppBorderBrush}"
+            BorderThickness="0,1,0,0"
+            Background="{DynamicResource AppPanelBackgroundBrush}"
+            Height="30"
+            Padding="10,0,6,0">
+        <Grid ColumnDefinitions="Auto,*,Auto">
+            <icons:LucideIcon Grid.Column="0"
+                              Data="{Binding #Bar.Icon}"
+                              Size="13"
+                              Margin="0,0,8,0"
+                              VerticalAlignment="Center"
+                              Foreground="{DynamicResource AppSubtleIconBrush}" />
+
+            <!-- Hit-testable background, so a click anywhere along the bar opens the entry. -->
+            <Border Grid.Column="1"
+                    x:Name="PathDisplay"
+                    Background="Transparent"
+                    Cursor="IBeam"
+                    PointerPressed="OnPathBarPressed">
+                <Panel VerticalAlignment="Center">
+                    <TextBlock Text="{Binding #Bar.EmptyText}"
+                               FontSize="11"
+                               VerticalAlignment="Center"
+                               IsVisible="{Binding SelectedPath, Converter={x:Static ObjectConverters.IsNull}}"
+                               Foreground="{DynamicResource AppSubtleIconBrush}" />
+                    <ItemsControl ItemsSource="{Binding SelectedPathSegments}"
+                                  IsVisible="{Binding SelectedPath, Converter={x:Static ObjectConverters.IsNotNull}}"
+                                  HorizontalAlignment="Left"
+                                  VerticalAlignment="Center">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Orientation="Horizontal" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="tree:TreePathSegment">
+                                <Button Content="{Binding Label}"
+                                        Click="OnPathSegmentClick"
+                                        Classes="pathlink"
+                                        FontSize="11"
+                                        FontFamily="{DynamicResource AppContentFontFamily}" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Panel>
+            </Border>
+
+            <TextBox Grid.Column="1"
+                     x:Name="PathEntry"
+                     IsVisible="False"
+                     MinHeight="22"
+                     Height="22"
+                     Padding="6,2"
+                     FontSize="11"
+                     VerticalAlignment="Center"
+                     FontFamily="{DynamicResource AppContentFontFamily}"
+                     PlaceholderText="{Binding #Bar.EntryPlaceholder}"
+                     KeyDown="OnPathEntryKeyDown"
+                     LostFocus="OnPathEntryLostFocus" />
+
+            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2" Margin="8,0,0,0">
+                <Button x:Name="GoToPathButton"
+                        Classes="iconbutton compact"
+                        Click="OnGoToPathClick"
+                        ToolTip.Tip="{Binding #Bar.GoToTooltip}">
+                    <icons:LucideIcon Data="{StaticResource Icon.GoTo}" Size="14" />
+                </Button>
+                <Button x:Name="CopyValueButton"
+                        Classes="iconbutton compact"
+                        Click="OnCopyValueClick"
+                        IsEnabled="{Binding SelectedPath, Converter={x:Static ObjectConverters.IsNotNull}}"
+                        ToolTip.Tip="Copy value">
+                    <icons:LucideIcon Data="{StaticResource Icon.CopyValue}" Size="14" />
+                </Button>
+                <Button x:Name="CopyPathButton"
+                        Classes="iconbutton compact"
+                        Click="OnCopyPathClick"
+                        IsEnabled="{Binding SelectedPath, Converter={x:Static ObjectConverters.IsNotNull}}"
+                        ToolTip.Tip="{Binding #Bar.CopyPathTooltip}">
+                    <icons:LucideIcon Data="{StaticResource Icon.CopyPath}" Size="14" />
+                </Button>
+            </StackPanel>
+        </Grid>
+    </Border>
+</UserControl>

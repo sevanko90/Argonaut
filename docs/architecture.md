@@ -57,9 +57,9 @@ them). Keep this in sync when the ownership chain changes.
   model plus one `DataTemplate`, with no shell logic to touch.
 - Consequently the shell never reaches into a document view model **by concrete type**. Where it
   needs a behaviour only some documents can honour, it asks for an opt-in capability interface
-  the document declares — `IPathNavigable` (reveal a JSONPath; `JsonViewModel`) and
+  the document declares — `IPathNavigable` (reveal a path; `TreeDocumentViewModel`) and
   `IByteRangeNavigable` (report and reveal a byte range of the input; `RawViewModel`,
-  `JsonViewModel`, `NdJsonViewModel`), both in `Ui/Documents/Navigation`. These stay
+  `TreeDocumentViewModel`, `NdJsonViewModel`), both in `Ui/Documents/Navigation`. These stay
   *off* `IDocumentViewModel`, whose job is the surface every document genuinely shares, but a
   new view that can honour one implements it with no shell edit. Toolbar-driven state is passed
   *down* at construction instead: the owning document view model builds its
@@ -330,6 +330,18 @@ The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLeng
   close start), a painter (`ITreeRowPainter`: styled runs per row, and an optional marker) and
   gutters (`ITreeGutter`). JSON's are `JsonTreeReader`, `JsonTreePainter` and `JsonSchemaGutter`
   (`Features/Json/Tree`); an XML view would add its own three and nothing else.
+- **The tree view model, path bar, search navigator and toolbar controls are shared.**
+  `TreeDocumentViewModel` (`Ui/Tree`, on `IndexedDocumentViewModel`) holds everything about showing
+  a tree: the `TreeDocument` and expansion, selection, reveals (and the pending reveal a view
+  consumes), find highlighting, the growth monitor, the shell hand-offs and the generic shell of
+  go-to-path. A format derives from it and supplies the index it starts (an `ITreeIndex`), the
+  reader, painter and gutters (`ShowTree`), the path segments for a cursor, the path string, its
+  resolution and the value text of a row. `JsonViewModel` adds schema, date hints, value hints and
+  the array table on top. `TreePathBar` is the foot-of-view bar over its data context (segments as
+  `TreePathSegment`, the click-to-edit entry, go-to, copy value, copy path, Ctrl/Cmd+L); the format
+  tells it only its icon, placeholder, empty text and tooltips. `TreeSearchNavigator` reveals a find
+  match through the base view model, and `TreeToolbarControls` (over `TreeToolbarState`) is the
+  expand-depth button and indent-guides toggle a format's toolbar hosts.
 - **The array table reads the same way.** `JsonArrayTableSession` indexes the array's own
   range sparsely; `JsonArrayElements` finds element `i` from the nearest resume point, counting
   only elements known to have ended while the scan runs; rows, column discovery and cells read

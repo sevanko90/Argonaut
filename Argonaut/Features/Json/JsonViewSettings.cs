@@ -2,11 +2,12 @@ using System;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using Argonaut.Engine.Settings;
+using Argonaut.Ui.Tree;
 
 namespace Argonaut.Features.Json;
 
 /// <summary>The JSON tree's remembered settings, shared by the NDJSON view's selected-line tree.</summary>
-public sealed class JsonViewSettings : ISettingsBlock<JsonViewSettings>
+public sealed class JsonViewSettings : ISettingsBlock<JsonViewSettings>, ITreeViewSettings
 {
     public const int DefaultExpandDepth = 2;
     public const int MinExpandDepth = 0;

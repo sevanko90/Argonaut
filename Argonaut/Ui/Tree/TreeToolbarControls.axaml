@@ -1,0 +1,60 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:tree="clr-namespace:Argonaut.Ui.Tree"
+             xmlns:icons="clr-namespace:Argonaut.Ui.Icons"
+             xmlns:conv="clr-namespace:Argonaut.Ui.Converters"
+             x:Class="Argonaut.Ui.Tree.TreeToolbarControls"
+             x:DataType="tree:TreeToolbarState">
+    <!-- The tree controls a format's toolbar shares: the expand depth and the indent guides. -->
+    <StackPanel Orientation="Horizontal"
+                Spacing="2"
+                VerticalAlignment="Center">
+        <!-- The value is the depth itself; 0 is "start collapsed". -->
+        <Button x:Name="ExpandDepthButton"
+                Classes="tool"
+                ToolTip.Tip="Auto-expand: how many levels open when a file opens">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+                <icons:LucideIcon Data="{StaticResource Icon.ExpandDepth}" />
+                <TextBlock Classes="toolvalue" Text="{Binding ExpandDepthIndex}" />
+                <icons:LucideIcon Classes="chevron" Data="{StaticResource Icon.ChevronDown}" />
+            </StackPanel>
+            <Button.Flyout>
+                <Flyout Placement="BottomEdgeAlignedLeft">
+                    <StackPanel Margin="12" Spacing="2" MinWidth="150">
+                        <TextBlock Classes="flyouthead" Text="Auto-expand on open" />
+                        <RadioButton GroupName="expandDepth"
+                                     Content="Start collapsed"
+                                     FontSize="12"
+                                     IsChecked="{Binding ExpandDepthIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=0}" />
+                        <RadioButton GroupName="expandDepth"
+                                     Content="1 level"
+                                     FontSize="12"
+                                     IsChecked="{Binding ExpandDepthIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=1}" />
+                        <RadioButton GroupName="expandDepth"
+                                     Content="2 levels"
+                                     FontSize="12"
+                                     IsChecked="{Binding ExpandDepthIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=2}" />
+                        <RadioButton GroupName="expandDepth"
+                                     Content="3 levels"
+                                     FontSize="12"
+                                     IsChecked="{Binding ExpandDepthIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=3}" />
+                        <RadioButton GroupName="expandDepth"
+                                     Content="4 levels"
+                                     FontSize="12"
+                                     IsChecked="{Binding ExpandDepthIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=4}" />
+                        <RadioButton GroupName="expandDepth"
+                                     Content="5 levels"
+                                     FontSize="12"
+                                     IsChecked="{Binding ExpandDepthIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=5}" />
+                    </StackPanel>
+                </Flyout>
+            </Button.Flyout>
+        </Button>
+        <ToggleButton x:Name="IndentGuidesToggle"
+                      IsChecked="{Binding ShowIndentGuides, Mode=TwoWay}"
+                      Classes="tool icononly"
+                      ToolTip.Tip="Indent guides: a line down each open container's contents">
+            <icons:LucideIcon Data="{StaticResource Icon.IndentGuides}" />
+        </ToggleButton>
+    </StackPanel>
+</UserControl>

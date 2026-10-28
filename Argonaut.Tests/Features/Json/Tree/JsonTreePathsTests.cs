@@ -5,6 +5,7 @@ using Argonaut.Features.Json.Indexing;
 using Argonaut.Features.Json.Paths;
 using Argonaut.Features.Json.Tree;
 using Argonaut.Tests.Support;
+using Argonaut.Ui.Tree;
 
 namespace Argonaut.Tests.Features.Json.Tree;
 
@@ -19,12 +20,12 @@ public sealed class JsonTreePathsTests
     private const string SampleJson =
         "{\"a\":1,\"nested\":{\"x\":[1,2,{\"deep\":\"value\"}],\"weird key\":true},\"arr\":[10,20,30]}";
 
-    private static JsonTreePathResult Resolve(JsonTreeHarness tree, string path)
+    private static TreePathResult Resolve(JsonTreeHarness tree, string path)
         => JsonTreePaths.Resolve(tree.Index.Structure, tree.Reader, tree.Text, path);
 
     /// <summary>The path of the row the cursor finds at <paramref name="offset"/>, everything
     /// expanded.</summary>
-    private static IReadOnlyList<JsonTreePathSegment> SegmentsAt(JsonTreeHarness tree, long offset)
+    private static IReadOnlyList<TreePathSegment> SegmentsAt(JsonTreeHarness tree, long offset)
     {
         var cursor = tree.Cursor(new TreeExpandState(int.MaxValue));
         Assert.True(cursor.SeekTo(offset));

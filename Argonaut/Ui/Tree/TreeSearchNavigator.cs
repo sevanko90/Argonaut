@@ -3,18 +3,18 @@ using System.Threading.Tasks;
 using Argonaut.Engine.Search;
 using Argonaut.Ui.Find;
 
-namespace Argonaut.Features.Json;
+namespace Argonaut.Ui.Tree;
 
 /// <summary>
-/// Reveal strategy for a whole-file JSON view: the match's byte offset goes straight to the view
+/// Reveal strategy for a whole-file tree view: the match's byte offset goes straight to the view
 /// model, whose tree selects the row holding it and expands whatever hides it. The tree reads the
 /// bytes directly, so there is no waiting for an index to cover the match first.
 /// </summary>
-public sealed class JsonSearchNavigator : ISearchNavigator
+public sealed class TreeSearchNavigator : ISearchNavigator
 {
-    private readonly JsonViewModel viewModel;
+    private readonly TreeDocumentViewModel viewModel;
 
-    public JsonSearchNavigator(JsonViewModel viewModel)
+    public TreeSearchNavigator(TreeDocumentViewModel viewModel)
     {
         this.viewModel = viewModel;
     }

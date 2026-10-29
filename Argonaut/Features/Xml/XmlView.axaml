@@ -1,0 +1,75 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:xv="clr-namespace:Argonaut.Features.Xml"
+             xmlns:tree="clr-namespace:Argonaut.Ui.Tree"
+             xmlns:preview="clr-namespace:Argonaut.Features.Json.Preview"
+             x:Class="Argonaut.Features.Xml.XmlView"
+             x:DataType="xv:XmlViewModel">
+    <!-- Edge to edge: the tree is the window's content, not a card inside it. -->
+    <Border Background="{DynamicResource AppWindowBackgroundBrush}"
+            ClipToBounds="True">
+        <Grid RowDefinitions="*,Auto">
+            <!-- The surface draws every visible row itself. The two
+                 scrollbars drive it through RowScrollBars, as every self-drawn view's do: the
+                 vertical one over its position in the document, the pan one over TreeSurface.PanOffset,
+                 which moves the rows. -->
+            <Grid Grid.Row="0" RowDefinitions="*,Auto" ColumnDefinitions="*,Auto">
+                <tree:TreeSurface x:Name="Surface"
+                                  Grid.Row="0"
+                                  Grid.Column="0"
+                                  Background="{DynamicResource AppWindowBackgroundBrush}"
+                                  FontFamily="{DynamicResource AppContentFontFamily}"
+                                  FontSize="{DynamicResource AppContentFontSize}"
+                                  Foreground="{DynamicResource AppTextBrush}"
+                                  GutterForeground="{DynamicResource AppMutedTextBrush}"
+                                  GutterBackground="{DynamicResource AppPanelBackgroundBrush}"
+                                  DividerBrush="{DynamicResource AppBorderBrush}"
+                                  HighlightBrush="{DynamicResource AppSearchMatchBrush}"
+                                  HighlightEdgeBrush="{DynamicResource AppSearchMatchEdgeBrush}"
+                                  CurrentHighlightBrush="{DynamicResource AppSearchCurrentBrush}"
+                                  CurrentHighlightForeground="{DynamicResource AppSearchCurrentTextBrush}"
+                                  SelectionBrush="{DynamicResource AppAccentSurfaceBrush}"
+                                  ChipFontFamily="{DynamicResource AppSansFontFamily}"
+                                  ChipBackground="{DynamicResource AppChipBrush}"
+                                  ChipHoverBackground="{DynamicResource AppChipHoverBrush}"
+                                  ExpanderBrush="{DynamicResource AppSubtleIconBrush}"
+                                  ExpanderRowHoverBrush="{DynamicResource AppMutedTextBrush}"
+                                  GuideBrush="{DynamicResource AppIndentGuideBrush}"
+                                  ShowIndentGuides="{Binding ShowIndentGuides}" />
+
+                <ScrollBar x:Name="VerticalScrollBar"
+                           Grid.Row="0"
+                           Grid.Column="1"
+                           Orientation="Vertical"
+                           IsVisible="False"
+                           Minimum="0" />
+
+                <ScrollBar x:Name="PanScrollBar"
+                           Grid.Row="1"
+                           Grid.Column="0"
+                           Orientation="Horizontal"
+                           AllowAutoHide="False"
+                           IsVisible="False"
+                           Minimum="0" />
+            </Grid>
+
+            <!-- The path bar: where the selection is, and where to go - here as an XPath. -->
+            <tree:TreePathBar Grid.Row="1"
+                              x:Name="PathBar"
+                              Icon="{StaticResource Icon.Xml}"
+                              RootPath="/"
+                              EntryPlaceholder="/root/child[2]"
+                              EmptyText="No selection — click to go to an XPath"
+                              GoToTooltip="Go to an XPath (Ctrl+L / Cmd+L)"
+                              CopyPathTooltip="Copy XPath"
+                              CopiedPathMessage="XPath copied"
+                              FocusTarget="{Binding #Surface}" />
+
+            <preview:HintCard x:Name="HintCard"
+                              Anchor="{Binding #Surface}"
+                              ShowIndentGuides="{Binding ShowIndentGuides}" />
+        </Grid>
+    </Border>
+</UserControl>

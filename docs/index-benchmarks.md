@@ -34,6 +34,7 @@ same machine; a new machine starts a new baseline.
 - **JsonRecords**: one root array of records (JsonShape.RecordArray).
 - **JsonTokenDense**: one root array of short numbers (JsonShape.TokenDenseArray).
 - **JsonRecordsWithHashes**: as JSON records, indexed the way a diff indexes.
+- **Xml**: one root of CityGML-like records: namespaces, attributes, nested geometry.
 
 ## Columns
 
@@ -53,21 +54,43 @@ the app's own memory.
 
 Index kept:
 
-| Run | Text | Csv | NdJson | JsonRecords | JsonTokenDense | JsonRecordsWithHashes |
-|---|---:|---:|---:|---:|---:|---:|
-| 2026-10-10 `2f5aaeb` UI spike check | 2.5 MB | 259.2 KB | 259.2 KB | 776.8 KB | 776.8 KB | 781.5 KB |
-| 2026-09-26 `07f5cf5` sparse line index | 2.5 MB | 259.2 KB | 259.0 KB | 776.8 KB | 777.3 KB | 781.6 KB |
-| 2026-09-26 `7b3e5e3` baseline | 2.5 MB | 98.0 MB | 95.7 MB | 777.0 KB | 776.8 KB | 781.5 KB |
+| Run | Text | Csv | NdJson | JsonRecords | JsonTokenDense | JsonRecordsWithHashes | Xml |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 2026-10-28 `c335c87` XML view | 2.5 MB | 259.2 KB | 259.0 KB | 777.0 KB | 776.8 KB | 781.5 KB | 1.6 MB |
+| 2026-10-10 `2f5aaeb` UI spike check | 2.5 MB | 259.2 KB | 259.2 KB | 776.8 KB | 776.8 KB | 781.5 KB | - |
+| 2026-09-26 `07f5cf5` sparse line index | 2.5 MB | 259.2 KB | 259.0 KB | 776.8 KB | 777.3 KB | 781.6 KB | - |
+| 2026-09-26 `7b3e5e3` baseline | 2.5 MB | 98.0 MB | 95.7 MB | 777.0 KB | 776.8 KB | 781.5 KB | - |
 
 Speed:
 
-| Run | Text | Csv | NdJson | JsonRecords | JsonTokenDense | JsonRecordsWithHashes |
-|---|---:|---:|---:|---:|---:|---:|
-| 2026-10-10 `2f5aaeb` UI spike check | 6,340 MiB/s | 9,086 MiB/s | 9,109 MiB/s | 563 MiB/s | 429 MiB/s | 472 MiB/s |
-| 2026-09-26 `07f5cf5` sparse line index | 5,864 MiB/s | 8,066 MiB/s | 8,098 MiB/s | 565 MiB/s | 420 MiB/s | 473 MiB/s |
-| 2026-09-26 `7b3e5e3` baseline | 5,701 MiB/s | 7,559 MiB/s | 7,771 MiB/s | 563 MiB/s | 435 MiB/s | 477 MiB/s |
+| Run | Text | Csv | NdJson | JsonRecords | JsonTokenDense | JsonRecordsWithHashes | Xml |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 2026-10-28 `c335c87` XML view | 6,302 MiB/s | 9,029 MiB/s | 9,126 MiB/s | 565 MiB/s | 433 MiB/s | 469 MiB/s | 908 MiB/s |
+| 2026-10-10 `2f5aaeb` UI spike check | 6,340 MiB/s | 9,086 MiB/s | 9,109 MiB/s | 563 MiB/s | 429 MiB/s | 472 MiB/s | - |
+| 2026-09-26 `07f5cf5` sparse line index | 5,864 MiB/s | 8,066 MiB/s | 8,098 MiB/s | 565 MiB/s | 420 MiB/s | 473 MiB/s | - |
+| 2026-09-26 `7b3e5e3` baseline | 5,701 MiB/s | 7,559 MiB/s | 7,771 MiB/s | 563 MiB/s | 435 MiB/s | 477 MiB/s | - |
 
 ## Runs
+
+### 2026-10-28 - XML view (`c335c87`)
+
+The XML tree view's index joins the harness: `XmlSparseIndex` over one root of CityGML-like
+records. It indexes and checks the document's structure in one pass at 908 MiB/s, faster than
+JSON's sparse index (whose speed is set by its separate validation pass), with allocation that
+does not grow with the file. It keeps 1.6 MB per GiB: the sparse containers and checkpoints, plus
+the same-name sibling counts snapshotted at each checkpoint for XPath numbering. The other
+documents are unchanged within their ranges; step 1 of the XML work moved tree-view code but no
+indexer.
+
+| Document | Indexer | Items | Time | Speed | Speed range | Allocated | Alloc / byte | GCs (0/1/2) | Peak heap | Peak working set | Index kept | Left after release (1st / last) |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Text | RawSegmentIndex (wrap 160) | 9,996,610 | 163 ms | 6,302 MiB/s | 6,194-6,305 | 2.5 MB | 0.0024 | 0/0/0 | 2.5 MB | 1.05 GB | 2.5 MB | 488 B / 952 B |
+| Csv | FileOffsetIndex | 6,414,338 | 113 ms | 9,029 MiB/s | 9,019-9,030 | 267.0 KB | 0.0003 | 0/0/0 | 296.8 KB | 1.05 GB | 259.2 KB | 488 B / 952 B |
+| NdJson | FileOffsetIndex | 6,262,785 | 112 ms | 9,126 MiB/s | 9,111-9,151 | 267.0 KB | 0.0003 | 0/0/0 | 296.8 KB | 1.05 GB | 259.0 KB | 488 B / 952 B |
+| JsonRecords | JsonSparseIndex | 16,370 | 1,812 ms | 565 MiB/s | 560-567 | 774.8 KB | 0.0007 | 0/0/0 | 800.8 KB | 1.06 GB | 777.0 KB | 488 B / 952 B |
+| JsonTokenDense | JsonSparseIndex | 16,384 | 2,366 ms | 433 MiB/s | 402-434 | 774.4 KB | 0.0007 | 0/0/0 | 800.8 KB | 1.06 GB | 776.8 KB | 488 B / 952 B |
+| JsonRecordsWithHashes | JsonSparseIndex + content hashes | 16,371 | 2,181 ms | 469 MiB/s | 469-476 | 779.2 KB | 0.0007 | 0/0/0 | 800.8 KB | 1.06 GB | 781.5 KB | 488 B / 952 B |
+| Xml | XmlSparseIndex | 16,302 | 1,128 ms | 908 MiB/s | 902-915 | 1.5 MB | 0.0014 | 0/0/0 | 1.5 MB | 1.05 GB | 1.6 MB | 488 B / 952 B |
 
 ### 2026-10-10 - UI spike check (`2f5aaeb`)
 

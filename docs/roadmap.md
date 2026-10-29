@@ -206,24 +206,21 @@ rendering gives up. Reasoning in [markdown-options.md](markdown-options.md).
 
 ## XML
 
-Not designed beyond this. The tree machinery is already format-agnostic -
-`SparseContainerIndex`, `TreeCursor` over an `ITreeFormatReader`, `TreeSurface` over an
-`ITreeRowSource`, painters as styled runs, gutters as providers - and the test-only S-expression
-format keeps it honest. An XML view adds a scanner, a reader and a painter.
+The XML tree view is built (see "The XML tree" in architecture.md). What remains:
 
-- **Detection** in `FileTypeDetector`: the document starts with `<?xml`, or its first characters
-  form a tag, after a BOM and whitespace. A bare tag is also how HTML starts, so that case may want
-  a second signal.
-- **A structural scanner**, span-based over `IByteSource` in the `Utf8JsonReader` mould rather than
-  `XmlReader`, which allocates a string for every name and value. It feeds `SparseContainerIndex`
-  with elements as containers and checkpoints at child boundaries.
-- **Where XML differs from JSON**, and the generic types must allow: close tags are real rows;
-  text, comments, CDATA and processing instructions are leaf rows between elements, and a
-  checkpoint may land before any of them; resuming at a checkpoint needs the namespace bindings in
-  scope, so the reader re-reads each ancestor's start tag (one short read per ancestor); attributes
-  sit inline in the element's row, clipped by the display cap, and whether they can also expand as
-  child rows is the view's decision.
-- **Syntax colouring**: element names, attribute names and values as `TreeRunStyle`s, which exist.
+- **How containers are drawn.** A chevron beside a start tag reads oddly, and a wrapper element
+  holding a single child (CityGML's `core:cityObjectMember` around each building) spends three
+  rows on one object. Folding such a wrapper into its child's row was offered and declined for
+  now.
+- **A namespace-correct "copy strict XPath"**, resolving prefixes to URIs, for pasting into
+  other tools. Paths today are as written and lexical.
+- **Namespace URIs on hover**, which needs the ancestors' declarations read on demand.
+- **Attributes as child rows**, for an element whose start tag is past the display cap.
+- **XSD-labelled rows**, the XML counterpart of the JSON schema gutter.
+- **Decoding non-UTF-8 encodings.** A file declaring another encoding is shown as UTF-8 with a
+  status note; UTF-16 is not detected as XML.
+- **Hints in CDATA**, which is not entity-decoded and so needs its own path.
+- **XML colouring in the Raw view**, and XML in the diff.
 
 ## Input sources
 

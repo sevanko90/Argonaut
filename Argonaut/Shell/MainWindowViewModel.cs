@@ -785,7 +785,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 {
                     var found = LineSelectionLocator.Locate(source, filter, progress, stopping.Token, checkpoints);
                     var detected = view ?? FileTypeDetector.DetectFileType(whole);
-                    return (found, detected == FileTypeDetector.FileKind.Json ? FileTypeDetector.FileKind.Unidentified : detected);
+                    return (found, detected is FileTypeDetector.FileKind.Json or FileTypeDetector.FileKind.Xml ? FileTypeDetector.FileKind.Unidentified : detected);
                 }
                 finally
                 {
@@ -1428,6 +1428,11 @@ public sealed class MainWindowViewModel : ObservableObject
             {
                 isPlausible = false;
                 reason = "A selection of lines is not one JSON document. The NDJSON or Raw view shows it.";
+            }
+            else if (kind == FileTypeDetector.FileKind.Xml && origin is SelectionByteOrigin)
+            {
+                isPlausible = false;
+                reason = "A selection of lines is not one XML document. The NDJSON or Raw view shows it.";
             }
             else if (origin is SelectionByteOrigin { AvailableLength: 0 })
             {

@@ -34,6 +34,13 @@
   - config-sample.yaml: ~1MB YAML of services for the same colouring and hints in YAML's shape -
     nested mappings, lists, quoted and bare scalars, block scalars and comments.
 
+  - citygml-sample-500mb.xml: ~500MB CityGML 2.0 city model for the XML view - eleven
+    namespaces, attributes on most elements, a root of ~70,000 members nested ~15 deep, comments,
+    processing instructions, CDATA, entity and character references, a namespace declared below
+    the root, a default-namespace spelling of the same elements, and one ~20MB text node. The
+    XPaths worth trying are printed when it is written. Only written when --xml is passed, never
+    by a bare run, to spare the disk.
+
   - huge-sample-<N>gb.ndjson: 100GB of NDJSON by default (size set by --huge-gb), far past any laptop's
     RAM, for stress-testing indexing, scrolling, search and memory use on a file that cannot be
     held in memory. Two needle lines - at 50% and near the end - give search and go-to something
@@ -41,7 +48,7 @@
     by a bare run, and refused when the disk would be left with less than 10GB free.
 
 Run with no arguments to generate the first five. Pass --corrupt, --valid, --geojson, --wide,
---ini or --yaml to generate just one, or --huge for the 100GB file - the 4GB corrupt file takes minutes, so the others alone are handy for
+--ini or --yaml to generate just one, --xml for the 500MB CityGML file, or --huge for the 100GB file - the 4GB corrupt file takes minutes, so the others alone are handy for
 quick UI iteration.
 """
 import argparse, base64, datetime, json, math, os, random, shutil, time
@@ -58,6 +65,9 @@ INI_LONG_VALUE_EVERY = 50
 INI_LONG_VALUE_CHARS = 20_000
 YAML_OUT = os.path.join(OUT_DIR, "config-sample.yaml")
 YAML_SERVICES = 1_500
+XML_OUT = os.path.join(OUT_DIR, "citygml-sample-500mb.xml")
+XML_TARGET = 500 * 1024**2
+XML_LONG_POSLIST_POINTS = 600_000   # about 20MB of coordinates in one text node
 
 HUGE_DEFAULT_GB = 100
 HUGE_TEMPLATE_LINES = 40_000
@@ -654,6 +664,420 @@ def make_yaml_sample():
           f"({time.time() - start:.1f}s)", flush=True)
 
 
+# CityGML 2.0 (OGC 12-019): the namespaces a real city model carries. Prefixes are the
+# conventional ones; Energy ADE is declared locally on the buildings that use it, as an
+# Application Domain Extension is in the wild.
+CITYGML_NAMESPACES = (
+    ("core", "http://www.opengis.net/citygml/2.0"),
+    ("bldg", "http://www.opengis.net/citygml/building/2.0"),
+    ("gen", "http://www.opengis.net/citygml/generics/2.0"),
+    ("app", "http://www.opengis.net/citygml/appearance/2.0"),
+    ("tran", "http://www.opengis.net/citygml/transportation/2.0"),
+    ("veg", "http://www.opengis.net/citygml/vegetation/2.0"),
+    ("dem", "http://www.opengis.net/citygml/relief/2.0"),
+    ("gml", "http://www.opengis.net/gml"),
+    ("xlink", "http://www.w3.org/1999/xlink"),
+    ("xAL", "urn:oasis:names:tc:ciq:xsdschema:xAL:2.0"),
+    ("xsi", "http://www.w3.org/2001/XMLSchema-instance"),
+)
+CITYGML_SCHEMA_LOCATION = ("http://www.opengis.net/citygml/building/2.0 "
+                           "http://schemas.opengis.net/citygml/building/2.0/building.xsd "
+                           "http://www.opengis.net/citygml/generics/2.0 "
+                           "http://schemas.opengis.net/citygml/generics/2.0/generics.xsd")
+ENERGY_ADE_NS = "http://www.sig3d.org/citygml/2.0/energy/1.0"
+CITYGML_SRS = "urn:ogc:def:crs,crs:EPSG::25833,crs:EPSG::5783"
+CITYGML_ORIGIN = (385_000.0, 5_818_000.0)   # Berlin, ETRS89 / UTM 33N
+CITYGML_EXTENT = 12_000.0                   # metres either way
+CITYGML_STREETS = (
+    "Unter den Linden", "Straße des 17. Juni", "Müllerstraße", "Karl-Marx-Allee",
+    "Ulica Świętokrzyska", "Οδός Ερμού", "Улица Арбат", "شارع الرشيد", "東京通り", "Rue de l'Église",
+)
+CITYGML_OWNERS = (
+    "Müller &amp; Söhne GmbH", "Bezirksamt Mitte", "Wohnungsbau &#x2014; Genossenschaft",
+    "Ærø Holdings", "Zoë &amp; Chloé SARL", "&lt;unknown&gt;",
+)
+CITYGML_ROOF_COLOURS = ("#8B4513", "#A52A2A", "#2F4F4F", "#708090", "#B22222")
+
+
+def _cg_poslist(points):
+    return " ".join(f"{x:.3f} {y:.3f} {z:.3f}" for x, y, z in points)
+
+
+def _cg_polygon(rng, pid, points, pad):
+    ring = list(points) + [points[0]]
+    return (f'{pad}<gml:Polygon gml:id="{pid}">\n'
+            f'{pad}  <gml:exterior>\n'
+            f'{pad}    <gml:LinearRing gml:id="{pid}_ring">\n'
+            f'{pad}      <gml:posList srsDimension="3">{_cg_poslist(ring)}</gml:posList>\n'
+            f'{pad}    </gml:LinearRing>\n'
+            f'{pad}  </gml:exterior>\n'
+            f'{pad}</gml:Polygon>\n')
+
+
+def _cg_surface(rng, kind, sid, points, pad, p):
+    """A thematic boundary surface - WallSurface, RoofSurface, GroundSurface - holding one
+    LOD2 polygon. `p` is the element prefix for the bldg namespace ('bldg:' or '' under a
+    default namespace)."""
+    return (f'{pad}<{p}boundedBy>\n'
+            f'{pad}  <{p}{kind} gml:id="{sid}">\n'
+            f'{pad}    <{p}lod2MultiSurface>\n'
+            f'{pad}      <gml:MultiSurface srsName="{CITYGML_SRS}" srsDimension="3">\n'
+            f'{pad}        <gml:surfaceMember>\n'
+            + _cg_polygon(rng, f"{sid}_poly", points, pad + "          ") +
+            f'{pad}        </gml:surfaceMember>\n'
+            f'{pad}      </gml:MultiSurface>\n'
+            f'{pad}    </{p}lod2MultiSurface>\n'
+            f'{pad}  </{p}{kind}>\n'
+            f'{pad}</{p}boundedBy>\n')
+
+
+def _cg_shell(rng, bid, pad, p):
+    """A gabled box: footprint, four walls, two roof planes, and the solid that references them."""
+    x0 = CITYGML_ORIGIN[0] + rng.uniform(-CITYGML_EXTENT, CITYGML_EXTENT)
+    y0 = CITYGML_ORIGIN[1] + rng.uniform(-CITYGML_EXTENT, CITYGML_EXTENT)
+    w, d = rng.uniform(8, 40), rng.uniform(8, 30)
+    z0 = rng.uniform(30, 60)
+    eaves = z0 + rng.uniform(6, 30)
+    ridge = eaves + rng.uniform(2, 8)
+    a, b, c, e = (x0, y0), (x0 + w, y0), (x0 + w, y0 + d), (x0, y0 + d)
+    mid0, mid1 = (x0, y0 + d / 2), (x0 + w, y0 + d / 2)
+
+    surfaces = [
+        ("GroundSurface", [(*a, z0), (*e, z0), (*c, z0), (*b, z0)]),
+        ("WallSurface", [(*a, z0), (*b, z0), (*b, eaves), (*a, eaves)]),
+        ("WallSurface", [(*b, z0), (*c, z0), (*c, eaves), (*mid1, ridge), (*b, eaves)]),
+        ("WallSurface", [(*c, z0), (*e, z0), (*e, eaves), (*c, eaves)]),
+        ("WallSurface", [(*e, z0), (*a, z0), (*a, eaves), (*mid0, ridge), (*e, eaves)]),
+        ("RoofSurface", [(*a, eaves), (*b, eaves), (*mid1, ridge), (*mid0, ridge)]),
+        ("RoofSurface", [(*mid0, ridge), (*mid1, ridge), (*c, eaves), (*e, eaves)]),
+    ]
+    ids = [f"{bid}_{kind[0].lower()}{n}" for n, (kind, _) in enumerate(surfaces)]
+
+    solid = (f'{pad}<{p}lod2Solid>\n'
+             f'{pad}  <gml:Solid gml:id="{bid}_solid">\n'
+             f'{pad}    <gml:exterior>\n'
+             f'{pad}      <gml:CompositeSurface>\n'
+             + "".join(f'{pad}        <gml:surfaceMember xlink:href="#{sid}_poly"/>\n' for sid in ids) +
+             f'{pad}      </gml:CompositeSurface>\n'
+             f'{pad}    </gml:exterior>\n'
+             f'{pad}  </gml:Solid>\n'
+             f'{pad}</{p}lod2Solid>\n')
+    bounded = "".join(_cg_surface(rng, kind, sid, pts, pad, p) for sid, (kind, pts) in zip(ids, surfaces))
+    return solid + bounded, ids, ridge - z0
+
+
+def _cg_address(rng, pad, p):
+    street = rng.choice(CITYGML_STREETS)
+    return (f'{pad}<{p}address>\n'
+            f'{pad}  <core:Address>\n'
+            f'{pad}    <core:xalAddress>\n'
+            f'{pad}      <xAL:AddressDetails>\n'
+            f'{pad}        <xAL:Country>\n'
+            f'{pad}          <xAL:CountryName>Germany</xAL:CountryName>\n'
+            f'{pad}          <xAL:Locality Type="Town">\n'
+            f'{pad}            <xAL:LocalityName>Berlin</xAL:LocalityName>\n'
+            f'{pad}            <xAL:Thoroughfare Type="Street">\n'
+            f'{pad}              <xAL:ThoroughfareNumber>{rng.randint(1, 240)}</xAL:ThoroughfareNumber>\n'
+            f'{pad}              <xAL:ThoroughfareName>{street}</xAL:ThoroughfareName>\n'
+            f'{pad}            </xAL:Thoroughfare>\n'
+            f'{pad}            <xAL:PostalCode>\n'
+            f'{pad}              <xAL:PostalCodeNumber>{rng.randint(10115, 14199)}</xAL:PostalCodeNumber>\n'
+            f'{pad}            </xAL:PostalCode>\n'
+            f'{pad}          </xAL:Locality>\n'
+            f'{pad}        </xAL:Country>\n'
+            f'{pad}      </xAL:AddressDetails>\n'
+            f'{pad}    </core:xalAddress>\n'
+            f'{pad}  </core:Address>\n'
+            f'{pad}</{p}address>\n')
+
+
+def _cg_generics(rng, i, pad):
+    surveyed = datetime.date(2015, 1, 1) + datetime.timedelta(days=rng.randint(0, 3650))
+    return (f'{pad}<gen:stringAttribute name="owner">\n'
+            f'{pad}  <gen:value>{rng.choice(CITYGML_OWNERS)}</gen:value>\n'
+            f'{pad}</gen:stringAttribute>\n'
+            f'{pad}<gen:stringAttribute name="roofColour">\n'
+            f'{pad}  <gen:value>{rng.choice(CITYGML_ROOF_COLOURS)}</gen:value>\n'
+            f'{pad}</gen:stringAttribute>\n'
+            f'{pad}<gen:doubleAttribute name="footprintArea">\n'
+            f'{pad}  <gen:value>{rng.uniform(40, 1200):.2f}</gen:value>\n'
+            f'{pad}</gen:doubleAttribute>\n'
+            f'{pad}<gen:intAttribute name="cadastralParcel">\n'
+            f'{pad}  <gen:value>{100000 + i}</gen:value>\n'
+            f'{pad}</gen:intAttribute>\n'
+            f'{pad}<gen:dateAttribute name="surveyed">\n'
+            f'{pad}  <gen:value>{surveyed.isoformat()}</gen:value>\n'
+            f'{pad}</gen:dateAttribute>\n'
+            f'{pad}<gen:uriAttribute name="registry">\n'
+            f'{pad}  <gen:value>https://registry.example.org/parcels/{100000 + i}?view=full&amp;lang=de</gen:value>\n'
+            f'{pad}</gen:uriAttribute>\n')
+
+
+def _cg_building(rng, i, pad, *, default_ns=False, energy_ade=False, parts=0, part_number=0):
+    """One bldg:Building with `parts` bldg:BuildingParts inside it, or - given a `part_number` -
+    one of those parts. `default_ns` writes it under a default namespace declaration with
+    unprefixed bldg elements: the same element, spelled the other way XML allows. Its parts keep
+    the bldg prefix, which the root still binds. `energy_ade` adds Energy ADE properties with
+    the prefix declared on the building."""
+    element = "BuildingPart" if part_number else "Building"
+    bid = f"BLDG_{i:07d}_part{part_number}" if part_number else f"BLDG_{i:07d}"
+    p = "" if default_ns else "bldg:"
+    decls = f' xmlns="{CITYGML_NAMESPACES[1][1]}"' if default_ns else ""
+    if energy_ade:
+        decls += f' xmlns:energy="{ENERGY_ADE_NS}"'
+    created = datetime.datetime(2020, 1, 1) + datetime.timedelta(seconds=rng.randint(0, 5 * 365 * 86400))
+
+    out = [f'{pad}<{p}{element} gml:id="{bid}"{decls}>\n']
+    inner = pad + "  "
+    if i % 13 == 0:
+        out.append(f'{inner}<gml:description><![CDATA[Survey note: wall <north> & roof replaced; '
+                   f'see "plan 4" <b>before</b> 2030.]]></gml:description>\n')
+    elif i % 17 == 0:
+        out.append(f'{inner}<gml:description>Listed building &#x2014; façade &lt;protected&gt; since 1987 &amp; '
+                   f'interior since 2004</gml:description>\n')
+    out.append(f'{inner}<gml:name>Gebäude {i}</gml:name>\n')
+    out.append(f'{inner}<core:creationDate>{created.date().isoformat()}</core:creationDate>\n')
+    out.append(f'{inner}<core:externalReference>\n'
+               f'{inner}  <core:informationSystem>https://www.berlin.de/sen/sbw/stadtdaten/</core:informationSystem>\n'
+               f'{inner}  <core:externalObject>\n'
+               f'{inner}    <core:name>DEBE{i:011d}</core:name>\n'
+               f'{inner}  </core:externalObject>\n'
+               f'{inner}</core:externalReference>\n')
+    out.append(_cg_generics(rng, i, inner))
+    out.append(f'{inner}<{p}class codeSpace="http://www.sig3d.org/codelists/citygml/2.0/building/2.0/_AbstractBuilding_class.xml">'
+               f'{rng.choice((1000, 1010, 1020, 1060))}</{p}class>\n')
+    out.append(f'{inner}<{p}function codeSpace="http://www.sig3d.org/codelists/citygml/2.0/building/2.0/_AbstractBuilding_function.xml">'
+               f'31001_{rng.choice((1000, 1010, 2000, 3020))}</{p}function>\n')
+    out.append(f'{inner}<{p}yearOfConstruction>{rng.randint(1850, 2024)}</{p}yearOfConstruction>\n')
+    out.append(f'{inner}<{p}roofType codeSpace="http://www.sig3d.org/codelists/citygml/2.0/building/2.0/_AbstractBuilding_roofType.xml">1030</{p}roofType>\n')
+    shell, ids, height = _cg_shell(rng, bid, inner, p)
+    out.append(f'{inner}<{p}measuredHeight uom="urn:adv:uom:m">{height:.2f}</{p}measuredHeight>\n')
+    out.append(f'{inner}<{p}storeysAboveGround>{max(1, int(height // 3))}</{p}storeysAboveGround>\n')
+    out.append(f'{inner}<{p}storeyHeightsAboveGround uom="urn:adv:uom:m">3.0 3.0 2.8</{p}storeyHeightsAboveGround>\n')
+    if energy_ade:
+        out.append(f'{inner}<energy:volume>\n'
+                   f'{inner}  <energy:VolumeType>\n'
+                   f'{inner}    <energy:type>grossVolume</energy:type>\n'
+                   f'{inner}    <energy:value uom="m3">{rng.uniform(300, 9000):.1f}</energy:value>\n'
+                   f'{inner}  </energy:VolumeType>\n'
+                   f'{inner}</energy:volume>\n'
+                   f'{inner}<energy:referencePoint>\n'
+                   f'{inner}  <gml:Point srsName="{CITYGML_SRS}" srsDimension="3">\n'
+                   f'{inner}    <gml:pos>{CITYGML_ORIGIN[0]:.3f} {CITYGML_ORIGIN[1]:.3f} 34.000</gml:pos>\n'
+                   f'{inner}  </gml:Point>\n'
+                   f'{inner}</energy:referencePoint>\n')
+    out.append(shell)
+    for n in range(parts):
+        out.append(f'{inner}<{p}consistsOfBuildingPart>\n')
+        out.append(_cg_building(rng, i, inner + "  ", part_number=n + 1)[0])
+        out.append(f'{inner}</{p}consistsOfBuildingPart>\n')
+    if not part_number:
+        out.append(_cg_address(rng, inner, p))
+    out.append(f'{pad}</{p}{element}>\n')
+    return "".join(out), ids
+
+
+def _cg_vegetation(rng, i, pad):
+    x = CITYGML_ORIGIN[0] + rng.uniform(-CITYGML_EXTENT, CITYGML_EXTENT)
+    y = CITYGML_ORIGIN[1] + rng.uniform(-CITYGML_EXTENT, CITYGML_EXTENT)
+    return (f'{pad}<veg:SolitaryVegetationObject gml:id="VEG_{i:07d}">\n'
+            f'{pad}  <gml:name>Tilia cordata {i}</gml:name>\n'
+            f'{pad}  <veg:species codeSpace="http://www.sig3d.org/codelists/citygml/2.0/vegetation/2.0/SolitaryVegetationObject_species.xml">1070</veg:species>\n'
+            f'{pad}  <veg:height uom="urn:adv:uom:m">{rng.uniform(4, 28):.1f}</veg:height>\n'
+            f'{pad}  <veg:trunkDiameter uom="urn:adv:uom:m">{rng.uniform(0.2, 1.4):.2f}</veg:trunkDiameter>\n'
+            f'{pad}  <veg:crownDiameter uom="urn:adv:uom:m">{rng.uniform(2, 14):.1f}</veg:crownDiameter>\n'
+            f'{pad}  <veg:lod1ImplicitRepresentation>\n'
+            f'{pad}    <core:ImplicitGeometry>\n'
+            f'{pad}      <core:mimeType>model/obj</core:mimeType>\n'
+            f'{pad}      <core:libraryObject>https://models.example.org/trees/tilia.obj</core:libraryObject>\n'
+            f'{pad}      <core:referencePoint>\n'
+            f'{pad}        <gml:Point srsName="{CITYGML_SRS}" srsDimension="3">\n'
+            f'{pad}          <gml:pos>{x:.3f} {y:.3f} {rng.uniform(30, 60):.3f}</gml:pos>\n'
+            f'{pad}        </gml:Point>\n'
+            f'{pad}      </core:referencePoint>\n'
+            f'{pad}    </core:ImplicitGeometry>\n'
+            f'{pad}  </veg:lod1ImplicitRepresentation>\n'
+            f'{pad}</veg:SolitaryVegetationObject>\n')
+
+
+def _cg_road(rng, i, pad):
+    x = CITYGML_ORIGIN[0] + rng.uniform(-CITYGML_EXTENT, CITYGML_EXTENT)
+    y = CITYGML_ORIGIN[1] + rng.uniform(-CITYGML_EXTENT, CITYGML_EXTENT)
+    length, width, z = rng.uniform(40, 300), rng.uniform(6, 20), rng.uniform(30, 60)
+    pts = [(x, y, z), (x + length, y, z), (x + length, y + width, z), (x, y + width, z)]
+    return (f'{pad}<tran:Road gml:id="ROAD_{i:07d}">\n'
+            f'{pad}  <gml:name>{rng.choice(CITYGML_STREETS)}</gml:name>\n'
+            f'{pad}  <tran:function codeSpace="http://www.sig3d.org/codelists/citygml/2.0/transportation/2.0/Road_function.xml">1000</tran:function>\n'
+            f'{pad}  <tran:surfaceMaterial>asphalt</tran:surfaceMaterial>\n'
+            f'{pad}  <tran:lod1MultiSurface>\n'
+            f'{pad}    <gml:MultiSurface srsName="{CITYGML_SRS}" srsDimension="3">\n'
+            f'{pad}      <gml:surfaceMember>\n'
+            + _cg_polygon(rng, f"ROAD_{i:07d}_poly", pts, pad + "        ") +
+            f'{pad}      </gml:surfaceMember>\n'
+            f'{pad}    </gml:MultiSurface>\n'
+            f'{pad}  </tran:lod1MultiSurface>\n'
+            f'{pad}</tran:Road>\n')
+
+
+def _cg_relief(rng, pad, points):
+    """A breakline relief whose one posList is tens of MB - the XML counterpart of the valid
+    sample's 10MB string, for a text node far past the display cap."""
+    x, y, z = CITYGML_ORIGIN[0] - CITYGML_EXTENT, CITYGML_ORIGIN[1], 40.0
+    coords = []
+    for _ in range(points):
+        x += rng.uniform(0.5, 2.0)
+        y += rng.uniform(-1.0, 1.0)
+        z += rng.uniform(-0.05, 0.05)
+        coords.append(f"{x:.3f} {y:.3f} {z:.3f}")
+    return (f'{pad}<dem:ReliefFeature gml:id="DEM_breaklines">\n'
+            f'{pad}  <gml:name>Spree embankment breaklines</gml:name>\n'
+            f'{pad}  <dem:lod>2</dem:lod>\n'
+            f'{pad}  <dem:reliefComponent>\n'
+            f'{pad}    <dem:BreaklineRelief gml:id="DEM_breaklines_1">\n'
+            f'{pad}      <dem:lod>2</dem:lod>\n'
+            f'{pad}      <dem:ridgeOrValleyLines>\n'
+            f'{pad}        <gml:MultiCurve srsName="{CITYGML_SRS}" srsDimension="3">\n'
+            f'{pad}          <gml:curveMember>\n'
+            f'{pad}            <gml:LineString gml:id="DEM_breaklines_1_line">\n'
+            f'{pad}              <gml:posList srsDimension="3" count="{points}">' + " ".join(coords) + '</gml:posList>\n'
+            f'{pad}            </gml:LineString>\n'
+            f'{pad}          </gml:curveMember>\n'
+            f'{pad}        </gml:MultiCurve>\n'
+            f'{pad}      </dem:ridgeOrValleyLines>\n'
+            f'{pad}    </dem:BreaklineRelief>\n'
+            f'{pad}  </dem:reliefComponent>\n'
+            f'{pad}</dem:ReliefFeature>\n')
+
+
+def _cg_appearance(rng, n, targets, pad):
+    """One appearance theme: a material on some surfaces and a texture on others."""
+    material_targets = "".join(f'{pad}        <app:target>#{t}_poly</app:target>\n' for t in targets[::2])
+    texture_targets = "".join(
+        f'{pad}        <app:target uri="#{t}_poly">\n'
+        f'{pad}          <app:TexCoordList>\n'
+        f'{pad}            <app:textureCoordinates ring="#{t}_poly_ring">0.0 0.0 1.0 0.0 1.0 1.0 0.0 1.0 0.0 0.0</app:textureCoordinates>\n'
+        f'{pad}          </app:TexCoordList>\n'
+        f'{pad}        </app:target>\n' for t in targets[1::2])
+    return (f'{pad}<app:appearanceMember>\n'
+            f'{pad}  <app:Appearance gml:id="APP_{n:05d}">\n'
+            f'{pad}    <app:theme>{"summer" if n % 2 else "winter"}</app:theme>\n'
+            f'{pad}    <app:surfaceDataMember>\n'
+            f'{pad}      <app:X3DMaterial gml:id="APP_{n:05d}_mat">\n'
+            f'{pad}        <app:diffuseColor>{rng.random():.3f} {rng.random():.3f} {rng.random():.3f}</app:diffuseColor>\n'
+            f'{pad}        <app:transparency>0.0</app:transparency>\n'
+            f'{pad}        <app:isSmooth>false</app:isSmooth>\n'
+            + material_targets +
+            f'{pad}      </app:X3DMaterial>\n'
+            f'{pad}    </app:surfaceDataMember>\n'
+            f'{pad}    <app:surfaceDataMember>\n'
+            f'{pad}      <app:ParameterizedTexture gml:id="APP_{n:05d}_tex">\n'
+            f'{pad}        <app:imageURI>https://textures.example.org/facades/{n:05d}.jpg</app:imageURI>\n'
+            f'{pad}        <app:mimeType>image/jpeg</app:mimeType>\n'
+            f'{pad}        <app:wrapMode>wrap</app:wrapMode>\n'
+            + texture_targets +
+            f'{pad}      </app:ParameterizedTexture>\n'
+            f'{pad}    </app:surfaceDataMember>\n'
+            f'{pad}  </app:Appearance>\n'
+            f'{pad}</app:appearanceMember>\n')
+
+
+def make_citygml_sample():
+    """A CityGML 2.0 city model of about 500MB, for the XML view. Its own seeded Random, so it
+    never shifts the other files' shared stream.
+
+    One root (core:CityModel) holding ~70,000 core:cityObjectMember children - a wide container -
+    each a building (or a tree or a road) nested about 15 deep. Eleven namespaces declared on the
+    root and attributes on most elements. Also, by design, every construct a tree reader of XML
+    has to cope with: an XML declaration and a stylesheet processing instruction before the root,
+    comments between members, a processing instruction inside an element, CDATA holding '<', '&'
+    and quotes, the predefined entities and numeric character references in text and attribute
+    values, raw UTF-8 street names in five scripts, a namespace declared below the root (the
+    Energy ADE), the same element spelled under a default namespace, self-closing elements, and
+    one text node of tens of MB. Mixed content and a DOCTYPE are not CityGML, so they are left
+    to unit tests.
+    """
+    start = time.time()
+    rng = random.Random(2027)
+    pad = "  "
+    members = 0
+    written = 0
+    notes = {}
+    appearance_targets = []
+
+    with open(XML_OUT, "w", encoding="utf-8", newline="\n", buffering=4 * 1024 * 1024) as f:
+        def put(text):
+            nonlocal written
+            f.write(text)
+            written += len(text)
+
+        put('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n')
+        put('<?xml-stylesheet type="text/xsl" href="citygml-overview.xsl"?>\n')
+        # No "--" inside a comment: XML forbids it, so the option is not named here.
+        put('<!-- Generated by make-test-json.py: a synthetic CityGML 2.0 model of Berlin.\n'
+            '     Coordinates are ETRS89 / UTM zone 33N with DHHN2016 heights. -->\n')
+        decls = "".join(f'\n    xmlns:{prefix}="{uri}"' for prefix, uri in CITYGML_NAMESPACES)
+        put(f'<core:CityModel{decls}\n    xsi:schemaLocation="{CITYGML_SCHEMA_LOCATION}">\n')
+        put(f'{pad}<gml:name>Argonaut test city</gml:name>\n')
+        lo = (CITYGML_ORIGIN[0] - CITYGML_EXTENT, CITYGML_ORIGIN[1] - CITYGML_EXTENT)
+        hi = (CITYGML_ORIGIN[0] + CITYGML_EXTENT, CITYGML_ORIGIN[1] + CITYGML_EXTENT)
+        put(f'{pad}<gml:boundedBy>\n'
+            f'{pad}  <gml:Envelope srsName="{CITYGML_SRS}" srsDimension="3">\n'
+            f'{pad}    <gml:lowerCorner>{lo[0]:.3f} {lo[1]:.3f} 20.000</gml:lowerCorner>\n'
+            f'{pad}    <gml:upperCorner>{hi[0]:.3f} {hi[1]:.3f} 150.000</gml:upperCorner>\n'
+            f'{pad}  </gml:Envelope>\n'
+            f'{pad}</gml:boundedBy>\n')
+
+        i = 0
+        relief_written = False
+        while written < XML_TARGET:
+            if i % 500 == 0:
+                put(f'{pad}<!-- district {i // 500 + 1} -->\n')
+            if i % 1000 == 999:
+                put(f'{pad}<?argonaut-checkpoint member="{members + 1}"?>\n')
+
+            if not relief_written and written >= XML_TARGET // 3:
+                body = _cg_relief(rng, pad + "  ", XML_LONG_POSLIST_POINTS)
+                relief_written = True
+                notes["long posList"] = (members + 1, "dem:ReliefFeature/dem:reliefComponent/dem:BreaklineRelief/"
+                                         "dem:ridgeOrValleyLines/gml:MultiCurve/gml:curveMember/gml:LineString/gml:posList")
+            elif i % 11 == 5:
+                body = _cg_road(rng, i, pad + "  ")
+            elif i % 7 == 3:
+                body = _cg_vegetation(rng, i, pad + "  ")
+            else:
+                # Offset from one another, so no member carries every special case at once.
+                default_ns = i % 97 == 48
+                energy = i % 53 == 26
+                parts = 2 if i % 250 == 124 else 0
+                body, ids = _cg_building(rng, i, pad + "  ", default_ns=default_ns, energy_ade=energy, parts=parts)
+                if i % 40 == 0:
+                    appearance_targets.extend(ids[:4])
+                if default_ns and "default namespace" not in notes:
+                    notes["default namespace"] = (members + 1, "Building")
+                if energy and "Energy ADE" not in notes:
+                    notes["Energy ADE"] = (members + 1, "bldg:Building/energy:volume")
+                if parts and "building parts" not in notes:
+                    notes["building parts"] = (members + 1, "bldg:Building/bldg:consistsOfBuildingPart[2]/bldg:BuildingPart")
+
+            put(f'{pad}<core:cityObjectMember>\n{body}{pad}</core:cityObjectMember>\n')
+            members += 1
+            i += 1
+
+        notes["last member"] = (members, "")
+        for n in range(0, len(appearance_targets), 8):
+            put(_cg_appearance(rng, n // 8, appearance_targets[n:n + 8], pad))
+        put('</core:CityModel>\n')
+        put('<!-- end of model -->\n')
+
+    size = os.path.getsize(XML_OUT)
+    print(f"DONE: CityGML sample ~{size / 1024**2:.1f} MiB, {members:,} city objects, "
+          f"{(len(appearance_targets) + 7) // 8:,} appearances -> {XML_OUT}  ({time.time() - start:.1f}s)")
+    print("  XPaths worth typing into the path bar:")
+    for label, (member, rest) in notes.items():
+        path = f"/core:CityModel/core:cityObjectMember[{member}]" + (f"/{rest}" if rest else "")
+        print(f"    {path}   {label}", flush=True)
+
+
 def _huge_template():
     """One block of varied NDJSON lines, every one carrying HUGE_BLOCK_MARK in its "block" field.
 
@@ -741,6 +1165,8 @@ def main():
     parser.add_argument("--wide", action="store_true", help="generate only the ~130MB million-key object file")
     parser.add_argument("--ini", action="store_true", help="generate only the ~2MB INI config file")
     parser.add_argument("--yaml", action="store_true", help="generate only the ~1MB YAML config file")
+    parser.add_argument("--xml", action="store_true",
+                        help="generate the ~500MB CityGML XML file (never part of a bare run)")
     parser.add_argument("--huge", action="store_true",
                         help="generate the 100GB NDJSON stress file (never part of a bare run)")
     parser.add_argument("--huge-gb", type=float, default=HUGE_DEFAULT_GB, metavar="GB",
@@ -750,6 +1176,12 @@ def main():
     if args.huge:
         os.makedirs(OUT_DIR, exist_ok=True)
         make_huge_ndjson(args.huge_gb)
+        if not (args.corrupt or args.valid or args.geojson or args.wide or args.ini or args.yaml or args.xml):
+            return
+
+    if args.xml:
+        os.makedirs(OUT_DIR, exist_ok=True)
+        make_citygml_sample()
         if not (args.corrupt or args.valid or args.geojson or args.wide or args.ini or args.yaml):
             return
 

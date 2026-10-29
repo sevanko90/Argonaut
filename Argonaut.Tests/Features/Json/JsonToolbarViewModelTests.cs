@@ -41,9 +41,9 @@ public sealed class JsonToolbarViewModelTests : IDisposable
 
         var toolbar = new JsonToolbarViewModel(settings, new JsonSchemaSettings(), initialExpandDepthIndex: 3, applyExpandDepth: _ => { });
 
-        Assert.Equal((int)DateDecodingScheme.JsSeconds, toolbar.DateHintSchemeIndex);
-        Assert.Equal((int)DateHintTimeZoneMode.Utc, toolbar.TimeZoneModeIndex);
-        Assert.Equal(3, toolbar.ExpandDepthIndex);
+        Assert.Equal((int)DateDecodingScheme.JsSeconds, toolbar.DateHintControls.DateHintSchemeIndex);
+        Assert.Equal((int)DateHintTimeZoneMode.Utc, toolbar.DateHintControls.TimeZoneModeIndex);
+        Assert.Equal(3, toolbar.TreeControls.ExpandDepthIndex);
     }
 
     [Fact]
@@ -52,7 +52,7 @@ public sealed class JsonToolbarViewModelTests : IDisposable
         var settings = new DateHintSettings();
         var toolbar = new JsonToolbarViewModel(settings, new JsonSchemaSettings(), 0, _ => { });
 
-        toolbar.DateHintSchemeIndex = (int)DateDecodingScheme.KeepaMinutes;
+        toolbar.DateHintControls.DateHintSchemeIndex = (int)DateDecodingScheme.KeepaMinutes;
 
         Assert.Equal(DateDecodingScheme.KeepaMinutes, settings.FileDefaultScheme);
         Assert.True(settings.IsUserSelected);
@@ -64,7 +64,7 @@ public sealed class JsonToolbarViewModelTests : IDisposable
         var settings = new DateHintSettings();
         var toolbar = new JsonToolbarViewModel(settings, new JsonSchemaSettings(), 0, _ => { });
 
-        toolbar.TimeZoneModeIndex = (int)DateHintTimeZoneMode.Utc;
+        toolbar.DateHintControls.TimeZoneModeIndex = (int)DateHintTimeZoneMode.Utc;
 
         Assert.Equal(DateHintTimeZoneMode.Utc, settings.TimeZoneMode);
     }
@@ -75,9 +75,9 @@ public sealed class JsonToolbarViewModelTests : IDisposable
         var settings = new DateHintSettings();
         var toolbar = new JsonToolbarViewModel(settings, new JsonSchemaSettings(), 0, _ => { });
 
-        toolbar.DateHintSchemeIndex = -1;
-        toolbar.TimeZoneModeIndex = -1;
-        toolbar.ExpandDepthIndex = -1;
+        toolbar.DateHintControls.DateHintSchemeIndex = -1;
+        toolbar.DateHintControls.TimeZoneModeIndex = -1;
+        toolbar.TreeControls.ExpandDepthIndex = -1;
 
         Assert.Equal(DateDecodingScheme.Off, settings.FileDefaultScheme);
         Assert.False(settings.IsUserSelected);
@@ -92,13 +92,13 @@ public sealed class JsonToolbarViewModelTests : IDisposable
 
         // Background inference lands - the combo should follow without marking IsUserSelected.
         settings.TrySetInferredDefault(DateDecodingScheme.JsSeconds);
-        Assert.Equal((int)DateDecodingScheme.JsSeconds, toolbar.DateHintSchemeIndex);
+        Assert.Equal((int)DateDecodingScheme.JsSeconds, toolbar.DateHintControls.DateHintSchemeIndex);
         Assert.False(settings.IsUserSelected);
 
         // Simulates the two-way binding writing the (already-synced) value back into the VM -
         // must be a no-op via the SetField equality guard, not a redundant SetUserDefault call
         // that would incorrectly latch IsUserSelected.
-        toolbar.DateHintSchemeIndex = (int)DateDecodingScheme.JsSeconds;
+        toolbar.DateHintControls.DateHintSchemeIndex = (int)DateDecodingScheme.JsSeconds;
 
         Assert.False(settings.IsUserSelected);
     }
@@ -569,11 +569,11 @@ public sealed class JsonToolbarViewModelTests : IDisposable
         var applied = new List<int>();
         var toolbar = new JsonToolbarViewModel(settings, new JsonSchemaSettings(), 0, applied.Add);
 
-        toolbar.ExpandDepthIndex = 4;
+        toolbar.TreeControls.ExpandDepthIndex = 4;
 
         Assert.Equal(new[] { 4 }, applied);
 
-        toolbar.ExpandDepthIndex = 4;
+        toolbar.TreeControls.ExpandDepthIndex = 4;
 
         Assert.Equal(new[] { 4 }, applied);
     }
@@ -584,10 +584,10 @@ public sealed class JsonToolbarViewModelTests : IDisposable
         var applied = new List<bool>();
         var toolbar = new JsonToolbarViewModel(new DateHintSettings(), new JsonSchemaSettings(), 0, _ => { },
             showIndentGuides: true, applyIndentGuides: applied.Add);
-        Assert.True(toolbar.ShowIndentGuides);
+        Assert.True(toolbar.TreeControls.ShowIndentGuides);
 
-        toolbar.ShowIndentGuides = false;
-        toolbar.ShowIndentGuides = false;
+        toolbar.TreeControls.ShowIndentGuides = false;
+        toolbar.TreeControls.ShowIndentGuides = false;
 
         Assert.Equal(new[] { false }, applied);
     }

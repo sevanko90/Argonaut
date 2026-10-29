@@ -49,6 +49,14 @@ Argonaut was originally conceived as a viewer for large JSON files (hence the na
 
 - Browse individual lines, view the JSON for the selected line in the dedicated JSON viewer
 
+#### XML
+
+- Shown as a collapsible tree, indexed in the background, so a multi-gigabyte file opens at once
+- XPath display of the selected node (spelled with the document's own prefixes) and a go to XPath option
+- Searchable, with optional indent guides
+- Copy a text node's value or the XPath to clipboard
+- Read as UTF-8: a file declaring another encoding opens with a note saying so
+
 #### CSV
 
 - Comma and tab delimited files are shown in a column viewer
@@ -166,7 +174,7 @@ Use `--filter FILE` with `--lines` or `--bytes`, in place of a range. Every line
     5000+20, 1m+10
 
 #### Choosing the view
-`--view VIEW` opens the file in `json`, `ndjson`, `csv`, `tsv` or `raw` instead of the detected view.
+`--view VIEW` opens the file in `json`, `ndjson`, `xml`, `csv`, `tsv` or `raw` instead of the detected view.
 
 #### Examples
 

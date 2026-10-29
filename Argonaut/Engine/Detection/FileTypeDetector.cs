@@ -1,5 +1,6 @@
 using System;
 using System.Buffers;
+using System.Text;
 using Argonaut.Engine.Bytes;
 
 namespace Argonaut.Engine.Detection;
@@ -33,6 +34,10 @@ public static class FileTypeDetector
         /// TSV file.
         /// </summary>
         Tsv,
+        /// <summary>
+        /// XML file.
+        /// </summary>
+        Xml,
     }
 
     private const int ChunkSize = 64 * 1024;
@@ -41,6 +46,10 @@ public static class FileTypeDetector
     private const int PreflightScanLimit = 1024 * 1024;
 
     private static readonly SearchValues<byte> Whitespace = SearchValues.Create(" \t\r\n"u8);
+
+    // How much of the start of a file XML detection reads: enough to walk past a long comment
+    // or DOCTYPE to the first element, which is where HTML gives itself away.
+    private const int XmlPrefixLimit = 64 * 1024;
 
     /// <summary>
     /// Detect whether a file is structurally JSON or NDJson
@@ -72,9 +81,12 @@ public static class FileTypeDetector
         if (firstCharOffset < 0)
             return FileKind.Unidentified;
 
+        byte firstChar = mmap.ByteAt(firstCharOffset);
+        if ((firstChar == (byte)'<' || firstChar == Utf8Bom[0]) && LooksLikeXml(mmap, length))
+            return FileKind.Xml;
+
         // 2. JSON Starts with { or [. If it's not that, check for CSV/TSV, or default to unidentified. 
         // fast early-out, before bothering to read for the json/ndjson distinction.
-        byte firstChar = mmap.ByteAt(firstCharOffset);
         if (firstChar is not (byte)'{' and not (byte)'[')
             return DetectDelimitedOrUnknown(mmap, length);
 
@@ -157,6 +169,22 @@ public static class FileTypeDetector
                 return false;
             }
 
+            case FileKind.Xml:
+            {
+                var prefix = mmap.RequireContiguous(0, (int)Math.Min(length, XmlPrefixLimit));
+                int first = SkipBomAndWhitespace(prefix);
+                if (first < prefix.Length && prefix[first] == (byte)'<')
+                {
+                    reason = "";
+                    return true;
+                }
+
+                reason = first >= prefix.Length
+                    ? "The file is empty or contains only whitespace."
+                    : $"Expected the first non-whitespace byte to be '<', but found '{(char)prefix[first]}' at byte offset {first}.";
+                return false;
+            }
+
             case FileKind.Csv:
             case FileKind.Tsv:
             {
@@ -187,6 +215,99 @@ public static class FileTypeDetector
                 reason = $"Unsupported file kind: {kind}.";
                 return false;
         }
+    }
+
+    private static ReadOnlySpan<byte> Utf8Bom => [0xEF, 0xBB, 0xBF];
+
+    /// <summary>
+    /// XML rule, on a prefix of at most <see cref="XmlPrefixLimit"/> bytes: after an optional
+    /// UTF-8 BOM and whitespace, an XML declaration decides at once. Otherwise the document must
+    /// open with markup - a comment, a processing instruction, a DOCTYPE or a start tag - and
+    /// leading comments and processing instructions are walked past to whichever of the last two
+    /// comes first, since that is where HTML gives itself away: a DOCTYPE or first element naming
+    /// html is not XML. Markup that runs past the prefix before deciding is taken as XML.
+    /// </summary>
+    private static bool LooksLikeXml(IByteSource file, long length)
+    {
+        var prefix = file.RequireContiguous(0, (int)Math.Min(length, XmlPrefixLimit));
+        int at = SkipBomAndWhitespace(prefix);
+        if (StartsWith(prefix, at, "<?xml"u8) && at + 5 < prefix.Length && Whitespace.Contains(prefix[at + 5]))
+            return true;
+
+        while (true)
+        {
+            if (at >= prefix.Length || prefix[at] != (byte)'<' || at + 1 >= prefix.Length)
+                return false;
+
+            byte next = prefix[at + 1];
+            int end;
+            if (next == (byte)'?')
+            {
+                end = IndexAfter(prefix, at + 2, "?>"u8);
+            }
+            else if (StartsWith(prefix, at, "<!--"u8))
+            {
+                end = IndexAfter(prefix, at + 4, "-->"u8);
+            }
+            else if (StartsWithIgnoringCase(prefix, at, "<!DOCTYPE"u8))
+            {
+                int name = at + 9;
+                while (name < prefix.Length && Whitespace.Contains(prefix[name]))
+                    name++;
+                return !IsNamed(prefix, name, "html"u8);
+            }
+            else if (IsNameStart(next))
+            {
+                return !IsNamed(prefix, at + 1, "html"u8);
+            }
+            else
+            {
+                return false;
+            }
+
+            if (end < 0)
+                return true; // markup still open where the prefix ends
+            at = end;
+            while (at < prefix.Length && Whitespace.Contains(prefix[at]))
+                at++;
+            if (at >= prefix.Length)
+                return true;
+        }
+    }
+
+    private static int SkipBomAndWhitespace(ReadOnlySpan<byte> prefix)
+    {
+        int at = prefix.StartsWith(Utf8Bom) ? Utf8Bom.Length : 0;
+        int content = prefix[at..].IndexOfAnyExcept(Whitespace);
+        return content < 0 ? prefix.Length : at + content;
+    }
+
+    /// <summary>A name may start with a letter, an underscore, a colon or any non-ASCII
+    /// character; the multi-byte ones are not told apart here.</summary>
+    private static bool IsNameStart(byte b) => b is >= (byte)'a' and <= (byte)'z' or >= (byte)'A' and <= (byte)'Z' or (byte)'_' or (byte)':' or >= 0x80;
+
+    /// <summary>Whether the name at <paramref name="at"/> is <paramref name="name"/> in any case,
+    /// and ends there.</summary>
+    private static bool IsNamed(ReadOnlySpan<byte> prefix, int at, ReadOnlySpan<byte> name)
+    {
+        if (!StartsWithIgnoringCase(prefix, at, name))
+            return false;
+        int after = at + name.Length;
+        return after >= prefix.Length || prefix[after] is (byte)'>' or (byte)'/' or (byte)'[' || Whitespace.Contains(prefix[after]);
+    }
+
+    private static bool StartsWith(ReadOnlySpan<byte> prefix, int at, ReadOnlySpan<byte> text)
+        => at <= prefix.Length && prefix[at..].StartsWith(text);
+
+    private static bool StartsWithIgnoringCase(ReadOnlySpan<byte> prefix, int at, ReadOnlySpan<byte> text)
+        => at + text.Length <= prefix.Length && Ascii.EqualsIgnoreCase(prefix.Slice(at, text.Length), text);
+
+    /// <summary>One past the end of <paramref name="terminator"/> at or after
+    /// <paramref name="from"/>, or -1 when the prefix does not hold it.</summary>
+    private static int IndexAfter(ReadOnlySpan<byte> prefix, int from, ReadOnlySpan<byte> terminator)
+    {
+        int found = prefix[from..].IndexOf(terminator);
+        return found < 0 ? -1 : from + found + terminator.Length;
     }
 
     /// <summary>

@@ -5,14 +5,14 @@ using System.Threading.Tasks;
 using Argonaut.Engine.Hints;
 using Argonaut.Ui.Hints;
 using Argonaut.Features.Json.Schema;
+using Argonaut.Ui.Tree;
 using Argonaut.Ui.ViewModels;
 
 namespace Argonaut.Features.Json;
 
 /// <summary>
-/// Header toolbar for the JSON tree view: date-hint scheme/time-zone radio groups (behind a
-/// single "Date" dropdown button) bound to a document's <see cref="DateHintSettings"/>, the
-/// default-expand-depth picker, and (JSON documents only) a "jump to JSONPath" text entry.
+/// Header toolbar for the JSON tree view: the shared date-hint controls
+/// (<see cref="DateHintToolbarState"/>: scheme and time zone), the shared tree controls (<see cref="TreeToolbarState"/>: expand depth, indent guides), and (JSON documents only) a "jump to JSONPath" text entry.
 /// Shared by JsonViewModel and NdJsonViewModel, which expose an identical surface (a
 /// DateHintSettings instance and a SetDefaultExpandDepth callback) and previously drove these
 /// same combos through the shell via type-switches. NdJsonViewModel omits
@@ -32,17 +32,10 @@ public sealed class JsonToolbarViewModel : ObservableObject
     /// opens the user schema folder and reverts the combo to whatever was selected before.</summary>
     public const string OpenSchemaFolderLabel = "Open schema folder…";
 
-    private readonly DateHintSettings settings;
     private readonly JsonSchemaSettings schemaSettings;
-    private readonly Action<int> applyExpandDepth;
-    private readonly Action<bool>? applyIndentGuides;
     private readonly Func<string, Task>? navigateToPath;
     private readonly Func<Task>? refreshSchemaEntries;
     private readonly Action? openSchemaFolder;
-    private int dateHintSchemeIndex;
-    private int timeZoneModeIndex;
-    private int expandDepthIndex;
-    private bool showIndentGuides;
     private string jsonPathInput = string.Empty;
     private IReadOnlyList<string> schemaItems = Array.Empty<string>();
     private int selectedSchemaIndex;
@@ -56,24 +49,17 @@ public sealed class JsonToolbarViewModel : ObservableObject
 
     public JsonToolbarViewModel(DateHintSettings settings, JsonSchemaSettings schemaSettings, int initialExpandDepthIndex, Action<int> applyExpandDepth, Func<string, Task>? navigateToPath = null, Func<Task>? refreshSchemaEntries = null, Action? openSchemaFolder = null, bool showIndentGuides = false, Action<bool>? applyIndentGuides = null)
     {
-        this.settings = settings;
+        DateHintControls = new DateHintToolbarState(settings);
         this.schemaSettings = schemaSettings;
-        this.applyExpandDepth = applyExpandDepth;
         this.navigateToPath = navigateToPath;
         this.refreshSchemaEntries = refreshSchemaEntries;
         this.openSchemaFolder = openSchemaFolder;
-        this.showIndentGuides = showIndentGuides;
-        this.applyIndentGuides = applyIndentGuides;
-
-        dateHintSchemeIndex = (int)settings.FileDefaultScheme;
-        timeZoneModeIndex = (int)settings.TimeZoneMode;
-        expandDepthIndex = initialExpandDepthIndex;
+        TreeControls = new TreeToolbarState(initialExpandDepthIndex, applyExpandDepth, showIndentGuides, applyIndentGuides);
 
         SchemaRootPicker = new SchemaRootPickerViewModel(schemaSettings, closeRequested: () => IsSchemaFlyoutOpen = false);
 
         RebuildSchemaItems();
 
-        settings.PropertyChanged += OnSettingsPropertyChanged;
         schemaSettings.PropertyChanged += OnSchemaSettingsPropertyChanged;
     }
 
@@ -219,78 +205,11 @@ public sealed class JsonToolbarViewModel : ObservableObject
         return navigateToPath(jsonPathInput);
     }
 
-    /// <summary>Bound two-way to the date-hint scheme combo; forwards to <see cref="DateHintSettings"/>.</summary>
-    public int DateHintSchemeIndex
-    {
-        get => dateHintSchemeIndex;
-        set
-        {
-            if (value < 0 || !SetField(ref dateHintSchemeIndex, value))
-                return;
+    /// <summary>The date-hint scheme and time-zone choices every tree toolbar shares.</summary>
+    public DateHintToolbarState DateHintControls { get; }
 
-            settings.SetUserDefault((DateDecodingScheme)value);
-        }
-    }
-
-    /// <summary>Bound two-way to the time-zone combo; forwards to <see cref="DateHintSettings"/>.</summary>
-    public int TimeZoneModeIndex
-    {
-        get => timeZoneModeIndex;
-        set
-        {
-            if (value < 0 || !SetField(ref timeZoneModeIndex, value))
-                return;
-
-            settings.SetTimeZoneMode((DateHintTimeZoneMode)value);
-        }
-    }
-
-    /// <summary>Bound two-way to the expand-depth choices; the value is the depth itself. Reports the choice to the owning
-    /// document, which remembers it and applies it live to its tree.</summary>
-    public int ExpandDepthIndex
-    {
-        get => expandDepthIndex;
-        set
-        {
-            if (value < 0 || !SetField(ref expandDepthIndex, value))
-                return;
-
-            applyExpandDepth(value);
-        }
-    }
-
-    /// <summary>Bound two-way to the indent-guides toggle. Reports the choice to the owning
-    /// document, which remembers it and applies it live to its tree.</summary>
-    public bool ShowIndentGuides
-    {
-        get => showIndentGuides;
-        set
-        {
-            if (!SetField(ref showIndentGuides, value))
-                return;
-
-            applyIndentGuides?.Invoke(value);
-        }
-    }
-
-    /// <summary>Inference completing in the background updates FileDefaultScheme - reflect it
-    /// live in the combo.</summary>
-    private void OnSettingsPropertyChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        if (e.PropertyName is null or nameof(DateHintSettings.FileDefaultScheme) or nameof(DateHintSettings.TimeZoneMode))
-            SyncFromSettings();
-    }
-
-    /// <summary>
-    /// Pushes the current settings values into the bound combo indices. SetField's equality
-    /// check makes this a no-op when nothing changed, so the resulting property notification
-    /// doesn't loop back through the combo setters into <see cref="DateHintSettings"/>.
-    /// </summary>
-    private void SyncFromSettings()
-    {
-        SetField(ref dateHintSchemeIndex, (int)settings.FileDefaultScheme, nameof(DateHintSchemeIndex));
-        SetField(ref timeZoneModeIndex, (int)settings.TimeZoneMode, nameof(TimeZoneModeIndex));
-    }
+    /// <summary>The expand-depth and indent-guides controls every tree toolbar shares.</summary>
+    public TreeToolbarState TreeControls { get; }
 
     /// <summary>The catalog is populated asynchronously after the document opens, and a remembered
     /// schema selects itself - both have to light up the combo without the user touching it.</summary>

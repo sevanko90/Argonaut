@@ -57,9 +57,9 @@ them). Keep this in sync when the ownership chain changes.
   model plus one `DataTemplate`, with no shell logic to touch.
 - Consequently the shell never reaches into a document view model **by concrete type**. Where it
   needs a behaviour only some documents can honour, it asks for an opt-in capability interface
-  the document declares — `IPathNavigable` (reveal a JSONPath; `JsonViewModel`) and
+  the document declares — `IPathNavigable` (reveal a path; `TreeDocumentViewModel`) and
   `IByteRangeNavigable` (report and reveal a byte range of the input; `RawViewModel`,
-  `JsonViewModel`, `NdJsonViewModel`), both in `Ui/Documents/Navigation`. These stay
+  `TreeDocumentViewModel`, `NdJsonViewModel`), both in `Ui/Documents/Navigation`. These stay
   *off* `IDocumentViewModel`, whose job is the surface every document genuinely shares, but a
   new view that can honour one implements it with no shell edit. Toolbar-driven state is passed
   *down* at construction instead: the owning document view model builds its
@@ -83,7 +83,7 @@ them). Keep this in sync when the ownership chain changes.
   mapping in the app: a static `(Create, Load)` registration table per view model, with the
   `FileKind → registration` map *derived* once at startup by probing each registration's
   throwaway instance with `CanHandleFileType` — not restated by hand. `Options` (JSON, NDJSON,
-  CSV, TSV, Raw text) drives the status-bar `ComboBox`; `LoadAsync` has the exact shape of
+  XML, CSV, TSV, Raw text) drives the status-bar `ComboBox`; `LoadAsync` has the exact shape of
   `MainWindowViewModel.DocumentLoader`, so it's both the production default and the same seam
   tests fake.
 - The switcher's `SelectedView` setter fires `MainWindowViewModel.SwitchViewAsync(kind)` when
@@ -329,7 +329,19 @@ The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLeng
 - **What a format supplies is small.** A reader (next child, first-child position, value end,
   close start), a painter (`ITreeRowPainter`: styled runs per row, and an optional marker) and
   gutters (`ITreeGutter`). JSON's are `JsonTreeReader`, `JsonTreePainter` and `JsonSchemaGutter`
-  (`Features/Json/Tree`); an XML view would add its own three and nothing else.
+  (`Features/Json/Tree`); XML's are `XmlTreeReader` and `XmlTreePainter`, with no gutter.
+- **The tree view model, path bar, search navigator and toolbar controls are shared.**
+  `TreeDocumentViewModel` (`Ui/Tree`, on `IndexedDocumentViewModel`) holds everything about showing
+  a tree: the `TreeDocument` and expansion, selection, reveals (and the pending reveal a view
+  consumes), find highlighting, the growth monitor, the shell hand-offs and the generic shell of
+  go-to-path. A format derives from it and supplies the index it starts (an `ITreeIndex`), the
+  reader, painter and gutters (`ShowTree`), the path segments for a cursor, the path string, its
+  resolution and the value text of a row. `JsonViewModel` adds schema, date hints, value hints and
+  the array table on top. `TreePathBar` is the foot-of-view bar over its data context (segments as
+  `TreePathSegment`, the click-to-edit entry, go-to, copy value, copy path, Ctrl/Cmd+L); the format
+  tells it only its icon, placeholder, empty text and tooltips. `TreeSearchNavigator` reveals a find
+  match through the base view model, and `TreeToolbarControls` (over `TreeToolbarState`) is the
+  expand-depth button and indent-guides toggle a format's toolbar hosts.
 - **The array table reads the same way.** `JsonArrayTableSession` indexes the array's own
   range sparsely; `JsonArrayElements` finds element `i` from the nearest resume point, counting
   only elements known to have ended while the scan runs; rows, column discovery and cells read
@@ -359,6 +371,43 @@ The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLeng
   merged order and find orders its stops by them. The scrollbar is estimated over the left
   document: each record carries a left anchor, and anchors never decrease along the log.
 
+## The XML tree
+
+The XML view is the same tree machinery with XML's index, reader and painter
+(`Features/Xml`); the design record is [xml-view-options.md](xml-view-options.md).
+
+- **One pass indexes and checks.** `XmlSparseIndex` (`Features/Xml/Indexing`) feeds
+  `SparseContainerIndexBuilder` from a resumable state machine over `XmlStructuralScanner`'s
+  span-level primitives, so no construct is ever required contiguous and a source split into
+  one-byte pieces gives the same index. There is no second validator: the same pass reports what
+  breaks the tree - a close tag not matching its start tag, elements left open, an unterminated
+  tag, comment, CDATA, instruction or DOCTYPE, a second root, text outside the root - with line
+  and column, and carries on. A mismatched close tag closes up to the open element of that name,
+  or is skipped when there is none, so one bad tag does not nest the rest of the file deeper.
+- **An element holding only text is one row.** Only an element whose content holds an element,
+  comment or processing instruction is a container (`XmlNodeKind.Element`); one of text and
+  CDATA is a `TextElement` leaf, one of whitespace an `EmptyElement`. Whitespace-only text is
+  never a row. The scanner holds a start tag until its next markup decides, opening the
+  container only then, so a 20 MB `gml:posList` is never recorded; `XmlTreeReader` classifies by
+  the same rule, since the cursor trusts the index's containers.
+- **XPaths as written, numbered from snapshots.** `XmlTreePaths` spells a row's path with the
+  document's own prefixes (`/core:CityModel/core:cityObjectMember[1234]/bldg:Building`) and
+  resolves the subset `XmlPathSyntax` reads, matching names lexically. A step's `[k]` counts
+  same-name siblings: the index snapshots each recorded container's child-name counts at its
+  checkpoints and totals at its close (`XmlSiblingCounts`, up to 16 distinct names), so a path
+  costs at most a checkpoint stride of reading per level, and `[1]` is left out for a name that
+  is unique once that is known.
+- **Rows show markup as written.** `XmlTreeText` decodes on demand under the display cap and
+  folds whitespace holding a line break or tab to one space; entity references stay as written,
+  so find highlights line up with the bytes. `XmlTreePainter` gives namespace prefixes and
+  declarations a run style of their own (`TreeRunStyle.Namespace`), drawn muted by
+  `XmlTreePalette` so local names lead. `TreeSurface` draws every tree with ligatures and
+  contextual alternates off, so a font never turns `-->` into an arrow.
+- **Hints read decoded text.** A text-only element's content and a text node are offered to the
+  value-hint providers with their entities decoded (`XmlUnescape`) and escaped as JSON string
+  content (`XmlHintText`), the form the providers and decoders read - so `?a=1&amp;b=2` opens as
+  `?a=1&b=2`. The hint card is composed from `Features/Json/Preview` as the raw view does.
+
 ## Value hints
 
 - **What a value reads as is the engine's; how it shows is the view's.** The providers
@@ -371,7 +420,10 @@ The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLeng
   symbol and colour into the icon and swatch every view draws, and `ChipPainter` (`Ui/Rows`)
   draws the chip itself.
 - **The tree hints a row's scalar.** `JsonTreePainter` offers a leaf's value to the providers and
-  adds the hint as a chip or action run after the text, with the link that clicking it follows.
+  adds the hint as a chip or action run after the text, with the link that clicking it follows;
+  `XmlTreePainter` does the same for text (see "The XML tree"). Both take the provider list from
+  `ValueHintProviders.Standard` (`Ui/Hints`), and both toolbars host the shared
+  `DateHintToolbarControls`.
 - **The raw view hints what its lexer finds.** `RawValueHints` (`Features/Raw/Hints`) takes a
   row's string and number spans as the starts of values and reads each value whole from the
   document's bytes - to its closing quote, the end of its number, or for a bare config value the

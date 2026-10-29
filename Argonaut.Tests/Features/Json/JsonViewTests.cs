@@ -157,7 +157,7 @@ public sealed class JsonViewTests : IDisposable
     public Task AHintPreviewsWhatItsValueEncodes() => WithView("""{"embedded":"{\"a\":1,\"b\":[2]}","text":"aGVsbG8gdGhlcmUsIHJlYWRlcg==","bad":"{\"a\":"}""", async (_, vm, _) =>
     {
         string json = File.ReadAllText(path);
-        Argonaut.Features.Json.Tree.ExpandHintLink Link(string key, Argonaut.Engine.Hints.ValueHintKind kind)
+        Argonaut.Ui.Tree.ExpandHintLink Link(string key, Argonaut.Engine.Hints.ValueHintKind kind)
         {
             int start = json.IndexOf('"', json.IndexOf($"\"{key}\":", StringComparison.Ordinal) + key.Length + 3);
             int end = json.IndexOf('"', start + 1);

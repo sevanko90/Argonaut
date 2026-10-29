@@ -7,6 +7,7 @@ using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Indexing;
 using Argonaut.Engine.Indexing.Trees;
 using Argonaut.Engine.Progress;
+using Argonaut.Ui.Tree;
 
 namespace Argonaut.Features.Json.Indexing;
 
@@ -51,7 +52,7 @@ public sealed class JsonKeptStructure
 /// and a stray closing bracket is skipped. Either still fails the scan once it is done, and that
 /// failure stands only if validation somehow passed.
 /// </summary>
-public sealed class JsonSparseIndex : IBackgroundIndex
+public sealed class JsonSparseIndex : ITreeIndex
 {
     public const int DefaultPromotionBytes = 64 * 1024;
     public const int DefaultCheckpointBytes = 64 * 1024;

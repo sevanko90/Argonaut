@@ -187,4 +187,97 @@ public class FileTypeDetectorTests
     [InlineData("a,b,c\n1,2,3\n")]
     public void IsPlausibleFor_Unidentified_AlwaysAccepted(string content)
         => Assert.True(IsPlausible(FileTypeDetector.FileKind.Unidentified, content, out _));
+
+    private static FileTypeDetector.FileKind DetectBytes(byte[] content)
+    {
+        string path = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllBytes(path, content);
+            return LoadFromPath.DetectFileType(path);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Theory]
+    [InlineData("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<root/>\n")]
+    [InlineData("<?xml version='1.0'?><a><b>1</b></a>")]
+    [InlineData("\uFEFF<?xml version=\"1.0\"?>\n<root/>")]
+    [InlineData("  \r\n\t<?xml version=\"1.0\"?>\n<root/>")]
+    [InlineData("<root><child attr=\"1\"/></root>\n")]
+    [InlineData("<core:CityModel xmlns:core=\"http://www.opengis.net/citygml/2.0\"/>")]
+    [InlineData("<_private/>")]
+    [InlineData("<!-- generated --><root/>")]
+    [InlineData("<!DOCTYPE note SYSTEM \"note.dtd\">\n<note/>")]
+    [InlineData("<?xml-stylesheet type=\"text/xsl\" href=\"a.xsl\"?>\n<root/>")]
+    [InlineData("<ñame>é</ñame>")]
+    [InlineData("<?xml version=\"1.0\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\"><body/></html>")]
+    public void MarkupOpeningADocument_IsXml(string content) => Assert.Equal(FileTypeDetector.FileKind.Xml, Detect(content));
+
+    /// <summary>HTML opens with markup too. Without an XML declaration, a DOCTYPE or first element
+    /// naming html keeps it out of the XML view.</summary>
+    [Theory]
+    [InlineData("<!DOCTYPE html>\n<html><body></body></html>")]
+    [InlineData("<!doctype html>\n<html>")]
+    [InlineData("<!DocType HTML PUBLIC \"-//W3C//DTD HTML 4.01//EN\">\n<HTML>")]
+    [InlineData("<html><head></head></html>")]
+    [InlineData("<HTML lang=\"en\">")]
+    [InlineData("<!-- page --><html>")]
+    [InlineData("\uFEFF<html>")]
+    public void Html_IsNotXml(string content) => Assert.NotEqual(FileTypeDetector.FileKind.Xml, Detect(content));
+
+    /// <summary>A lone angle bracket, or one followed by something no XML document starts with, is
+    /// text.</summary>
+    [Theory]
+    [InlineData("<")]
+    [InlineData("< root>")]
+    [InlineData("<1abc>")]
+    [InlineData("<-- not a comment -->")]
+    [InlineData("<= less or equal\n")]
+    public void AnAngleBracketNotOpeningMarkup_IsNotXml(string content) => Assert.NotEqual(FileTypeDetector.FileKind.Xml, Detect(content));
+
+    [Fact]
+    public void Utf16_IsNotXml()
+    {
+        Assert.NotEqual(FileTypeDetector.FileKind.Xml, DetectBytes([0xFF, 0xFE, .. Encoding.Unicode.GetBytes("<?xml version=\"1.0\"?><a/>")]));
+        Assert.NotEqual(FileTypeDetector.FileKind.Xml, DetectBytes([0xFE, 0xFF, .. Encoding.BigEndianUnicode.GetBytes("<?xml version=\"1.0\"?><a/>")]));
+    }
+
+    [Fact]
+    public void AnElementNameSplitPastTheDetectionPrefix_StillDecides()
+    {
+        // A 70 KB comment before the root: the first element is past the prefix detection reads,
+        // so it decides on what it has - markup that is not HTML.
+        string content = "<!--" + new string('x', 70 * 1024) + "-->\n<root/>";
+        Assert.Equal(FileTypeDetector.FileKind.Xml, Detect(content));
+    }
+
+    [Fact]
+    public void XmlDetection_LeavesJsonAndDelimitedAlone()
+    {
+        Assert.Equal(FileTypeDetector.FileKind.Json, Detect("""{"a":"<b>"}"""));
+        Assert.Equal(FileTypeDetector.FileKind.Ndjson, Detect("{\"a\":\"<x/>\"}\n{\"a\":2}\n"));
+        Assert.Equal(FileTypeDetector.FileKind.Csv, Detect("a,<b>,c\n1,2,3\n"));
+    }
+
+    [Theory]
+    [InlineData("<root/>")]
+    [InlineData("\uFEFF  <?xml version=\"1.0\"?><a/>")]
+    [InlineData("<html></html>")]
+    public void IsPlausibleFor_MarkupContent_AcceptedForXml(string content)
+        => Assert.True(IsPlausible(FileTypeDetector.FileKind.Xml, content, out _));
+
+    [Theory]
+    [InlineData("""{"a":1}""")]
+    [InlineData("a,b,c\n1,2,3\n")]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void IsPlausibleFor_NonMarkupContent_RejectedForXml(string content)
+    {
+        Assert.False(IsPlausible(FileTypeDetector.FileKind.Xml, content, out var reason));
+        Assert.NotEmpty(reason);
+    }
 }

@@ -48,6 +48,7 @@ public class StartupArgumentsTests
     [InlineData("raw", FileTypeDetector.FileKind.Unidentified)]
     [InlineData("CSV", FileTypeDetector.FileKind.Csv)]
     [InlineData("ndjson", FileTypeDetector.FileKind.Ndjson)]
+    [InlineData("xml", FileTypeDetector.FileKind.Xml)]
     public void Reads_the_view_to_force(string name, FileTypeDetector.FileKind kind)
     {
         var parsed = Parse("big.ndjson", "--view", name);
@@ -58,7 +59,7 @@ public class StartupArgumentsTests
 
     [Fact]
     public void Names_the_views_when_one_is_unknown()
-        => Assert.Equal("--view: \"tree\" is not a view. Use one of: json, ndjson, csv, tsv, raw.", Parse("a.json", "--view", "tree").Error);
+        => Assert.Equal("--view: \"tree\" is not a view. Use one of: json, ndjson, xml, csv, tsv, raw.", Parse("a.json", "--view", "tree").Error);
 
     [Fact]
     public void Keeps_positional_paths_in_order_around_options()
@@ -128,6 +129,10 @@ public class StartupArgumentsTests
     [Fact]
     public void A_filter_opens_one_file_not_a_comparison()
         => Assert.Equal("--bytes opens one file, not a comparison.", Parse("a.csv", "b.csv", "--bytes", "--filter", "picks.txt").Error);
+
+    [Fact]
+    public void A_filter_cannot_be_shown_as_xml()
+        => Assert.Contains("--view xml cannot show a selection", Parse("a.xml", "--lines", "--filter", "p.txt", "--view", "xml").Error);
 
     [Fact]
     public void A_filter_cannot_be_shown_as_json()

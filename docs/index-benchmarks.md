@@ -4,6 +4,10 @@ What indexing costs for each kind of document - speed, allocation, peak memory, 
 index keeps, and whether anything is left behind once it is released - measured run after run, so
 an improvement or a regression shows up against what came before. Newest run first.
 
+Small documents are where a fixed per-session cost shows: see
+[index-fixed-cost.md](index-fixed-cost.md) for the 1, 16 and 256 MiB runs, what they found and the
+fix. A run should record a 1 MiB point as well as 1 GiB, so a fixed cost stays visible.
+
 ## Running it
 
 ```sh
@@ -71,6 +75,75 @@ Speed:
 | 2026-09-26 `7b3e5e3` baseline | 5,701 MiB/s | 7,559 MiB/s | 7,771 MiB/s | 563 MiB/s | 435 MiB/s | 477 MiB/s | - |
 
 ## Runs
+
+### 2026-10-31 - segments sized in bytes (cloud Linux VM, new baseline)
+
+`SegmentedAppendLog<T>` segments went from 8,192 items to about 16 KiB, so an index session's
+first append no longer buys up to 384 KiB per log on the large object heap
+([index-fixed-cost.md](index-fixed-cost.md)). Measured before and after on a different machine
+from every run below, so it is its own baseline and is not in the M5 trend tables.
+
+- Machine: X64, 4 cores (cloud VM)
+- Runtime: .NET 10.0.14, Ubuntu 24.04.5 LTS, Workstation GC
+- 3 processes per document.
+
+**1 MiB, before** (the fixed cost dominates):
+
+| Document | Indexer | Items | Time | Speed | Speed range | Allocated | Alloc / byte | GCs (0/1/2) | Peak heap | Peak working set | Index kept | Left after release (1st / last) |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Text | RawSegmentIndex (wrap 160) | 9,816 | 1 ms | 718 MiB/s | 519-721 | 141.6 KB | 0.1381 | 0/0/0 | 168.8 KB | 39.9 MB | 129.4 KB | 208 B / 440 B |
+| Csv | FileOffsetIndex | 8,194 | 1 ms | 1,756 MiB/s | 1,467-2,257 | 138.8 KB | 0.1054 | 0/0/0 | 168.8 KB | 40.2 MB | 129.5 KB | 208 B / 440 B |
+| NdJson | FileOffsetIndex | 8,193 | 1 ms | 1,929 MiB/s | 1,686-1,941 | 139.0 KB | 0.1030 | 0/0/0 | 160.8 KB | 40.3 MB | 129.6 KB | 208 B / 440 B |
+| JsonRecords | JsonSparseIndex | 16 | 10 ms | 99 MiB/s | 67-117 | 613.9 KB | 0.5995 | 0/0/0 | 648.9 KB | 46.9 MB | 580.4 KB | 208 B / 440 B |
+| JsonTokenDense | JsonSparseIndex | 16 | 17 ms | 59 MiB/s | 56-74 | 631.6 KB | 0.6168 | 0/0/0 | 656.9 KB | 46.7 MB | 580.4 KB | 208 B / 440 B |
+| JsonRecordsWithHashes | JsonSparseIndex + content hashes | 17 | 17 ms | 60 MiB/s | 59-81 | 636.0 KB | 0.6211 | 0/0/0 | 665.0 KB | 46.9 MB | 582.8 KB | 208 B / 440 B |
+| Xml | XmlSparseIndex | 16 | 13 ms | 78 MiB/s | 57-88 | 901.8 KB | 0.8780 | 0/0/0 | 928.9 KB | 43.8 MB | 834.1 KB | 208 B / 440 B |
+
+**1 MiB, after:**
+
+| Document | Indexer | Items | Time | Speed | Speed range | Allocated | Alloc / byte | GCs (0/1/2) | Peak heap | Peak working set | Index kept | Left after release (1st / last) |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Text | RawSegmentIndex (wrap 160) | 9,816 | 2 ms | 622 MiB/s | 617-761 | 29.6 KB | 0.0289 | 0/0/0 | 56.8 KB | 39.9 MB | 17.4 KB | 208 B / 440 B |
+| Csv | FileOffsetIndex | 8,194 | 1 ms | 1,728 MiB/s | 1,481-1,787 | 26.8 KB | 0.0203 | 0/0/0 | 48.8 KB | 40.3 MB | 17.6 KB | 208 B / 440 B |
+| NdJson | FileOffsetIndex | 8,193 | 1 ms | 1,801 MiB/s | 1,776-1,826 | 26.8 KB | 0.0198 | 0/0/0 | 48.8 KB | 40.5 MB | 17.5 KB | 208 B / 440 B |
+| JsonRecords | JsonSparseIndex | 16 | 12 ms | 84 MiB/s | 83-88 | 64.8 KB | 0.0633 | 0/0/0 | 96.9 KB | 46.7 MB | 28.3 KB | 208 B / 440 B |
+| JsonTokenDense | JsonSparseIndex | 16 | 19 ms | 52 MiB/s | 48-81 | 85.5 KB | 0.0835 | 0/0/0 | 110.9 KB | 46.5 MB | 28.4 KB | 240 B / 472 B |
+| JsonRecordsWithHashes | JsonSparseIndex + content hashes | 17 | 19 ms | 52 MiB/s | 44-70 | 90.0 KB | 0.0878 | 0/0/0 | 113.0 KB | 46.8 MB | 30.8 KB | 208 B / 440 B |
+| Xml | XmlSparseIndex | 16 | 12 ms | 80 MiB/s | 69-85 | 135.9 KB | 0.1323 | 0/0/0 | 169.0 KB | 44.1 MB | 74.3 KB | 208 B / 440 B |
+
+**1 GiB, before:**
+
+| Document | Indexer | Items | Time | Speed | Speed range | Allocated | Alloc / byte | GCs (0/1/2) | Peak heap | Peak working set | Index kept | Left after release (1st / last) |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Text | RawSegmentIndex (wrap 160) | 9,996,610 | 409 ms | 2,507 MiB/s | 2,241-2,524 | 3.5 MB | 0.0035 | 0/0/0 | 3.8 MB | 1.05 GB | 2.5 MB | 208 B / 3.4 KB |
+| Csv | FileOffsetIndex | 6,414,338 | 306 ms | 3,345 MiB/s | 3,216-3,355 | 1.0 MB | 0.0010 | 0/0/0 | 1.1 MB | 1.04 GB | 257.5 KB | 208 B / 440 B |
+| NdJson | FileOffsetIndex | 6,262,785 | 302 ms | 3,396 MiB/s | 3,357-3,413 | 1.0 MB | 0.0010 | 0/0/0 | 1.1 MB | 1.04 GB | 257.4 KB | 208 B / 440 B |
+| JsonRecords | JsonSparseIndex | 16,370 | 2,925 ms | 350 MiB/s | 315-356 | 8.0 MB | 0.0078 | 0/0/0 | 9.3 MB | 1.06 GB | 772.5 KB | 208 B / 440 B |
+| JsonTokenDense | JsonSparseIndex | 16,384 | 5,524 ms | 185 MiB/s | 179-192 | 14.5 MB | 0.0142 | 0/0/0 | 15.9 MB | 1.06 GB | 772.5 KB | 208 B / 440 B |
+| JsonRecordsWithHashes | JsonSparseIndex + content hashes | 16,371 | 4,901 ms | 209 MiB/s | 207-219 | 13.0 MB | 0.0127 | 0/0/0 | 15.1 MB | 1.06 GB | 777.8 KB | 3.2 KB / 3.4 KB |
+| Xml | XmlSparseIndex | 16,302 | 1,872 ms | 547 MiB/s | 497-551 | 6.2 MB | 0.0060 | 0/0/0 | 7.3 MB | 1.05 GB | 1.4 MB | 208 B / 440 B |
+
+**1 GiB, after:**
+
+| Document | Indexer | Items | Time | Speed | Speed range | Allocated | Alloc / byte | GCs (0/1/2) | Peak heap | Peak working set | Index kept | Left after release (1st / last) |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Text | RawSegmentIndex (wrap 160) | 9,996,610 | 447 ms | 2,291 MiB/s | 2,240-2,421 | 3.5 MB | 0.0034 | 0/0/0 | 3.8 MB | 1.05 GB | 2.4 MB | 208 B / 440 B |
+| Csv | FileOffsetIndex | 6,414,338 | 306 ms | 3,341 MiB/s | 3,316-3,463 | 1.0 MB | 0.0010 | 0/0/0 | 1.1 MB | 1.04 GB | 257.8 KB | 208 B / 440 B |
+| NdJson | FileOffsetIndex | 6,262,785 | 310 ms | 3,302 MiB/s | 3,070-3,384 | 1.0 MB | 0.0010 | 0/0/0 | 1.2 MB | 1.04 GB | 260.9 KB | 208 B / 3.4 KB |
+| JsonRecords | JsonSparseIndex | 16,370 | 3,355 ms | 305 MiB/s | 283-346 | 8.7 MB | 0.0085 | 0/0/0 | 9.7 MB | 1.06 GB | 409.1 KB | 208 B / 440 B |
+| JsonTokenDense | JsonSparseIndex | 16,384 | 4,884 ms | 210 MiB/s | 196-216 | 12.6 MB | 0.0123 | 0/0/0 | 13.7 MB | 1.06 GB | 404.3 KB | 3.2 KB / 3.4 KB |
+| JsonRecordsWithHashes | JsonSparseIndex + content hashes | 16,371 | 4,559 ms | 225 MiB/s | 222-250 | 11.9 MB | 0.0116 | 0/0/0 | 13.7 MB | 1.06 GB | 406.6 KB | 3.2 KB / 3.4 KB |
+| Xml | XmlSparseIndex | 16,302 | 1,972 ms | 519 MiB/s | 480-535 | 6.0 MB | 0.0059 | 0/0/0 | 7.0 MB | 1.05 GB | 1.0 MB | 3.2 KB / 3.4 KB |
+
+- **Index kept at 1 MiB: 580 → 28 KB (JSON), 834 → 74 KB (XML), 130 → 18 KB (CSV, NDJSON,
+  Text).** At 1 GiB JSON 773 → 409 KB and XML 1.4 → 1.0 MB; CSV, NDJSON and Text unchanged, their
+  segments were already full.
+- **Speed: within noise**, in both directions.
+- **The 1 GiB *Allocated* column above is inflated on this machine** by the harness's own
+  sampler: reading `Environment.WorkingSet` every millisecond allocates ~3 KB a call on Linux
+  (~2.5 MB/s). Fixed in the same change (working set every 50 ms, sampler's own allocation
+  subtracted); re-run after it, 1 GiB *Allocated* is Text 2.4 MB, Csv/NdJson 267.3 KB,
+  JsonRecords 403.4 KB, Xml 1.1 MB - matching *Index kept*. *Index kept* above is unaffected.
 
 ### 2026-10-28 - XML view (`c335c87`)
 

@@ -70,10 +70,11 @@ public static class LineSelectionLocator
                         (offset, newlines) = (known, knownNewlines);
                 }
 
+                bool settled = source.LengthSettled; // before the length: see FileOffsetIndex.ProduceAnchors
                 long available = source.AvailableLength;
                 if (offset >= available)
                 {
-                    if (source.LengthSettled)
+                    if (settled)
                         break;
 
                     source.WaitForLength(offset + 1, cancellationToken);

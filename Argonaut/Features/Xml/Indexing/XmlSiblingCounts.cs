@@ -50,6 +50,10 @@ public sealed class XmlSiblingCounts
 
     private readonly SegmentedAppendLog<Entry> entries = new();
 
+    /// <summary>What the first stored snapshot allocates for the entries log; for the guard that
+    /// keeps every index log's segment off the large object heap.</summary>
+    internal static int EntrySegmentBytes => SegmentedAppendLog<Entry>.SegmentBytes;
+
     /// <summary>The key of an element or attribute name as written, prefix included.</summary>
     public static ulong KeyOf(ReadOnlySpan<byte> qualifiedName) => XxHash3.HashToUInt64(qualifiedName);
 

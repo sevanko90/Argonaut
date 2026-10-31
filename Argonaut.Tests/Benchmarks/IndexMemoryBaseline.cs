@@ -178,6 +178,9 @@ public static class IndexMemoryBaseline
         return cycle with { AfterRelease = GC.GetTotalMemory(forceFullCollection: true) - baselineHeap };
     }
 
+    /// <summary>Sampler ticks (about a millisecond each) between working-set reads.</summary>
+    private const int WorkingSetEveryTicks = 50;
+
     /// <summary>One cycle up to the release: indexes while sampling, measures what the index
     /// keeps, then releases it.</summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
@@ -187,16 +190,27 @@ public static class IndexMemoryBaseline
         int gen0 = GC.CollectionCount(0), gen1 = GC.CollectionCount(1), gen2 = GC.CollectionCount(2);
         long allocatedBefore = GC.GetTotalAllocatedBytes(precise: true);
 
-        long peakHeap = 0, peakWorkingSet = 0;
+        // The sampler must not measure itself. The heap read is allocation-free, so it runs every
+        // millisecond to catch transient scan scratch. The working-set read is not: on Linux it
+        // parses /proc into strings, ~3 KB a call, which at 1 ms was 2.5 MB/s of "allocation" by
+        // the harness - more than the JSON index itself. The working set peaks with the mapped
+        // file, which is still mapped at the end, so it is read every 50 ms and once after. What
+        // the sampler does allocate is subtracted from the process-wide figure below.
+        long peakHeap = 0, peakWorkingSet = 0, samplerAllocated = 0;
         bool indexing = true;
         var sampler = new Thread(() =>
         {
-            while (Volatile.Read(ref indexing))
+            long samplerStart = GC.GetAllocatedBytesForCurrentThread();
+            for (int tick = 0; Volatile.Read(ref indexing); tick++)
             {
                 peakHeap = Math.Max(peakHeap, GC.GetTotalMemory(forceFullCollection: false));
-                peakWorkingSet = Math.Max(peakWorkingSet, Environment.WorkingSet);
+                if (tick % WorkingSetEveryTicks == 0)
+                    peakWorkingSet = Math.Max(peakWorkingSet, Environment.WorkingSet);
+
                 Thread.Sleep(1);
             }
+
+            samplerAllocated = GC.GetAllocatedBytesForCurrentThread() - samplerStart;
         }) { IsBackground = true, Priority = ThreadPriority.AboveNormal };
         sampler.Start();
 
@@ -206,7 +220,7 @@ public static class IndexMemoryBaseline
 
         Volatile.Write(ref indexing, false);
         sampler.Join();
-        long allocated = GC.GetTotalAllocatedBytes(precise: true) - allocatedBefore;
+        long allocated = GC.GetTotalAllocatedBytes(precise: true) - allocatedBefore - samplerAllocated;
         peakHeap = Math.Max(peakHeap, GC.GetTotalMemory(forceFullCollection: false));
         peakWorkingSet = Math.Max(peakWorkingSet, Environment.WorkingSet);
         int collections0 = GC.CollectionCount(0) - gen0, collections1 = GC.CollectionCount(1) - gen1, collections2 = GC.CollectionCount(2) - gen2;

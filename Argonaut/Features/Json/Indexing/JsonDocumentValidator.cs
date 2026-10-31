@@ -47,10 +47,14 @@ internal static class JsonDocumentValidator
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
+                // Settled first, then the length: read the other way round, a source that
+                // receives its last bytes and settles in between would have a window ending at
+                // the old length parsed as the final block - a number cut there is then "invalid".
+                bool settled = source.LengthSettled;
                 long available = source.AvailableLength;
                 if (offset >= available)
                 {
-                    if (source.LengthSettled)
+                    if (settled)
                         return null;
 
                     source.WaitForLength(offset + 1, cancellationToken);
@@ -73,7 +77,7 @@ internal static class JsonDocumentValidator
 
                 try
                 {
-                    bool isFinalBlock = source.LengthSettled && offset + window.Length >= available;
+                    bool isFinalBlock = settled && offset + window.Length >= available;
                     var reader = new Utf8JsonReader(window, isFinalBlock, state);
 
                     while (reader.Read())
@@ -96,7 +100,7 @@ internal static class JsonDocumentValidator
                             continue;
                         }
 
-                        if (!source.LengthSettled)
+                        if (!settled)
                         {
                             source.WaitForLength(available + 1, cancellationToken);
                             continue;

@@ -58,10 +58,11 @@ public static class LineRangeLocator
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
+                bool settled = source.LengthSettled; // before the length: see FileOffsetIndex.ProduceAnchors
                 long available = source.AvailableLength;
                 if (offset >= available)
                 {
-                    if (source.LengthSettled)
+                    if (settled)
                         break;
 
                     source.WaitForLength(offset + 1, cancellationToken);

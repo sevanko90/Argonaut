@@ -1,0 +1,41 @@
+name: Test
+
+# The test suite on the two platforms the app ships to and that behave differently underneath it:
+# Windows cannot replace a file while a mapping of it is open (saves), and macOS and Windows round
+# a mapping's capacity differently (MMapFile). A pass on one says little about the other.
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build
+        run: dotnet build Argonaut.Tests/Argonaut.Tests.csproj -c Release
+      - name: Test
+        run: dotnet test Argonaut.Tests/Argonaut.Tests.csproj -c Release --no-build --logger "trx;LogFileName=results.trx" --results-directory TestResults
+      - name: Upload results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.os }}
+          path: TestResults

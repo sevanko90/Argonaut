@@ -1,0 +1,4 @@
+# C# sources are LF on every platform. Raw string literals take the file's line endings, so a test
+# fixture written as one would hold \r\n on a Windows checkout (git's default autocrlf) and no
+# longer match the \n its assertions search for.
+*.cs text eol=lf

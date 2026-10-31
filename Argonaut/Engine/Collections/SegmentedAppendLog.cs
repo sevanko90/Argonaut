@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.CompilerServices;
 using System.Threading;
 
 namespace Argonaut.Engine.Collections;
@@ -34,9 +35,32 @@ namespace Argonaut.Engine.Collections;
 /// </summary>
 public sealed class SegmentedAppendLog<T> where T : struct
 {
-    private const int SegmentShift = 13;
-    private const int SegmentSize = 1 << SegmentShift; // 8192 items per segment
-    private const int SegmentMask = SegmentSize - 1;
+    // Segments are sized in bytes, not items: about 12-16 KiB whatever T is. A fixed item count
+    // made the first append of a 48-byte record buy 384 KiB, on the large object heap, for an
+    // index that may only ever hold one item. 16 KiB keeps every segment well under the LOH's
+    // 85,000 bytes and still needs only tens of segments for a 1 GiB document's index.
+    //
+    // T is constrained to a struct, so every T gets its own compiled code and Unsafe.SizeOf<T>()
+    // is a JIT-time constant: the switch folds away and the shift is as constant as a const.
+    private static int SegmentShift
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => Unsafe.SizeOf<T>() switch
+        {
+            <= 8 => 11,   // 2,048 items
+            <= 16 => 10,  // 1,024
+            <= 32 => 9,   // 512
+            <= 64 => 8,   // 256
+            <= 128 => 7,  // 128
+            _ => 6,       // 64
+        };
+    }
+
+    private static int SegmentSize => 1 << SegmentShift;
+    private static int SegmentMask => SegmentSize - 1;
+
+    /// <summary>The bytes of one segment's items: what the first append allocates.</summary>
+    internal static int SegmentBytes => SegmentSize * Unsafe.SizeOf<T>();
 
     // The table is grown by copy-and-swap (never resized in place) so concurrent readers
     // keep a coherent table; the segment arrays it points to never move, so refs handed

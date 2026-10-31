@@ -231,11 +231,14 @@ public sealed class JsonSparseIndex : ITreeIndex
             cancellationToken.ThrowIfCancellationRequested();
 
             // Re-read every turn, never snapshotted: over a streamed source it is only the end
-            // so far (see IByteSource.AvailableLength).
+            // so far (see IByteSource.AvailableLength). Settled first, then the length: read the
+            // other way round, a source that receives its last bytes and settles in between
+            // would end the scan, and publish a complete index, with them unread.
+            bool settled = source.LengthSettled;
             long available = source.AvailableLength;
             if (offset >= available)
             {
-                if (source.LengthSettled)
+                if (settled)
                     break;
 
                 builder.Advance(offset);
@@ -267,7 +270,7 @@ public sealed class JsonSparseIndex : ITreeIndex
                     ProcessBlock(gathered, masks, offset);
                     offset += JsonBlockClassifier.BlockSize;
                 }
-                else if (source.LengthSettled)
+                else if (settled)
                 {
                     // The document's last partial block, padded with whitespace, which opens
                     // and closes nothing.

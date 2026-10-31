@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 
 namespace Argonaut.Engine.Locations;
 
@@ -66,8 +67,8 @@ public sealed class ConfigLocationSource : IConfigLocationSource
 
             case ConfigPlatform.MacOs:
                 Offer("Config", XdgConfigHome());
-                Offer("Application Support", Path.Combine(homeFolder, "Library", "Application Support"));
-                Offer("Preferences", Path.Combine(homeFolder, "Library", "Preferences"));
+                Offer("Application Support", Join(homeFolder, "Library", "Application Support"));
+                Offer("Preferences", Join(homeFolder, "Library", "Preferences"));
                 Offer("System config", "/etc");
                 break;
 
@@ -80,11 +81,18 @@ public sealed class ConfigLocationSource : IConfigLocationSource
         return found;
     }
 
-    // XDG_CONFIG_HOME applies when set and absolute, otherwise the spec's ~/.config.
+    // XDG_CONFIG_HOME applies when set and absolute, otherwise the spec's ~/.config. Only the
+    // Unix layouts use it, so absolute means starting with '/', whatever the host.
     private string XdgConfigHome() =>
-        environmentVariable("XDG_CONFIG_HOME") is { } configured && Path.IsPathRooted(configured)
+        environmentVariable("XDG_CONFIG_HOME") is { } configured && configured.StartsWith('/')
             ? configured
-            : Path.Combine(homeFolder, ".config");
+            : Join(homeFolder, ".config");
+
+    // Paths are joined with the target platform's separator, not the host's: Path.Combine on
+    // Windows would put backslashes in a macOS or Linux layout.
+    private string Join(params string[] parts) => platform == ConfigPlatform.Windows
+        ? Path.Combine(parts)
+        : string.Join('/', parts.Select((part, i) => i == 0 ? part.TrimEnd('/') : part.Trim('/')));
 
     private StringComparer PathComparer =>
         platform == ConfigPlatform.Linux ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase;

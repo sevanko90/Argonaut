@@ -18,6 +18,8 @@ internal sealed class GrowingByteSource : IByteSource
     private readonly object gate = new();
     private long available;
     private bool settled;
+    private bool settleOnNextLengthRead;
+    private bool wakeWaiterOnce;
 
     public GrowingByteSource(byte[] all, long initiallyAvailable = 0)
     {
@@ -27,7 +29,41 @@ internal sealed class GrowingByteSource : IByteSource
 
     public long AvailableLength
     {
-        get { lock (this.gate) return this.available; }
+        get
+        {
+            lock (this.gate)
+            {
+                long seen = this.available;
+                if (this.settleOnNextLengthRead)
+                {
+                    // Reports the length as it stood, then the rest arrives and the source settles
+                    // before the caller's next read - see SettleBehindTheNextLengthRead.
+                    this.settleOnNextLengthRead = false;
+                    this.available = this.all.Length;
+                    this.settled = true;
+                    Monitor.PulseAll(this.gate);
+                }
+
+                return seen;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The next <see cref="AvailableLength"/> read returns the length as it stands, and the rest
+    /// arrives and the source settles straight after it: a download finishing between a scan's
+    /// read of the length and its read of <see cref="LengthSettled"/>. A scan that reads them in
+    /// that order sees an old length with a settled flag and takes the old length for the end. Wakes
+    /// a scan blocked in <see cref="WaitForLength"/> once, so it makes that read now.
+    /// </summary>
+    public void SettleBehindTheNextLengthRead()
+    {
+        lock (this.gate)
+        {
+            this.settleOnNextLengthRead = true;
+            this.wakeWaiterOnce = true;
+            Monitor.PulseAll(this.gate);
+        }
     }
 
     public bool LengthSettled
@@ -78,6 +114,11 @@ internal sealed class GrowingByteSource : IByteSource
             while (this.available < atLeast && !this.settled)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (this.wakeWaiterOnce)
+                {
+                    this.wakeWaiterOnce = false;
+                    break;
+                }
 
                 // A bounded wait rather than an indefinite one so a cancelled scan cannot wedge
                 // a test run if it is cancelled between the check and the wait.

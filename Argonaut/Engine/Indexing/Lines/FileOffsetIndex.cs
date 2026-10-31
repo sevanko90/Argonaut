@@ -321,10 +321,13 @@ public sealed class FileOffsetIndex : AppendLogIndexBase<FileLineAnchor>, IBackg
                 // source it is only the end *so far*, and a loop that bounded itself by the
                 // value it saw at entry would stop there and then publish a complete index over
                 // a partial document (see IByteSource.AvailableLength).
+                // LengthSettled is read first: the other way round, a source that receives its
+                // last bytes and settles in between would end the scan with them unread.
+                bool settled = file.LengthSettled;
                 long available = file.AvailableLength;
                 if (offset >= available)
                 {
-                    if (file.LengthSettled)
+                    if (settled)
                         break;
 
                     file.WaitForLength(offset + 1, cancellationToken);

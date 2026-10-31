@@ -228,4 +228,77 @@ public class GrowingSourceIndexingTests
         var stopped = await Task.WhenAny(index.IndexingTask, Task.Delay(TimeSpan.FromSeconds(5)));
         Assert.Same(index.IndexingTask, stopped);
     }
+
+    // ---- Settling between a scan's two reads -------------------------------------------
+    //
+    // A scan must read LengthSettled before AvailableLength. The other way round, a source that
+    // receives its last bytes and settles between the two reads hands the scan an old length with
+    // a settled flag, and the scan takes the old length for the end of the document. The window is
+    // a few instructions wide, so it surfaced only as a Windows CI failure; these make it certain.
+
+    /// <summary>Lets the scan block at the end of what has arrived, then settles the source behind
+    /// its next read of the length.</summary>
+    private static void SettleWhileTheScanReadsTheLength(GrowingByteSource source)
+    {
+        Assert.True(SpinWait.SpinUntil(() => source.Waits > 0, TimeSpan.FromSeconds(10)), "the scan never reached the end of what had arrived");
+        source.SettleBehindTheNextLengthRead();
+    }
+
+    [Fact]
+    public async Task FileOffsetIndex_ASourceSettlingBetweenItsReads_IsIndexedToTheEnd()
+    {
+        byte[] payload = Encoding.UTF8.GetBytes(string.Join('\n', Enumerable.Range(0, 40).Select(i => $"line {i}")) + "\n");
+        var source = new GrowingByteSource(payload, initiallyAvailable: payload.Length / 2);
+
+        var index = FileOffsetIndex.StartIndexing(source);
+        SettleWhileTheScanReadsTheLength(source);
+        await index.IndexingTask;
+
+        Assert.Equal(40, index.LineCount);
+    }
+
+    [Fact]
+    public async Task RawSegmentIndex_ASourceSettlingBetweenItsReads_IsIndexedToTheEnd()
+    {
+        byte[] payload = Encoding.UTF8.GetBytes(string.Join('\n', Enumerable.Range(0, 400).Select(i => $"line {i}")) + "\n");
+        var source = new GrowingByteSource(payload, initiallyAvailable: payload.Length / 2);
+
+        var index = RawSegmentIndex.StartIndexing(source, 80);
+        SettleWhileTheScanReadsTheLength(source);
+        await index.IndexingTask;
+
+        var whole = RawSegmentIndex.StartIndexing(new MemoryByteSource(payload), 80);
+        await whole.IndexingTask;
+        Assert.Equal(whole.RowCount, index.RowCount);
+    }
+
+    [Fact]
+    public async Task JsonSparseIndex_ASourceSettlingBetweenItsReads_IsIndexedAndValidatedToTheEnd()
+    {
+        byte[] payload = Encoding.UTF8.GetBytes("[" + string.Join(",\n", Enumerable.Range(0, 4000).Select(i => $"{{\"id\":{i * 1001}}}")) + "]");
+        var source = new GrowingByteSource(payload, initiallyAvailable: payload.Length / 2);
+
+        var index = JsonSparseIndex.StartIndexing(source, promotionBytes: 256, checkpointBytes: 64);
+        SettleWhileTheScanReadsTheLength(source);
+        await index.IndexingTask;
+
+        var whole = JsonSparseIndex.StartIndexing(new MemoryByteSource(payload), promotionBytes: 256, checkpointBytes: 64);
+        await whole.IndexingTask;
+        Assert.Null(index.Failure);
+        Assert.True(index.Structure.IsComplete);
+        Assert.Equal(whole.Structure.CheckpointCount, index.Structure.CheckpointCount);
+    }
+
+    [Fact]
+    public void JsonDocumentValidator_ASourceSettlingBetweenItsReads_DoesNotParseTheOldLengthAsTheEnd()
+    {
+        // Cut mid-number, so a window ending at the old length parsed as the final block is invalid.
+        byte[] payload = Encoding.UTF8.GetBytes("[" + string.Join(",", Enumerable.Range(0, 2000).Select(i => (i * 1001).ToString())) + "]");
+        int cut = Array.IndexOf(payload, (byte)',', payload.Length / 2) - 2;
+        var source = new GrowingByteSource(payload, initiallyAvailable: cut);
+
+        source.SettleBehindTheNextLengthRead();
+
+        Assert.Null(JsonDocumentValidator.FindFailure(source, CancellationToken.None));
+    }
 }

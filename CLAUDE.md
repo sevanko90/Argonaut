@@ -88,7 +88,14 @@ partial document. So:
   loops synchronous. Never call it from the UI thread. Anything a scan finalises at the end of the
   data - `FileOffsetIndex`'s trailing newline-less line, `RawSegmentIndex`'s last row, the JSON
   reader's `isFinalBlock` - is conditional on `LengthSettled`, or it freezes a partial answer into
-  an append-only index. `GrowingByteSource` in the tests is the only source that exercises this;
+  an append-only index.
+- **Read `LengthSettled` before `AvailableLength`**, every turn, and use those two values for the
+  turn. The other way round, a source that receives its last bytes and settles between the reads
+  hands the scan an old length with a settled flag, and the scan ends - or parses a final block -
+  at the old length. Six loops had it backwards; it surfaced only as a Windows CI failure.
+  `GrowingByteSource.SettleBehindTheNextLengthRead` makes the race deterministic in a test. And
+  where a step reads the source itself (a row advance), a length that moved since the step began
+  means doing the step again, not accepting where it stopped. `GrowingByteSource` in the tests is the only source that exercises this;
   every other one is settled from birth, so a regression here is invisible without it.
 - **A whole range comes from `ByteSourceReading.RequireContiguous`**, which returns exactly the
   range or throws - the contract the old `MMapFile.GetSpan` had, and over any single-buffer source

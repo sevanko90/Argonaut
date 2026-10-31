@@ -492,8 +492,10 @@ public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IBackgro
         // row to a scan that does tens of millions of them. Instead the pair is cached and
         // refreshed only when a row actually reaches the cached end - which for a settled source
         // (every source but a streamed one) happens exactly once, at the end of the data.
-        long available = this.source.AvailableLength;
+        // Settled first, then the length (see XmlIndexScan): read the other way round, a source
+        // that receives its last bytes and settles in between looks finished with them unread.
         bool settled = this.source.LengthSettled;
+        long available = this.source.AvailableLength;
 
         try
         {
@@ -504,8 +506,8 @@ public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IBackgro
 
                 if (cursor.Start >= available)
                 {
-                    available = this.source.AvailableLength;
                     settled = this.source.LengthSettled;
+                    available = this.source.AvailableLength;
                     if (cursor.Start >= available)
                     {
                         if (settled)
@@ -527,11 +529,21 @@ public sealed class RawSegmentIndex : AppendLogIndexBase<RawRowAnchor>, IBackgro
                 // because the rest has not arrived - its newline could be the next byte, or it
                 // could wrap further. This index is append-only with bucket anchors, so a row
                 // published at the wrong width can never be corrected: wait for more instead.
+                // The advance read the source itself, so if bytes arrived since the cached length
+                // was taken it may have ended the row where *it* saw the data end. Any change in
+                // the length means walking the row again over what is there now; only an
+                // unchanged length that has settled makes a row ending at it final.
                 if (end >= available && !settled)
                 {
-                    available = this.source.AvailableLength;
                     settled = this.source.LengthSettled;
-                    if (end >= available && !settled)
+                    long now = this.source.AvailableLength;
+                    if (now != available)
+                    {
+                        available = now;
+                        continue;
+                    }
+
+                    if (!settled)
                     {
                         this.source.WaitForLength(available + 1, cancellationToken);
                         continue;

@@ -1,4 +1,8 @@
 using Argonaut.Engine.Collections;
+using Argonaut.Engine.Indexing.Lines;
+using Argonaut.Engine.Indexing.Trees;
+using Argonaut.Features.Raw.Rows;
+using Argonaut.Features.Xml.Indexing;
 
 namespace Argonaut.Tests.Engine.Collections;
 
@@ -31,8 +35,8 @@ public class SegmentedAppendLogTests
     [Fact]
     public void ItemsSurviveSegmentBoundariesAndTableGrowth()
     {
-        // 300,000 items crosses many 8192-item segment boundaries and forces the initial
-        // 16-slot segment table to grow (16 * 8192 = 131,072) more than once.
+        // 300,000 ints crosses many 2,048-item segment boundaries and forces the initial
+        // 16-slot segment table to grow (16 * 2,048 = 32,768) several times.
         const int n = 300_000;
         var log = new SegmentedAppendLog<int>();
         for (int i = 0; i < n; i++)
@@ -104,5 +108,41 @@ public class SegmentedAppendLogTests
         await writer;
         await Task.WhenAll(readers);
         Assert.Equal(n, log.Count);
+    }
+
+    // Every index session pays one segment per log on its first append, however small the
+    // document. Sized by items (8,192), a ContainerSlot segment was 384 KiB on the large object
+    // heap; sized by bytes, every log's segment must stay a gen-0 allocation.
+    private const int LargeObjectThreshold = 85_000;
+
+    [Fact]
+    public void EveryIndexLogsSegment_StaysOffTheLargeObjectHeap()
+    {
+        int[] segments =
+        [
+            SegmentedAppendLog<SparseContainerIndex.ContainerSlot>.SegmentBytes,
+            SegmentedAppendLog<TreeCheckpoint>.SegmentBytes,
+            SegmentedAppendLog<FileLineAnchor>.SegmentBytes,
+            SegmentedAppendLog<RawRowAnchor>.SegmentBytes,
+            SegmentedAppendLog<long>.SegmentBytes,
+            XmlSiblingCounts.EntrySegmentBytes,
+        ];
+
+        Assert.All(segments, bytes => Assert.InRange(bytes, 8 * 1024, 16 * 1024));
+        Assert.All(segments, bytes => Assert.True(bytes < LargeObjectThreshold));
+    }
+
+    [Fact]
+    public void TheFirstAppend_AllocatesOneSmallSegment()
+    {
+        // Warm the JIT and the type's statics so only the log's own allocation is measured.
+        new SegmentedAppendLog<SparseContainerIndex.ContainerSlot>().Add(default);
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        var log = new SegmentedAppendLog<SparseContainerIndex.ContainerSlot>();
+        log.Add(default);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.InRange(allocated, SegmentedAppendLog<SparseContainerIndex.ContainerSlot>.SegmentBytes, 16 * 1024);
     }
 }

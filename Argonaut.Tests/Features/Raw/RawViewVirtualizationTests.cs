@@ -307,11 +307,11 @@ public sealed class RawViewVirtualizationTests : IDisposable
     /// A reveal asked for while the row it names does not exist yet must land once it does,
     /// rather than being applied once against a document that is still too short.
     ///
-    /// Driven through a wrap-width change, which is the deterministic way to get this state: it
-    /// restarts the index synchronously, so the row count drops to near zero and climbs again,
-    /// and a reveal issued in that window names a row that genuinely is not there. Waiting for a
-    /// background scan to still be running instead would be a race - a few MB indexes faster than
-    /// the test can reach the next line.
+    /// Driven through a wrap-width change, which restarts the index so the row count drops to
+    /// near zero and climbs again, over bytes that are held back until the reveal has been
+    /// issued: only the first 14,000 lines have arrived, which is at most 28,000 rows at wrap 80,
+    /// so the restarted scan cannot have reached the target however fast it runs. Over a file
+    /// whose bytes are all there, a few MB re-indexes faster than the test reaches the next line.
     /// </summary>
     [Fact]
     public Task ARevealIssuedBeforeTheRowExists_StillLands()
@@ -319,12 +319,14 @@ public sealed class RawViewVirtualizationTests : IDisposable
         var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(RawViewVirtualizationTests).Assembly);
         return session.Dispatch(async () =>
         {
+            const int arrivedLines = 14_000;
+            byte[] bytes = BigBytes();
+            var growing = new GrowingByteSource(bytes, initiallyAvailable: (long)arrivedLines * LineLength);
             var vm = new RawViewModel(new RawViewSettings());
             Window? window = null;
             try
             {
-                await vm.LoadAsync(WriteBigFile());
-                await vm.IndexingTask;
+                await vm.LoadAsync(new GrowingByteOrigin(growing));
 
                 var view = new RawView { DataContext = vm };
                 window = new Window { Width = 900, Height = 600, Content = view };
@@ -341,6 +343,7 @@ public sealed class RawViewVirtualizationTests : IDisposable
 
                 surface.RevealRow(target);
 
+                growing.Seal();
                 await vm.IndexingTask;
                 for (int i = 0; i < 20; i++)
                 {

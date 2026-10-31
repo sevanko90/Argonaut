@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Detection;
 using Argonaut.Engine.Collections;
 using Argonaut.Features.Raw.Rows;
 
@@ -49,11 +50,10 @@ public enum RawEditOutcome
 /// </summary>
 public sealed class RawEditController
 {
-    /// <summary>The line ending Enter inserts. Deliberately not the document's prevailing one:
-    /// this is the viewer that exists for files whose contents cannot be assumed about, and
-    /// guessing a convention from bytes that may be half binary would be a worse surprise than a
-    /// consistent LF the user can see in the gutter.</summary>
-    private static readonly byte[] NewLine = { (byte)'\n' };
+    /// <summary>The line ending Enter inserts: the document's own convention, as an editor follows
+    /// a file's, set by the document from its input's line endings - the platform's when the input
+    /// has none to follow. LF until set.</summary>
+    public LineEndingStyle NewLine { get; set; } = LineEndingStyle.Lf;
 
     private readonly RawEditJournal journal;
 
@@ -228,7 +228,7 @@ public sealed class RawEditController
     }
 
     /// <summary>Inserts a line break at the caret, replacing the selection if there is one.</summary>
-    public RawEditOutcome InsertNewLine() => Insert(NewLine);
+    public RawEditOutcome InsertNewLine() => Insert(LineEndingBytes.Of(NewLine));
 
     /// <summary>
     /// Inserts <paramref name="bytes"/> at the caret, replacing the selection if there is one.

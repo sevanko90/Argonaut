@@ -51,8 +51,15 @@ them). Keep this in sync when the ownership chain changes.
   are one: counted by the injected `ILineEndingDetector` (`Engine/Detection`) from the first 1 MB
   of each origin the shell adopts, so a view switch, which re-adopts the same origin, does not
   count again, and a comparison of two inputs shows none.
-- Each document view model owns its whole status line (initial, live indexing %, complete,
-  failed, and — NDJSON — selected-line), which the shell mirrors into the status bar.
+- Each document view model owns its detail through every state (initial, live indexing,
+  complete, failed, and — NDJSON — the selected line); the shell recomposes the line whenever it
+  changes.
+- **A document that writes line breaks implements `ILineEndingDocument`** (`Ui/Documents`; today
+  only `RawViewModel`). The shell hands it the count of its own input (`UseInputLineEndings`) - so
+  Enter inserts the prevailing break, the platform's (`LineEndingBytes.OperatingSystemDefault`)
+  when there is none to follow, and pasted CRLF/LF takes it too - and reads back the conversion
+  its next save will make (`PendingLineEnding`), which the indicator shows as `LF → CRLF`.
+  Conversion is offered from the Transform menu and by clicking the indicator.
 - **Per-view toolbars are injected, not type-switched.** `IDocumentViewModel.Toolbar` is
   `object?` — null for a document with no toolbar (CSV) — and `MainWindow.axaml` binds
   `DocumentToolbarArea.Content` straight to `CurrentDocument.Toolbar`, resolving it through
@@ -641,3 +648,10 @@ which stages beside the file, and every implementation must:
 - **Fail before writing** when the volume lacks room for the whole new file.
 - **Never delete a stage that may be the only copy.** `KeepStagedContent()` is called when a
   failed commit also left the original unreadable.
+
+A save that converts line endings (`ILineEndingConverter`, `Engine/Transforms`) streams the
+conversion into the stage instead of copying, through one pooled buffer - never a rewrite in
+memory, so a multi-GB document costs no more than any save. The stage is made for an exact length,
+so the converted length is measured first by a counting pass over the document, on the background
+and joined by disposal like the copy. The caret's offset is mapped through the conversion for the
+reopen; a failed or stopped save keeps the conversion pending with the edits.

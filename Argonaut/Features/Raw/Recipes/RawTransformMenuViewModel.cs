@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Threading.Tasks;
+using Argonaut.Engine.Detection;
 using Argonaut.Engine.Transforms;
 using Argonaut.Ui.Notifications;
 using Argonaut.Ui.ViewModels;
@@ -8,8 +9,9 @@ using Argonaut.Ui.ViewModels;
 namespace Argonaut.Features.Raw.Recipes;
 
 /// <summary>
-/// The raw toolbar's Transform menu: the built-in encodings, which apply at once, and the saved
-/// recipes, which apply at once or open in the recipe dialog. Every item replaces the whole
+/// The raw toolbar's Transform menu: the built-in encodings, which apply at once, the line-ending
+/// conversion, which the next save applies, and the saved recipes, which apply at once or open in
+/// the recipe dialog. Every item replaces the whole
 /// document as one undoable edit (<see cref="RawViewModel.ApplyRecipeAsync"/>,
 /// <see cref="RawViewModel.ApplyCodecAsync"/>) - undo is the preview for an encoding.
 ///
@@ -66,6 +68,14 @@ public sealed class RawTransformMenuViewModel : ObservableObject
         this.recipes is { } store && this.document.Document is { } bytes
             ? new RecipeEditorViewModel(store, bytes, initial)
             : null;
+
+    /// <summary>The kind of break the next save writes: a pending conversion's, or what the input
+    /// uses throughout; null when the input mixes them and nothing is pending.</summary>
+    public LineEndingStyle? SavedLineEnding => this.document.PendingLineEnding ?? this.document.InputLineEnding;
+
+    /// <summary>Has the next save write every line break as <paramref name="target"/>; see
+    /// <see cref="RawViewModel.ConvertLineEndingsOnSave"/>.</summary>
+    public void ConvertLineEndings(LineEndingStyle target) => this.document.ConvertLineEndingsOnSave(target);
 
     /// <summary>Applies what the dialog was closed with.</summary>
     public Task<bool> ApplyFromEditorAsync(RecipeEditorViewModel editor) =>

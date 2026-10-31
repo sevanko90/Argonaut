@@ -412,12 +412,27 @@
                             IsVisible="{Binding LineEndingLabel, Converter={x:Static ObjectConverters.IsNotNull}}" />
                     <TextBlock x:Name="LineEndingText"
                                Text="{Binding LineEndingLabel}"
-                               IsVisible="{Binding LineEndingLabel, Converter={x:Static ObjectConverters.IsNotNull}}"
+                               IsVisible="{Binding ShowsLineEndingText}"
                                ToolTip.Tip="{Binding LineEndingToolTip}"
                                FontSize="11"
                                Margin="0,0,10,0"
                                VerticalAlignment="Center"
                                Foreground="{DynamicResource AppMutedTextBrush}" />
+                    <!-- The same label on a document that can convert: clicking it offers LF / CRLF. -->
+                    <Button x:Name="LineEndingButton"
+                            Classes="tool"
+                            IsVisible="{Binding OffersLineEndingMenu}"
+                            Click="OnLineEndingClick"
+                            ToolTip.Tip="{Binding LineEndingToolTip}"
+                            FontSize="11"
+                            MinHeight="22"
+                            Height="22"
+                            Padding="6,0"
+                            Margin="0,0,4,0">
+                        <TextBlock Text="{Binding LineEndingLabel}"
+                                   VerticalAlignment="Center"
+                                   Foreground="{DynamicResource AppMutedTextBrush}" />
+                    </Button>
                     <ComboBox x:Name="ViewSwitcherComboBox"
                               IsVisible="{Binding IsFileOpen}"
                               ItemsSource="{Binding AvailableViews}"

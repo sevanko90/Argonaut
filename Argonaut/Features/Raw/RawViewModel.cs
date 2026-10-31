@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
@@ -46,7 +47,7 @@ namespace Argonaut.Features.Raw;
 /// (<see cref="RawIndexSession.StartPendingIndex"/>) and the edits move onto the finished scan in
 /// one step (<see cref="RawEditController.Rewrap"/>). Until then the view keeps its old width.
 /// </summary>
-public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable, ISaveableDocument
+public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable, ISaveableDocument, ILineEndingDocument
 {
     private const int InitialIndexedRowTarget = 250;
 
@@ -67,6 +68,21 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     private bool isSaving;
     private RawColourChoice colourChoice;
     private IRawLexer? autoLexer;
+
+    private readonly ILineEndingConverter lineEndingConverter;
+
+    /// <summary>The platform's convention, followed where the input gives nothing to follow.</summary>
+    private readonly LineEndingStyle defaultLineEnding;
+
+    /// <summary>The break new lines and pasted text use - the input's prevailing one once the shell
+    /// has counted it (<see cref="UseInputLineEndings"/>).</summary>
+    private LineEndingStyle lineEnding;
+
+    /// <summary>The kind of break the input uses throughout, if it uses only one - what a
+    /// conversion to that kind would leave as it is.</summary>
+    private LineEndingStyle? inputLineEnding;
+
+    private LineEndingStyle? pendingLineEnding;
 
     /// <summary>The width an edited document's background re-wrap is scanning for, or null when
     /// none is running. See <see cref="SetWrapWidth"/>.</summary>
@@ -107,8 +123,12 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     /// encodings.</param>
     /// <param name="launcher">Opens the links value hints offer; null opens none.</param>
     public RawViewModel(RawViewSettings settings, ProgressBoard? progressBoard = null, LineNumberingPreference? lineNumbers = null,
-        IRecipeStore? recipes = null, ISystemLauncher? launcher = null)
+        IRecipeStore? recipes = null, ISystemLauncher? launcher = null,
+        ILineEndingConverter? lineEndingConverter = null, LineEndingStyle? defaultLineEnding = null)
     {
+        this.lineEndingConverter = lineEndingConverter ?? new LineEndingConverter();
+        this.defaultLineEnding = defaultLineEnding ?? LineEndingBytes.OperatingSystemDefault;
+        this.lineEnding = this.defaultLineEnding;
         this.settings = settings;
         this.recipes = recipes;
         this.launcher = launcher;
@@ -339,7 +359,11 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     public bool IsEditing
     {
         get => this.isEditing;
-        private set => SetField(ref this.isEditing, value);
+        private set
+        {
+            if (SetField(ref this.isEditing, value))
+                OnPropertyChanged(nameof(CanConvertLineEndings));
+        }
     }
 
     /// <summary>
@@ -354,9 +378,75 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     /// <summary>True once the document reads differently from the file on disk.</summary>
     public bool IsDirty => this.editor?.IsDirty == true;
 
-    /// <summary>See <see cref="ISaveableDocument.HasUnsavedChanges"/>; the same as
-    /// <see cref="IsDirty"/>, under the name the shell asks by.</summary>
-    public bool HasUnsavedChanges => IsDirty;
+    /// <summary>See <see cref="ISaveableDocument.HasUnsavedChanges"/>: edits, or a line-ending
+    /// conversion the next save will make - either way the file on disk is not what saving writes.</summary>
+    public bool HasUnsavedChanges => IsDirty || this.pendingLineEnding is not null;
+
+    /// <summary>The break a new line inserts - the input's convention, or the platform's when the
+    /// input has none to follow.</summary>
+    public LineEndingStyle LineEnding => this.lineEnding;
+
+    /// <inheritdoc />
+    public void UseInputLineEndings(LineEndingTally input)
+    {
+        this.inputLineEnding = input.Style is LineEndingStyle.Lf or LineEndingStyle.CrLf or LineEndingStyle.Cr ? input.Style : null;
+        this.lineEnding = input.Prevailing ?? this.defaultLineEnding;
+        if (this.editor is { } editor)
+            editor.NewLine = this.lineEnding;
+
+        OnPropertyChanged(nameof(LineEnding));
+        OnPropertyChanged(nameof(InputLineEnding));
+    }
+
+    /// <summary>The kind of break the input uses throughout, or null when it uses none or several.</summary>
+    public LineEndingStyle? InputLineEnding => this.inputLineEnding;
+
+    /// <summary>See <see cref="ILineEndingDocument.CanConvertLineEndings"/>: only in edit mode, as
+    /// for any other change - a document not being edited is read-only to the user - and otherwise
+    /// whenever it could be saved.</summary>
+    public bool CanConvertLineEndings => IsEditing && CanSave;
+
+    /// <inheritdoc />
+    public LineEndingStyle? PendingLineEnding => this.pendingLineEnding;
+
+    /// <inheritdoc />
+    public void ConvertLineEndingsOnSave(LineEndingStyle? target)
+    {
+        if (target is not (null or LineEndingStyle.Lf or LineEndingStyle.CrLf))
+            throw new ArgumentOutOfRangeException(nameof(target), target, "Line endings can be converted to LF or CRLF.");
+
+        if (target is not null && !CanConvertLineEndings)
+            return;
+
+        // Converting to what the input already uses throughout changes nothing: it cancels.
+        var wanted = target == this.inputLineEnding ? null : target;
+        if (wanted == this.pendingLineEnding)
+            return;
+
+        this.pendingLineEnding = wanted;
+
+        // Once converted, the document follows the kind of break it is being converted to.
+        this.lineEnding = wanted ?? (this.inputLineEnding ?? this.defaultLineEnding);
+        if (this.editor is { } editor)
+            editor.NewLine = this.lineEnding;
+
+        OnPropertyChanged(nameof(PendingLineEnding));
+        OnPropertyChanged(nameof(LineEnding));
+        OnPropertyChanged(nameof(HasUnsavedChanges));
+        OnPropertyChanged(nameof(EditStatusText));
+        StatusDetail = RowsDetail();
+    }
+
+    /// <summary>The status detail for the rows on screen: how many, and what saving would change.</summary>
+    private string RowsDetail()
+    {
+        string rows = $"{ContentRowCount:N0} rows";
+        if (IsDirty)
+            rows += " · edited, not saved";
+        if (this.pendingLineEnding is { } target)
+            rows += $" · line endings → {(target == LineEndingStyle.CrLf ? "CRLF" : "LF")} on save";
+        return rows;
+    }
 
     /// <summary>True while a save is writing the document out. Edits, re-wrapping and the edit
     /// toggle are all refused meanwhile: the copy is reading the piece table on the background,
@@ -373,6 +463,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
                 toolbar.CanChangeWrapWidth = !value;
 
             OnPropertyChanged(nameof(CanSave));
+            OnPropertyChanged(nameof(CanConvertLineEndings));
         }
     }
 
@@ -394,7 +485,9 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
 
     /// <summary>What the status gutter says about editing: nothing, or that there are unsaved
     /// changes.</summary>
-    public string EditStatusText => IsDirty ? "Edited — not saved" : string.Empty;
+    public string EditStatusText => IsDirty ? "Edited — not saved"
+        : this.pendingLineEnding is not null ? "Line endings change on save"
+        : string.Empty;
 
     /// <summary>
     /// Turns edit mode on or off. Turning it on for the first time builds the piece table and
@@ -455,7 +548,19 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     /// clipboard that offers UTF-8 directly reaches the document without a decode-and-re-encode
     /// round trip that would silently repair anything invalid in it.
     /// </summary>
-    public bool Paste(ReadOnlySpan<byte> bytes) => EditsPaused() || Report(this.editor is null ? null : this.editor.Insert(bytes));
+    public bool Paste(ReadOnlySpan<byte> bytes)
+    {
+        if (EditsPaused())
+            return true;
+
+        if (this.editor is not { } editor)
+            return false;
+
+        // Pasted text takes the document's line breaks, as in any editor.
+        var converted = new ArrayBufferWriter<byte>(Math.Max(1, bytes.Length));
+        this.lineEndingConverter.ConvertPaste(bytes, this.lineEnding, converted);
+        return Report(editor.Insert(converted.WrittenSpan));
+    }
 
     /// <summary>Backspace.</summary>
     public bool DeleteBackward() => EditsPaused() || Report(this.editor?.DeleteBackward());
@@ -489,7 +594,10 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         private set
         {
             if (SetField(ref this.isTransforming, value))
+            {
                 OnPropertyChanged(nameof(CanSave));
+                OnPropertyChanged(nameof(CanConvertLineEndings));
+            }
         }
     }
 
@@ -622,7 +730,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     private void BeginEditing()
     {
         var session = this.session!;
-        var editor = new RawEditController(session.Index, session.Bytes);
+        var editor = new RawEditController(session.Index, session.Bytes) { NewLine = this.lineEnding };
         editor.Changed += OnDocumentEdited;
         this.editor = editor;
 
@@ -682,7 +790,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         // it), so its own notification cannot be relied on to refresh what is under it.
         RefreshCaretReadout();
 
-        StatusDetail = $"{ContentRowCount:N0} rows · edited, not saved";
+        StatusDetail = RowsDetail();
     }
 
     private void SyncToolbarEditing()
@@ -1144,6 +1252,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         this.session?.DiscardPendingIndex();
         OnPropertyChanged(nameof(IsRewrapping));
         OnPropertyChanged(nameof(CanSave));
+        OnPropertyChanged(nameof(CanConvertLineEndings));
         return width;
     }
 
@@ -1166,6 +1275,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         this.pendingWrapWidth = bytes;
         OnPropertyChanged(nameof(IsRewrapping));
         OnPropertyChanged(nameof(CanSave));
+        OnPropertyChanged(nameof(CanConvertLineEndings));
 
         var progress = this.progressBoard.Begin($"Re-indexing {Path.GetFileName(FilePath)}");
         var scan = session.StartPendingIndex(bytes, progress, FindKeptAnchors(bytes));
@@ -1186,6 +1296,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         this.pendingWrapWidth = null;
         OnPropertyChanged(nameof(IsRewrapping));
         OnPropertyChanged(nameof(CanSave));
+        OnPropertyChanged(nameof(CanConvertLineEndings));
 
         if (!scan.AllItemsPublished || scan.Failure is not null)
         {
@@ -1213,7 +1324,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         Caret = editor.Caret;
 
         OnPropertyChanged(nameof(RowCount));
-        StatusDetail = IsDirty ? $"{ContentRowCount:N0} rows · edited, not saved" : $"{ContentRowCount:N0} rows";
+        StatusDetail = RowsDetail();
     }
 
     /// <summary>Opens <paramref name="origin"/> and starts scanning it, reading through a
@@ -1283,6 +1394,9 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
 
         string statusBefore = StatusDetail;
         long length = document.AvailableLength;
+        var conversion = this.pendingLineEnding;
+        long caretOffset = Caret?.Caret.Offset ?? 0;
+        long reopenedCaret = caretOffset;
 
         // A pending re-wrap scans the mapping the commit unmaps, so it is stopped and joined here,
         // alongside search (see "Saving" in docs/architecture.md). Its width is not lost: a save
@@ -1294,15 +1408,30 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         StagedFile? stagedOrNull = null;
         try
         {
-            stagedOrNull = replacer.Stage(destination, length);
-
             // Stopped by the user (stopping) or by the document closing (DisposeCore).
             var cts = CancellationTokenSource.CreateLinkedTokenSource(stopping);
             this.saveCts = cts;
+
+            // A conversion changes the length, and the stage is made for an exact length, so the
+            // converted length is counted first - a read of the document, on the background like
+            // the copy, and joined by disposal the same way.
+            if (conversion is { } target)
+            {
+                progress?.Report("Preparing");
+                var measuring = Task.Run(() => this.lineEndingConverter.MeasureOutput(document, target, cts.Token));
+                this.saveCopy = measuring;
+                length = await measuring;
+            }
+
+            stagedOrNull = replacer.Stage(destination, length);
             var stage = stagedOrNull;
             this.saveCopy = Task.Run(() =>
             {
-                document.WriteTo(stage.Content, progress, cts.Token);
+                if (conversion is { } target)
+                    reopenedCaret = this.lineEndingConverter.WriteConverted(document, target, stage.Content, progress, cts.Token, caretOffset);
+                else
+                    document.WriteTo(stage.Content, progress, cts.Token);
+
                 stage.Seal();
             });
 
@@ -1354,7 +1483,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         bool saved = false;
         try
         {
-            var result = CommitAndReopen(staged, destination, fileBytes, rewrapWanted);
+            var result = CommitAndReopen(staged, destination, fileBytes, rewrapWanted, reopenedCaret);
             saved = result.Outcome == DocumentSaveOutcome.Saved;
             if (!saved)
                 StatusDetail = statusBefore;
@@ -1382,7 +1511,8 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     /// while its mapping is gone: unmap, swap, and either reopen over the result or put the old
     /// mapping back.
     /// </summary>
-    private DocumentSaveResult CommitAndReopen(StagedFile staged, IByteOrigin destination, RemappableByteSource fileBytes, int? rewrapWanted)
+    private DocumentSaveResult CommitAndReopen(StagedFile staged, IByteOrigin destination, RemappableByteSource fileBytes,
+        int? rewrapWanted, long caretOffset)
     {
         var origin = Origin!;
         long mappedLength = fileBytes.AvailableLength;
@@ -1415,22 +1545,22 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         // Before reopening: a small file can finish its fresh scan synchronously inside
         // ReopenOver, and resuming edit mode from there must not find a save still running.
         IsSaving = false;
-        ReopenOver(destination, rewrapWanted);
+        ReopenOver(destination, rewrapWanted, caretOffset);
         return DocumentSaveResult.Saved;
     }
 
     /// <summary>
     /// Replaces everything this document reads with a fresh scan of <paramref name="destination"/>,
     /// which now holds exactly what was on screen - so the edits, the undo history and the piece
-    /// table are all retired, and the caret goes back to the same byte offset, which means the same
-    /// place in the saved file as it did in the edited document.
+    /// table are all retired, and the caret goes back to <paramref name="caretOffset"/>: the same
+    /// place in the saved file as it was in the edited document - its offset unchanged, or, when the
+    /// save converted the line endings, where the conversion moved it to.
     ///
     /// Everything is swapped before anything is announced: the outgoing session reads a mapping
     /// that is already gone, and a property notification is what would make the view read it.
     /// </summary>
-    private void ReopenOver(IByteOrigin destination, int? rewrapWanted)
+    private void ReopenOver(IByteOrigin destination, int? rewrapWanted, long caretOffset)
     {
-        long caretOffset = Caret?.Caret.Offset ?? 0;
         bool wasEditing = IsEditing;
 
         if (this.editor is { } editor)
@@ -1456,6 +1586,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         retiredSession?.Dispose();
 
         this.isEditing = false;
+        this.pendingLineEnding = null; // written into the file now
         Origin = destination;
         PlaceAcrossRewrap = null; // a reopen puts the caret back with a reveal instead
         IndexGeneration++;
@@ -1479,8 +1610,10 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         OnPropertyChanged(nameof(IsDirty));
         OnPropertyChanged(nameof(HasUnsavedChanges));
         OnPropertyChanged(nameof(EditStatusText));
+        OnPropertyChanged(nameof(PendingLineEnding));
         OnPropertyChanged(nameof(CanEdit));
         OnPropertyChanged(nameof(CanSave));
+        OnPropertyChanged(nameof(CanConvertLineEndings));
 
         StatusDetail = $"saved · {ContentRowCount:N0} rows indexed so far";
         MonitorIndexing();
@@ -1557,6 +1690,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
 
         OnPropertyChanged(nameof(CanEdit));
         OnPropertyChanged(nameof(CanSave));
+        OnPropertyChanged(nameof(CanConvertLineEndings));
 
         // The last growth tick can land before the final rows are published; the view hears the
         // total here, which is also what lets a place waiting on the end of the scan settle.

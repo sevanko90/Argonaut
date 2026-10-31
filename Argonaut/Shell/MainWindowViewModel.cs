@@ -119,6 +119,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private IByteOrigin? lineEndingsOrigin;
     private CancellationTokenSource? lineEndingsStop;
     private Task lineEndingsDetecting = Task.CompletedTask;
+    private LineEndingTally? lineEndingsTally;
     private string? lineEndingLabel;
     private string? lineEndingToolTip;
     private string title = DefaultTitle;
@@ -258,6 +259,28 @@ public sealed class MainWindowViewModel : ObservableObject
         private set => SetField(ref lineEndingToolTip, value);
     }
 
+    /// <summary>Whether the current document can have its line endings converted - one that writes
+    /// line breaks (<see cref="ILineEndingDocument"/>) and can be saved now.</summary>
+    public bool CanConvertLineEndings => currentDocument is ILineEndingDocument { CanConvertLineEndings: true };
+
+    /// <summary>The kind of break the next save writes: a pending conversion's, or what the input
+    /// uses throughout. What the indicator's menu marks as chosen.</summary>
+    public LineEndingStyle? SavedLineEnding => this.lineEndingsTally?.Style switch
+    {
+        _ when (currentDocument as ILineEndingDocument)?.PendingLineEnding is { } pending => pending,
+        LineEndingStyle.Lf or LineEndingStyle.CrLf or LineEndingStyle.Cr => this.lineEndingsTally?.Style,
+        LineEndingStyle.None => (currentDocument as ILineEndingDocument)?.LineEnding,
+        _ => null,
+    };
+
+    /// <summary>Has the current document's next save write every break as <paramref name="target"/>;
+    /// choosing what the input already uses cancels a pending conversion.</summary>
+    public void ConvertLineEndings(LineEndingStyle target)
+    {
+        if (currentDocument is ILineEndingDocument { CanConvertLineEndings: true } document)
+            document.ConvertLineEndingsOnSave(target);
+    }
+
     /// <summary>The status line for <paramref name="document"/>: where it is, then what its view says.</summary>
     private static string ComposeStatus(IDocumentViewModel document)
         => DocumentStatusLine.Compose(document.FilePath, document.StatusDetail);
@@ -274,8 +297,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
         StopLineEndingDetection();
         this.lineEndingsOrigin = origin;
-        LineEndingLabel = null;
-        LineEndingToolTip = null;
+        this.lineEndingsTally = null;
+        RefreshLineEndingLabel();
         if (origin is null)
             return;
 
@@ -305,9 +328,43 @@ public sealed class MainWindowViewModel : ObservableObject
         if (stopping.IsCancellationRequested || !ReferenceEquals(origin, this.lineEndingsOrigin))
             return;
 
-        LineEndingLabel = LineEndingText.Label(tally);
-        LineEndingToolTip = LineEndingText.Describe(tally);
+        this.lineEndingsTally = tally;
+        HandLineEndingsTo(currentDocument);
+        RefreshLineEndingLabel();
     }
+
+    /// <summary>Gives a document that writes line breaks the count of its own input, so it follows
+    /// that convention - only when the count is of the input it reads.</summary>
+    private void HandLineEndingsTo(IDocumentViewModel? document)
+    {
+        if (document is ILineEndingDocument writer && this.lineEndingsTally is { } tally
+            && ReferenceEquals(document.Origin, this.lineEndingsOrigin))
+            writer.UseInputLineEndings(tally);
+    }
+
+    /// <summary>The indicator: the input's line endings, and the conversion the next save makes.</summary>
+    private void RefreshLineEndingLabel()
+    {
+        var writer = currentDocument as ILineEndingDocument;
+        var pending = writer?.PendingLineEnding;
+
+        // A document with no breaks yet - a new one - has nothing counted to show, but it does have
+        // the break its new lines will use.
+        LineEndingStyle? newLines = this.lineEndingsTally is { Style: LineEndingStyle.None } ? writer?.LineEnding : null;
+        LineEndingLabel = LineEndingText.Label(this.lineEndingsTally, pending, newLines);
+        LineEndingToolTip = LineEndingText.Describe(this.lineEndingsTally, pending, newLines);
+        OnPropertyChanged(nameof(SavedLineEnding));
+        OnPropertyChanged(nameof(CanConvertLineEndings));
+        OnPropertyChanged(nameof(OffersLineEndingMenu));
+        OnPropertyChanged(nameof(ShowsLineEndingText));
+    }
+
+    /// <summary>The indicator is a menu of conversions: there is something to show, and the
+    /// document can convert.</summary>
+    public bool OffersLineEndingMenu => LineEndingLabel is not null && CanConvertLineEndings;
+
+    /// <summary>The indicator is plain text: there is something to show, and nothing to convert.</summary>
+    public bool ShowsLineEndingText => LineEndingLabel is not null && !CanConvertLineEndings;
 
     /// <summary>Asks a count in flight to stop; returns at once and joins nothing.</summary>
     private void StopLineEndingDetection()
@@ -1754,6 +1811,7 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             document.PropertyChanged += OnDocumentPropertyChanged;
             StatusText = ComposeStatus(document);
+            HandLineEndingsTo(document);
             FileName = Path.GetFileName(path!);
             Title = document.WindowTitle ?? $"{DefaultTitle} — {FileName}";
             SelectedView = DocumentViewCatalog.Options.FirstOrDefault(o => o.Kind == kind);
@@ -1771,6 +1829,7 @@ public sealed class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(CanCompare));
         NotifyFailurePropertiesChanged();
         NotifySavePropertiesChanged();
+        RefreshLineEndingLabel();
     }
 
     private void NotifyFailurePropertiesChanged()
@@ -1796,6 +1855,10 @@ public sealed class MainWindowViewModel : ObservableObject
 
         if (e.PropertyName is null or nameof(ISaveableDocument.HasUnsavedChanges) or nameof(ISaveableDocument.CanSave))
             NotifySavePropertiesChanged();
+
+        if (e.PropertyName is null or nameof(ILineEndingDocument.PendingLineEnding) or nameof(ILineEndingDocument.CanConvertLineEndings)
+            or nameof(ILineEndingDocument.LineEnding))
+            RefreshLineEndingLabel();
 
         if (e.PropertyName is (null or nameof(IDocumentViewModel.IndexFailure)) && currentDocument!.IndexFailure is { } failure)
         {

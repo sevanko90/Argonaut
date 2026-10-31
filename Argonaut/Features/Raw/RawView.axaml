@@ -46,7 +46,7 @@
             <editing:RawEditOverview x:Name="EditOverview"
                                  Grid.Row="0"
                                  Grid.Column="2"
-                                 Width="8"
+                                 Width="12"
                                  IsVisible="False"
                                  MarkBrush="{DynamicResource AppEditMarkBrush}" />
 

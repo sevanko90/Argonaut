@@ -1,8 +1,11 @@
 using System;
+using System.Linq;
 using System.ComponentModel;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.VisualTree;
+using Avalonia.Controls.Primitives;
 using Avalonia.Reactive;
 using Avalonia.Threading;
 using Argonaut.Engine.Hints;
@@ -41,6 +44,7 @@ public partial class RawView : UserControl
         ActualThemeVariantChanged += OnThemeChanged;
         scrollBars = new RowScrollBars(Surface, VerticalScrollBar, PanScrollBar);
         EditOverview.EditChosen += OnEditChosen;
+        VerticalScrollBar.LayoutUpdated += OnScrollBarLaidOut;
         Surface.HintClicked += OnHintClicked;
         Surface.MarkHovered += OnMarkHovered;
         MarkChip.Click += OnMarkChipClick;
@@ -242,6 +246,7 @@ public partial class RawView : UserControl
         scrollBars.Dispose();
         ActualThemeVariantChanged -= OnThemeChanged;
         EditOverview.EditChosen -= OnEditChosen;
+        VerticalScrollBar.LayoutUpdated -= OnScrollBarLaidOut;
         DataContextChanged -= OnDataContextChanged;
         fontResourceSubscription.Dispose();
 
@@ -256,6 +261,28 @@ public partial class RawView : UserControl
         // drive (e.g. window close); the shell disposes the outgoing document before the swap.
         if (DataContext is IDisposable d)
             d.Dispose();
+    }
+
+    /// <summary>
+    /// Keeps the edit overview on the scrollbar's scale: it spans the scrollbar's track, inset by
+    /// the arrow buttons either side, so a mark sits level with where the thumb would show that
+    /// part of the document. Read from the laid-out track rather than assumed, because the arrows'
+    /// size is the theme's; when the scrollbar is hidden there is nothing to line up with.
+    /// </summary>
+    private void OnScrollBarLaidOut(object? sender, EventArgs e)
+    {
+        var margin = default(Thickness);
+        if (VerticalScrollBar.IsVisible
+            && VerticalScrollBar.GetVisualDescendants().OfType<Track>().FirstOrDefault() is { } track
+            && track.TranslatePoint(default, VerticalScrollBar) is { } trackTop)
+        {
+            double below = VerticalScrollBar.Bounds.Height - trackTop.Y - track.Bounds.Height;
+            margin = new Thickness(0, trackTop.Y, 0, Math.Max(0, below));
+        }
+
+        // Only on a change: setting it lays out again, which raises this again.
+        if (EditOverview.Margin != margin)
+            EditOverview.Margin = margin;
     }
 
     /// <summary>

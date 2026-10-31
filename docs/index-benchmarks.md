@@ -4,6 +4,9 @@ What indexing costs for each kind of document - speed, allocation, peak memory, 
 index keeps, and whether anything is left behind once it is released - measured run after run, so
 an improvement or a regression shows up against what came before. Newest run first.
 
+Small documents are where a fixed per-session cost shows: see
+[index-fixed-cost.md](index-fixed-cost.md) for the 1, 16 and 256 MiB runs and what they found.
+
 ## Running it
 
 ```sh

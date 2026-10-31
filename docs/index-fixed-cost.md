@@ -262,9 +262,9 @@ gen 0, none on the LOH.
 
 1. **The XML `Index kept` column reads ~103 KiB above both `Allocated` and `Peak heap`, at every
    size** (964.1/964.5 KiB kept vs 861.5 KiB allocated and 889.1 KiB peak). It is constant, it is
-   XML-only, and the computed 832.1 KiB plus 29.4 KiB of scan scratch does not explain it. Likely
-   LOH accounting in `GC.GetTotalMemory`, but it is not proven. If it disappears once no segment
-   is on the LOH, that is the answer.
+   XML-only, and the computed 832.1 KiB plus 29.4 KiB of scan scratch does not explain it.
+   *Answered under [Result](#result): `GC.GetTotalMemory` double-counts small-object-heap
+   survivors on .NET 10 on macOS.*
 2. **Gen-2 frequency.** The harness does three cycles per process and sees none; the build
    benchmark does eight builds and sees one every ~six. With no LOH segments left it should be
    zero either way.
@@ -355,10 +355,18 @@ inside BenchmarkDotNet's error bars.
 | RecordRoot | 859.77 KB | 111.66 KB | 200 | - |
 | TextHeavy | 859.60 KB | 111.41 KB | 219 | - |
 
-**Open question 1 answered, partly.** On this machine the XML 1 MiB *Index kept* (74.3 KB) sits
-below *Allocated* (135.9 KB) and *Peak heap*, as every other row does, so the ~103 KiB excess no
-longer appears. Before the change it did not appear here either (834.1 kept vs 901.8 allocated), so
-it may be specific to the M5 run rather than to the LOH.
+**Open question 1 answered.** The ~103 KiB excess in XML's *Index kept* was `GC.GetTotalMemory`
+counting small-object-heap survivors of a full collection twice on .NET 10 on macOS - XML's two
+`long` logs were its only segments under the large object threshold. Once every segment was
+small, the M5's first pass after this change read *Index kept* at double *Allocated* for every
+document; a standalone program reproduces it (401 KB live reads as 802 KB) while
+`GC.GetGCMemoryInfo` reports 401 KB. The harness now reads kept and left-after-release from the
+collection's record of the heap.
+
+**Confirmed on the M5** (2026-10-31, `2e54969`, the machine every earlier run used): 1 GiB
+*Index kept* JsonRecords 401.4 KB, Xml 1.0 MB, Csv 257.7 KB, Text 2.4 MB; at 1 MiB JSON 28.5 KB,
+XML 74.3 KB, CSV/NDJSON/Text 17.5 KB. Speeds inside the previous run's ranges except CSV/NDJSON,
+1-3% under. Full tables in [index-benchmarks.md](index-benchmarks.md).
 
 **The 1 GiB allocation gap was the harness.** This VM first reported far more allocation at 1 GiB
 than the M5, before and after alike (JsonRecords 8.0 / 8.7 MB against 775 KB), at a steady

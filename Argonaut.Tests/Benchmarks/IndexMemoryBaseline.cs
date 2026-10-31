@@ -154,8 +154,7 @@ public static class IndexMemoryBaseline
         // Warm-up: every code path of this kind jitted and every type loaded before measuring.
         Measure(kind, warmup);
 
-        FullCollect();
-        long baselineHeap = GC.GetTotalMemory(forceFullCollection: true);
+        long baselineHeap = LiveHeap();
         long baselineWorkingSet = Environment.WorkingSet;
 
         var cycles = new List<Cycle>();
@@ -174,8 +173,7 @@ public static class IndexMemoryBaseline
         // Measured here, not inside IndexAndRelease: there the session and its index would still
         // be locals of a live frame, and a collection could not tell a leak from the harness
         // holding them.
-        FullCollect();
-        return cycle with { AfterRelease = GC.GetTotalMemory(forceFullCollection: true) - baselineHeap };
+        return cycle with { AfterRelease = LiveHeap() - baselineHeap };
     }
 
     /// <summary>Sampler ticks (about a millisecond each) between working-set reads.</summary>
@@ -187,6 +185,7 @@ public static class IndexMemoryBaseline
     private static Cycle IndexAndRelease(Kind kind, string path, long baselineHeap)
     {
         FullCollect();
+        long peakBaseline = GC.GetTotalMemory(forceFullCollection: false);
         int gen0 = GC.CollectionCount(0), gen1 = GC.CollectionCount(1), gen2 = GC.CollectionCount(2);
         long allocatedBefore = GC.GetTotalAllocatedBytes(precise: true);
 
@@ -226,12 +225,11 @@ public static class IndexMemoryBaseline
         int collections0 = GC.CollectionCount(0) - gen0, collections1 = GC.CollectionCount(1) - gen1, collections2 = GC.CollectionCount(2) - gen2;
 
         // What the finished index keeps, the session still open.
-        FullCollect();
-        long retained = GC.GetTotalMemory(forceFullCollection: true) - baselineHeap;
+        long retained = LiveHeap() - baselineHeap;
         long count = items();
         session.Dispose();
 
-        return new Cycle(stopwatch.Elapsed.TotalSeconds, allocated, peakHeap - baselineHeap, peakWorkingSet, retained,
+        return new Cycle(stopwatch.Elapsed.TotalSeconds, allocated, peakHeap - peakBaseline, peakWorkingSet, retained,
             AfterRelease: 0, collections0, collections1, collections2, count);
     }
 
@@ -277,6 +275,20 @@ public static class IndexMemoryBaseline
     private sealed class Owned(Action release) : IDisposable
     {
         public void Dispose() => release();
+    }
+
+    /// <summary>
+    /// Live managed bytes after a full compacting collection, as that collection recorded them.
+    /// Not <c>GC.GetTotalMemory</c>: on .NET 10 on macOS it reports small-object-heap survivors
+    /// of a full collection twice (400 KB of live 16 KB arrays read as 802 KB), which once every
+    /// index segment fitted under the large object threshold made <i>Index kept</i> read double
+    /// <i>Allocated</i>. The collection's own record of the heap does not.
+    /// </summary>
+    private static long LiveHeap()
+    {
+        FullCollect();
+        var collection = GC.GetGCMemoryInfo(GCKind.FullBlocking);
+        return collection.HeapSizeBytes - collection.FragmentedBytes;
     }
 
     private static void FullCollect()

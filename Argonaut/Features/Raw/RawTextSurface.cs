@@ -1865,9 +1865,15 @@ public class RawTextSurface : RowSurface
     /// still short of that row, and the host can clamp the offset against an extent that has not
     /// caught up. Any input from the user abandons it - being yanked back to a search hit after
     /// scrolling away would be worse than the reveal never landing.
+    ///
+    /// It replaces a place still waiting from <see cref="KeepPlace"/>: the newest intent owns the
+    /// viewport, so at most one of the two is pending. Otherwise a reveal and an older place that
+    /// become landable in the same growth step would both land, and the place would undo the
+    /// reveal.
     /// </summary>
     public void RevealRow(int rowIndex)
     {
+        this.pendingPlace = null;
         this.pendingRevealRow = rowIndex;
         ApplyPendingReveal();
     }
@@ -1895,7 +1901,8 @@ public class RawTextSurface : RowSurface
             this.pendingRevealRow = null;
     }
 
-    /// <summary>A reveal in flight belongs to the app, not the user; their first input ends it.</summary>
+    /// <summary>A reveal or a kept place in flight belongs to the app, not the user; their first
+    /// input ends it.</summary>
     private void AbandonPendingReveal()
     {
         this.pendingRevealRow = null;
@@ -1908,8 +1915,16 @@ public class RawTextSurface : RowSurface
     /// rows below the top of the view. Not applied here - the rows the surface sees at the moment
     /// of the call may still be the old ones - but on the next layout or growth, like
     /// <see cref="RevealRow"/>, and abandoned by the user's first input in the same way.
+    ///
+    /// It replaces a reveal still waiting, as <see cref="RevealRow"/> replaces a place: the rows
+    /// are being replaced wholesale, so a pending reveal's row index was measured against rows
+    /// that are going away and would land on the wrong row.
     /// </summary>
-    public void KeepPlace(long offset, int screenRow) => this.pendingPlace = (offset, screenRow);
+    public void KeepPlace(long offset, int screenRow)
+    {
+        this.pendingRevealRow = null;
+        this.pendingPlace = (offset, screenRow);
+    }
 
     private void ApplyPendingPlace()
     {

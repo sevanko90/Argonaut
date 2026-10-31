@@ -307,11 +307,11 @@ public sealed class RawViewVirtualizationTests : IDisposable
     /// A reveal asked for while the row it names does not exist yet must land once it does,
     /// rather than being applied once against a document that is still too short.
     ///
-    /// Driven through a wrap-width change, which is the deterministic way to get this state: it
-    /// restarts the index synchronously, so the row count drops to near zero and climbs again,
-    /// and a reveal issued in that window names a row that genuinely is not there. Waiting for a
-    /// background scan to still be running instead would be a race - a few MB indexes faster than
-    /// the test can reach the next line.
+    /// Driven through a wrap-width change, which restarts the index so the row count drops to
+    /// near zero and climbs again, over bytes that are held back until the reveal has been
+    /// issued: only the first 14,000 lines have arrived, which is at most 28,000 rows at wrap 80,
+    /// so the restarted scan cannot have reached the target however fast it runs. Over a file
+    /// whose bytes are all there, a few MB re-indexes faster than the test reaches the next line.
     /// </summary>
     [Fact]
     public Task ARevealIssuedBeforeTheRowExists_StillLands()
@@ -319,12 +319,14 @@ public sealed class RawViewVirtualizationTests : IDisposable
         var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(RawViewVirtualizationTests).Assembly);
         return session.Dispatch(async () =>
         {
+            const int arrivedLines = 14_000;
+            byte[] bytes = BigBytes();
+            var growing = new GrowingByteSource(bytes, initiallyAvailable: (long)arrivedLines * LineLength);
             var vm = new RawViewModel(new RawViewSettings());
             Window? window = null;
             try
             {
-                await vm.LoadAsync(WriteBigFile());
-                await vm.IndexingTask;
+                await vm.LoadAsync(new GrowingByteOrigin(growing));
 
                 var view = new RawView { DataContext = vm };
                 window = new Window { Width = 900, Height = 600, Content = view };
@@ -341,6 +343,7 @@ public sealed class RawViewVirtualizationTests : IDisposable
 
                 surface.RevealRow(target);
 
+                growing.Seal();
                 await vm.IndexingTask;
                 for (int i = 0; i < 20; i++)
                 {
@@ -359,6 +362,89 @@ public sealed class RawViewVirtualizationTests : IDisposable
             }
         }, CancellationToken.None);
     }
+
+    private const int LineLength = 131; // "L00000000 " + 120 x's + '\n'
+
+    private static byte[] BigBytes()
+    {
+        var sb = new StringBuilder(40_000 * LineLength);
+        var line = new string('x', 120);
+        for (int i = 0; i < 40_000; i++)
+            sb.Append($"L{i:D8} ").Append(line).Append('\n');
+        return Encoding.UTF8.GetBytes(sb.ToString());
+    }
+
+    /// <summary>
+    /// A reveal issued while a kept place is still waiting (a search hit right after a re-wrap)
+    /// supersedes it, and the reverse: whichever was asked for last owns the viewport. Both are
+    /// made pending over rows that have not arrived yet, then the rows grow past both in one
+    /// step - so the first growth tick or layout finds both landable at once, which is the
+    /// ordering that let the older intent undo the newer one.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public Task TheNewerOfARevealAndAKeptPlace_OwnsTheViewportWhenBothLandTogether(bool revealIsNewer)
+    {
+        var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(RawViewVirtualizationTests).Assembly);
+        return session.Dispatch(async () =>
+        {
+            byte[] bytes = BigBytes();
+            var growing = new GrowingByteSource(bytes, initiallyAvailable: bytes.Length / 10);
+            var vm = new RawViewModel(new RawViewSettings());
+            Window? window = null;
+            try
+            {
+                await vm.LoadAsync(new GrowingByteOrigin(growing));
+
+                var view = new RawView { DataContext = vm };
+                window = new Window { Width = 900, Height = 600, Content = view };
+                window.Show();
+                await PumpAsync();
+                window.UpdateLayout();
+
+                var surface = SurfaceOf(window);
+                const int revealRow = 30_000;
+                const int placeRow = 20_000;
+                Assert.True(vm.RowCount < placeRow, $"expected the scan to be short of {placeRow}, was {vm.RowCount}");
+
+                if (revealIsNewer)
+                {
+                    surface.KeepPlace((long)placeRow * LineLength, 0);
+                    surface.RevealRow(revealRow);
+                }
+                else
+                {
+                    surface.RevealRow(revealRow);
+                    surface.KeepPlace((long)placeRow * LineLength, 0);
+                }
+
+                // Blocking on purpose: no dispatcher turn may run between the intents being
+                // issued and the rows growing past both, or a growth tick could land one of them
+                // alone. The scan runs on the thread pool and only posts to the UI thread, so
+                // waiting for it here cannot deadlock.
+                growing.Seal();
+                Assert.True(vm.IndexingTask.Wait(TimeSpan.FromSeconds(30)), "the scan should finish once sealed");
+
+                for (int i = 0; i < 10; i++)
+                {
+                    await PumpAsync();
+                    window.UpdateLayout();
+                }
+
+                Assert.True(vm.RowCount > revealRow, "the file should index to more rows than the reveal");
+                int expected = revealIsNewer ? revealRow : placeRow;
+                Assert.InRange(expected, surface.RealizedRowRange.First, surface.RealizedRowRange.Last);
+                return true;
+            }
+            finally
+            {
+                window?.Close();
+                vm.Dispose();
+            }
+        }, CancellationToken.None);
+    }
+
     /// <summary>
     /// A reveal centres its row rather than scraping it into the bottom edge: the target of a
     /// jump wants context on both sides, and the bottom line of a window is where the eye has to

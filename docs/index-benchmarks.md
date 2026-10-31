@@ -44,7 +44,9 @@ same machine; a new machine starts a new baseline.
 
 *Peak heap*, *Index kept* and *Left after release* are managed heap above the baseline taken
 before indexing - kept is after a full collection with the index still open, left after release
-is after closing it and collecting again (what a leak would show as). *Peak working set* is the
+is after closing it and collecting again (what a leak would show as). Both are read from the full
+collection's own record of the heap (`GC.GetGCMemoryInfo`), not `GC.GetTotalMemory`, which on
+.NET 10 on macOS counts small-object-heap survivors twice. *Peak working set* is the
 whole process and includes the file's mapped pages, clean and free to reclaim on macOS.
 
 Speed is warm-cache: each document is indexed straight after being written, so its pages are in
@@ -60,6 +62,7 @@ Index kept:
 
 | Run | Text | Csv | NdJson | JsonRecords | JsonTokenDense | JsonRecordsWithHashes | Xml |
 |---|---:|---:|---:|---:|---:|---:|---:|
+| 2026-10-31 `2e54969` segments sized in bytes | 2.4 MB | 257.7 KB | 257.9 KB | 401.4 KB | 401.3 KB | 404.5 KB | 1.0 MB |
 | 2026-10-28 `c335c87` XML view | 2.5 MB | 259.2 KB | 259.0 KB | 777.0 KB | 776.8 KB | 781.5 KB | 1.6 MB |
 | 2026-10-10 `2f5aaeb` UI spike check | 2.5 MB | 259.2 KB | 259.2 KB | 776.8 KB | 776.8 KB | 781.5 KB | - |
 | 2026-09-26 `07f5cf5` sparse line index | 2.5 MB | 259.2 KB | 259.0 KB | 776.8 KB | 777.3 KB | 781.6 KB | - |
@@ -69,12 +72,64 @@ Speed:
 
 | Run | Text | Csv | NdJson | JsonRecords | JsonTokenDense | JsonRecordsWithHashes | Xml |
 |---|---:|---:|---:|---:|---:|---:|---:|
+| 2026-10-31 `2e54969` segments sized in bytes | 6,254 MiB/s | 8,784 MiB/s | 9,095 MiB/s | 567 MiB/s | 442 MiB/s | 478 MiB/s | 902 MiB/s |
 | 2026-10-28 `c335c87` XML view | 6,302 MiB/s | 9,029 MiB/s | 9,126 MiB/s | 565 MiB/s | 433 MiB/s | 469 MiB/s | 908 MiB/s |
 | 2026-10-10 `2f5aaeb` UI spike check | 6,340 MiB/s | 9,086 MiB/s | 9,109 MiB/s | 563 MiB/s | 429 MiB/s | 472 MiB/s | - |
 | 2026-09-26 `07f5cf5` sparse line index | 5,864 MiB/s | 8,066 MiB/s | 8,098 MiB/s | 565 MiB/s | 420 MiB/s | 473 MiB/s | - |
 | 2026-09-26 `7b3e5e3` baseline | 5,701 MiB/s | 7,559 MiB/s | 7,771 MiB/s | 563 MiB/s | 435 MiB/s | 477 MiB/s | - |
 
 ## Runs
+
+### 2026-10-31 - segments sized in bytes (`2e54969`)
+
+`SegmentedAppendLog<T>` segments went from 8,192 items to about 16 KiB, so an index session's
+first append no longer buys up to 384 KiB per log on the large object heap
+([index-fixed-cost.md](index-fixed-cost.md)). The harness changed with it: the peak sampler no
+longer counts its own allocation, and *Index kept* / *Left after release* read the collection's
+record of the heap instead of `GC.GetTotalMemory`.
+
+- Machine: Apple M5, 32 GB, 10 cores
+- Runtime: .NET 10.0.5, macOS 27.0.1, Workstation GC
+- 3 processes per document.
+
+**1 GiB:**
+
+| Document | Indexer | Items | Time | Speed | Speed range | Allocated | Alloc / byte | GCs (0/1/2) | Peak heap | Peak working set | Index kept | Left after release (1st / last) |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Text | RawSegmentIndex (wrap 160) | 9,996,610 | 164 ms | 6,254 MiB/s | 6,225-6,294 | 2.4 MB | 0.0023 | 0/0/0 | 2.4 MB | 1.05 GB | 2.4 MB | 232 B / 464 B |
+| Csv | FileOffsetIndex | 6,414,338 | 117 ms | 8,784 MiB/s | 8,782-8,931 | 267.3 KB | 0.0003 | 0/0/0 | 296.9 KB | 1.05 GB | 257.7 KB | 232 B / 464 B |
+| NdJson | FileOffsetIndex | 6,262,785 | 113 ms | 9,095 MiB/s | 8,943-9,095 | 267.3 KB | 0.0003 | 0/0/0 | 296.9 KB | 1.05 GB | 257.9 KB | 232 B / 464 B |
+| JsonRecords | JsonSparseIndex | 16,370 | 1,805 ms | 567 MiB/s | 566-568 | 403.7 KB | 0.0004 | 0/0/0 | 437.7 KB | 1.06 GB | 401.4 KB | 232 B / 464 B |
+| JsonTokenDense | JsonSparseIndex | 16,384 | 2,319 ms | 442 MiB/s | 437-448 | 403.4 KB | 0.0004 | 0/0/0 | 437.7 KB | 1.06 GB | 401.3 KB | 232 B / 464 B |
+| JsonRecordsWithHashes | JsonSparseIndex + content hashes | 16,371 | 2,143 ms | 478 MiB/s | 474-478 | 408.9 KB | 0.0004 | 0/0/0 | 453.8 KB | 1.06 GB | 404.5 KB | 440 B / 1.3 KB |
+| Xml | XmlSparseIndex | 16,302 | 1,136 ms | 902 MiB/s | 901-920 | 1.1 MB | 0.0010 | 0/0/0 | 1.1 MB | 1.05 GB | 1.0 MB | 232 B / 464 B |
+
+**1 MiB** (where the fixed cost showed; the 2026-10-31 analysis measured 583 KB allocated for
+JSON and 862 KB for XML here before the change):
+
+| Document | Indexer | Items | Time | Speed | Speed range | Allocated | Alloc / byte | GCs (0/1/2) | Peak heap | Peak working set | Index kept | Left after release (1st / last) |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Text | RawSegmentIndex (wrap 160) | 9,816 | 0 ms | 2,088 MiB/s | 2,068-2,172 | 18.8 KB | 0.0184 | 0/0/0 | 48.2 KB | 47.3 MB | 17.4 KB | 232 B / 464 B |
+| Csv | FileOffsetIndex | 8,194 | 0 ms | 6,587 MiB/s | 6,235-6,590 | 19.0 KB | 0.0144 | 0/0/0 | 48.2 KB | 48.5 MB | 17.5 KB | 232 B / 464 B |
+| NdJson | FileOffsetIndex | 8,193 | 0 ms | 6,252 MiB/s | 6,170-6,287 | 19.0 KB | 0.0141 | 0/0/0 | 48.2 KB | 48.5 MB | 17.5 KB | 232 B / 464 B |
+| JsonRecords | JsonSparseIndex | 16 | 3 ms | 300 MiB/s | 295-300 | 30.7 KB | 0.0300 | 0/0/0 | 56.2 KB | 58.1 MB | 28.5 KB | 232 B / 464 B |
+| JsonTokenDense | JsonSparseIndex | 16 | 5 ms | 186 MiB/s | 185-187 | 30.4 KB | 0.0297 | 0/0/0 | 56.2 KB | 57.6 MB | 28.4 KB | 232 B / 464 B |
+| JsonRecordsWithHashes | JsonSparseIndex + content hashes | 17 | 5 ms | 202 MiB/s | 202-204 | 35.2 KB | 0.0344 | 0/0/0 | 56.2 KB | 58.1 MB | 30.8 KB | 232 B / 464 B |
+| Xml | XmlSparseIndex | 16 | 5 ms | 192 MiB/s | 191-194 | 101.5 KB | 0.0989 | 0/0/0 | 128.5 KB | 51.7 MB | 74.3 KB | 232 B / 464 B |
+
+- **Index kept at 1 GiB: JSON 777 → 401 KB, XML 1.6 → 1.0 MB**; CSV, NDJSON and Text unchanged,
+  their segments were already full. At 1 MiB: JSON 28 KB, XML 74 KB, CSV/NDJSON/Text 17.5 KB.
+  These match the expectations in index-fixed-cost.md and the Linux VM run below to within a
+  few KB.
+- **Speed: unchanged** for Text, JSON and XML, all inside or above the previous run's ranges.
+  CSV (8,784, range 8,782-8,931) and NDJSON (9,095) read 1-3% under the previous ranges; an
+  earlier pass the same hour measured CSV at 8,985 (8,959-9,047), so treat it as the machine.
+- **`GC.GetTotalMemory` double-counted.** With every segment now under the large object
+  threshold, the first pass of this run reported *Index kept* at twice *Allocated* (JSON 802.5 KB
+  kept against 403.7 KB allocated). A 20-line program reproduces it on this runtime: 401 KB of
+  live 16 KB arrays reads as an 802 KB `GetTotalMemory` delta while `GC.GetGCMemoryInfo` reports
+  401 KB. Earlier runs' *Index kept* was right for CSV, NDJSON, Text and JSON, whose segments were
+  all on the large object heap; XML's 1.6 MB included its two small `long` logs counted twice.
 
 ### 2026-10-31 - segments sized in bytes (cloud Linux VM, new baseline)
 

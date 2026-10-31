@@ -16,50 +16,77 @@
         xmlns:raw="clr-namespace:Argonaut.Features.Raw"
         xmlns:progress="clr-namespace:Argonaut.Ui.Progress"
         xmlns:icons="clr-namespace:Argonaut.Ui.Icons"
+        xmlns:documents="clr-namespace:Argonaut.Ui.Documents"
         Title="{Binding Title}"
         Background="{DynamicResource AppPanelBackgroundBrush}"
         Width="1000" Height="700">
 
     <Window.DataTemplates>
-        <DataTemplate DataType="json:JsonViewModel">
-            <json:JsonView />
-        </DataTemplate>
-        <DataTemplate DataType="ndjson:NdJsonViewModel">
-            <ndjson:NdJsonView />
-        </DataTemplate>
-        <DataTemplate DataType="xmlview:XmlViewModel">
-            <xmlview:XmlView />
-        </DataTemplate>
-        <DataTemplate DataType="csv:CsvViewModel">
-            <csv:CsvView />
-        </DataTemplate>
-        <DataTemplate DataType="raw:RawViewModel">
-            <raw:RawView />
-        </DataTemplate>
-        <DataTemplate DataType="diff:JsonDiffViewModel">
-            <diff:JsonDiffView />
-        </DataTemplate>
-        <DataTemplate DataType="arrayTable:JsonArrayTableViewModel">
-            <arrayTable:JsonArrayTableView />
-        </DataTemplate>
-        <DataTemplate DataType="json:JsonToolbarViewModel">
-            <json:JsonToolbarView />
-        </DataTemplate>
-        <DataTemplate DataType="xmlview:XmlToolbarViewModel">
-            <xmlview:XmlToolbarView />
-        </DataTemplate>
-        <DataTemplate DataType="diff:JsonDiffToolbarViewModel">
-            <diff:JsonDiffToolbarView />
-        </DataTemplate>
-        <DataTemplate DataType="raw:RawToolbarViewModel">
-            <raw:RawToolbarView />
-        </DataTemplate>
-        <DataTemplate DataType="arrayTable:JsonArrayTableToolbarViewModel">
-            <arrayTable:JsonArrayTableToolbarView />
-        </DataTemplate>
-        <DataTemplate DataType="shell:IncompatibleViewModel">
-            <shell:IncompatibleView />
-        </DataTemplate>
+        <documents:FreshViewTemplate>
+            <DataTemplate DataType="json:JsonViewModel">
+                <json:JsonView />
+            </DataTemplate>
+        </documents:FreshViewTemplate>
+        <documents:FreshViewTemplate>
+            <DataTemplate DataType="ndjson:NdJsonViewModel">
+                <ndjson:NdJsonView />
+            </DataTemplate>
+        </documents:FreshViewTemplate>
+        <documents:FreshViewTemplate>
+            <DataTemplate DataType="xmlview:XmlViewModel">
+                <xmlview:XmlView />
+            </DataTemplate>
+        </documents:FreshViewTemplate>
+        <documents:FreshViewTemplate>
+            <DataTemplate DataType="csv:CsvViewModel">
+                <csv:CsvView />
+            </DataTemplate>
+        </documents:FreshViewTemplate>
+        <documents:FreshViewTemplate>
+            <DataTemplate DataType="raw:RawViewModel">
+                <raw:RawView />
+            </DataTemplate>
+        </documents:FreshViewTemplate>
+        <documents:FreshViewTemplate>
+            <DataTemplate DataType="diff:JsonDiffViewModel">
+                <diff:JsonDiffView />
+            </DataTemplate>
+        </documents:FreshViewTemplate>
+        <documents:FreshViewTemplate>
+            <DataTemplate DataType="arrayTable:JsonArrayTableViewModel">
+                <arrayTable:JsonArrayTableView />
+            </DataTemplate>
+        </documents:FreshViewTemplate>
+        <documents:FreshViewTemplate>
+            <DataTemplate DataType="json:JsonToolbarViewModel">
+                <json:JsonToolbarView />
+            </DataTemplate>
+        </documents:FreshViewTemplate>
+        <documents:FreshViewTemplate>
+            <DataTemplate DataType="xmlview:XmlToolbarViewModel">
+                <xmlview:XmlToolbarView />
+            </DataTemplate>
+        </documents:FreshViewTemplate>
+        <documents:FreshViewTemplate>
+            <DataTemplate DataType="diff:JsonDiffToolbarViewModel">
+                <diff:JsonDiffToolbarView />
+            </DataTemplate>
+        </documents:FreshViewTemplate>
+        <documents:FreshViewTemplate>
+            <DataTemplate DataType="raw:RawToolbarViewModel">
+                <raw:RawToolbarView />
+            </DataTemplate>
+        </documents:FreshViewTemplate>
+        <documents:FreshViewTemplate>
+            <DataTemplate DataType="arrayTable:JsonArrayTableToolbarViewModel">
+                <arrayTable:JsonArrayTableToolbarView />
+            </DataTemplate>
+        </documents:FreshViewTemplate>
+        <documents:FreshViewTemplate>
+            <DataTemplate DataType="shell:IncompatibleViewModel">
+                <shell:IncompatibleView />
+            </DataTemplate>
+        </documents:FreshViewTemplate>
     </Window.DataTemplates>
 
     <Grid>

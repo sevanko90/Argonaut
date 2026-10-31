@@ -62,7 +62,7 @@ public sealed class StatusProgressHandoffTests : IDisposable
 
         public string FilePath { get; init; } = string.Empty;
 
-        public string StatusText
+        public string StatusDetail
         {
             get => status;
             set => SetField(ref status, value);
@@ -97,7 +97,7 @@ public sealed class StatusProgressHandoffTests : IDisposable
         return session.Dispatch(async () =>
         {
             string path = WriteJsonFile();
-            var document = new FakeDocument { FilePath = path, StatusText = "12,345 tokens indexed so far" };
+            var document = new FakeDocument { FilePath = path, StatusDetail = "12,345 tokens indexed so far" };
 
             IProgressReporter? reporter = null;
             var vm = new MainWindowViewModel(SettingsStore.InMemory(), TestSchemas.Catalog(), _ => Task.FromResult(true), documentLoader: (_, _, r) =>
@@ -114,12 +114,12 @@ public sealed class StatusProgressHandoffTests : IDisposable
 
             // Indexing finishes and the document publishes its real total - exactly the window
             // in which that already-queued post used to land on top of it.
-            document.StatusText = "12,345 tokens";
+            document.StatusDetail = "12,345 tokens";
             document.Indexing.SetResult();
             await document.IndexingTask;
             Dispatcher.UIThread.RunJobs();
 
-            Assert.Equal("12,345 tokens", vm.StatusText);
+            Assert.Equal(DocumentStatusLine.Compose(path, "12,345 tokens"), vm.StatusText);
             return true;
         }, CancellationToken.None);
     }
@@ -133,7 +133,7 @@ public sealed class StatusProgressHandoffTests : IDisposable
         return session.Dispatch(async () =>
         {
             string path = WriteJsonFile();
-            var document = new FakeDocument { FilePath = path, StatusText = "250 rows indexed so far" };
+            var document = new FakeDocument { FilePath = path, StatusDetail = "250 rows indexed so far" };
             var board = new ProgressBoard(TimeProvider.System);
 
             IProgressReporter? reporter = null;
@@ -151,7 +151,7 @@ public sealed class StatusProgressHandoffTests : IDisposable
             Assert.Equal(45, entry.Percent);
             Assert.Equal("Indexing doc.json", entry.Title);
             Assert.True(entry.CanStop);
-            Assert.Equal("250 rows indexed so far", vm.StatusText);
+            Assert.Equal(DocumentStatusLine.Compose(path, "250 rows indexed so far"), vm.StatusText);
 
             // Indexing ending finishes the entry.
             document.Indexing.SetResult();
@@ -212,7 +212,7 @@ public sealed class StatusProgressHandoffTests : IDisposable
                 Assert.Equal("Re-indexing big.txt", reindex.Title);
                 Assert.NotEmpty(percents);
                 Assert.True(reindex.IsFinished);
-                Assert.EndsWith("rows", vm.StatusText);
+                Assert.EndsWith("rows", vm.StatusDetail);
             }
             finally
             {

@@ -158,12 +158,12 @@ public class JsonArrayTableViewModelTests
         {
             await document.IndexingTask;
             await Task.Yield();
-            Assert.EndsWith("6 rows", document.StatusText);
+            Assert.EndsWith("6 rows", document.StatusDetail);
 
             var toolbar = Assert.IsType<JsonArrayTableToolbarViewModel>(document.Toolbar);
             toolbar.SelectedColumnMode = toolbar.ColumnModes.Single(o => o.Mode == JsonArrayColumnMode.Reshape && o.Columns == 3);
 
-            Assert.EndsWith("2 rows", document.StatusText);
+            Assert.EndsWith("2 rows", document.StatusDetail);
         });
 
     [Fact]
@@ -287,7 +287,7 @@ public class JsonArrayTableViewModelTests
         {
             await document.IndexingTask;
 
-            Assert.Contains("3 rows", document.StatusText);
+            Assert.Contains("3 rows", document.StatusDetail);
             Assert.Null(document.IndexFailure);
         });
 

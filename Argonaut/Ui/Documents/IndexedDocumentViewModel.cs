@@ -36,7 +36,7 @@ namespace Argonaut.Ui.Documents;
 public abstract class IndexedDocumentViewModel : ObservableObject, IDocumentViewModel
 {
     private string filePath = string.Empty;
-    private string statusText = string.Empty;
+    private string statusDetail = string.Empty;
     private IndexFailure? indexFailure;
     private volatile bool disposed;
     private LineNumbering lineNumbering = LineNumbering.FromStart;
@@ -66,10 +66,10 @@ public abstract class IndexedDocumentViewModel : ObservableObject, IDocumentView
         protected set => SetField(ref filePath, value);
     }
 
-    public string StatusText
+    public string StatusDetail
     {
-        get => statusText;
-        protected set => SetField(ref statusText, value);
+        get => statusDetail;
+        protected set => SetField(ref statusDetail, value);
     }
 
     /// <summary>See <see cref="IDocumentViewModel.IndexFailure"/>.</summary>

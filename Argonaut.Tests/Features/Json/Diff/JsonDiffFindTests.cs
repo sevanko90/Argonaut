@@ -147,7 +147,7 @@ public class JsonDiffFindTests
     /// <summary>What the document actually held, for an assertion that is about to fail on a
     /// timing-dependent state - the row list and every status the find reported.</summary>
     private static string Describe(Harness h)
-        => $"status='{h.Vm.StatusText}' failure='{h.Vm.IndexFailure?.Message}'\n"
+        => $"status='{h.Vm.StatusDetail}' failure='{h.Vm.IndexFailure?.Message}'\n"
             + JsonDiffRows.Describe(h.Tree)
             + "\nstatuses=" + string.Join(" | ", h.Statuses);
 

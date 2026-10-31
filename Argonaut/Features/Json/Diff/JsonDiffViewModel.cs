@@ -475,7 +475,7 @@ public sealed class JsonDiffViewModel : IndexedDocumentViewModel, IDocumentViewM
         if (comparing)
             growthMonitor = new IndexGrowthMonitor(GrowthInterval, started.IndexingTask, () => started.Diff.AllItemsPublished, OnGrew);
 
-        StatusText = $"Comparing {FilePath} with {RightFilePath}";
+        StatusDetail = $"comparing with {Path.GetFileName(RightFilePath)}";
         MonitorIndexing();
         return Task.CompletedTask;
     }
@@ -521,14 +521,14 @@ public sealed class JsonDiffViewModel : IndexedDocumentViewModel, IDocumentViewM
         if (current.Left.Index.Failure is { } leftFailure)
         {
             IndexFailure = new IndexFailure($"Left file: {leftFailure.Message}", leftFailure.ByteOffset, leftFailure.Line, leftFailure.Column, leftFailure.ItemsIndexed);
-            StatusText = $"{FilePath} — left file failed to index";
+            StatusDetail = "left file failed to index";
             return;
         }
 
         if (current.Right.Index.Failure is { } rightFailure)
         {
             IndexFailure = new IndexFailure($"Right file: {rightFailure.Message}", rightFailure.ByteOffset, rightFailure.Line, rightFailure.Column, rightFailure.ItemsIndexed);
-            StatusText = $"{RightFilePath} — right file failed to index";
+            StatusDetail = $"right file {Path.GetFileName(RightFilePath)} failed to index";
             return;
         }
 
@@ -536,7 +536,7 @@ public sealed class JsonDiffViewModel : IndexedDocumentViewModel, IDocumentViewM
             return;
 
         OnGrew();
-        StatusText = Summarize(current.Diff);
+        StatusDetail = Summarize(current.Diff);
     }
 
     /// <summary>One pass over the finished record log, counting user-meaningful changes:

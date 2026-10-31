@@ -295,7 +295,7 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
         OnPropertyChanged(nameof(ColumnCount));
         OnPropertyChanged(nameof(RowCount));
 
-        StatusText = DocumentStatusLine.Compose(FilePath, $"{RowCount:N0} rows indexed so far");
+        StatusDetail = $"{RowCount:N0} rows indexed so far";
         MonitorIndexing();
     }
 
@@ -315,14 +315,14 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
 
     /// <summary>The finished table's row count in the status line - which a re-shape changes, so
     /// it is said again then: three columns of 300 numbers is 100 rows.</summary>
-    private void ReportRowCount() => StatusText = DocumentStatusLine.Compose(FilePath, $"{RowCount:N0} rows");
+    private void ReportRowCount() => StatusDetail = $"{RowCount:N0} rows";
 
     protected override void OnIndexingFailed(IndexFailure? failure)
     {
         IndexFailure = failure;
-        StatusText = failure is { } f
-            ? $"{FilePath} — indexing stopped — {f.ItemsIndexed:N0} items indexed"
-            : $"{FilePath} — indexing failed";
+        StatusDetail = failure is { } f
+            ? $"indexing stopped — {f.ItemsIndexed:N0} items indexed"
+            : "indexing failed";
     }
 
     /// <summary>

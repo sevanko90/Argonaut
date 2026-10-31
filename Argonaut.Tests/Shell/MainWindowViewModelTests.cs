@@ -72,7 +72,7 @@ public sealed class MainWindowViewModelTests : IDisposable
 
         public string FilePath { get; init; } = string.Empty;
 
-        public string StatusText
+        public string StatusDetail
         {
             get => status;
             set => SetField(ref status, value);
@@ -113,8 +113,10 @@ public sealed class MainWindowViewModelTests : IDisposable
         public void Dispose() => Disposed = true;
     }
 
-    private static MainWindowViewModel CreateViewModel(MainWindowViewModel.DocumentLoader loader, ISettingsStore? settings = null)
-        => new(settings ?? SettingsStore.InMemory(), TestSchemas.Catalog(), _ => Task.FromResult(true), documentLoader: loader);
+    private static MainWindowViewModel CreateViewModel(MainWindowViewModel.DocumentLoader loader, ISettingsStore? settings = null,
+        ILineEndingDetector? lineEndings = null)
+        => new(settings ?? SettingsStore.InMemory(), TestSchemas.Catalog(), _ => Task.FromResult(true), documentLoader: loader,
+            lineEndings: lineEndings);
 
     /// <summary>The shell logs through the log it is given - here, that a path that does not
     /// exist was turned away.</summary>
@@ -135,7 +137,7 @@ public sealed class MainWindowViewModelTests : IDisposable
     public async Task OpenPath_PublishesDocument_AndMirrorsStatus()
     {
         string path = WriteJsonFile();
-        var document = new FakeDocument { FilePath = path, StatusText = "42 rows" };
+        var document = new FakeDocument { FilePath = path, StatusDetail = "42 rows" };
         var vm = CreateViewModel((_, _, _) => Task.FromResult<IDocumentViewModel>(document));
 
         await vm.OpenPathAsync(path);
@@ -145,7 +147,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         Assert.Equal(path, vm.FilePath);
         Assert.Equal(Path.GetFileName(path), vm.FileName);
         Assert.Equal("Argonaut — " + Path.GetFileName(path), vm.Title);
-        Assert.Equal("42 rows", vm.StatusText);
+        Assert.Equal(DocumentStatusLine.Compose(path, "42 rows"), vm.StatusText);
     }
 
     [Fact]
@@ -180,9 +182,9 @@ public sealed class MainWindowViewModelTests : IDisposable
         var vm = CreateViewModel((_, _, _) => Task.FromResult<IDocumentViewModel>(document));
         await vm.OpenPathAsync(path);
 
-        document.StatusText = "indexing failed";
+        document.StatusDetail = "indexing failed";
 
-        Assert.Equal("indexing failed", vm.StatusText);
+        Assert.Equal(DocumentStatusLine.Compose(path, "indexing failed"), vm.StatusText);
     }
 
     [Fact]
@@ -191,7 +193,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         string pathA = WriteJsonFile("a.json");
         string pathB = WriteJsonFile("b.json");
         var docA = new FakeDocument { FilePath = pathA };
-        var docB = new FakeDocument { FilePath = pathB, StatusText = "B loaded" };
+        var docB = new FakeDocument { FilePath = pathB, StatusDetail = "B loaded" };
 
         var vm = CreateViewModel((_, origin, _) =>            Task.FromResult<IDocumentViewModel>(origin.Path == pathA ? docA : docB));
 
@@ -199,8 +201,8 @@ public sealed class MainWindowViewModelTests : IDisposable
         await vm.OpenPathAsync(pathB);
 
         // The outgoing document is no longer mirrored once replaced.
-        docA.StatusText = "stale update";
-        Assert.Equal("B loaded", vm.StatusText);
+        docA.StatusDetail = "stale update";
+        Assert.Equal(DocumentStatusLine.Compose(pathB, "B loaded"), vm.StatusText);
     }
 
     [Fact]
@@ -418,7 +420,7 @@ public sealed class MainWindowViewModelTests : IDisposable
     {
         string path = WriteJsonFile();
         var initial = new FakeDocument { FilePath = path };
-        var switched = new FakeDocument { FilePath = path, StatusText = "switched" };
+        var switched = new FakeDocument { FilePath = path, StatusDetail = "switched" };
         var vm = new MainWindowViewModel(SettingsStore.InMemory(), TestSchemas.Catalog(),
             _ => throw new InvalidOperationException("confirmReplace must not be called for a view switch"),
             documentLoader: (kind, _, _) => Task.FromResult<IDocumentViewModel>(kind == FileTypeDetector.FileKind.Json ? initial : switched));
@@ -434,7 +436,7 @@ public sealed class MainWindowViewModelTests : IDisposable
     {
         string path = WriteJsonFile();
         var initial = new FakeDocument { FilePath = path };
-        var switched = new FakeDocument { FilePath = path, StatusText = "switched" };
+        var switched = new FakeDocument { FilePath = path, StatusDetail = "switched" };
         var vm = CreateViewModel((kind, _, _) =>
             Task.FromResult<IDocumentViewModel>(kind == FileTypeDetector.FileKind.Json ? initial : switched));
 
@@ -512,7 +514,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         Assert.Equal("Line 5, column 3 (byte 100)", vm.FailureLocationText);
 
         // The banner has no dismiss affordance - it stays up for as long as the document does.
-        partial.StatusText = "still showing partial results";
+        partial.StatusDetail = "still showing partial results";
         Assert.True(vm.IsFailureBannerVisible);
     }
 

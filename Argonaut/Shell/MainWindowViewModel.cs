@@ -112,6 +112,15 @@ public sealed class MainWindowViewModel : ObservableObject
     private string? currentFilePath;
     private FileTypeDetector.FileKind currentKind;
     private string statusText = "No file loaded";
+
+    // Line endings belong to the input, not the view: counted once per adopted origin and kept
+    // across view switches, which re-adopt the same origin.
+    private readonly ILineEndingDetector lineEndings;
+    private IByteOrigin? lineEndingsOrigin;
+    private CancellationTokenSource? lineEndingsStop;
+    private Task lineEndingsDetecting = Task.CompletedTask;
+    private string? lineEndingLabel;
+    private string? lineEndingToolTip;
     private string title = DefaultTitle;
     private string fileName = string.Empty;
     private IReadOnlyList<RecentFileItem> recentFiles = Array.Empty<RecentFileItem>();
@@ -187,8 +196,10 @@ public sealed class MainWindowViewModel : ObservableObject
         IConfigLocationSource? configLocations = null,
         ISelectionFilterFiles? filterFiles = null,
         IRecipeStore? recipes = null,
-        ISystemLauncher? launcher = null)
+        ISystemLauncher? launcher = null,
+        ILineEndingDetector? lineEndings = null)
     {
+        this.lineEndings = lineEndings ?? new LineEndingDetector();
         this.appearance = settings.Get<AppearanceSettings>();
         this.recentFileHistory = settings.Get<RecentFileHistory>();
         this.favouriteFiles = settings.Get<FavouriteFiles>();
@@ -230,6 +241,90 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         get => statusText;
         private set => SetField(ref statusText, value);
+    }
+
+    /// <summary>The current input's line endings (<c>LF</c>, <c>CRLF</c>, <c>CR</c>, <c>Mixed</c>),
+    /// or null while unknown, for an input with no line breaks, and for a comparison of two.</summary>
+    public string? LineEndingLabel
+    {
+        get => lineEndingLabel;
+        private set => SetField(ref lineEndingLabel, value);
+    }
+
+    /// <summary>What <see cref="LineEndingLabel"/> was counted from, and the count of each kind.</summary>
+    public string? LineEndingToolTip
+    {
+        get => lineEndingToolTip;
+        private set => SetField(ref lineEndingToolTip, value);
+    }
+
+    /// <summary>The status line for <paramref name="document"/>: where it is, then what its view says.</summary>
+    private static string ComposeStatus(IDocumentViewModel document)
+        => DocumentStatusLine.Compose(document.FilePath, document.StatusDetail);
+
+    /// <summary>
+    /// Counts the line endings of the input now adopted, unless they were already counted for this
+    /// very origin. Only a single input has them; a comparison of two shows none.
+    /// </summary>
+    private void DetectLineEndingsOfInput()
+    {
+        var origin = this.ownedOrigins.Count == 1 ? this.ownedOrigins[0] : null;
+        if (ReferenceEquals(origin, this.lineEndingsOrigin))
+            return;
+
+        StopLineEndingDetection();
+        this.lineEndingsOrigin = origin;
+        LineEndingLabel = null;
+        LineEndingToolTip = null;
+        if (origin is null)
+            return;
+
+        var stop = new CancellationTokenSource();
+        this.lineEndingsStop = stop;
+        this.lineEndingsDetecting = ShowLineEndingsAsync(origin, stop.Token);
+    }
+
+    private async Task ShowLineEndingsAsync(IByteOrigin origin, CancellationToken stopping)
+    {
+        LineEndingTally tally;
+        try
+        {
+            tally = await this.lineEndings.DetectAsync(origin, stopping);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            this.log.Write($"Line ending detection failed: {ex}");
+            return;
+        }
+
+        // Resumed on the UI thread; the input may have changed while the count ran.
+        if (stopping.IsCancellationRequested || !ReferenceEquals(origin, this.lineEndingsOrigin))
+            return;
+
+        LineEndingLabel = LineEndingText.Label(tally);
+        LineEndingToolTip = LineEndingText.Describe(tally);
+    }
+
+    /// <summary>Asks a count in flight to stop; returns at once and joins nothing.</summary>
+    private void StopLineEndingDetection()
+    {
+        this.lineEndingsStop?.Cancel();
+        this.lineEndingsStop = null;
+    }
+
+    /// <summary>
+    /// Stops a count in flight and waits for it to let go of its source - what a save needs,
+    /// since the count reads the file the save replaces. The next adoption counts again.
+    /// </summary>
+    private async Task StopLineEndingDetectionAndWaitAsync()
+    {
+        StopLineEndingDetection();
+        this.lineEndingsOrigin = null;
+        await this.lineEndingsDetecting;
     }
 
     public string Title
@@ -1529,7 +1624,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         BeginOpenRequest();
-        StatusText = currentDocument?.StatusText ?? "No file loaded";
+        StatusText = currentDocument is { } shown ? ComposeStatus(shown) : "No file loaded";
     }
 
     private static string DisplayNameFor(FileTypeDetector.FileKind kind) =>
@@ -1606,6 +1701,10 @@ public sealed class MainWindowViewModel : ObservableObject
     /// </summary>
     private void AdoptOrigins(params IByteOrigin[] origins)
     {
+        // A count reading an origin about to be released is told to stop first.
+        if (this.lineEndingsOrigin is { } counted && Array.IndexOf(origins, counted) < 0)
+            StopLineEndingDetection();
+
         foreach (var owned in this.ownedOrigins)
         {
             if (Array.IndexOf(origins, owned) >= 0)
@@ -1617,6 +1716,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
         this.ownedOrigins.Clear();
         this.ownedOrigins.AddRange(origins);
+        DetectLineEndingsOfInput();
 
         // A reload adopts the selection it made; anything else ends the following.
         if (this.filterWatch is not null && !(origins.Length == 1 && ReferenceEquals(origins[0], this.followedSelection)))
@@ -1653,7 +1753,7 @@ public sealed class MainWindowViewModel : ObservableObject
         if (document is not null)
         {
             document.PropertyChanged += OnDocumentPropertyChanged;
-            StatusText = document.StatusText;
+            StatusText = ComposeStatus(document);
             FileName = Path.GetFileName(path!);
             Title = document.WindowTitle ?? $"{DefaultTitle} — {FileName}";
             SelectedView = DocumentViewCatalog.Options.FirstOrDefault(o => o.Kind == kind);
@@ -1691,8 +1791,8 @@ public sealed class MainWindowViewModel : ObservableObject
         if (sender != currentDocument)
             return;
 
-        if (e.PropertyName is null or nameof(IDocumentViewModel.StatusText))
-            StatusText = currentDocument!.StatusText;
+        if (e.PropertyName is null or nameof(IDocumentViewModel.StatusDetail))
+            StatusText = ComposeStatus(currentDocument!);
 
         if (e.PropertyName is null or nameof(ISaveableDocument.HasUnsavedChanges) or nameof(ISaveableDocument.CanSave))
             NotifySavePropertiesChanged();
@@ -1816,6 +1916,7 @@ public sealed class MainWindowViewModel : ObservableObject
             // The swap needs every mapping of the file gone, and a search holds its own chunk
             // mappings that it would otherwise let go of only when it next looks up.
             await findController.StopSearchAndWaitAsync();
+            await StopLineEndingDetectionAndWaitAsync();
 
             string name = destination.Path is { } path ? Path.GetFileName(path) : destination.DisplayName;
             using var stopping = new CancellationTokenSource();
@@ -1839,7 +1940,11 @@ public sealed class MainWindowViewModel : ObservableObject
         // Whatever happened, the document's own line is the true one again - including when a
         // failed save put back text identical to what it had, which raises no change to mirror.
         if (currentDocument is not null)
-            StatusText = currentDocument.StatusText;
+            StatusText = ComposeStatus(currentDocument);
+
+        // The save may have changed the bytes (an edit can add or remove line breaks), so the input
+        // is counted again. A Save As below adopts its new origin, which starts a count of that.
+        DetectLineEndingsOfInput();
 
         switch (result.Outcome)
         {

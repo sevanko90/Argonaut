@@ -7,6 +7,7 @@ using Argonaut.Features.Raw.Rows;
 using Argonaut.Tests.Support;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Headless;
 using Avalonia.Input;
 using Avalonia.Threading;
@@ -710,5 +711,26 @@ public sealed class RawEditInputTests : IDisposable
             await PumpAsync();
 
             Assert.Equal(editAt, vm.Caret.Caret.Offset);
+        });
+
+    /// <summary>The strip is the scrollbar's scale turned into marks, so it spans exactly the
+    /// scrollbar's track - not the arrow buttons either side of it, or an edit at the top of the
+    /// document would sit level with the up arrow, above where the thumb can reach.</summary>
+    [Fact]
+    public Task EditOverview_SpansTheScrollbarsTrack()
+        => WhileEditing(ManyLines(2000), async (window, _, _) =>
+        {
+            await PumpAsync();
+            var overview = window.GetVisualDescendants().OfType<RawEditOverview>().Single();
+            var scrollBar = window.GetVisualDescendants().OfType<ScrollBar>().First(b => b.Name == "VerticalScrollBar");
+            var track = scrollBar.GetVisualDescendants().OfType<Track>().Single();
+            Assert.True(scrollBar.IsVisible);
+
+            double trackTop = track.TranslatePoint(default, window)!.Value.Y;
+            double overviewTop = overview.TranslatePoint(default, window)!.Value.Y;
+
+            Assert.True(trackTop > scrollBar.TranslatePoint(default, window)!.Value.Y, "the track starts below the up arrow");
+            Assert.Equal(trackTop, overviewTop, precision: 1);
+            Assert.Equal(track.Bounds.Height, overview.Bounds.Height, precision: 1);
         });
 }

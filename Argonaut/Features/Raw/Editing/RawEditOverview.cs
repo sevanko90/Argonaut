@@ -84,10 +84,10 @@ internal sealed class RawEditOverview : Control
 {
     /// <summary>A mark is drawn at least this tall, or a single keystroke would be a fraction of
     /// a pixel on a multi-GB document - positions are true, heights are not below this.</summary>
-    private const double MinimumMarkHeight = 3;
+    private const double MinimumMarkHeight = 5;
 
     /// <summary>How far off a mark a click may land and still count as on it.</summary>
-    private const double ClickSlop = 3;
+    private const double ClickSlop = 5;
 
     public static readonly StyledProperty<IBrush?> MarkBrushProperty =
         AvaloniaProperty.Register<RawEditOverview, IBrush?>(nameof(MarkBrush));

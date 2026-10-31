@@ -1658,9 +1658,9 @@ public class RawTextSurface : RowSurface
     };
 
     /// <summary>
-    /// Pastes the clipboard at the caret. No line-ending translation and no re-encoding: this is
-    /// the viewer that exists for files whose conventions cannot be assumed about, so what was
-    /// copied is what goes in.
+    /// Pastes the clipboard at the caret. Its line breaks take the document's convention, as in any
+    /// editor (<see cref="RawViewModel.Paste"/>); nothing is re-encoded, so the bytes otherwise go
+    /// in as they were copied.
     /// </summary>
     private async Task PasteAsync()
     {

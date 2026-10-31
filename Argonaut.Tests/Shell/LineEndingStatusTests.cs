@@ -124,6 +124,84 @@ public class LineEndingStatusTests : IDisposable
         Assert.Equal(DocumentStatusLine.Compose(path, "42 rows"), vm.StatusText);
     }
 
+    [Fact]
+    public async Task ADocumentThatWritesBreaks_IsGivenTheCount()
+    {
+        var detector = new FakeLineEndingDetector { Answer = new LineEndingTally(0, 4, 0, 40, true) };
+        var vm = new MainWindowViewModel(SettingsStore.InMemory(), TestSchemas.Catalog(), _ => Task.FromResult(true),
+            documentLoader: (_, origin, _) => Task.FromResult<IDocumentViewModel>(new WritingDocument(origin)),
+            lineEndings: detector);
+
+        await vm.OpenPathAsync(WriteFile("doc.txt"));
+
+        var document = Assert.IsType<WritingDocument>(vm.CurrentDocument);
+        Assert.Equal(LineEndingStyle.CrLf, Assert.Single(document.Given).Style);
+    }
+
+    [Fact]
+    public async Task ADocumentSwitchedInOverTheSameInput_IsGivenTheCountAlreadyMade()
+    {
+        var detector = new FakeLineEndingDetector();
+        var vm = new MainWindowViewModel(SettingsStore.InMemory(), TestSchemas.Catalog(), _ => Task.FromResult(true),
+            documentLoader: (kind, origin, _) => Task.FromResult<IDocumentViewModel>(
+                kind == FileTypeDetector.FileKind.Unidentified ? new WritingDocument(origin) : new Document(origin, "json")),
+            lineEndings: detector);
+        await vm.OpenPathAsync(WriteFile("doc.json"));
+
+        await vm.SwitchViewAsync(FileTypeDetector.FileKind.Unidentified);
+
+        var document = Assert.IsType<WritingDocument>(vm.CurrentDocument);
+        Assert.Single(document.Given);
+        Assert.Single(detector.Asked);
+    }
+
+    [Fact]
+    public async Task APendingConversion_ShowsAsAnArrow_UntilCancelled()
+    {
+        var detector = new FakeLineEndingDetector { Answer = new LineEndingTally(3, 0, 0, 12, true) };
+        var vm = new MainWindowViewModel(SettingsStore.InMemory(), TestSchemas.Catalog(), _ => Task.FromResult(true),
+            documentLoader: (_, origin, _) => Task.FromResult<IDocumentViewModel>(new WritingDocument(origin)),
+            lineEndings: detector);
+        await vm.OpenPathAsync(WriteFile("doc.txt"));
+        Assert.True(vm.OffersLineEndingMenu);
+        Assert.False(vm.ShowsLineEndingText);
+        Assert.Equal(LineEndingStyle.Lf, vm.SavedLineEnding);
+
+        vm.ConvertLineEndings(LineEndingStyle.CrLf);
+
+        Assert.Equal("LF → CRLF", vm.LineEndingLabel);
+        Assert.EndsWith("Converted to CRLF when saved", vm.LineEndingToolTip);
+        Assert.Equal(LineEndingStyle.CrLf, vm.SavedLineEnding);
+
+        vm.ConvertLineEndings(LineEndingStyle.Lf);
+
+        Assert.Equal("LF", vm.LineEndingLabel);
+    }
+
+    [Fact]
+    public async Task ADocumentWithNoBreaksYet_ShowsTheBreakItsNewLinesUse()
+    {
+        var detector = new FakeLineEndingDetector { Answer = new LineEndingTally(0, 0, 0, 0, true) };
+        var vm = new MainWindowViewModel(SettingsStore.InMemory(), TestSchemas.Catalog(), _ => Task.FromResult(true),
+            documentLoader: (_, origin, _) => Task.FromResult<IDocumentViewModel>(new WritingDocument(origin)),
+            lineEndings: detector);
+
+        await vm.NewDocumentAsync();
+
+        Assert.Equal("LF", vm.LineEndingLabel);
+        Assert.Equal("No line breaks yet\nNew lines use LF", vm.LineEndingToolTip);
+        Assert.Equal(LineEndingStyle.Lf, vm.SavedLineEnding);
+    }
+
+    [Fact]
+    public async Task ADocumentThatCannotConvert_ShowsPlainText()
+    {
+        var (vm, _) = await OpenAsync(new FakeLineEndingDetector());
+
+        Assert.True(vm.ShowsLineEndingText);
+        Assert.False(vm.OffersLineEndingMenu);
+    }
+
     private async Task<(MainWindowViewModel Vm, string Path)> OpenAsync(FakeLineEndingDetector detector, string detail = "loaded")
     {
         var vm = CreateViewModel(detector, detail);
@@ -148,6 +226,36 @@ public class LineEndingStatusTests : IDisposable
     {
         for (int i = 0; i < 200 && !condition(); i++)
             await Task.Delay(10);
+    }
+
+    /// <summary>A document that writes line breaks: records the counts it is given, and holds a
+    /// pending conversion the way the raw view does - choosing the input's own kind cancels it.</summary>
+    private sealed class WritingDocument(IByteOrigin origin) : ILineEndingDocument, IDocumentViewModel
+    {
+        private LineEndingStyle? pending;
+
+        public List<LineEndingTally> Given { get; } = new();
+        public event PropertyChangedEventHandler? PropertyChanged;
+        public IByteOrigin? Origin => origin;
+        public string FilePath => origin.Path ?? origin.DisplayName;
+        public string StatusDetail => "text";
+        public IndexFailure? IndexFailure => null;
+        public Task IndexingTask => Task.CompletedTask;
+        public object? Toolbar => null;
+        public ISearchNavigator? CreateSearchNavigator() => null;
+        public bool CanHandleFileType(FileTypeDetector.FileKind fileType) => true;
+        public void Dispose() { }
+
+        public void UseInputLineEndings(LineEndingTally input) => Given.Add(input);
+        public LineEndingStyle LineEnding => this.pending ?? Given.LastOrDefault().Prevailing ?? LineEndingStyle.Lf;
+        public bool CanConvertLineEndings => true;
+        public LineEndingStyle? PendingLineEnding => this.pending;
+
+        public void ConvertLineEndingsOnSave(LineEndingStyle? target)
+        {
+            this.pending = Given.LastOrDefault().Style == target ? null : target;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PendingLineEnding)));
+        }
     }
 
     private sealed class Document(IByteOrigin origin, string detail) : IDocumentViewModel

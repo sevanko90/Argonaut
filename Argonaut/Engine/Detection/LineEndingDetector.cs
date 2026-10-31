@@ -51,30 +51,11 @@ public sealed class LineEndingDetector : ILineEndingDetector
         if (sampled == 0)
             return new LineEndingTally(0, 0, 0, 0, wholeInput);
 
-        long lf = 0, cr = 0, crLf = 0;
-        bool previousEndedInCr = false;
-
+        LineBreakCounts counts;
         var source = origin.OpenRange(0, sampled);
         try
         {
-            long offset = 0;
-            while (offset < sampled)
-            {
-                // A span can stop short of what was asked for; advance by what came back.
-                var chunk = source.GetContiguousSpan(offset, (int)(sampled - offset));
-                if (chunk.IsEmpty)
-                    break;
-
-                lf += chunk.Count((byte)'\n');
-                cr += chunk.Count((byte)'\r');
-                crLf += chunk.Count("\r\n"u8);
-                if (previousEndedInCr && chunk[0] == (byte)'\n')
-                    crLf++;
-
-                previousEndedInCr = chunk[^1] == (byte)'\r';
-                offset += chunk.Length;
-                stopping.ThrowIfCancellationRequested();
-            }
+            counts = LineBreakCounts.Count(source, sampled, stopping);
         }
         finally
         {
@@ -83,9 +64,7 @@ public sealed class LineEndingDetector : ILineEndingDetector
 
         // A CR at the cut, with more of the document after it, may be the first half of a CRLF
         // whose LF was not sampled - it is not counted as either.
-        if (previousEndedInCr && !wholeInput)
-            cr--;
-
-        return new LineEndingTally(lf - crLf, crLf, cr - crLf, sampled, wholeInput);
+        long cr = counts.EndsInCr && !wholeInput ? counts.Cr - 1 : counts.Cr;
+        return new LineEndingTally(counts.Lf - counts.CrLf, counts.CrLf, cr - counts.CrLf, sampled, wholeInput);
     }
 }

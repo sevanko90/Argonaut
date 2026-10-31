@@ -1,3 +1,4 @@
+using Argonaut.Engine.Detection;
 using System.Text;
 using Argonaut.Engine.Bytes;
 using Argonaut.Features.Raw;
@@ -94,7 +95,9 @@ public sealed class RawEditInputTests : IDisposable
         var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(RawEditInputTests).Assembly);
         return session.Dispatch(async () =>
         {
-            var vm = new RawViewModel(new RawViewSettings());
+            // No shell hands this document its input's line endings, so new lines would follow the
+            // platform's - CRLF on Windows. Fixed to LF so the expected text is the same everywhere.
+            var vm = new RawViewModel(new RawViewSettings(), defaultLineEnding: LineEndingStyle.Lf);
             Window? window = null;
             try
             {

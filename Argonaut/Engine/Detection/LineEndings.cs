@@ -1,3 +1,5 @@
+using System;
+
 namespace Argonaut.Engine.Detection;
 
 /// <summary>Which line breaks a document uses.</summary>
@@ -45,4 +47,46 @@ public readonly record struct LineEndingTally(long Lf, long CrLf, long LoneCr, l
             return Lf > 0 ? LineEndingStyle.Lf : CrLf > 0 ? LineEndingStyle.CrLf : LineEndingStyle.Cr;
         }
     }
+
+    /// <summary>
+    /// The break a new line in this document should use, the way an editor follows a file's
+    /// convention: the only kind present, or the most common in a mixed document. Null when there
+    /// is nothing to follow - no breaks, or a tie - so the caller falls back to its own default.
+    /// </summary>
+    public LineEndingStyle? Prevailing
+    {
+        get
+        {
+            long most = Math.Max(Lf, Math.Max(CrLf, LoneCr));
+            if (most == 0)
+                return null;
+
+            int leaders = (Lf == most ? 1 : 0) + (CrLf == most ? 1 : 0) + (LoneCr == most ? 1 : 0);
+            if (leaders > 1)
+                return null;
+
+            return Lf == most ? LineEndingStyle.Lf : CrLf == most ? LineEndingStyle.CrLf : LineEndingStyle.Cr;
+        }
+    }
+}
+
+/// <summary>The bytes of each kind of line break.</summary>
+public static class LineEndingBytes
+{
+    private static readonly byte[] LfBytes = [(byte)'\n'];
+    private static readonly byte[] CrLfBytes = [(byte)'\r', (byte)'\n'];
+    private static readonly byte[] CrBytes = [(byte)'\r'];
+
+    /// <summary>The bytes <paramref name="style"/> writes; only a single kind of break has them.</summary>
+    public static ReadOnlySpan<byte> Of(LineEndingStyle style) => style switch
+    {
+        LineEndingStyle.Lf => LfBytes,
+        LineEndingStyle.CrLf => CrLfBytes,
+        LineEndingStyle.Cr => CrBytes,
+        _ => throw new ArgumentOutOfRangeException(nameof(style), style, "Only LF, CRLF and CR are line breaks."),
+    };
+
+    /// <summary>The platform's own convention: CRLF on Windows, LF elsewhere.</summary>
+    public static LineEndingStyle OperatingSystemDefault
+        => OperatingSystem.IsWindows() ? LineEndingStyle.CrLf : LineEndingStyle.Lf;
 }

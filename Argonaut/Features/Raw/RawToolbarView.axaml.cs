@@ -1,5 +1,6 @@
 using System;
 using System.Threading.Tasks;
+using Argonaut.Engine.Detection;
 using Argonaut.Engine.Transforms;
 using Argonaut.Features.Raw.Recipes;
 using Argonaut.Ui.Notifications;
@@ -42,7 +43,7 @@ public partial class RawToolbarView : UserControl
     }
 
     /// <summary>
-    /// The Transform menu: the encodings, then the saved recipes (forward, with a submenu to run
+    /// The Transform menu: the encodings and the line-ending conversion, then the saved recipes (forward, with a submenu to run
     /// one in reverse), then the recipe dialog. Each item replaces the whole document as one
     /// undoable edit.
     /// </summary>
@@ -61,6 +62,7 @@ public partial class RawToolbarView : UserControl
         };
         eachLine.Click += (_, _) => transforms.EachLine = !transforms.EachLine;
         items.Add(eachLine);
+        items.Add(LineEndingsMenu(transforms));
 
         if (!transforms.HasRecipes)
             return menu;
@@ -79,6 +81,27 @@ public partial class RawToolbarView : UserControl
 
         items.Add(new Separator());
         items.Add(Item("Edit recipes…", () => EditRecipesAsync(transforms)));
+        return menu;
+    }
+
+    /// <summary>Line endings ▸ LF / CRLF, the one the next save writes checked. Converted as the
+    /// document is saved, not in memory - so unlike the encodings it is not an edit to undo, and
+    /// picking the input's own kind again cancels it.</summary>
+    private static MenuItem LineEndingsMenu(RawTransformMenuViewModel transforms)
+    {
+        var menu = new MenuItem { Header = "Line endings" };
+        foreach (var (style, name) in new[] { (LineEndingStyle.Lf, "LF"), (LineEndingStyle.CrLf, "CRLF") })
+        {
+            var item = new MenuItem
+            {
+                Header = name,
+                ToggleType = MenuItemToggleType.Radio,
+                IsChecked = transforms.SavedLineEnding == style,
+            };
+            item.Click += (_, _) => transforms.ConvertLineEndings(style);
+            menu.Items.Add(item);
+        }
+
         return menu;
     }
 

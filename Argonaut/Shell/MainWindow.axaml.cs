@@ -1,4 +1,5 @@
 using System;
+using Argonaut.Engine.Detection;
 using System.ComponentModel;
 using System.Linq;
 using System.Text;
@@ -569,6 +570,29 @@ public partial class MainWindow : Window
     private async void OnSaveFile(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         await viewModel.SaveAsync();
+    }
+
+    /// <summary>
+    /// The line-ending indicator's menu: LF and CRLF, the one the next save writes checked. Built
+    /// when clicked rather than bound, so it shows what is true at that moment; a menu item's click
+    /// is not a selection commit, so acting on it at once is safe.
+    /// </summary>
+    private void OnLineEndingClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        var menu = new MenuFlyout { Placement = PlacementMode.TopEdgeAlignedRight };
+        foreach (var (style, name) in new[] { (LineEndingStyle.Lf, "LF"), (LineEndingStyle.CrLf, "CRLF") })
+        {
+            var item = new MenuItem
+            {
+                Header = name,
+                ToggleType = MenuItemToggleType.Radio,
+                IsChecked = viewModel.SavedLineEnding == style,
+            };
+            item.Click += (_, _) => viewModel.ConvertLineEndings(style);
+            menu.Items.Add(item);
+        }
+
+        menu.ShowAt(LineEndingButton);
     }
 
     private async void OnSaveFileAs(object? sender, Avalonia.Interactivity.RoutedEventArgs e)

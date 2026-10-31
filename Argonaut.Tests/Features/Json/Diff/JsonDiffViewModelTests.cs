@@ -92,11 +92,11 @@ public class JsonDiffViewModelTests
         try
         {
             // MonitorIndexing's continuation races the test; poll for its status write.
-            await WaitForAsync(() => vm.StatusText.Contains("added"));
+            await WaitForAsync(() => vm.StatusDetail.Contains("added"));
 
-            Assert.Contains("1 added", vm.StatusText);
-            Assert.Contains("1 removed", vm.StatusText);
-            Assert.Contains("1 modified", vm.StatusText);
+            Assert.Contains("1 added", vm.StatusDetail);
+            Assert.Contains("1 removed", vm.StatusDetail);
+            Assert.Contains("1 modified", vm.StatusDetail);
             Assert.Same(vm.DiffTree, vm.Tree);
             Assert.NotEmpty(JsonDiffRows.All(Tree(vm)));
             Assert.Null(vm.IndexFailure);
@@ -175,7 +175,7 @@ public class JsonDiffViewModelTests
         var (vm, l, r) = await LoadAsync("""{"a":[1,2,3]}""", """{"a":[1,2,3]}""");
         try
         {
-            await WaitForAsync(() => vm.StatusText.Contains("identical"));
+            await WaitForAsync(() => vm.StatusDetail.Contains("identical"));
         }
         finally
         {
@@ -193,9 +193,9 @@ public class JsonDiffViewModelTests
 
             // The pair identifies the document, so it belongs in the title once - the status
             // bar is left to say what the comparison found.
-            await WaitForAsync(() => vm.StatusText.Contains("modified"));
-            Assert.DoesNotContain(Path.GetFileName(l), vm.StatusText);
-            Assert.DoesNotContain(Path.GetFileName(r), vm.StatusText);
+            await WaitForAsync(() => vm.StatusDetail.Contains("modified"));
+            Assert.DoesNotContain(Path.GetFileName(l), vm.StatusDetail);
+            Assert.DoesNotContain(Path.GetFileName(r), vm.StatusDetail);
         }
         finally
         {
@@ -217,7 +217,7 @@ public class JsonDiffViewModelTests
             var (vm, l, r) = await LoadAsync("""{"a":1}""", """{"a":1,"new":"hello"}""");
             try
             {
-                Assert.True(ReferenceEquals(vm.Tree, vm.DiffTree), $"load {i}: status='{vm.StatusText}'");
+                Assert.True(ReferenceEquals(vm.Tree, vm.DiffTree), $"load {i}: status='{vm.StatusDetail}'");
 
                 vm.GoToNextDiff();
                 var row = Selected(vm);

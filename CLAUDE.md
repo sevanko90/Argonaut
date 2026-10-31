@@ -182,8 +182,10 @@ open, so every reader of the document's file must be let go of first:
   commit fails. Anything new that holds the raw document's bytes must hold them through it, not a
   separate `origin.Open()`.
 - **Anything else reading the file must be stopped and joined by the save.** Today that is
-  search (`FindController.StopSearchAndWaitAsync`) and an edited document's pending re-wrap scan
-  (`RawViewModel.SaveAsync` withdraws it, and the reopen scans at its width). A new background
+  search (`FindController.StopSearchAndWaitAsync`), the shell's line-ending count
+  (`MainWindowViewModel.StopLineEndingDetectionAndWaitAsync`, which counts again after the save),
+  and an edited document's pending re-wrap scan (`RawViewModel.SaveAsync` withdraws it, and the
+  reopen scans at its width). A new background
   reader of an origin's file (a sidecar indexer, a checksum) must be added to that join, or saves
   fail on Windows only.
 - **A failed commit leaves the destination untouched** - every `IFileReplacer` must guarantee it,

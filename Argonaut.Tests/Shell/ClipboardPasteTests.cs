@@ -191,7 +191,7 @@ public class ClipboardPasteTests
 
         public string FilePath => Origin?.Path ?? Origin?.DisplayName ?? string.Empty;
 
-        public string StatusText => "loaded";
+        public string StatusDetail => "loaded";
 
         public IndexFailure? IndexFailure => null;
 

@@ -135,6 +135,6 @@ public sealed class XmlViewTests : IDisposable
         await vm.LoadAsync(path);
         await vm.IndexingTask;
 
-        Assert.Equal(noted, vm.StatusText?.Contains("shown as UTF-8", StringComparison.Ordinal) ?? false);
+        Assert.Equal(noted, vm.StatusDetail?.Contains("shown as UTF-8", StringComparison.Ordinal) ?? false);
     }
 }

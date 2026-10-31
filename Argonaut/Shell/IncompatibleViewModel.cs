@@ -46,7 +46,10 @@ public sealed class IncompatibleViewModel : ObservableObject, IDocumentViewModel
     /// <summary>Nothing is indexed for a placeholder - see <see cref="IDocumentViewModel.IndexingTask"/>.</summary>
     public Task IndexingTask => Task.CompletedTask;
 
-    public string StatusText => $"{FilePath} — not compatible with the {AttemptedViewName} view";
+    public string StatusDetail => $"not compatible with the {AttemptedViewName} view";
+
+    /// <summary>The placeholder's headline: which file the view could not show.</summary>
+    public string Message => $"{FilePath} — not compatible with the {AttemptedViewName} view";
 
     /// <summary>Whether the failure-detail panel (message + location) should be shown at all.</summary>
     public bool HasFailureDetail => IndexFailure is not null;

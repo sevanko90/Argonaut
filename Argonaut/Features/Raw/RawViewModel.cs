@@ -682,7 +682,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         // it), so its own notification cannot be relied on to refresh what is under it.
         RefreshCaretReadout();
 
-        StatusText = DocumentStatusLine.Compose(FilePath, $"{ContentRowCount:N0} rows · edited, not saved");
+        StatusDetail = $"{ContentRowCount:N0} rows · edited, not saved";
     }
 
     private void SyncToolbarEditing()
@@ -973,7 +973,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         OnPropertyChanged(nameof(RowCount));
         OnPropertyChanged(nameof(Lexer));
 
-        StatusText = DocumentStatusLine.Compose(FilePath, $"{ContentRowCount:N0} rows indexed so far");
+        StatusDetail = $"{ContentRowCount:N0} rows indexed so far";
         MonitorIndexing();
 
         if (origin.StartsEditable)
@@ -1124,7 +1124,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         OnPropertyChanged(nameof(Rows));
         OnPropertyChanged(nameof(RowCount));
 
-        StatusText = DocumentStatusLine.Compose(FilePath, $"{ContentRowCount:N0} rows indexed so far");
+        StatusDetail = $"{ContentRowCount:N0} rows indexed so far";
         MonitorIndexing();
     }
 
@@ -1213,7 +1213,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         Caret = editor.Caret;
 
         OnPropertyChanged(nameof(RowCount));
-        StatusText = DocumentStatusLine.Compose(FilePath, IsDirty ? $"{ContentRowCount:N0} rows · edited, not saved" : $"{ContentRowCount:N0} rows");
+        StatusDetail = IsDirty ? $"{ContentRowCount:N0} rows · edited, not saved" : $"{ContentRowCount:N0} rows";
     }
 
     /// <summary>Opens <paramref name="origin"/> and starts scanning it, reading through a
@@ -1281,7 +1281,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         if (stopping.IsCancellationRequested)
             return DocumentSaveResult.Stopped;
 
-        string statusBefore = StatusText;
+        string statusBefore = StatusDetail;
         long length = document.AvailableLength;
 
         // A pending re-wrap scans the mapping the commit unmaps, so it is stopped and joined here,
@@ -1314,7 +1314,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
             IsSaving = false;
             if (!IsDisposed)
             {
-                StatusText = statusBefore;
+                StatusDetail = statusBefore;
                 ResumeRewrap(rewrapWanted);
             }
 
@@ -1346,7 +1346,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         {
             staged.Dispose();
             IsSaving = false;
-            StatusText = statusBefore;
+            StatusDetail = statusBefore;
             ResumeRewrap(rewrapWanted);
             return DocumentSaveResult.Stopped;
         }
@@ -1357,7 +1357,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
             var result = CommitAndReopen(staged, destination, fileBytes, rewrapWanted);
             saved = result.Outcome == DocumentSaveOutcome.Saved;
             if (!saved)
-                StatusText = statusBefore;
+                StatusDetail = statusBefore;
 
             return result;
         }
@@ -1482,7 +1482,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         OnPropertyChanged(nameof(CanEdit));
         OnPropertyChanged(nameof(CanSave));
 
-        StatusText = DocumentStatusLine.Compose(FilePath, $"saved · {ContentRowCount:N0} rows indexed so far");
+        StatusDetail = $"saved · {ContentRowCount:N0} rows indexed so far";
         MonitorIndexing();
 
         _ = RestoreAfterReopenAsync(caretOffset, wasEditing);
@@ -1548,7 +1548,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     /// covering a wrap-width restart retiring this index mid-monitor.</summary>
     protected override void OnIndexingCompleted()
     {
-        StatusText = DocumentStatusLine.Compose(FilePath, $"{ContentRowCount:N0} rows");
+        StatusDetail = $"{ContentRowCount:N0} rows";
         KeepAnchors();
 
         // Editing waits for the scan, so this is the moment the toggle becomes usable.
@@ -1567,8 +1567,8 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     protected override void OnIndexingFailed(IndexFailure? failure)
     {
         IndexFailure = failure;
-        StatusText = failure is { } f
-            ? $"{FilePath} — indexing stopped — {f.ItemsIndexed:N0} rows shown"
-            : $"{FilePath} — indexing failed";
+        StatusDetail = failure is { } f
+            ? $"indexing stopped — {f.ItemsIndexed:N0} rows shown"
+            : "indexing failed";
     }
 }

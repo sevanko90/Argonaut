@@ -299,7 +299,7 @@ public sealed class JsonViewModel : TreeDocumentViewModel
         // Inference dereferences the mapping, so the session must join it before unmapping.
         _ = InferDefaultDateSchemeAsync(session, reader, text);
 
-        StatusText = DocumentStatusLine.Compose(FilePath, "indexing…");
+        StatusDetail = "indexing…";
         MonitorIndexing();
         return Task.CompletedTask;
     }
@@ -316,7 +316,7 @@ public sealed class JsonViewModel : TreeDocumentViewModel
     protected override void OnIndexingCompleted()
     {
         indexBasis?.Keep(JsonKeptStructure.Key, Index?.DetachStructure());
-        StatusText = DocumentStatusLine.Compose(FilePath, ByteLengthText.Format(Bytes?.AvailableLength ?? 0));
+        StatusDetail = ByteLengthText.Format(Bytes?.AvailableLength ?? 0);
         Tree?.NotifyGrew();
         UpdateSchemaRootMatches();
     }
@@ -325,9 +325,9 @@ public sealed class JsonViewModel : TreeDocumentViewModel
     protected override void OnIndexingFailed(IndexFailure? failure)
     {
         IndexFailure = failure;
-        StatusText = failure is { } f
-            ? $"{FilePath} — indexing stopped at line {f.Line?.ToString("N0") ?? "?"}, column {f.Column?.ToString("N0") ?? "?"} — {f.ItemsIndexed:N0} tokens shown"
-            : $"{FilePath} — indexing failed";
+        StatusDetail = failure is { } f
+            ? $"indexing stopped at line {f.Line?.ToString("N0") ?? "?"}, column {f.Column?.ToString("N0") ?? "?"} — {f.ItemsIndexed:N0} tokens shown"
+            : "indexing failed";
     }
 
     /// <summary>

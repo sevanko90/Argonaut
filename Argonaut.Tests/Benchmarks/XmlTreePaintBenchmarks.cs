@@ -11,9 +11,11 @@ namespace Argonaut.Tests.Benchmarks;
 
 /// <summary>
 /// What it costs to draw XML rows, per <see cref="XmlShape"/>: a screen scrolled through a fully
-/// expanded tree, and a long scroll that walks several screens in one operation so a footprint
-/// that climbs with distance travelled would show. Collapsed summary rows, whose child counts are
-/// a different cost, are <see cref="XmlTreeCollapsedPaintBenchmarks"/>'.
+/// expanded tree, and a long scroll of twenty screens in one operation. Collapsed summary rows,
+/// whose child counts are a different cost, are <see cref="XmlTreeCollapsedPaintBenchmarks"/>'.
+///
+/// These are per-operation costs. A footprint that climbs with distance travelled does not show in
+/// a benchmark's mean; that is <see cref="XmlTreeFootprintTests"/>' job.
 ///
 /// Allocation here is the row text and its hints, so a screen's bytes are what a scroll throws
 /// away.
@@ -82,8 +84,9 @@ public class XmlTreePaintBenchmarks
     [Benchmark]
     public int Painter_ScrollScreen() => Paint(screenCursor, ScreenRows);
 
-    /// <summary>Twenty screens in one operation: the shape a long scroll has, and the one that
-    /// shows whether anything grows with the rows already drawn.</summary>
+    /// <summary>Twenty screens in one operation: the shape a long scroll has. Its time and
+    /// allocation should be twenty screens' worth; more per row than a single screen means a
+    /// scroll costs more the further it goes.</summary>
     [Benchmark]
     public int Painter_LongScroll() => Paint(longCursor, LongScrollRows);
 

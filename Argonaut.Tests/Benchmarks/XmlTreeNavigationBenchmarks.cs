@@ -18,7 +18,8 @@ namespace Argonaut.Tests.Benchmarks;
 /// nothing to one 64 KB stride depending on where the target falls between checkpoints. One
 /// position - the middle of the file, say - measures that alignment, not the seek; it moved 2x
 /// between two runs of the same code. The seek rotates through <see cref="SeekSamples"/> positions
-/// spread across the document, one per invocation, so the reported mean is a seek anywhere.
+/// spread across the document and across the stride (<see cref="XmlShapeCorpus.SampleOffsets"/>),
+/// one per invocation, so the reported mean is a seek anywhere.
 ///
 /// <b>Size.</b> 16 MiB. The read is bounded by the checkpoint stride and the tree's depth, not by
 /// the document's length, and the sampled positions cover the stride. The bigger corpus would only
@@ -67,9 +68,7 @@ public class XmlTreeNavigationBenchmarks
         pageCursor.SeekTo(file.AvailableLength / 2);
         forwardCursor.SeekTo(file.AvailableLength / 2);
 
-        seekOffsets = new long[SeekSamples];
-        for (int sample = 0; sample < SeekSamples; sample++)
-            seekOffsets[sample] = file.AvailableLength * (2 * sample + 1) / (2 * SeekSamples);
+        seekOffsets = XmlShapeCorpus.SampleOffsets(file.AvailableLength, SeekSamples, index.Structure.CheckpointBytes);
     }
 
     [GlobalCleanup]

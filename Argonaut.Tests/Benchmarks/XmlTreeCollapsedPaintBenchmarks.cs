@@ -12,9 +12,9 @@ namespace Argonaut.Tests.Benchmarks;
 
 /// <summary>
 /// What a screen of collapsed summary rows costs: every one asks its container how many children
-/// it has, which for a container the index did not record is counted by reading it. That is two to
-/// three times an expanded row, and it is the state a document opens in, so it is measured on its
-/// own rather than as a flag on <see cref="XmlTreePaintBenchmarks"/>.
+/// it has, which for a container the index did not record is counted by reading it. That makes it
+/// a different cost from an expanded row, and it is the state a document opens in, so it is
+/// measured on its own rather than as a flag on <see cref="XmlTreePaintBenchmarks"/>.
 ///
 /// Only the shapes that have containers below the default expand depth are here: with
 /// <see cref="XmlShape.TinyElements"/> the root is the only container and is expanded, and with

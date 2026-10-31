@@ -20,7 +20,8 @@ namespace Argonaut.Tests.Benchmarks;
 /// and one 64 KB stride of siblings depending on where the row falls. One row - the last in the
 /// document, say - measures that alignment rather than the selection, and it moved by 2.6x between
 /// two runs of the same code. Rows are taken from <see cref="SampleCount"/> positions spread across
-/// the document, rotated one per invocation, so the reported mean is a selection anywhere.
+/// the document and across the stride (<see cref="XmlShapeCorpus.SampleOffsets"/>), rotated one per
+/// invocation, so the reported mean is a selection anywhere.
 ///
 /// <b>Size.</b> 16 MiB. A step is bounded by the checkpoint stride, and the document's length only
 /// decides how large <c>k</c> is, which is a stored count rather than a walk.
@@ -65,12 +66,13 @@ public class XmlPathBenchmarks
         reader = new XmlTreeReader(file);
         text = new XmlTreeText(file, index.Structure, reader);
 
+        long[] offsets = XmlShapeCorpus.SampleOffsets(file.AvailableLength, SampleCount, index.Structure.CheckpointBytes);
         sampleCursors = new TreeCursor[SampleCount];
         samplePaths = new string[SampleCount];
         for (int sample = 0; sample < SampleCount; sample++)
         {
             var cursor = new TreeCursor(index.Structure, reader, new TreeExpandState(FullyExpanded));
-            cursor.SeekTo(file.AvailableLength * (2 * sample + 1) / (2 * SampleCount));
+            cursor.SeekTo(offsets[sample]);
 
             sampleCursors[sample] = cursor;
             samplePaths[sample] = XmlTreePaths.Format(XmlTreePaths.Segments(cursor, text, index));

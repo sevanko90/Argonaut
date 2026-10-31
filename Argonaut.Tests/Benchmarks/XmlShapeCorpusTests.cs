@@ -141,5 +141,40 @@ public class XmlShapeCorpusTests
         }
     }
 
+    /// <summary>The navigation and path benchmarks report a mean over sampled positions on the
+    /// grounds that the samples cover the checkpoint stride. Evenly spaced offsets alone did not:
+    /// every TinyElements sample landed a whole stride past its checkpoint.</summary>
+    [Theory]
+    [InlineData(XmlShape.TinyElements)]
+    [InlineData(XmlShape.DeepNesting)]
+    [InlineData(XmlShape.RecordRoot)]
+    [InlineData(XmlShape.TextHeavy)]
+    public async Task SampleOffsets_LandAcrossTheCheckpointStride(XmlShape shape)
+    {
+        string path = PathOf(shape);
+        try
+        {
+            XmlShapeCorpus.Write(path, shape, 16 * Size);
+
+            using var file = new MMapFile(path);
+            var index = XmlSparseIndex.StartIndexing(file);
+            await index.IndexingTask;
+            var structure = index.Structure;
+            var checkpoints = Enumerable.Range(0, structure.CheckpointCount)
+                .Select(checkpoint => structure.GetCheckpoint(checkpoint).Offset).ToArray();
+
+            var pastCheckpoint = XmlShapeCorpus.SampleOffsets(file.AvailableLength, 8, structure.CheckpointBytes)
+                .Select(offset => offset - checkpoints.Where(start => start <= offset).DefaultIfEmpty(0).Max())
+                .ToArray();
+
+            Assert.True(pastCheckpoint.Max() - pastCheckpoint.Min() > structure.CheckpointBytes / 2,
+                $"Samples sit {string.Join(", ", pastCheckpoint)} bytes past their checkpoints.");
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
     private static string PathOf(XmlShape shape) => Path.Combine(Path.GetTempPath(), $"corpus-{shape}-{Guid.NewGuid():N}.xml");
 }

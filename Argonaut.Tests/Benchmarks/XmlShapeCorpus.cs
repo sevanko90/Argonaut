@@ -69,6 +69,25 @@ public static class XmlShapeCorpus
     /// most of the file.</summary>
     private const long MinimumBytes = 64 * 1024;
 
+    /// <summary>
+    /// <paramref name="count"/> offsets spread across a document and across the checkpoint
+    /// stride, for benchmarks whose cost depends on how far a position is past the nearest
+    /// checkpoint. Spreading across the document alone is not enough: evenly spaced offsets in a
+    /// document whose length is a power of two are all multiples of the 64 KB stride, and with
+    /// checkpoints that drift only a few bytes per stride (<see cref="XmlShape.TinyElements"/>)
+    /// every one landed a whole stride past its checkpoint - the worst case, eight times. Each
+    /// sample is therefore shifted by its own fraction of the stride as well.
+    /// </summary>
+    public static long[] SampleOffsets(long length, int count, int checkpointStride)
+    {
+        var offsets = new long[count];
+        for (int sample = 0; sample < count; sample++)
+            offsets[sample] = Math.Min(length - 1,
+                length * (2 * sample + 1) / (2 * count) + (long)checkpointStride * sample / count);
+
+        return offsets;
+    }
+
     public static void Write(string path, XmlShape shape, long sizeBytes)
     {
         if (sizeBytes < MinimumBytes)

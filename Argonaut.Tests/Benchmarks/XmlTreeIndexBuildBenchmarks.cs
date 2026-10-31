@@ -11,11 +11,11 @@ namespace Argonaut.Tests.Benchmarks;
 /// any of it is indexed, so there is no first-screen wait to measure.
 ///
 /// <b>Size.</b> 64 MiB, because this is the one measurement here that is per byte: speed divides by
-/// the document's length and the column divides the allocation by it. Read the allocation with that
-/// in mind - an index session pays a fixed ~860 KB for its append logs before it records anything
-/// (five logs' first 8192-item segment, three of them on the large object heap), so at this size the
-/// column reports mostly that fixed cost, not the marginal one. <c>docs/index-benchmarks.md</c>
-/// measures the same indexer at 1 GiB, where the fixed share is small.
+/// the document's length and the column divides the allocation by it. An index session pays a
+/// fixed cost for its five append logs' first segments (about 72 KiB since segments are sized in
+/// bytes; 860 KB, mostly on the large object heap, before - see <c>docs/index-fixed-cost.md</c>), so
+/// at this size the column still includes it. <c>docs/index-benchmarks.md</c> measures the same
+/// indexer at 1 GiB.
 /// </summary>
 [MemoryDiagnoser]
 [SimpleJob(warmupCount: 2, iterationCount: 8)]

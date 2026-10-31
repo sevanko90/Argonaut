@@ -61,7 +61,7 @@ public sealed class RawViewModelTests : IDisposable
             Assert.Equal(RawViewSettings.DefaultWrapWidth, vm.WrapWidth);
             Assert.Equal(3, vm.RowCount);
             Assert.NotNull(vm.Toolbar);
-            Assert.Contains("3 rows", vm.StatusText);
+            Assert.Contains("3 rows", vm.StatusDetail);
         }
         finally
         {

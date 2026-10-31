@@ -101,7 +101,7 @@ public sealed class XmlViewModel : TreeDocumentViewModel
         string? declared = XmlDeclaredEncoding.Read(session.Bytes);
         encodingNote = XmlDeclaredEncoding.IsNotUtf8(declared) ? $"declared {declared}, shown as UTF-8" : null;
 
-        StatusText = Status("indexing…");
+        StatusDetail = Status("indexing…");
         MonitorIndexing();
         return Task.CompletedTask;
     }
@@ -110,15 +110,15 @@ public sealed class XmlViewModel : TreeDocumentViewModel
 
     public override bool CanHandleFileType(FileTypeDetector.FileKind fileType) => fileType == FileTypeDetector.FileKind.Xml;
 
-    /// <summary>The status line: the folder, then <paramref name="detail"/>, then the encoding note
+    /// <summary>The status detail: <paramref name="detail"/>, then the encoding note
     /// when the declaration names one that is not shown as it says.</summary>
     private string Status(string detail)
-        => DocumentStatusLine.Compose(FilePath, encodingNote is null ? detail : $"{detail} — {encodingNote}");
+        => encodingNote is null ? detail : $"{detail} — {encodingNote}";
 
     protected override void OnIndexingCompleted()
     {
         indexBasis?.Keep(XmlKeptStructure.Key, Index?.DetachStructure());
-        StatusText = Status(ByteLengthText.Format(Bytes?.AvailableLength ?? 0));
+        StatusDetail = Status(ByteLengthText.Format(Bytes?.AvailableLength ?? 0));
         Tree?.NotifyGrew();
     }
 
@@ -131,7 +131,7 @@ public sealed class XmlViewModel : TreeDocumentViewModel
         string detail = failure is { } f
             ? $"{f.Message} at line {f.Line?.ToString("N0") ?? "?"}, column {f.Column?.ToString("N0") ?? "?"}"
             : "indexing failed";
-        StatusText = Status(detail);
+        StatusDetail = Status(detail);
     }
 
     /// <summary>

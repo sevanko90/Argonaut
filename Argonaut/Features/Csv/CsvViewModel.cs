@@ -272,7 +272,7 @@ public sealed class CsvViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         OnPropertyChanged(nameof(ColumnCount));
         OnPropertyChanged(nameof(RowCount));
 
-        StatusText = DocumentStatusLine.Compose(FilePath, $"{RowCount:N0} rows indexed so far");
+        StatusDetail = $"{RowCount:N0} rows indexed so far";
         MeasureWidestGutterLabel();
         MonitorIndexing();
     }
@@ -323,7 +323,7 @@ public sealed class CsvViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     protected override void OnIndexingCompleted()
     {
         this.indexBasis?.Keep(FileLineAnchors.Key, this.session?.Index.DetachAnchors());
-        StatusText = DocumentStatusLine.Compose(FilePath, $"{RowCount:N0} rows");
+        StatusDetail = $"{RowCount:N0} rows";
         MeasureWidestGutterLabel();
     }
 
@@ -331,9 +331,9 @@ public sealed class CsvViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     protected override void OnIndexingFailed(IndexFailure? failure)
     {
         IndexFailure = failure;
-        StatusText = failure is { } f
-            ? $"{FilePath} — indexing stopped — {f.ItemsIndexed:N0} rows shown"
-            : $"{FilePath} — indexing failed";
+        StatusDetail = failure is { } f
+            ? $"indexing stopped — {f.ItemsIndexed:N0} rows shown"
+            : "indexing failed";
     }
 
     /// <summary>

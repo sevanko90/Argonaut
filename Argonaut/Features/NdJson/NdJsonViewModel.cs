@@ -96,7 +96,7 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
 
             OnPropertyChanged(nameof(SelectedLineNumber));
             OnPropertyChanged(nameof(SelectedLineText));
-            UpdateStatusText();
+            UpdateStatusDetail();
         }
     }
 
@@ -298,7 +298,7 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
         lines = new NdJsonLineCollection(session.Index, session.Bytes);
         OnPropertyChanged(nameof(Lines));
 
-        UpdateStatusText();
+        UpdateStatusDetail();
         MonitorIndexing();
     }
 
@@ -373,12 +373,12 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
         return (fileType == FileTypeDetector.FileKind.Ndjson);
     }
 
-    private void UpdateStatusText()
+    private void UpdateStatusDetail()
     {
         MeasureWidestLineNumber();
-        StatusText = SelectedLineNumber is { } line
-            ? DocumentStatusLine.Compose(FilePath, $"{LineCount:N0} lines · {SelectedLineLabel(line)}")
-            : DocumentStatusLine.Compose(FilePath, $"{LineCount:N0} lines");
+        StatusDetail = SelectedLineNumber is { } line
+            ? $"{LineCount:N0} lines · {SelectedLineLabel(line)}"
+            : $"{LineCount:N0} lines";
     }
 
     /// <summary>The selected line as the gutter names it: by number, or by where it starts.</summary>
@@ -388,22 +388,22 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
             : $"Selected line: {LineNumbering.Line(line):N0}";
 
     /// <summary>The status line names the selected line by its shown number.</summary>
-    protected override void OnLineNumberingChanged() => UpdateStatusText();
+    protected override void OnLineNumberingChanged() => UpdateStatusDetail();
 
     /// <summary>Indexing finished: keeps the "Selected line" suffix if one is selected by then.</summary>
     protected override void OnIndexingCompleted()
     {
         this.indexBasis?.Keep(FileLineAnchors.Key, this.session?.Index.DetachAnchors());
-        UpdateStatusText();
+        UpdateStatusDetail();
     }
 
     /// <summary>Indexing stopped early (failure, or cancellation on <paramref name="failure"/> null).</summary>
     protected override void OnIndexingFailed(IndexFailure? failure)
     {
         IndexFailure = failure;
-        StatusText = failure is { } f
-            ? $"{FilePath} — indexing stopped — {f.ItemsIndexed:N0} lines shown"
-            : $"{FilePath} — indexing failed";
+        StatusDetail = failure is { } f
+            ? $"indexing stopped — {f.ItemsIndexed:N0} lines shown"
+            : "indexing failed";
     }
 
     public string GetLineText(int lineIndex)

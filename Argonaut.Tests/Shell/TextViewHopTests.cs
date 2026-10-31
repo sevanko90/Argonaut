@@ -62,7 +62,7 @@ public sealed class TextViewHopTests : IDisposable
 
         public string FilePath => string.Empty;
 
-        public string StatusText => "loaded";
+        public string StatusDetail => "loaded";
 
         public IndexFailure? IndexFailure => null;
 

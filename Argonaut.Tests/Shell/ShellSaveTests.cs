@@ -63,7 +63,7 @@ public sealed class ShellSaveTests : IDisposable
 
         public string FilePath => Origin?.Path ?? Origin?.DisplayName ?? string.Empty;
 
-        public string StatusText => "loaded";
+        public string StatusDetail => "loaded";
 
         public IndexFailure? IndexFailure => null;
 
@@ -141,8 +141,11 @@ public sealed class ShellSaveTests : IDisposable
 
         public ProgressBoard Board { get; } = new(TimeProvider.System);
 
-        public Harness(byte[]? clipboard = null)
+        public FakeLineEndingDetector LineEndings { get; }
+
+        public Harness(byte[]? clipboard = null, bool holdLineEndings = false)
         {
+            LineEndings = new FakeLineEndingDetector { HoldsResults = holdLineEndings };
             Shell = new MainWindowViewModel(SettingsStore.InMemory(), TestSchemas.Catalog(),
                 _ =>
                 {
@@ -173,7 +176,8 @@ public sealed class ShellSaveTests : IDisposable
                     Failures.Add(message);
                     return Task.CompletedTask;
                 },
-                progressBoard: Board);
+                progressBoard: Board,
+                lineEndings: LineEndings);
         }
     }
 
@@ -415,6 +419,31 @@ public sealed class ShellSaveTests : IDisposable
         Assert.False(harness.Shell.IsSaving);
         Assert.True(saving.IsFinished);
         Assert.Same(harness.Document, harness.Shell.CurrentDocument);
+    }
+
+    /// <summary>The line-ending count reads the file a save replaces, so a save stops it and waits
+    /// for it before writing, then counts the saved file again.</summary>
+    [Fact]
+    public async Task ASave_StopsTheLineEndingCountFirst_AndCountsAgainAfter()
+    {
+        string path = WriteFile();
+        var harness = new Harness(holdLineEndings: true);
+        await harness.Shell.OpenPathAsync(path);
+        harness.Document.HasUnsavedChanges = true;
+        Assert.Equal(1, harness.LineEndings.Pending);
+
+        int pendingWhenWritten = -1;
+        harness.Board.WorkStarted += (_, entry) =>
+        {
+            if (entry.Title.StartsWith("Saving"))
+                pendingWhenWritten = harness.LineEndings.Pending;
+        };
+
+        Assert.True(await harness.Shell.SaveAsync().WaitAsync(TimeSpan.FromSeconds(5)));
+
+        Assert.Equal(0, pendingWhenWritten);
+        Assert.Equal(2, harness.LineEndings.Asked.Count);
+        Assert.Equal(1, harness.LineEndings.Pending);
     }
 
     /// <summary>The split button's two halves: Save needs something to save, Save As only needs a

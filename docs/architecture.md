@@ -40,11 +40,17 @@ them). Keep this in sync when the ownership chain changes.
 ## Documents
 
 - `IDocumentViewModel` (`Ui/Documents/IDocumentViewModel.cs`) is the shell's slim view of one open
-  document: `FilePath`, observable `StatusText`, `CreateSearchNavigator()` (nullable — null for
+  document: `FilePath`, observable `StatusDetail`, `CreateSearchNavigator()` (nullable — null for
   a document with nothing searchable), `CanHandleFileType(FileKind)`, observable
   `IndexFailure`, and `Toolbar`. Implemented by `JsonViewModel`, `NdJsonViewModel`,
   `CsvViewModel`, `RawViewModel`, `JsonDiffViewModel`, `JsonArrayTableViewModel`, and the
   placeholder `IncompatibleViewModel`.
+- The status bar is the shell's. A document supplies only `StatusDetail`, what its view has to
+  say (`1,234 rows`, `indexing…`, a failure); `MainWindowViewModel` puts the document's location
+  in front (`DocumentStatusLine.Compose`) and shows facts about the input beside it. Line endings
+  are one: counted by the injected `ILineEndingDetector` (`Engine/Detection`) from the first 1 MB
+  of each origin the shell adopts, so a view switch, which re-adopts the same origin, does not
+  count again, and a comparison of two inputs shows none.
 - Each document view model owns its whole status line (initial, live indexing %, complete,
   failed, and — NDJSON — selected-line), which the shell mirrors into the status bar.
 - **Per-view toolbars are injected, not type-switched.** `IDocumentViewModel.Toolbar` is
@@ -525,7 +531,7 @@ The XML view is the same tree machinery with XML's index, reader and painter
   `JsonArrayTableViewModel`.
   Its `Dispose()` is the one place the ordering above is encoded for a document:
   `session.RequestStop()` → `rows.Dispose()` → subclass `DisposeCore()` → `session.Dispose()`.
-  It also owns `FilePath`/`StatusText`/`IndexFailure` and the indexing-completion monitor
+  It also owns `FilePath`/`StatusDetail`/`IndexFailure` and the indexing-completion monitor
   (`MonitorIndexing()`, started from `LoadAsync` before it returns, so it is registered ahead of
   the shell's own continuation that finishes the load's progress entry);
   subclasses react to completion/failure via `OnIndexingCompleted()`/`OnIndexingFailed(failure)`,

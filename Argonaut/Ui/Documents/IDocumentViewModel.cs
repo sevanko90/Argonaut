@@ -10,9 +10,10 @@ namespace Argonaut.Ui.Documents;
 
 /// <summary>
 /// The shell's contract for one open document (JSON, NDJSON, CSV/TSV). Each document view
-/// model owns its whole status-bar line (<see cref="StatusText"/>), including reacting to
-/// its own selection changes and its background indexing completing or failing - the shell
-/// only mirrors the current document's text.
+/// model owns what its status bar says about the view (<see cref="StatusDetail"/>), including
+/// reacting to its own selection changes and its background indexing completing or failing.
+/// The shell builds the line around it: the document's location before it, and facts about the
+/// input itself (its line endings) beside it.
 ///
 /// Lifetime contract: instances are created and loaded by MainWindowViewModel, which owns
 /// disposal. It disposes any instance that never becomes CurrentDocument (a stale open
@@ -60,8 +61,12 @@ public interface IDocumentViewModel : INotifyPropertyChanged, IDisposable
     /// </summary>
     string? HeaderTitle => null;
 
-    /// <summary>The full status-bar line for this document; observable.</summary>
-    string StatusText { get; }
+    /// <summary>
+    /// What the status bar says about this view of the document - <c>1,234 rows</c>,
+    /// <c>indexing…</c>, a failure - without its location, which the shell puts in front.
+    /// Observable.
+    /// </summary>
+    string StatusDetail { get; }
 
     /// <summary>
     /// This document's header toolbar view model, or null for a document with no toolbar
@@ -89,7 +94,7 @@ public interface IDocumentViewModel : INotifyPropertyChanged, IDisposable
     /// <summary>
     /// Non-null when this document's background indexing stopped early because of an error;
     /// null on success and on cancellation. Observable via <see cref="INotifyPropertyChanged"/>,
-    /// like <see cref="StatusText"/>.
+    /// like <see cref="StatusDetail"/>.
     /// </summary>
     IndexFailure? IndexFailure { get; }
 
@@ -97,8 +102,8 @@ public interface IDocumentViewModel : INotifyPropertyChanged, IDisposable
     /// Completes when this document's background indexing stops (finished, failed, or
     /// cancelled); already-completed for a document that never indexes anything. The shell
     /// needs this to know when to stop writing scan progress over the status line, since past
-    /// that point <see cref="StatusText"/> holds the document's own final total. Faults are
-    /// this document's to report via <see cref="IndexFailure"/>/<see cref="StatusText"/> - the
+    /// that point <see cref="StatusDetail"/> holds the document's own final total. Faults are
+    /// this document's to report via <see cref="IndexFailure"/>/<see cref="StatusDetail"/> - the
     /// shell only ever awaits completion, never the result.
     /// </summary>
     Task IndexingTask { get; }

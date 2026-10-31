@@ -295,9 +295,8 @@ session still open, `Left after release` is the same after disposal. KB/MB in it
 ## Result
 
 Measured 2026-10-31 on a cloud Linux VM (x64, 4 cores, Ubuntu 24.04, .NET 10.0.14), before and
-after on the same machine. It is noisier than the M5 and allocates more at 1 GiB on both sides
-(see the note under the 1 GiB table), so compare the columns side by side, not against the M5
-figures above.
+after on the same machine. It is noisier than the M5, so compare the columns side by side, not
+against the M5 figures above.
 
 **Every acceptance point was met.** At 1 MiB, before → after:
 
@@ -361,10 +360,15 @@ below *Allocated* (135.9 KB) and *Peak heap*, as every other row does, so the ~1
 longer appears. Before the change it did not appear here either (834.1 kept vs 901.8 allocated), so
 it may be specific to the M5 run rather than to the LOH.
 
-**Not explained:** at 1 GiB this machine allocates far more than the M5 did, before and after alike
-(JsonRecords 8.0 / 8.7 MB against 775 KB; Csv 1.0 MB against 267 KB), while *Index kept* matches
-the M5 closely. That is transient scan allocation outside the index, platform- or
-runtime-dependent, and unrelated to this change.
+**The 1 GiB allocation gap was the harness.** This VM first reported far more allocation at 1 GiB
+than the M5, before and after alike (JsonRecords 8.0 / 8.7 MB against 775 KB), at a steady
+~2.5 MB per second of indexing for every document. That was the harness's peak sampler reading
+`Environment.WorkingSet` every millisecond: on Linux each read parses `/proc` into strings
+(~3 KB a call), on macOS it is an allocation-free system call. The sampler now reads the working
+set every 50 ms and subtracts its own allocation; re-run after the fix, *Allocated* at 1 GiB is
+JsonRecords 403.4 KB, Csv 267.3 KB, Xml 1.1 MB - in line with *Index kept* and with the M5. The
+1 MiB tables above were barely affected (a few milliseconds of sampling); the 1 GiB *Allocated*
+column in index-benchmarks.md's before/after tables for this machine carries the inflation.
 
 ## References
 

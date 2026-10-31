@@ -139,8 +139,11 @@ from every run below, so it is its own baseline and is not in the M5 trend table
   Text).** At 1 GiB JSON 773 → 409 KB and XML 1.4 → 1.0 MB; CSV, NDJSON and Text unchanged, their
   segments were already full.
 - **Speed: within noise**, in both directions.
-- This VM allocates more at 1 GiB than the M5 on both sides (transient scan allocation, not the
-  index); compare *Index kept* across machines, not *Allocated*.
+- **The 1 GiB *Allocated* column above is inflated on this machine** by the harness's own
+  sampler: reading `Environment.WorkingSet` every millisecond allocates ~3 KB a call on Linux
+  (~2.5 MB/s). Fixed in the same change (working set every 50 ms, sampler's own allocation
+  subtracted); re-run after it, 1 GiB *Allocated* is Text 2.4 MB, Csv/NdJson 267.3 KB,
+  JsonRecords 403.4 KB, Xml 1.1 MB - matching *Index kept*. *Index kept* above is unaffected.
 
 ### 2026-10-28 - XML view (`c335c87`)
 

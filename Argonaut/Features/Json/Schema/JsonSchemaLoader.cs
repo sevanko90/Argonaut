@@ -29,7 +29,8 @@ namespace Argonaut.Features.Json.Schema;
 /// Keyword coverage: <c>title</c>, <c>description</c>, <c>properties</c>, <c>items</c>,
 /// <c>prefixItems</c> (plus draft-07's array-form <c>items</c>), <c>additionalProperties</c>,
 /// <c>$defs</c>/<c>definitions</c>, local <c>#/...</c> <c>$ref</c>, <c>allOf</c>,
-/// <c>oneOf</c>/<c>anyOf</c>, <c>enum</c> with <c>x-enumNames</c>/<c>x-enumDescriptions</c>.
+/// <c>oneOf</c>/<c>anyOf</c>, <c>enum</c> with <c>x-enumNames</c>/<c>x-enumDescriptions</c>, and
+/// <c>required</c> - read as evidence for matching a schema to a document, never to validate one.
 ///
 /// OpenAPI documents load through this same path, because an OpenAPI Schema Object *is* a JSON
 /// Schema: 3.1 is literally JSON Schema 2020-12, and 3.0's dialect is a draft-04 subset whose
@@ -115,9 +116,12 @@ public static class JsonSchemaLoader
         private readonly List<JsonSchemaNode> nodes = new();
 
         // Parallel to nodes, and loader-only state: the local pointer this node defers to
-        // (pass 2), and the allOf/oneOf/anyOf branches merged into it (pass 3).
+        // (pass 2), and the allOf/oneOf/anyOf branches merged into it (pass 3). A branch
+        // remembers whether it came from allOf, the only one whose `required` holds for its owner.
         private readonly List<string?> refTargets = new();
-        private readonly List<List<int>?> branches = new();
+        private readonly List<List<Branch>?> branches = new();
+
+        private readonly record struct Branch(int NodeId, bool FromAllOf);
 
         private readonly Dictionary<string, int> nodesByPointer = new(StringComparer.Ordinal);
 
@@ -190,6 +194,7 @@ public static class JsonSchemaLoader
                 refTargets[id] = NormalisePointer(reference.GetString());
 
             ReadProperties(element, node, pointer, depth);
+            node.RequiredKeysUtf8 = ReadRequired(element);
             ReadArrayShape(element, node, pointer, depth);
 
             if (element.TryGetProperty("additionalProperties", out var additional) && additional.ValueKind == JsonValueKind.Object)
@@ -238,6 +243,35 @@ public static class JsonSchemaLoader
             Array.Sort(keyArray, idArray, Utf8KeyComparer);
             node.PropertyKeysUtf8 = keyArray;
             node.PropertyNodeIds = idArray;
+        }
+
+        /// <summary>The string entries of <c>required</c>, as sorted, distinct UTF-8; null when
+        /// there are none. Anything but an array of strings is ignored rather than rejected.</summary>
+        private static byte[][]? ReadRequired(JsonElement element)
+        {
+            if (!element.TryGetProperty("required", out var required) || required.ValueKind != JsonValueKind.Array)
+                return null;
+
+            List<byte[]>? names = null;
+            foreach (var entry in required.EnumerateArray())
+            {
+                if (entry.ValueKind == JsonValueKind.String && entry.GetString() is { } name)
+                    (names ??= new List<byte[]>()).Add(Encoding.UTF8.GetBytes(name));
+            }
+
+            return names is null ? null : SortedDistinct(names);
+        }
+
+        private static byte[][] SortedDistinct(List<byte[]> names)
+        {
+            names.Sort(Utf8KeyComparer);
+            for (int i = names.Count - 1; i > 0; i--)
+            {
+                if (((ReadOnlySpan<byte>)names[i]).SequenceEqual(names[i - 1]))
+                    names.RemoveAt(i);
+            }
+
+            return names.ToArray();
         }
 
         private void ReadArrayShape(JsonElement element, JsonSchemaNode node, string pointer, int depth)
@@ -352,7 +386,7 @@ public static class JsonSchemaLoader
                     int branchId = CreateNode(branch, pointer + "/" + keyword + "/" + i.ToString(System.Globalization.CultureInfo.InvariantCulture), depth + 1);
                     i++;
                     if (branchId >= 0)
-                        (branches[id] ??= new List<int>()).Add(branchId);
+                        (branches[id] ??= new List<Branch>()).Add(new Branch(branchId, keyword == "allOf"));
                 }
             }
         }
@@ -421,10 +455,15 @@ public static class JsonSchemaLoader
 
             if (branches[id] is { } list)
             {
-                foreach (int branchId in list)
+                foreach (var branch in list)
                 {
-                    MergeBranches(branchId, state);
-                    CopyStructure(nodes[id], nodes[branchId], unionProperties: true);
+                    MergeBranches(branch.NodeId, state);
+                    CopyStructure(nodes[id], nodes[branch.NodeId], unionProperties: true);
+
+                    // What every allOf branch requires, the whole requires; a oneOf/anyOf
+                    // branch's requirements hold only when that branch is the one taken.
+                    if (branch.FromAllOf)
+                        UnionRequired(nodes[id], nodes[branch.NodeId]);
                 }
             }
 
@@ -450,6 +489,11 @@ public static class JsonSchemaLoader
 
             target.PrefixItemIds ??= source.PrefixItemIds;
             target.EnumLabels ??= source.EnumLabels;
+
+            // A $ref brings its target's requirements; a merged branch does not here - which
+            // branches' requirements apply is MergeBranches' call.
+            if (!unionProperties)
+                target.RequiredKeysUtf8 ??= source.RequiredKeysUtf8;
 
             if (unionProperties)
                 UnionProperties(target, source);
@@ -516,6 +560,26 @@ public static class JsonSchemaLoader
 
             target.PropertyKeysUtf8 = keys.ToArray();
             target.PropertyNodeIds = ids.ToArray();
+        }
+
+        /// <summary>Merges <paramref name="source"/>'s required names into
+        /// <paramref name="target"/>'s, into a fresh array - either side may be shared with the
+        /// node a <c>$ref</c> was materialised from.</summary>
+        private static void UnionRequired(JsonSchemaNode target, JsonSchemaNode source)
+        {
+            if (source.RequiredKeysUtf8 is not { } sourceNames)
+                return;
+
+            if (target.RequiredKeysUtf8 is not { } targetNames)
+            {
+                target.RequiredKeysUtf8 = sourceNames;
+                return;
+            }
+
+            var names = new List<byte[]>(targetNames.Length + sourceNames.Length);
+            names.AddRange(targetNames);
+            names.AddRange(sourceNames);
+            target.RequiredKeysUtf8 = SortedDistinct(names);
         }
 
         private static string?[]? GetStringArray(JsonElement element, string keyword)

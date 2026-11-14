@@ -19,6 +19,9 @@ namespace Argonaut.Features.Json.Schema;
 /// what I'm looking at does this type explain".</param>
 /// <param name="Precision">Fraction of the schema's properties the document actually carries -
 /// "how much of this type is really here", which is what separates a tight match from a superset.</param>
+/// <param name="RequiredKeys">How many names the type's <c>required</c> lists.</param>
+/// <param name="RequiredPresent">How many of those the document carries. Read only by
+/// <see cref="SchemaAutoMatchRule"/>; the picker ranks on names alone and never checks it.</param>
 public readonly record struct SchemaRootMatch(
     string? Name,
     int NodeId,
@@ -26,7 +29,9 @@ public readonly record struct SchemaRootMatch(
     int DocumentKeys,
     int SchemaKeys,
     double Coverage,
-    double Precision);
+    double Precision,
+    int RequiredKeys = 0,
+    int RequiredPresent = 0);
 
 /// <summary>
 /// Ranks a schema's <see cref="JsonSchemaDocument.NamedRoots"/> against the property names the
@@ -99,23 +104,35 @@ public static class JsonSchemaRootMatcher
         ArgumentNullException.ThrowIfNull(schema);
         ArgumentNullException.ThrowIfNull(documentKeys);
 
-        var roots = schema.NamedRoots;
-        if (roots.Count == 0)
+        // Only a schema offering a choice of type is ranked for the picker.
+        if (schema.NamedRoots.Count == 0)
+            return Array.Empty<SchemaRootMatch>();
+
+        return Rank(SchemaFingerprint.Of(schema), documentKeys);
+    }
+
+    /// <summary>
+    /// Every type in <paramref name="schema"/> scored and ordered as the
+    /// <see cref="Rank(JsonSchemaDocument, IReadOnlyList{byte[]})"/> overload orders them,
+    /// including a schema whose only candidate is its own root - which is what matching a
+    /// document against the whole catalog needs.
+    /// </summary>
+    public static IReadOnlyList<SchemaRootMatch> Rank(SchemaFingerprint schema, IReadOnlyList<byte[]> documentKeys)
+    {
+        ArgumentNullException.ThrowIfNull(schema);
+        ArgumentNullException.ThrowIfNull(documentKeys);
+
+        var types = schema.Types;
+        if (types.Count == 0)
             return Array.Empty<SchemaRootMatch>();
 
         // Sorted (and de-duplicated) so each candidate is a linear merge against the schema's
         // already-sorted key array rather than a nested scan.
         var keys = SortedDistinct(documentKeys);
 
-        var matches = new List<SchemaRootMatch>(roots.Count + 1);
-
-        // The schema's own root competes with the named ones whenever it is usable - see the
-        // remark on SchemaRootMatch.Name.
-        if (schema.DocumentRootIsUsable)
-            matches.Add(Score(schema, name: null, schema.DocumentRootId, keys));
-
-        foreach (var root in roots)
-            matches.Add(Score(schema, root.Name, root.NodeId, keys));
+        var matches = new List<SchemaRootMatch>(types.Count);
+        foreach (var type in types)
+            matches.Add(Score(type, keys));
 
         matches.Sort(static (a, b) =>
         {
@@ -146,19 +163,21 @@ public static class JsonSchemaRootMatcher
         return matches;
     }
 
-    private static SchemaRootMatch Score(JsonSchemaDocument schema, string? name, int nodeId, List<byte[]> documentKeys)
+    private static SchemaRootMatch Score(SchemaTypeKeys type, List<byte[]> documentKeys)
     {
-        var schemaKeys = schema.GetPropertyKeys(nodeId);
+        var schemaKeys = type.PropertyKeys;
         int matched = CountCommon(documentKeys, schemaKeys);
 
         return new SchemaRootMatch(
-            name,
-            nodeId,
+            type.Name,
+            type.NodeId,
             matched,
             documentKeys.Count,
             schemaKeys.Count,
             documentKeys.Count == 0 ? 0 : (double)matched / documentKeys.Count,
-            schemaKeys.Count == 0 ? 0 : (double)matched / schemaKeys.Count);
+            schemaKeys.Count == 0 ? 0 : (double)matched / schemaKeys.Count,
+            type.RequiredKeys.Count,
+            CountCommon(documentKeys, type.RequiredKeys));
     }
 
     /// <summary>

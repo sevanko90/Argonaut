@@ -108,7 +108,7 @@ the document area, and opens what Send produces through `OpenOriginAsync`.
 
 ## Steps
 
-1. [ ] `UrlQuery` and `HttpRequestSpec`. Tests: round trips (order, duplicates, flags, encoding,
+1. [x] `UrlQuery` and `HttpRequestSpec`. Tests: round trips (order, duplicates, flags, encoding,
    fragment), editing one argument rewrites only the query.
 2. [ ] `HttpLocator`; identity, names, saved-source storage of method and body. Tests.
 3. [ ] `IHttpFetcher` and the download to a temp file with progress and Stop; `HttpResponseOrigin`.

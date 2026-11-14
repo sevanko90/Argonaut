@@ -327,7 +327,12 @@ public sealed class RawCaretInputTests : IDisposable
             for (long offset = 60; offset <= 140; offset += 10)
             {
                 await vm.RevealByteRangeAsync(ByteRange.At(offset));
-                await PumpAsync(60);
+
+                // The pan happens on the first animation frame after the arrival, which a slow
+                // runner can deliver well after any fixed delay - so wait for it, within the flash's
+                // own lifetime (RawArrivalFlash.Duration), rather than for a guessed time.
+                for (int waited = 0; waited < 1000 && !Fits(surface); waited += 20)
+                    await PumpAsync(20);
 
                 var shown = surface.ArrivalRect();
                 Assert.NotNull(shown);
@@ -372,6 +377,9 @@ public sealed class RawCaretInputTests : IDisposable
             return true;
         }, CancellationToken.None);
     }
+
+    private static bool Fits(RawTextSurface surface)
+        => surface.ArrivalRect() is { } shown && shown.Right <= surface.TextViewportRight + 0.5 && shown.Left > 0;
 
     /// <summary>
     /// The whole jump path, as the failure-location link drives it: resolve a byte offset, reveal

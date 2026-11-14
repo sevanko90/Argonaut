@@ -61,4 +61,36 @@ public sealed class RequestBodyEditorTests
             return true;
         }, CancellationToken.None);
     }
+
+    /// <summary>Regression: the editor was published before its load finished, and a layout pass
+    /// in between arranged the body view against a view model with no rows yet - an unhandled
+    /// InvalidOperationException ("LoadAsync must complete before Rows is accessed"). Whatever
+    /// sees the editor must be able to read its rows.</summary>
+    [Fact]
+    public Task TheEditor_IsOnlyPublishedOnceLoaded()
+    {
+        var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(RequestBodyEditorTests).Assembly);
+        return session.Dispatch(async () =>
+        {
+            using var body = new RequestBodyEditor(new RawViewSettings());
+            var failures = new List<Exception>();
+            body.EditorChanged += (_, _) =>
+            {
+                try
+                {
+                    _ = body.Editor?.Rows;
+                }
+                catch (Exception ex)
+                {
+                    failures.Add(ex);
+                }
+            };
+
+            await body.LoadAsync(Encoding.UTF8.GetBytes("{}"));
+            await body.LoadAsync(Encoding.UTF8.GetBytes("[]"));
+
+            Assert.Empty(failures);
+            return true;
+        }, CancellationToken.None);
+    }
 }

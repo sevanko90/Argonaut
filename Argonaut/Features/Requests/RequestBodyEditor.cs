@@ -16,6 +16,10 @@ public sealed class RequestBodyEditor(RawViewSettings settings) : ObservableObje
 {
     private RawViewModel? editor;
 
+    // Which load is the latest: one overtaken by another, or by Dispose, discards what it loaded.
+    private int loads;
+    private bool disposed;
+
     private const string BodyName = "Body";
 
     /// <summary>The hosted editor the view shows; null until <see cref="LoadAsync"/>.</summary>
@@ -32,15 +36,27 @@ public sealed class RequestBodyEditor(RawViewSettings settings) : ObservableObje
     /// <summary>Raised when <see cref="Editor"/> is replaced.</summary>
     public event EventHandler? EditorChanged;
 
-    /// <summary>Starts editing <paramref name="body"/>, replacing whatever was being edited.</summary>
+    /// <summary>
+    /// Starts editing <paramref name="body"/>, replacing whatever was being edited. The new editor
+    /// is published only once it has loaded - a view bound to it lays out its rows at once, and a
+    /// raw view model has none until its load completes - the same rule the shell keeps for every
+    /// document it shows.
+    /// </summary>
     public async Task LoadAsync(byte[] body)
     {
-        var previous = Editor;
+        int load = ++loads;
         var next = new RawViewModel(settings);
+        await next.LoadAsync(new MemoryByteOrigin(body, BodyName, startsEditable: true));
+
+        if (disposed || load != loads)
+        {
+            next.Dispose();
+            return;
+        }
+
+        var previous = Editor;
         Editor = next;
         previous?.Dispose();
-
-        await next.LoadAsync(new MemoryByteOrigin(body, BodyName, startsEditable: true));
     }
 
     /// <summary>The body as it stands, edits included; empty before anything has loaded.</summary>
@@ -64,6 +80,7 @@ public sealed class RequestBodyEditor(RawViewSettings settings) : ObservableObje
 
     public void Dispose()
     {
+        disposed = true;
         Editor?.Dispose();
         Editor = null;
     }

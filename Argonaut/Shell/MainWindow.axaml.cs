@@ -454,11 +454,11 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Only while nothing is open. Once the raw view's editing lands, plain Ctrl+V inside it
-        // has to mean "paste into the document", not "replace the document" - so this shortcut
-        // deliberately does not exist when there is a document to paste into. The empty state's
-        // button is the affordance that always works.
-        if (e.Key == Key.V && cmdOrCtrl && !viewModel.IsFileOpen && viewModel.CanPaste)
+        // Only while the empty state shows. This handler tunnels, so it sees the keystroke before
+        // the focused control: with a document open Ctrl+V means "paste into it", and with the
+        // request pane open it means "paste into the URL or the body" - never "replace what is
+        // here". The empty state's button is the affordance that always works.
+        if (e.Key == Key.V && cmdOrCtrl && viewModel.CanPasteAsNewDocument)
         {
             _ = viewModel.PasteAsync();
             e.Handled = true;

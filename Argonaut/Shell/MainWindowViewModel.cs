@@ -438,6 +438,13 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
     /// <summary>The empty state shows when nothing is open and no request is being written.</summary>
     public bool IsEmptyStateVisible => !IsFileOpen && !IsRequestPaneVisible;
 
+    /// <summary>
+    /// Whether the window's paste shortcut opens the clipboard as a new document: only while the
+    /// empty state is showing. With a document open, or the request pane, the keystroke belongs to
+    /// whatever has focus - the raw editor, the URL box, the body.
+    /// </summary>
+    public bool CanPasteAsNewDocument => IsEmptyStateVisible && CanPaste;
+
     /// <summary>A request is being written and nothing has loaded under it yet.</summary>
     public bool IsAwaitingResponse => !IsFileOpen && IsRequestPaneVisible;
 

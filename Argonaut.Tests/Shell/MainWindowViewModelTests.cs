@@ -452,6 +452,25 @@ public sealed class MainWindowViewModelTests : IDisposable
             lineEndings: new FakeLineEndingDetector(),
             responseDownloader: new ResponseDownloader(fetcher, Path.Combine(tempDir, "Responses")));
 
+    /// <summary>Regression: the paste shortcut tunnels ahead of the focused control, and it pasted a
+    /// URL meant for the request pane's URL box as a new document.</summary>
+    [Fact]
+    public async Task ThePasteShortcut_BelongsToTheEmptyStateOnly()
+    {
+        var vm = new MainWindowViewModel(SettingsStore.InMemory(), TestSchemas.Catalog(), _ => Task.FromResult(true),
+            readClipboardBytes: () => Task.FromResult<byte[]?>([1]),
+            documentLoader: (_, origin, _) => Task.FromResult<IDocumentViewModel>(new FakeDocument { Origin = origin, FilePath = origin.LocationText() }),
+            lineEndings: new FakeLineEndingDetector(),
+            responseDownloader: new ResponseDownloader(new FakeHttpFetcher([], 1, false), Path.Combine(tempDir, "Responses")));
+        Assert.True(vm.CanPasteAsNewDocument);
+
+        await vm.NewRequestAsync();
+        Assert.False(vm.CanPasteAsNewDocument);
+
+        await vm.OpenPathAsync(WriteJsonFile());
+        Assert.False(vm.CanPasteAsNewDocument);
+    }
+
     [Fact]
     public async Task NewRequest_ShowsThePane_InPlaceOfTheEmptyState()
     {

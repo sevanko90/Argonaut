@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Http;
 using Argonaut.Engine.Settings;
 
 namespace Argonaut.Shell.Sources;
@@ -31,8 +32,27 @@ public sealed class SavedSource
     /// <summary>A file's bookmark, base64 - what finds it again on macOS - or null.</summary>
     public string? Access { get; set; }
 
+    /// <summary>A request's method ("GET", "POST"); null for anything but a request.</summary>
+    public string? Method { get; set; }
+
+    /// <summary>A POST request's body, base64; null otherwise.</summary>
+    public string? Body { get; set; }
+
+    /// <summary>The kept response's file in the response folder - a request's last response - or
+    /// null when none is kept.</summary>
+    public string? ResponseFile { get; set; }
+
+    /// <summary>How large the kept response is, for the budget.</summary>
+    public long ResponseBytes { get; set; }
+
+    /// <summary>When the kept response arrived.</summary>
+    public DateTimeOffset? ResponseFetchedAt { get; set; }
+
     /// <summary>A file's kind.</summary>
     public const string FileKind = "file";
+
+    /// <summary>A request's kind - also the pill its row shows.</summary>
+    public const string HttpKind = "http";
 
     /// <summary>The locator this entry names, or null for a kind this build does not know - kept,
     /// so a newer build's entries survive a round trip through an older one, but not listed.</summary>
@@ -40,6 +60,7 @@ public sealed class SavedSource
     public SourceLocator? Locator => Kind switch
     {
         FileKind when !string.IsNullOrWhiteSpace(Location) => new FileLocator(Location, Bookmark()),
+        HttpKind => Request(),
         _ => null,
     };
 
@@ -52,10 +73,36 @@ public sealed class SavedSource
                 Kind = FileKind;
                 Location = file.Path;
                 Access = file.Bookmark is { } bookmark ? Convert.ToBase64String(bookmark) : null;
+                Method = null;
+                Body = null;
+                break;
+            case HttpLocator http:
+                Kind = HttpKind;
+                Location = http.Request.Url.OriginalString;
+                Method = http.Request.Method.ToString().ToUpperInvariant();
+                Body = http.Request.Body is { } body ? Convert.ToBase64String(body) : null;
+                Access = null;
                 break;
             default:
                 throw new ArgumentException($"No saved form for {locator.GetType().Name}.", nameof(locator));
         }
+    }
+
+    /// <summary>The saved request, or null when what is stored no longer makes one.</summary>
+    private HttpLocator? Request()
+    {
+        var method = string.Equals(Method, "POST", StringComparison.OrdinalIgnoreCase) ? HttpRequestMethod.Post : HttpRequestMethod.Get;
+        byte[]? body;
+        try
+        {
+            body = Body is { Length: > 0 } text ? Convert.FromBase64String(text) : null;
+        }
+        catch (FormatException)
+        {
+            return null;
+        }
+
+        return HttpRequestSpec.TryCreate(method, Location, body, out var request, out _) ? new HttpLocator(request!) : null;
     }
 
     private byte[]? Bookmark()

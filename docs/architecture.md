@@ -33,6 +33,23 @@ them). Keep this in sync when the ownership chain changes.
   `FileByteOrigin`, `PasteAsync` wraps the clipboard's bytes in a `MemoryByteOrigin` (declined
   past `MaxPasteBytes`, 64 MB), and `OpenDiffAsync` takes two. From there detection runs on the
   bytes, not the extension, so a paste with no name is detected the same way a file is.
+- **Requests** (`Features/Requests`, `Engine/Http`). New request (empty state, toolbar,
+  Ctrl/Cmd+L) opens the request pane - `RequestEditorViewModel` - docked above the document area.
+  The shell owns it while the input is a request and implements its `IRequestSender`: Send builds
+  an `HttpRequestSpec` (GET or POST, the URL, a POST body from a hosted raw editor), downloads the
+  response off the UI thread with `ResponseDownloader` over the injected `IHttpFetcher` (one
+  shared `HttpClient`; it decompresses gzip, deflate and Brotli itself so progress can count wire
+  bytes against `Content-Length`), and opens it as the document below, replacing the last; any
+  other input closes the pane. The URL and its query arguments stay in step both ways through
+  `UrlQuery`, which keeps each argument's text so an edit rewrites only what changed. A failed
+  send replaces the response with a `RequestFailure` - the status, what it means, and the server's
+  own message shown through a `HostedDocument` (JSON or XML fully expanded with no schema, raw
+  otherwise; a toggle swaps only that view), built by `DocumentViewCatalog.LoadHostedAsync`.
+  Saving: a new request is saved on its first successful send; a pane remembers the saved request
+  it edits and is dirty once its method, URL or body differ, which sending never resolves -
+  closing asks Update / Save as new / Don't save. A response answering its saved request as saved
+  is kept in the response folder (`ResponseStore`, 1 GB for all, oldest and unpinned first) and
+  reopens without sending.
 - **Saved sources** (`Shell/Sources`) are what the empty state lists: one `SavedSourceStore`
   of entries - id, name, kind, location, pinned - with the recent list (newest first, capped at
   `MaxRecent` unpinned) and the pinned list (in pin order) as two views of it. Opening or saving
@@ -261,8 +278,10 @@ The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLeng
   (`AvailableLength`/`LengthSettled`/`WaitForLength`), and it is the only thing that hands out
   sources: `Open()` for the whole document, `OpenRange(offset, length)` for one NDJSON line, an
   array's bytes as a table, or one search chunk. Implemented by `FileByteOrigin` (holds no
-  handle; every `Open` is a new `MMapFile`) and `MemoryByteOrigin` (a paste). It lives as long as
-  the open input and is owned by the shell (above).
+  handle; every `Open` is a new `MMapFile`), `MemoryByteOrigin` (a paste) and
+  `HttpResponseOrigin` (a downloaded response - a complete file in the response folder, read as
+  a file is, reporting its request's `HttpLocator`, and deleting the file when it closes unless
+  the response is kept). It lives as long as the open input and is owned by the shell (above).
 - **An origin also keeps finished indexes that are cheap to hold** (`IByteOrigin.KeptIndexes`,
   cleared on dispose), so a view closed and reopened over the same input - a switch to the text
   view and back, a wrap width tried and undone - skips its scan. Every document index is sparse,

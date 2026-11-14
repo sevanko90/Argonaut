@@ -29,6 +29,7 @@ using Argonaut.Ui.Progress;
 using System.Threading.Tasks;
 using Velopack;
 
+using Argonaut.Engine.Http;
 using Argonaut.Shell.Files;
 
 namespace Argonaut.Shell;
@@ -72,12 +73,16 @@ public partial class MainWindow : Window
     /// for this run only.</param>
     /// <param name="fileAccess">Describes and reopens remembered files - by bookmark on macOS; null
     /// goes by path.</param>
+    /// <param name="responseDownloader">Sends requests; null offers the request pane but cannot
+    /// send.</param>
+    /// <param name="responseStore">Keeps saved requests' last responses; null keeps none.</param>
     /// <param name="launcher">Opens folders and links - About, Notices and the views' value hints;
     /// null takes this build's own
     /// (see <see cref="SystemLaunchers.ForThisBuild"/>).</param>
     public MainWindow(ISettingsStore settings, JsonSchemaCatalog schemaCatalog, IDiagnosticLog log, Action? openLogFolder = null,
         IConfigLocationSource? configLocations = null, IRecipeStore? recipes = null, ISystemLauncher? launcher = null,
-        ISettingsSealer? settingsSealer = null, IFileAccess? fileAccess = null)
+        ISettingsSealer? settingsSealer = null, IFileAccess? fileAccess = null, ResponseDownloader? responseDownloader = null,
+        ResponseStore? responseStore = null)
     {
         InitializeComponent();
 
@@ -109,10 +114,13 @@ public partial class MainWindow : Window
             readClipboardBytes: ReadClipboardBytesAsync,
             pickSaveDestination: PickSaveDestinationAsync,
             askAboutUnsavedChanges: message => UnsavedChangesDialog.Show(this, message),
+            askAboutRequest: question => RequestSaveDialog.Show(this, question),
             reportFailure: message => ConfirmDialog.Inform(this, message),
             log: log,
             settingsSealer: settingsSealer,
             fileAccess: fileAccess,
+            responseDownloader: responseDownloader,
+            responseStore: responseStore,
             configLocations: configLocations,
             filterFiles: new SelectionFilterFiles(),
             recipes: recipes,
@@ -141,9 +149,12 @@ public partial class MainWindow : Window
         EmptyState.ChooseFileRequested += async (_, _) => await BrowseForFile();
         EmptyState.PasteRequested += async (_, _) => await viewModel.PasteAsync();
         EmptyState.NewDocumentRequested += async (_, _) => await viewModel.NewDocumentAsync();
+        EmptyState.NewRequestRequested += async (_, _) => await viewModel.NewRequestAsync();
         EmptyState.SetPasteAvailable(viewModel.CanPaste);
         EmptyState.OpenSavedSourceRequested += (_, id) => viewModel.OpenSavedSource(id);
         EmptyState.ClearRecentRequested += (_, _) => viewModel.ClearRecentSources();
+        EmptyState.ClearKeptResponsesRequested += (_, _) => viewModel.ClearKeptResponses();
+        EmptyState.SetHasKeptResponses(viewModel.HasKeptResponses);
         EmptyState.TogglePinRequested += (_, id) => viewModel.TogglePin(id);
         EmptyState.RenameRequested += (_, rename) => viewModel.RenameSavedSource(rename.Id, rename.Name);
         EmptyState.RemoveRequested += (_, id) => viewModel.RemoveSavedSource(id);
@@ -332,6 +343,9 @@ public partial class MainWindow : Window
         if (e.PropertyName is null or nameof(MainWindowViewModel.PinnedSources))
             EmptyState.SetPinned(viewModel.PinnedSources);
 
+        if (e.PropertyName is null or nameof(MainWindowViewModel.HasKeptResponses))
+            EmptyState.SetHasKeptResponses(viewModel.HasKeptResponses);
+
 #if DEBUG
         if (e.PropertyName is null or nameof(MainWindowViewModel.CurrentDocument))
             DetachInternalsInspector();
@@ -433,6 +447,14 @@ public partial class MainWindow : Window
             return;
         }
 
+        // A new request, as a browser's address bar is reached: with a document open it asks first.
+        if (e.Key == Key.L && cmdOrCtrl)
+        {
+            _ = viewModel.NewRequestAsync();
+            e.Handled = true;
+            return;
+        }
+
         // Always available: with a document open it asks first, as opening a file does.
         if (e.Key == Key.N && cmdOrCtrl)
         {
@@ -441,11 +463,11 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Only while nothing is open. Once the raw view's editing lands, plain Ctrl+V inside it
-        // has to mean "paste into the document", not "replace the document" - so this shortcut
-        // deliberately does not exist when there is a document to paste into. The empty state's
-        // button is the affordance that always works.
-        if (e.Key == Key.V && cmdOrCtrl && !viewModel.IsFileOpen && viewModel.CanPaste)
+        // Only while the empty state shows. This handler tunnels, so it sees the keystroke before
+        // the focused control: with a document open Ctrl+V means "paste into it", and with the
+        // request pane open it means "paste into the URL or the body" - never "replace what is
+        // here". The empty state's button is the affordance that always works.
+        if (e.Key == Key.V && cmdOrCtrl && viewModel.CanPasteAsNewDocument)
         {
             _ = viewModel.PasteAsync();
             e.Handled = true;
@@ -876,6 +898,8 @@ public partial class MainWindow : Window
         ToastBorder.IsVisible = false;
         toastAction = null;
     }
+
+    private void OnNewRequest(object? sender, Avalonia.Interactivity.RoutedEventArgs e) => _ = viewModel.NewRequestAsync();
 
     private void OnToastActionClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {

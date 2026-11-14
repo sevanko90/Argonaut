@@ -30,6 +30,10 @@ internal static class AppDataPaths
 
     /// <summary>The diagnostic log a Debug build writes (see
     /// <see cref="Argonaut.Engine.Logging.FileDiagnosticLog"/>).</summary>
+    /// <summary>Where downloaded responses are written and kept - the app's own folder, which the
+    /// App Store sandbox always allows.</summary>
+    public static string ResponsesDirectory => Path.Combine(Root, "Responses");
+
     /// <summary>Where Linux keeps the key that seals settings blocks - see
     /// <see cref="FileSealingKeyStore"/>. Unused on macOS (the Keychain) and Windows (DPAPI).</summary>
     public static string SealingKeyFile => Path.Combine(Root, "sealing.key");

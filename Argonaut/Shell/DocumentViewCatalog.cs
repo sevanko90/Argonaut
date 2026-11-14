@@ -52,6 +52,8 @@ public sealed class DocumentViewCatalog
     };
 
     private readonly IReadOnlyDictionary<FileTypeDetector.FileKind, int> kindToRegistration;
+    private readonly JsonSchemaCatalog schemaCatalog;
+    private readonly ISystemLauncher? launcher;
 
     /// <param name="lineNumbers">The excerpt numbering switch the views follow - the shell's, so
     /// the control that flips it and the views that show it share one; a new one over
@@ -66,6 +68,8 @@ public sealed class DocumentViewCatalog
         IRecipeStore? recipes = null, ISystemLauncher? launcher = null, ISchemaMatcher? schemaMatcher = null,
         ISettingsSealer? settingsSealer = null)
     {
+        this.schemaCatalog = schemaCatalog;
+        this.launcher = launcher;
         schemaMatcher ??= new CachedSchemaMatcher();
         lineNumbers ??= new LineNumberingPreference(settings.Get<LineNumberingSettings>());
         var jsonView = settings.Get<JsonViewSettings>();
@@ -109,6 +113,55 @@ public sealed class DocumentViewCatalog
         }
 
         return map;
+    }
+
+    /// <summary>
+    /// Builds and loads a small document hosted inside another view - a failed request's server
+    /// message - rather than as the window's document: JSON or XML fully expanded, without schema
+    /// matching (it would only be noise on an error) or opening an array as a table (which would
+    /// replace the window's document), and anything else in the raw view. Settings are its own,
+    /// never the user's.
+    /// </summary>
+    public async Task<IDocumentViewModel> LoadHostedAsync(FileTypeDetector.FileKind kind, IByteOrigin origin)
+    {
+        switch (kind)
+        {
+            case FileTypeDetector.FileKind.Json:
+            {
+                var json = new JsonViewModel(new JsonViewSettings(), new SchemaBindings(), schemaCatalog, launcher)
+                {
+                    ExpandsFully = true,
+                    OffersArrayTable = false,
+                };
+                return await Loaded(json, json.LoadAsync(origin));
+            }
+
+            case FileTypeDetector.FileKind.Xml:
+            {
+                var xml = new XmlViewModel(new XmlViewSettings(), launcher) { ExpandsFully = true };
+                return await Loaded(xml, xml.LoadAsync(origin));
+            }
+
+            default:
+            {
+                var raw = new RawViewModel(new RawViewSettings(), launcher: launcher);
+                return await Loaded(raw, raw.LoadAsync(origin));
+            }
+        }
+
+        static async Task<IDocumentViewModel> Loaded(IDocumentViewModel document, Task loading)
+        {
+            try
+            {
+                await loading;
+                return document;
+            }
+            catch
+            {
+                document.Dispose();
+                throw;
+            }
+        }
     }
 
     /// <summary>Builds and loads the document view model registered for <paramref name="kind"/>.</summary>

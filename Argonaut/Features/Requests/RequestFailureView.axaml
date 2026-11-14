@@ -1,0 +1,70 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:requests="clr-namespace:Argonaut.Features.Requests"
+             x:Class="Argonaut.Features.Requests.RequestFailureView"
+             x:DataType="requests:RequestFailure">
+    <UserControl.Styles>
+        <Style Selector="ToggleButton.viewswitch">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Padding" Value="10,2" />
+            <Setter Property="MinHeight" Value="0" />
+        </Style>
+    </UserControl.Styles>
+
+    <!-- In place of the response when a send fails: unmistakably not a response, with the
+         server's own explanation - in the app's own JSON/XML or raw view - where it gave one. -->
+    <Grid RowDefinitions="Auto,Auto,Auto,*" Margin="32,24,32,16">
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="10">
+            <Viewbox Width="22" Height="22" VerticalAlignment="Center">
+                <!-- Material "warning" -->
+                <Path Fill="{DynamicResource AppDangerHoverBrush}"
+                      Data="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z" />
+            </Viewbox>
+            <TextBlock Text="{Binding Title}"
+                       FontSize="20"
+                       FontWeight="SemiBold"
+                       VerticalAlignment="Center" />
+        </StackPanel>
+
+        <TextBlock Grid.Row="1"
+                   Text="{Binding Explanation}"
+                   TextWrapping="Wrap"
+                   Margin="0,10,0,0"
+                   Foreground="{DynamicResource AppMutedTextBrush}" />
+
+        <DockPanel Grid.Row="2" Margin="0,18,0,6"
+                   IsVisible="{Binding ServerMessage, Converter={x:Static ObjectConverters.IsNotNull}}">
+            <TextBlock Text="The server said" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"
+                       Foreground="{DynamicResource AppMutedTextBrush}" />
+            <!-- Swaps only this view: the detected one, or the raw text. -->
+            <StackPanel Orientation="Horizontal" Spacing="4" Margin="12,0,0,0"
+                        IsVisible="{Binding Message.OffersViews, FallbackValue=False}">
+                <ToggleButton Classes="viewswitch"
+                              Content="{Binding Message.DetectedName}"
+                              IsChecked="{Binding Message.ShowsStructured, Mode=TwoWay}" />
+                <ToggleButton Classes="viewswitch"
+                              Content="Raw"
+                              IsChecked="{Binding Message.ShowsRaw, Mode=TwoWay}" />
+            </StackPanel>
+        </DockPanel>
+
+        <Border Grid.Row="3"
+                IsVisible="{Binding ServerMessage, Converter={x:Static ObjectConverters.IsNotNull}}"
+                BorderBrush="{DynamicResource AppBorderBrush}"
+                BorderThickness="1"
+                CornerRadius="4"
+                ClipToBounds="True">
+            <Panel>
+                <!-- The hosted view: drawn by the window's own view templates. -->
+                <ContentControl Content="{Binding Message.Shown.Document}" />
+                <ScrollViewer IsVisible="{Binding ShowsPlainMessage}">
+                    <SelectableTextBlock Text="{Binding ServerMessage}"
+                                         Margin="12,10"
+                                         TextWrapping="Wrap"
+                                         FontFamily="{DynamicResource AppMonoFontFamily}"
+                                         FontSize="12" />
+                </ScrollViewer>
+            </Panel>
+        </Border>
+    </Grid>
+</UserControl>

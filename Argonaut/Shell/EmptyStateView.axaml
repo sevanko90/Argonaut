@@ -129,6 +129,9 @@
                     <Button Content="New document" Classes="secondary"
                             Click="OnNewDocument"
                             ToolTip.Tip="Start an empty document to type or paste into (Ctrl+N or Cmd+N)" />
+                    <Button Content="New request" Classes="secondary"
+                            Click="OnNewRequest"
+                            ToolTip.Tip="Open the response to an HTTP request as a document (Ctrl+L or Cmd+L)" />
                 </StackPanel>
             </StackPanel>
         </Border>
@@ -145,12 +148,17 @@
                 <ItemsControl x:Name="FavouritesList" Margin="0,0,16,0" ItemTemplate="{StaticResource FileRow}" />
             </ScrollViewer>
 
-            <Grid Grid.Column="1" ColumnDefinitions="*,Auto" Margin="10,0,0,8">
-                <TextBlock Text="Recent files" FontSize="12" FontWeight="SemiBold"
+            <Grid Grid.Column="1" ColumnDefinitions="*,Auto,Auto" Margin="10,0,0,8">
+                <TextBlock Text="Recent" FontSize="12" FontWeight="SemiBold"
                            Foreground="{DynamicResource AppMutedTextBrush}" VerticalAlignment="Center" />
-                <Button x:Name="ClearRecentFilesButton" Grid.Column="1" Content="Clear list"
+                <!-- Only while some saved request keeps its last response. -->
+                <Button x:Name="ClearKeptResponsesButton" Grid.Column="1" Content="Clear kept responses"
+                        Classes="linklike" FontSize="12" Click="OnClearKeptResponses" Margin="0,0,12,0"
+                        IsVisible="False"
+                        ToolTip.Tip="Delete the last response kept for each saved request; the requests stay" />
+                <Button x:Name="ClearRecentFilesButton" Grid.Column="2" Content="Clear list"
                         Classes="linklike" FontSize="12" Click="OnClearRecentFiles"
-                        ToolTip.Tip="Clear recent files" />
+                        ToolTip.Tip="Clear the recent list; pinned entries stay" />
             </Grid>
             <TextBlock x:Name="NoRecentFilesText" Grid.Column="1" Grid.Row="1" Text="Files you open will appear here."
                        Foreground="{DynamicResource AppMutedTextBrush}" Margin="10,6" TextWrapping="Wrap" />

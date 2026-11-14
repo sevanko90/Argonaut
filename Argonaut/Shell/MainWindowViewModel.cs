@@ -34,6 +34,9 @@ using Argonaut.Ui.ViewModels;
 using Avalonia.Threading;
 using Argonaut.Ui.Launching;
 
+using Argonaut.Engine.Http;
+using Argonaut.Features.Requests;
+using Argonaut.Features.Raw;
 using Argonaut.Shell.Files;
 using Argonaut.Shell.Sources;
 
@@ -56,7 +59,7 @@ namespace Argonaut.Shell;
 /// is disposed by its hosting view's DetachedFromVisualTree handler when the content swap
 /// tears it down.
 /// </summary>
-public sealed class MainWindowViewModel : ObservableObject
+public sealed class MainWindowViewModel : ObservableObject, IRequestSender
 {
     /// <summary>
     /// Builds the document view model for a detected file kind. Injectable so tests can
@@ -83,6 +86,13 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly AppearanceSettings appearance;
     private readonly SavedSourceStore savedSources;
     private readonly IFileAccess fileAccess;
+    private readonly ResponseDownloader? responseDownloader;
+    private readonly ResponseStore? responseStore;
+    private readonly RawViewSettings rawViewSettings;
+    private RequestEditorViewModel? requestEditor;
+
+    // Stops the send in progress; null while nothing is being sent.
+    private CancellationTokenSource? sendStopping;
     private readonly JsonViewSettings jsonViewSettings;
     private readonly IConfigLocationSource? configLocations;
     private readonly ISelectionFilterFiles filterFiles;
@@ -92,6 +102,10 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly FindController findController;
     private readonly Func<IByteOrigin, Task<string?>>? pickSaveDestination;
     private readonly Func<string, Task<UnsavedChangesChoice>>? askAboutUnsavedChanges;
+    private readonly Func<RequestSaveQuestion, Task<RequestSaveChoice>>? askAboutRequest;
+
+    // Loads documents hosted inside other views - a failed request's server message.
+    private readonly Func<FileTypeDetector.FileKind, IByteOrigin, Task<IDocumentViewModel>>? hostedDocumentLoader;
     private readonly Func<string, Task>? reportFailure;
     private readonly IFileReplacer fileReplacer;
     private readonly IDiagnosticLog log;
@@ -203,12 +217,23 @@ public sealed class MainWindowViewModel : ObservableObject
         ISystemLauncher? launcher = null,
         ILineEndingDetector? lineEndings = null,
         ISettingsSealer? settingsSealer = null,
-        IFileAccess? fileAccess = null)
+        IFileAccess? fileAccess = null,
+        ResponseDownloader? responseDownloader = null,
+        Func<RequestSaveQuestion, Task<RequestSaveChoice>>? askAboutRequest = null,
+        Func<FileTypeDetector.FileKind, IByteOrigin, Task<IDocumentViewModel>>? hostedDocumentLoader = null,
+        ResponseStore? responseStore = null)
     {
+        this.responseStore = responseStore;
+        this.askAboutRequest = askAboutRequest;
         this.fileAccess = fileAccess ?? new PlainFileAccess();
+        this.responseDownloader = responseDownloader;
+        this.rawViewSettings = settings.Get<RawViewSettings>();
         this.lineEndings = lineEndings ?? new LineEndingDetector();
         this.appearance = settings.Get<AppearanceSettings>();
         this.savedSources = new SavedSourceStore(settings.Get<SavedSourcesBlock>(), settingsSealer);
+
+        // Before anything downloads: whatever no saved request keeps is a crash's leftovers.
+        responseStore?.Sweep(this.savedSources.KeptResponses.Select(static k => k.FileName).ToHashSet());
         this.jsonViewSettings = settings.Get<JsonViewSettings>();
         this.configLocations = configLocations;
         this.filterFiles = filterFiles ?? new SelectionFilterFiles();
@@ -216,7 +241,9 @@ public sealed class MainWindowViewModel : ObservableObject
         this.readClipboardBytes = readClipboardBytes;
         this.lineNumbers = new LineNumberingPreference(settings.Get<LineNumberingSettings>());
         this.lineNumbers.PropertyChanged += (_, _) => OnPropertyChanged(nameof(NumberExcerptFromSource));
-        this.documentLoader = documentLoader ?? new DocumentViewCatalog(settings, schemaCatalog, this.lineNumbers, recipes, launcher, settingsSealer: settingsSealer).LoadAsync;
+        var views = documentLoader is null ? new DocumentViewCatalog(settings, schemaCatalog, this.lineNumbers, recipes, launcher, settingsSealer: settingsSealer) : null;
+        this.documentLoader = documentLoader ?? views!.LoadAsync;
+        this.hostedDocumentLoader = hostedDocumentLoader ?? (views is null ? null : views.LoadHostedAsync);
         this.pickSaveDestination = pickSaveDestination;
         this.askAboutUnsavedChanges = askAboutUnsavedChanges;
         this.reportFailure = reportFailure;
@@ -395,7 +422,10 @@ public sealed class MainWindowViewModel : ObservableObject
         private set
         {
             if (SetField(ref title, value))
+            {
                 OnPropertyChanged(nameof(HeaderTitle));
+                OnPropertyChanged(nameof(InputTitle));
+            }
         }
     }
 
@@ -405,8 +435,59 @@ public sealed class MainWindowViewModel : ObservableObject
     /// lines it is, the excerpt control says.</summary>
     public string HeaderTitle => PartOf is { } whole ? whole.DisplayName : currentDocument?.HeaderTitle ?? FileName;
 
+    /// <summary>
+    /// Something is open to close: a document, or the request pane on its own - a request not yet
+    /// sent, or one whose send failed, which has no document under it. The header's name and close
+    /// button follow this, so there is always a way back to the empty state.
+    /// </summary>
+    public bool HasInput => IsFileOpen || IsRequestPaneVisible;
+
+    /// <summary>What the header names: the document, or - with only the request pane open - the
+    /// request.</summary>
+    public string InputTitle => IsFileOpen ? HeaderTitle : RequestPaneTitle;
+
+    private string RequestPaneTitle
+        => requestEditor?.CurrentRequest is { } request ? new HttpLocator(request).DefaultName : "New request";
+
     /// <summary>True when a document is loaded; drives the toolbar's visibility.</summary>
     public bool IsFileOpen => currentFilePath is not null;
+
+    /// <summary>The request pane, while the input is a request or New request was chosen; null
+    /// otherwise.</summary>
+    public RequestEditorViewModel? RequestEditor
+    {
+        get => requestEditor;
+        private set
+        {
+            if (!SetField(ref requestEditor, value))
+                return;
+
+            OnPropertyChanged(nameof(IsRequestPaneVisible));
+            OnPropertyChanged(nameof(HasInput));
+            OnPropertyChanged(nameof(InputTitle));
+            OnPropertyChanged(nameof(IsEmptyStateVisible));
+            OnPropertyChanged(nameof(IsAwaitingResponse));
+            OnPropertyChanged(nameof(IsShowingRequestFailure));
+        }
+    }
+
+    public bool IsRequestPaneVisible => requestEditor is not null;
+
+    /// <summary>The empty state shows when nothing is open and no request is being written.</summary>
+    public bool IsEmptyStateVisible => !IsFileOpen && !IsRequestPaneVisible;
+
+    /// <summary>
+    /// Whether the window's paste shortcut opens the clipboard as a new document: only while the
+    /// empty state is showing. With a document open, or the request pane, the keystroke belongs to
+    /// whatever has focus - the raw editor, the URL box, the body.
+    /// </summary>
+    public bool CanPasteAsNewDocument => IsEmptyStateVisible && CanPaste;
+
+    /// <summary>A request is being written and nothing has loaded under it yet.</summary>
+    public bool IsAwaitingResponse => !IsFileOpen && requestEditor is { Failure: null };
+
+    /// <summary>The last send failed, and the response area says so instead of showing a response.</summary>
+    public bool IsShowingRequestFailure => !IsFileOpen && requestEditor is { Failure: not null };
 
     /// <summary>Whether <see cref="PasteAsync"/> can do anything - false when the view model was
     /// built without a clipboard reader.</summary>
@@ -570,6 +651,7 @@ public sealed class MainWindowViewModel : ObservableObject
     /// </summary>
     public async Task OpenDiffAsync(IByteOrigin leftOrigin, IByteOrigin rightOrigin)
     {
+        CloseRequestPane();
         var requestId = BeginOpenRequest();
         string leftPath = leftOrigin.LocationText();
         string rightPath = rightOrigin.LocationText();
@@ -1336,6 +1418,12 @@ public sealed class MainWindowViewModel : ObservableObject
     /// </summary>
     public void OpenSavedSource(string id)
     {
+        if (savedSources.Find(id) is { Locator: HttpLocator http })
+        {
+            _ = ReopenRequestAsync(http.Request, id);
+            return;
+        }
+
         if (savedSources.Find(id) is not { Locator: FileLocator file } source)
             return;
 
@@ -1359,6 +1447,35 @@ public sealed class MainWindowViewModel : ObservableObject
         _ = OpenPathAsync(grant.Path, grant: grant);
     }
 
+    /// <summary>A saved request: the pane filled in, and sent.</summary>
+    private async Task ReopenRequestAsync(HttpRequestSpec request, string entryId)
+    {
+        if (RefusedWhileSaving())
+            return;
+
+        if (!await ResolveUnsavedChangesAsync($"opening {new HttpLocator(request).DefaultName}"))
+            return;
+        if (IsFileOpen)
+            CloseCurrentDocument();
+
+        var editor = await OpenRequestPaneAsync(request);
+        editor.MarkSaved(entryId, request);
+
+        // The response kept from last time opens at once; with none, the request is sent.
+        if (savedSources.Find(entryId) is { ResponseFile: { } file, ResponseFetchedAt: var fetchedAt }
+            && responseStore?.PathOf(file) is { } path)
+        {
+            var locator = new HttpLocator(request);
+            savedSources.Touch(locator);
+            ReloadSavedSources();
+            await OpenOriginAsync(new HttpResponseOrigin(locator, path, kept: true), addToRecents: false, fromRequest: true);
+            editor.Say($"Response from {(fetchedAt ?? DateTimeOffset.Now).ToLocalTime():d MMM, HH:mm} - Send to refresh");
+            return;
+        }
+
+        await editor.SendAsync();
+    }
+
     /// <summary>The locator to remember for an opened or saved document: a file described by the
     /// file access, so it is remembered with its bookmark.</summary>
     private SourceLocator Rememberable(SourceLocator locator)
@@ -1373,13 +1490,48 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public void RemoveSavedSource(string id)
     {
-        savedSources.Remove(id);
+        DeleteResponses(savedSources.Remove(id));
         ReloadSavedSources();
+    }
+
+    /// <summary>Whether any saved request keeps a response - what "Clear kept responses" offers to
+    /// clear.</summary>
+    public bool HasKeptResponses => savedSources.KeptResponses.Count > 0;
+
+    /// <summary>Deletes every kept response, leaving the saved requests themselves.</summary>
+    public void ClearKeptResponses()
+    {
+        foreach (var kept in savedSources.KeptResponses)
+        {
+            if (savedSources.DropResponse(kept.EntryId) is { } file)
+                DeleteResponse(file);
+        }
+
+        ReloadSavedSources();
+    }
+
+    private void DeleteResponses(IEnumerable<string> files)
+    {
+        foreach (string file in files)
+            DeleteResponse(file);
+    }
+
+    /// <summary>Deletes a kept response - unless it is the response open right now, whose own
+    /// origin then deletes it when it closes.</summary>
+    private void DeleteResponse(string file)
+    {
+        if (ownedOrigins.FirstOrDefault() is HttpResponseOrigin { IsKept: true } open && open.ResponseFileName == file)
+        {
+            open.ReleaseKept();
+            return;
+        }
+
+        responseStore?.Delete(file);
     }
 
     public void ClearRecentSources()
     {
-        savedSources.ClearRecent();
+        DeleteResponses(savedSources.ClearRecent());
         ReloadSavedSources();
     }
 
@@ -1387,6 +1539,7 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         PinnedSources = savedSources.Pinned.Select(Row).ToList();
         RecentSources = savedSources.Recent.Select(Row).ToList();
+        OnPropertyChanged(nameof(HasKeptResponses));
     }
 
     /// <summary>A saved source as the empty state shows it - a pill for anything but a file.</summary>
@@ -1433,7 +1586,7 @@ public sealed class MainWindowViewModel : ObservableObject
         if (RefusedWhileSaving())
             return false;
 
-        if (HasUnsavedChanges)
+        if (HasUnsavedChanges || HasUnsavedRequest)
         {
             // Asked instead of the replace confirmation, not as well as it: this question already
             // says the document is going, and offers the one thing worth doing about it.
@@ -1521,7 +1674,7 @@ public sealed class MainWindowViewModel : ObservableObject
         if (RefusedWhileSaving())
             return;
 
-        if (HasUnsavedChanges)
+        if (HasUnsavedChanges || HasUnsavedRequest)
         {
             if (!await ResolveUnsavedChangesAsync($"opening {description}"))
                 return;
@@ -1547,8 +1700,13 @@ public sealed class MainWindowViewModel : ObservableObject
     /// otherwise passes to the shell's own ownership (see <see cref="AdoptOrigins"/>).
     /// </summary>
     /// <param name="view">The view to open it in; null detects one.</param>
-    private async Task OpenOriginAsync(IByteOrigin origin, bool addToRecents, FileTypeDetector.FileKind? view = null)
+    /// <param name="fromRequest">The origin is the response to the request pane's request, which
+    /// stays; any other input closes the pane, since it is no longer what is open.</param>
+    private async Task OpenOriginAsync(IByteOrigin origin, bool addToRecents, FileTypeDetector.FileKind? view = null, bool fromRequest = false)
     {
+        if (!fromRequest)
+            CloseRequestPane();
+
         var requestId = BeginOpenRequest();
         string name = origin.LocationText();
 
@@ -1597,7 +1755,7 @@ public sealed class MainWindowViewModel : ObservableObject
         if (this.ownedOrigins.Count == 0 || kind == currentKind)
             return;
 
-        if (RefusedWhileSaving() || !await ResolveUnsavedChangesAsync($"switching to the {DisplayNameFor(kind)} view"))
+        if (RefusedWhileSaving() || !await ResolveUnsavedChangesAsync($"switching to the {DisplayNameFor(kind)} view", includeRequest: false))
         {
             // Put the switcher back on the view that is still showing.
             SelectedView = DocumentViewCatalog.Options.FirstOrDefault(o => o.Kind == currentKind);
@@ -1859,6 +2017,7 @@ public sealed class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(ExcerptSourceName));
         OnPropertyChanged(nameof(ExcerptSourceNumberingLabel));
         OnPropertyChanged(nameof(HeaderTitle));
+        OnPropertyChanged(nameof(InputTitle));
     }
 
     private void SetCurrentDocument(IDocumentViewModel? document, string? path, FileTypeDetector.FileKind kind = FileTypeDetector.FileKind.Unknown)
@@ -1898,6 +2057,11 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         OnPropertyChanged(nameof(IsFileOpen));
+        OnPropertyChanged(nameof(HasInput));
+        OnPropertyChanged(nameof(InputTitle));
+        OnPropertyChanged(nameof(IsEmptyStateVisible));
+        OnPropertyChanged(nameof(IsAwaitingResponse));
+        OnPropertyChanged(nameof(IsShowingRequestFailure));
         OnPropertyChanged(nameof(FilePath));
         OnPropertyChanged(nameof(CanCompare));
         NotifyFailurePropertiesChanged();
@@ -1952,7 +2116,9 @@ public sealed class MainWindowViewModel : ObservableObject
 
     /// <summary>Closes the document with no questions asked - the tail of
     /// <see cref="CloseFileAsync"/>, and what a save that lost its document falls back to.</summary>
-    private void CloseCurrentDocument()
+    /// <param name="keepRequestPane">Leave the request pane up - a failed send clearing the last
+    /// response from under it.</param>
+    private void CloseCurrentDocument(bool keepRequestPane = false)
     {
         BeginOpenRequest();
         loadProgress?.Finish();
@@ -1966,6 +2132,197 @@ public sealed class MainWindowViewModel : ObservableObject
         SetCurrentDocument(null, null);
         AdoptOrigins();
         ReloadSavedSources();
+        if (!keepRequestPane)
+            CloseRequestPane();
+    }
+
+    // ── Requests ────────────────────────────────────────────────────────────────────────
+
+    /// <summary>What the pane says while it waits for a first response.</summary>
+    public const string AwaitingResponseText = "Send to load the response";
+
+    /// <summary>
+    /// Opens the request pane with an empty request, closing what is open first (asking about
+    /// unsaved changes, as opening a file does). The response to whatever it sends opens below it.
+    /// </summary>
+    public async Task NewRequestAsync()
+    {
+        if (RefusedWhileSaving())
+            return;
+
+        if (!await ResolveUnsavedChangesAsync("starting a new request"))
+            return;
+        if (IsFileOpen)
+            CloseCurrentDocument();
+
+        await OpenRequestPaneAsync(request: null);
+    }
+
+    /// <summary>A fresh pane - filled from <paramref name="request"/> when reopening a saved one.</summary>
+    private async Task<RequestEditorViewModel> OpenRequestPaneAsync(HttpRequestSpec? request)
+    {
+        CloseRequestPane();
+        var editor = new RequestEditorViewModel(this, new RequestBodyEditor(rawViewSettings));
+        editor.PropertyChanged += (_, e) =>
+        {
+            // The header names the request while it is all that is open.
+            if (e.PropertyName is nameof(RequestEditorViewModel.UrlText) or nameof(RequestEditorViewModel.Method))
+                OnPropertyChanged(nameof(InputTitle));
+        };
+        RequestEditor = editor;
+        if (request is not null)
+            await editor.LoadAsync(request);
+        else
+            await editor.Body!.LoadAsync([]);
+        return editor;
+    }
+
+    private void CloseRequestPane()
+    {
+        var editor = requestEditor;
+        RequestEditor = null;
+        editor?.Dispose();
+    }
+
+    /// <summary>
+    /// Sends the pane's request: saves it, downloads the response under a progress entry with
+    /// Stop, then opens it as the document below the pane, replacing the last one. A failure
+    /// replaces the response with what went wrong; a stop leaves the document that was there.
+    /// </summary>
+    async Task IRequestSender.SendAsync(HttpRequestSpec request)
+    {
+        if (requestEditor is not { } editor)
+            return;
+
+        if (responseDownloader is null)
+        {
+            editor.Say("Sending requests isn't available in this build.", isProblem: true);
+            return;
+        }
+
+        if (RefusedWhileSaving() || !await ResolveUnsavedChangesAsync("sending the request", includeRequest: false))
+            return;
+
+        var locator = new HttpLocator(request);
+
+        using var stopping = new CancellationTokenSource();
+        sendStopping = stopping;
+        var progress = this.progressBoard.Begin($"Downloading {locator.DefaultName}", stopping.Cancel);
+        HttpResponseOrigin origin;
+        try
+        {
+            // Off the UI thread: a large response is many chunks, and none should post here.
+            var downloader = responseDownloader;
+            origin = await Task.Run(() => downloader.DownloadAsync(request, progress, stopping.Token));
+        }
+        catch (OperationCanceledException)
+        {
+            editor.Say("Stopped - nothing new was loaded.");
+            return;
+        }
+        catch (HttpFetchException ex)
+        {
+            ShowRequestFailure(editor, RequestFailure.From(ex, hostedDocumentLoader));
+            return;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            editor.Say($"Couldn't keep the response: {ex.Message}", isProblem: true);
+            return;
+        }
+        finally
+        {
+            progress.Finish();
+            sendStopping = null;
+        }
+
+        // The pane may have closed while the response downloaded; then it is not wanted.
+        if (!ReferenceEquals(requestEditor, editor))
+        {
+            origin.Dispose();
+            return;
+        }
+
+        editor.Failure = null;
+        await OpenOriginAsync(origin, addToRecents: false, fromRequest: true);
+        editor.Say($"Response from {DateTime.Now:d MMM, HH:mm}");
+        RememberSentRequest(editor, request, locator);
+        OnPropertyChanged(nameof(IsShowingRequestFailure));
+    }
+
+    /// <summary>The pane's Stop: the same as the download's Stop on the progress board.</summary>
+    void IRequestSender.RequestStop() => sendStopping?.Cancel();
+
+    /// <summary>
+    /// What a successful send saves. A request never saved is saved now - the list keeps what
+    /// worked, so a run of failures never pushes good entries off it. A saved request sent as it
+    /// was moves to the top. A saved request sent with edits is left alone: what to do with the
+    /// edits is asked when the pane closes, never decided by sending.
+    /// </summary>
+    private void RememberSentRequest(RequestEditorViewModel editor, HttpRequestSpec request, HttpLocator locator)
+    {
+        string entryId;
+        if (editor.SavedEntryId is { } id && savedSources.Find(id) is not null)
+        {
+            if (editor.IsDirty)
+                return;
+
+            entryId = savedSources.Touch(locator).Id;
+        }
+        else
+        {
+            entryId = savedSources.Touch(locator).Id;
+            editor.MarkSaved(entryId, request);
+        }
+
+        KeepOpenResponse(entryId, editor);
+        ReloadSavedSources();
+    }
+
+    /// <summary>
+    /// Keeps the response open now as saved request <paramref name="entryId"/>'s last response -
+    /// when it answers that request as saved - replacing the one it kept, and lets the oldest go if
+    /// that takes the kept responses past the budget. A response larger than the whole budget is
+    /// not kept, and the pane says so.
+    /// </summary>
+    private void KeepOpenResponse(string entryId, RequestEditorViewModel? editor)
+    {
+        if (responseStore is null || ownedOrigins.FirstOrDefault() is not HttpResponseOrigin response
+            || savedSources.Find(entryId)?.Locator is not { } saved || !saved.IsSamePlace(response.Locator))
+            return;
+
+        long size = response.AvailableLength;
+        if (size > ResponseStore.Budget)
+        {
+            editor?.Say($"Response from {DateTime.Now:d MMM, HH:mm} - too large to keep within the {ByteLengthText.Format(ResponseStore.Budget)} kept for responses, so it goes when you close it.");
+            return;
+        }
+
+        response.MarkKept();
+        if (savedSources.SetResponse(entryId, response.ResponseFileName, size, DateTimeOffset.Now) is { } replaced)
+            DeleteResponse(replaced);
+
+        foreach (var evicted in ResponseStore.ChooseEvictions(savedSources.KeptResponses, ResponseStore.Budget, entryId))
+        {
+            if (savedSources.DropResponse(evicted.EntryId) is { } file)
+                DeleteResponse(file);
+        }
+    }
+
+    /// <summary>
+    /// Puts a failed send in place of the response: the last response is closed - leaving it up
+    /// would look like the same answer had come back - and the response area shows the failure.
+    /// </summary>
+    private void ShowRequestFailure(RequestEditorViewModel editor, RequestFailure failure)
+    {
+        if (IsFileOpen)
+            CloseCurrentDocument(keepRequestPane: true);
+
+        editor.Failure = failure;
+        _ = failure.Message?.ShowAsync();
+        editor.Say(failure.Title, isProblem: true);
+        OnPropertyChanged(nameof(IsAwaitingResponse));
+        OnPropertyChanged(nameof(IsShowingRequestFailure));
     }
 
     // ── Save ────────────────────────────────────────────────────────────────────────────
@@ -1983,6 +2340,10 @@ public sealed class MainWindowViewModel : ObservableObject
 
     /// <summary>True when the current document reads differently from its file.</summary>
     public bool HasUnsavedChanges => currentDocument is ISaveableDocument { HasUnsavedChanges: true };
+
+    /// <summary>The request pane holds a request with changes nobody saved - see
+    /// <see cref="RequestEditorViewModel.IsDirty"/>.</summary>
+    public bool HasUnsavedRequest => requestEditor is { IsDirty: true };
 
     /// <summary>Whether Save does anything now: there are changes, the document is ready to write
     /// them, and no save is already running.</summary>
@@ -2136,21 +2497,67 @@ public sealed class MainWindowViewModel : ObservableObject
     /// "opening x.json"), and saves if asked to. True when it is fine to go on: there was nothing
     /// unsaved, the user chose not to keep it, or the save succeeded.
     /// </summary>
-    public async Task<bool> ResolveUnsavedChangesAsync(string beforeWhat)
+    /// <param name="includeRequest">Also settle the request pane's unsaved request - false for
+    /// what keeps the pane (sending, switching the response's view).</param>
+    public async Task<bool> ResolveUnsavedChangesAsync(string beforeWhat, bool includeRequest = true)
     {
         if (isSaving)
             return false;
 
-        if (!HasUnsavedChanges || this.askAboutUnsavedChanges is null)
+        if (HasUnsavedChanges && this.askAboutUnsavedChanges is not null)
+        {
+            var choice = await this.askAboutUnsavedChanges($"Save your changes to \"{FileName}\" before {beforeWhat}?");
+            bool goOn = choice switch
+            {
+                UnsavedChangesChoice.Discard => true,
+                UnsavedChangesChoice.Save => await SaveAsync(),
+                _ => false,
+            };
+            if (!goOn)
+                return false;
+        }
+
+        return !includeRequest || await ResolveUnsavedRequestAsync();
+    }
+
+    /// <summary>
+    /// Asks what to do with the pane's request when it has changes nobody saved - a request never
+    /// saved (it has not worked yet, or was never sent), or a saved one that was edited - and does
+    /// it. True when it is fine for the pane to close.
+    /// </summary>
+    private async Task<bool> ResolveUnsavedRequestAsync()
+    {
+        if (requestEditor is not { IsDirty: true } editor || editor.CurrentRequest is not { } request || askAboutRequest is null)
             return true;
 
-        var choice = await this.askAboutUnsavedChanges($"Save your changes to \"{FileName}\" before {beforeWhat}?");
-        return choice switch
+        var saved = editor.SavedEntryId is { } id ? savedSources.Find(id) : null;
+        var locator = new HttpLocator(request);
+        var choice = await askAboutRequest(new RequestSaveQuestion(saved?.Name ?? locator.DefaultName, saved is not null));
+
+        string entryId;
+        switch (choice)
         {
-            UnsavedChangesChoice.Discard => true,
-            UnsavedChangesChoice.Save => await SaveAsync(),
-            _ => false,
-        };
+            case RequestSaveChoice.Update when saved is not null:
+                // The response it kept answered the request as it was; it goes unless the response
+                // open now answers the request as updated, which replaces it below.
+                if (savedSources.DropResponse(saved.Id) is { } outdated)
+                    DeleteResponse(outdated);
+                savedSources.Relocate(saved.Id, locator);
+                entryId = saved.Id;
+                break;
+            case RequestSaveChoice.Update:
+            case RequestSaveChoice.SaveAsNew:
+                entryId = savedSources.Touch(locator).Id;
+                break;
+            case RequestSaveChoice.Discard:
+                return true;
+            default:
+                return false;
+        }
+
+        KeepOpenResponse(entryId, editor: null);
+        ReloadSavedSources();
+        return true;
     }
 
     /// <summary>True, with a toast saying why, while a save is running.</summary>

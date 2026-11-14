@@ -16,6 +16,7 @@
     <StreamGeometry x:Key="Icon.Add">M5 12h14 M12 5v14</StreamGeometry>
     <!-- Lucide "minus" -->
     <StreamGeometry x:Key="Icon.Remove">M5 12h14</StreamGeometry>
+    <StreamGeometry x:Key="Icon.Request">M2 12a10 10 0 1 0 20 0a10 10 0 1 0 -20 0 M2 12h20 M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1 -4 10 15.3 15.3 0 0 1 -4 -10 15.3 15.3 0 0 1 4 -10z</StreamGeometry>
     <StreamGeometry x:Key="Icon.More">M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0 M18 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0 M4 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0</StreamGeometry>
     <!-- Lucide "wand-sparkles" -->
     <StreamGeometry x:Key="Icon.Transform">M21.64 3.64 l-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72 M14 7 l3 3 M5 6v4 M19 14v4 M10 2v2 M7 8H3 M21 16h-4 M11 3H9</StreamGeometry>

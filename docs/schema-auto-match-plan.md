@@ -34,6 +34,11 @@ chose by hand.
   choice is remembered as today.
 - **A document with no path auto-matches too** - a paste, a download. It needs no path, and
   nothing about it is remembered.
+- **The schema list is ranked by fit**, the way the type list within a schema already is: the
+  schemas that plausibly fit the document lead, best first, and the rest follow alphabetically.
+  This is what the user sees when matching is ambiguous and nothing was bound - the candidates
+  at the top instead of somewhere in an alphabetical list. It is worked out whether or not the
+  option is on: it binds nothing.
 - **The button says when a schema was matched rather than chosen**, so a schema appearing on its
   own does not look like a bug.
 
@@ -97,9 +102,10 @@ allocation-light, as the matcher is.
 ### The matcher service
 
 `ISchemaMatcher` (in `Features/Json/Schema`, beside its consumers):
-`Task<SchemaAutoMatch?> FindAsync(IReadOnlyList<SchemaCatalogEntry> entries, IReadOnlyList<byte[]> documentKeys, CancellationToken documentClosing)`,
-where `SchemaAutoMatch` is the entry, the type's name (null for the schema's own root) and its
-score. The implementation owns the fingerprint cache and its threading - it parses on the thread
+`Task<SchemaCatalogFit> FitAsync(IReadOnlyList<SchemaCatalogEntry> entries, IReadOnlyList<byte[]> documentKeys, CancellationToken documentClosing)`.
+`SchemaCatalogFit` holds every entry's leading type and score, plausible ones first and best
+first (the ranking the menu shows), and the auto-match, if any: the entry, the type's name (null
+for the schema's own root) and its score. The implementation owns the fingerprint cache and its threading - it parses on the thread
 pool and is safe to call from any number of documents at once. Built in the composition root and
 handed to the JSON and NDJSON view models through `DocumentViewCatalog`, as the catalog is.
 
@@ -138,18 +144,21 @@ change it. Look settled from a screenshot.
 2. [x] Fingerprints, the shared score and `SchemaAutoMatchRule`. Tests for each path of the rule,
    the required veto, cross-schema ambiguity, Keepa and GeoJSON samples matching their bundled
    schemas, and a small `{id, name}` document matching nothing.
-3. [ ] `ISchemaMatcher` and its cached implementation, composed in the root. Tests: a schema
+3. [x] `ISchemaMatcher` and its cached implementation, composed in the root. Tests: a schema
    parsed once across calls, re-parsed after it changes, a broken schema skipped.
-4. [ ] Settings: the option, and the "No schema" binding. Tests with a sparse settings file and an
+4. [x] Settings: the option, and the "No schema" binding. Tests with a sparse settings file and an
    old bindings file.
 5. [ ] `JsonSchemaSettings.IsMatched`; the JSON view model's two attempts; remembering rules.
    Tests: matched at open, not remembered, a remembered binding wins, "No schema" sticks across
    reopen, the user's pick this session stops a late match, the option off does nothing.
 6. [ ] NDJSON first-line sampler and the NDJSON view model. Tests: keys from a line longer than
    the sample window, a non-object line matching nothing.
-7. [ ] Flyout check box and "matched" button text; turning the option on matches now.
+7. [ ] Schema list ranked by fit: plausible schemas first, best first, with their score, as the
+   type list shows it. Tests: ordering, the selection index still naming the right entry after
+   reordering, a re-rank when the catalog is refreshed.
+8. [ ] Flyout check box and "matched" button text; turning the option on matches now.
    Screenshot for the look.
-8. [ ] Architecture doc and roadmap updated; benchmark the first open against a catalog of 50
+9. [ ] Architecture doc and roadmap updated; benchmark the first open against a catalog of 50
    schemas, including a large OpenAPI document.
 
 ## Not in this plan

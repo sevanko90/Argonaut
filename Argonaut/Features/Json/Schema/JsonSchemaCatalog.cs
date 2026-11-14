@@ -86,7 +86,8 @@ public sealed class JsonSchemaCatalog(string bundledDirectory, string userDirect
         if (documentPath is null)
             return (entries, null, null);
 
-        if (SchemaBindings.Find(bindings, documentPath) is { } remembered)
+        // A "No schema" choice preselects nothing, which is what it means.
+        if (SchemaBindings.Find(bindings, documentPath) is { SchemaPath: not null } remembered)
         {
             // Carried even when the schema file itself can't be found: harmless if unused, and
             // the loader drops a root name the schema no longer offers.

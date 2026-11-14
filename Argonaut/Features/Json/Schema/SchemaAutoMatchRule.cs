@@ -44,18 +44,25 @@ public static class SchemaAutoMatchRule
     /// the bar, or another schema fits about as well, or the best schema's own types tie.
     /// </summary>
     public static (int SchemaIndex, SchemaRootMatch Match)? Choose(IReadOnlyList<SchemaFingerprint> schemas, IReadOnlyList<byte[]> documentKeys)
+        => Assess(schemas, documentKeys).Chosen;
+
+    /// <summary>
+    /// <see cref="Choose"/>'s answer together with what it was chosen from: each schema's leading
+    /// type and score (null for a schema with no type to score), in <paramref name="schemas"/>'
+    /// order - which is what ranking the schema list by fit reads.
+    /// </summary>
+    public static (SchemaRootMatch?[] Leaders, (int SchemaIndex, SchemaRootMatch Match)? Chosen) Assess(IReadOnlyList<SchemaFingerprint> schemas, IReadOnlyList<byte[]> documentKeys)
     {
         ArgumentNullException.ThrowIfNull(schemas);
         ArgumentNullException.ThrowIfNull(documentKeys);
 
-        if (documentKeys.Count == 0 || schemas.Count == 0)
-            return null;
-
         // Each schema's leader, plausible or not: a schema whose own types tie cannot win, but
         // its leader still competes - it is still a schema that fits.
         var leaders = new SchemaRootMatch?[schemas.Count];
-        int winner = -1;
+        if (documentKeys.Count == 0)
+            return (leaders, null);
 
+        int winner = -1;
         for (int i = 0; i < schemas.Count; i++)
         {
             var ranked = JsonSchemaRootMatcher.Rank(schemas[i], documentKeys);
@@ -70,7 +77,7 @@ public static class SchemaAutoMatchRule
         }
 
         if (winner < 0)
-            return null;
+            return (leaders, null);
 
         var chosen = leaders[winner]!.Value;
         for (int i = 0; i < schemas.Count; i++)
@@ -78,10 +85,10 @@ public static class SchemaAutoMatchRule
             if (i != winner && leaders[i] is { } other && JsonSchemaRootMatcher.IsPlausible(other) &&
                 Math.Abs(chosen.Coverage - other.Coverage) < JsonSchemaRootMatcher.AmbiguityMargin &&
                 Math.Abs(chosen.Precision - other.Precision) < JsonSchemaRootMatcher.AmbiguityMargin)
-                return null;
+                return (leaders, null);
         }
 
-        return (winner, chosen);
+        return (leaders, (winner, chosen));
     }
 
     /// <summary>Whether one type, already the clear leader of its own schema, is good enough to
@@ -102,6 +109,6 @@ public static class SchemaAutoMatchRule
 
     /// <summary>The order <see cref="JsonSchemaRootMatcher.Rank(SchemaFingerprint, IReadOnlyList{byte[]})"/>
     /// uses: coverage, then precision.</summary>
-    private static bool Before(SchemaRootMatch a, SchemaRootMatch b)
+    internal static bool Before(SchemaRootMatch a, SchemaRootMatch b)
         => a.Coverage != b.Coverage ? a.Coverage > b.Coverage : a.Precision > b.Precision;
 }

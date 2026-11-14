@@ -6,7 +6,7 @@ namespace Argonaut.Tests.Features.Json.Schema;
 public sealed class SchemaBindingsTests
 {
     [Fact]
-    public void Remember_KeepsTheLatestChoice_AndForgetsOnNull()
+    public void Remember_KeepsTheLatestChoice_AndRemembersNoSchemaOnNull()
     {
         var bindings = new SchemaBindings();
 
@@ -18,7 +18,34 @@ public sealed class SchemaBindingsTests
         Assert.Single(bindings.Entries);
 
         bindings.Remember("/docs/a.json", null);
-        Assert.Null(SchemaBindings.Find(bindings.Entries, "/docs/a.json"));
+        Assert.Equal(new SchemaBinding("/docs/a.json", null), SchemaBindings.Find(bindings.Entries, "/docs/a.json"));
+        Assert.Single(bindings.Entries);
+    }
+
+    [Fact]
+    public void ChoseNoSchema_IsTrueOnlyForADocumentWhoseLastChoiceWasNone()
+    {
+        var bindings = new SchemaBindings();
+        bindings.Remember("/docs/none.json", null);
+        bindings.Remember("/docs/bound.json", "/one.json");
+
+        Assert.True(SchemaBindings.ChoseNoSchema(bindings.Entries, "/docs/none.json"));
+        Assert.False(SchemaBindings.ChoseNoSchema(bindings.Entries, "/docs/bound.json"));
+        Assert.False(SchemaBindings.ChoseNoSchema(bindings.Entries, "/docs/never.json"));
+        Assert.False(SchemaBindings.ChoseNoSchema(bindings.Entries, null));
+    }
+
+    [Fact]
+    public void NoSchemaChoice_RoundTripsThroughTheSettingsFile()
+    {
+        var bindings = new SchemaBindings();
+        bindings.Remember("/docs/none.json", null);
+        bindings.Remember("/docs/bound.json", "/one.json", "Root");
+
+        string json = System.Text.Json.JsonSerializer.Serialize(bindings, SchemaBindings.JsonTypeInfo);
+        var read = System.Text.Json.JsonSerializer.Deserialize(json, SchemaBindings.JsonTypeInfo)!;
+
+        Assert.Equal(bindings.Entries, read.Entries);
     }
 
     [Fact]

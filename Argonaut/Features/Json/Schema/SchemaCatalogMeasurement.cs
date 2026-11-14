@@ -70,7 +70,7 @@ public sealed class SchemaCatalogMeasurement(ISchemaMatcher matcher, JsonSchemaS
         if (documentClosing.IsCancellationRequested || !ReferenceEquals(entries, schemaSettings.Entries))
             return;
 
-        schemaSettings.SetFits(fit.Fits);
+        schemaSettings.SetFits(fit.Fits, fit.AutoMatch?.Entry);
 
         if (mayBind && fit.AutoMatch is { } match && !choseNoSchema && openMatchedSchemas())
             await schemaSettings.SelectMatchedAsync(match.Entry, match.RootName);

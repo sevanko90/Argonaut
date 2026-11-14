@@ -71,7 +71,7 @@ public sealed class SchemaRootPick
     /// 13-field type fully present in a 100-field object is a good match wearing a "13%" label.
     /// So a subset match is badged by what actually qualified it - all of its fields being there.
     /// </summary>
-    private static string? ScoreText(SchemaRootMatch? match)
+    internal static string? ScoreText(SchemaRootMatch? match)
     {
         if (match is not { } scored)
             return null;

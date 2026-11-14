@@ -286,7 +286,9 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
         DefaultExpandDepth = viewSettings.ExpandDepth;
         toolbar = new JsonToolbarViewModel(HintSettings, SchemaSettings, DefaultExpandDepth, ChooseExpandDepth,
             refreshSchemaEntries: () => RefreshSchemaEntriesAsync(origin.Path), openSchemaFolder: schemaCatalog.OpenUserDirectory,
-            showIndentGuides: viewSettings.ShowIndentGuides, applyIndentGuides: ChooseIndentGuides);
+            showIndentGuides: viewSettings.ShowIndentGuides, applyIndentGuides: ChooseIndentGuides,
+            openMatchedSchemas: viewSettings.OpenMatchedSchemas,
+            applyOpenMatchedSchemas: catalogMeasurement is null ? null : ChooseOpenMatchedSchemas);
 
         // Alongside indexing, not blocking it - see JsonViewModel.ApplyInitialSchemaAsync.
         _ = ApplyInitialSchemaAsync(origin.Path);
@@ -350,6 +352,14 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
     /// <summary>Measures the catalog against the first line's property names - the line every
     /// NDJSON file has, and the one most likely to be representative. See
     /// <see cref="SchemaCatalogMeasurement"/>.</summary>
+    /// <summary>"Open matched schemas" ticked or unticked - see JsonViewModel's counterpart.</summary>
+    private void ChooseOpenMatchedSchemas(bool open)
+    {
+        viewSettings.OpenMatchedSchemas = open;
+        if (open)
+            _ = MeasureCatalogAsync(mayBind: true);
+    }
+
     internal Task MeasureCatalogAsync(bool mayBind)
         => catalogMeasurement?.MeasureAsync(SampleFirstLineKeys, mayBind) ?? Task.CompletedTask;
 

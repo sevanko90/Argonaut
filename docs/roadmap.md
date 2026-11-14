@@ -170,6 +170,9 @@ it in (see "Saving" in architecture.md).
   test. It has not been needed yet across a real OpenAPI document, a GeoJSON schema and a Keepa
   response, and binding an envelope type as the root may cover most cases. Do not let it grow into
   per-row schema editing.
+
+  Matching a schema to a document ("Open matched schemas") reads only the outermost object, so
+  an envelope's payload is matched by neither; this button is where that would be answered.
 - **An array root bound as the array's items.** Root matching already scores element 0 of an
   array root and says so, but the winner cannot be bound: `WithRoot` cannot express "root is an
   array of C" without a synthetic node holding `ItemsId = C`.

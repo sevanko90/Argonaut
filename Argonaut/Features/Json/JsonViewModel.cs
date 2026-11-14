@@ -239,7 +239,9 @@ public sealed class JsonViewModel : TreeDocumentViewModel
         DefaultExpandDepth = ViewSettings.ExpandDepth;
         toolbar = new JsonToolbarViewModel(HintSettings, SchemaSettings, DefaultExpandDepth, ChooseExpandDepth, NavigateToPathAsync,
             refreshSchemaEntries: () => RefreshSchemaEntriesAsync(origin.Path), openSchemaFolder: schemaCatalog.OpenUserDirectory,
-            showIndentGuides: ShowIndentGuides, applyIndentGuides: ChooseIndentGuides);
+            showIndentGuides: ShowIndentGuides, applyIndentGuides: ChooseIndentGuides,
+            openMatchedSchemas: jsonViewSettings.OpenMatchedSchemas,
+            applyOpenMatchedSchemas: catalogMeasurement is null ? null : ChooseOpenMatchedSchemas);
 
         indexBasis = IndexBasis.Of(origin);
         var loadTask = LoadCore(origin.Open(), progressReporter, indexBasis?.FindKept<JsonKeptStructure>(JsonKeptStructure.Key));
@@ -302,6 +304,15 @@ public sealed class JsonViewModel : TreeDocumentViewModel
     /// so ranking schemas against an array's first element would offer bindings that label the
     /// wrong level.
     /// </summary>
+    /// <summary>"Open matched schemas" ticked or unticked: remembered for every document, and
+    /// ticking it tries this one now.</summary>
+    private void ChooseOpenMatchedSchemas(bool open)
+    {
+        jsonViewSettings.OpenMatchedSchemas = open;
+        if (open)
+            _ = MeasureCatalogAsync(mayBind: true);
+    }
+
     internal Task MeasureCatalogAsync(bool mayBind)
     {
         if (catalogMeasurement is null || Toolbar is null)

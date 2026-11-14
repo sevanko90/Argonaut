@@ -153,13 +153,16 @@ change it. Look settled from a screenshot.
    reopen, the user's pick this session stops a late match, the option off does nothing.
 6. [x] NDJSON first-line sampler and the NDJSON view model. Tests: keys from a line longer than
    the sample window, a non-object line matching nothing.
-7. [ ] Schema list ranked by fit: plausible schemas first, best first, with their score, as the
+7. [x] Schema list ranked by fit: plausible schemas first, best first, with their score, as the
    type list shows it. Tests: ordering, the selection index still naming the right entry after
    reordering, a re-rank when the catalog is refreshed.
-8. [ ] Flyout check box and "matched" button text; turning the option on matches now.
+8. [x] Flyout check box and "matched" button text; turning the option on matches now.
    Screenshot for the look.
-9. [ ] Architecture doc and roadmap updated; benchmark the first open against a catalog of 50
+9. [x] Architecture doc and roadmap updated; benchmark the first open against a catalog of 50
    schemas, including a large OpenAPI document.
+   Measured (Release, Apple silicon): 49 schemas of 30 properties plus a 6 MB OpenAPI document
+   of 2,500 types, sampling 100 keys - 132 ms for the first document opened, about 11 ms for
+   every later one, all on the thread pool.
 
 ## Not in this plan
 

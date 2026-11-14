@@ -59,7 +59,17 @@ public sealed class JsonSchemaSettings : ObservableObject
         private set => SetField(ref fits, value);
     }
 
-    public void SetFits(IReadOnlyList<SchemaFit> value) => Fits = value ?? Array.Empty<SchemaFit>();
+    /// <summary>The fit that clears the bar for binding unasked (see <see cref="SchemaAutoMatchRule"/>),
+    /// whether or not the option to bind it is on - the list marks it as the best match. Null when
+    /// no schema fits clearly.</summary>
+    public SchemaCatalogEntry? RecommendedFit { get; private set; }
+
+    /// <summary>Pushes freshly-measured fits in, with the one that fits clearly, if any.</summary>
+    public void SetFits(IReadOnlyList<SchemaFit> value, SchemaCatalogEntry? recommended = null)
+    {
+        RecommendedFit = recommended;
+        Fits = value ?? Array.Empty<SchemaFit>();
+    }
 
     /// <summary>
     /// Whether the bound schema was matched to the document ("Open matched schemas") rather than

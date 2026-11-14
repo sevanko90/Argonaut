@@ -84,10 +84,16 @@ sealed record HttpLocator(Uri Url) : SourceLocator      // added with the HTTP s
 
 ### Sealing (`Engine/Settings`)
 
-`ISettingsSealer` - `string Seal(ReadOnlySpan<byte>)` / `byte[]? Open(string)` - with one
-implementation per platform as above, chosen in the composition root. Tests use a fixed-key
-sealer. The settings store is unchanged: a sealed block is an ordinary settings block holding
-one sealed string, and the service that owns it decrypts on first read and seals on save.
+`ISettingsSealer` - `string? Seal(ReadOnlySpan<byte>)` / `byte[]? Open(string)` - chosen in the
+composition root by `SettingsSealers.ForThisPlatform`: `DpapiSettingsSealer` on Windows, and
+`AesGcmSettingsSealer` over an `ISealingKeyStore` elsewhere (`KeychainSealingKeyStore` on macOS,
+`FileSealingKeyStore` on Linux). A key that cannot be stored is never used - sealing returns
+null and the block is left as it was. The Keychain test runs only with
+`ARGONAUT_KEYCHAIN_TESTS=1`, since a CI runner's keychain may be locked. Tests use a fixed-key
+sealer. A sealed block is an ordinary settings block holding one sealed string, and the service that
+owns it opens it on first read and re-seals it on every change. The store gains a way to drop a
+key, so the old unsealed `recentFiles`, `favouriteFiles` and `schemaBindings` are removed from
+`settings.json` rather than left in it in plain text.
 
 ### Saved sources (`Shell/Sources`)
 
@@ -119,7 +125,7 @@ folder work is separate.
 1. [x] `SourceLocator`/`FileLocator`; `IByteOrigin.Locator` replaces `Path` at every reader;
    CLAUDE.md and architecture.md follow. Behaviour unchanged. Tests: identity and default
    names; existing suite green.
-2. [ ] `ISettingsSealer` and its three implementations, plus the test sealer. Tests: round
+2. [x] `ISettingsSealer` and its three implementations, plus the test sealer. Tests: round
    trip, a tampered or foreign blob opens as nothing, the macOS Keychain key created once and
    reused (macOS-only test), DPAPI on Windows CI.
 3. [ ] `SavedSourceStore` replacing recents and favourites, sealed; the shell records locators

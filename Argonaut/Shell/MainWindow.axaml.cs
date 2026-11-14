@@ -50,6 +50,9 @@ public partial class MainWindow : Window
     private readonly UpdateSettings updateSettings;
     private DispatcherTimer? toastTimer;
 
+    // What the toast showing now offers to do, if anything.
+    private ToastAction? toastAction;
+
     /// <summary>For the XAML runtime loader and the designer only - settings go nowhere. The app
     /// constructs the window through the other constructor.</summary>
     public MainWindow() : this(SettingsStore.InMemory(), new JsonSchemaCatalog(
@@ -115,6 +118,7 @@ public partial class MainWindow : Window
         viewModel.FindBarResetRequested += () => FindBarControl.Reset();
 
         ToastService.Requested += ShowToast;
+        ToastService.ActionRequested += ShowToast;
         viewModel.Progress.WorkStarted += (_, _) => StartProgressTicks();
         RawJumpService.Requested += range => _ = viewModel.RevealInTextViewAsync(range);
         ArrayTableService.Requested += request => _ = viewModel.OpenArrayTableAsync(request);
@@ -136,6 +140,8 @@ public partial class MainWindow : Window
         EmptyState.OpenSavedSourceRequested += (_, id) => viewModel.OpenSavedSource(id);
         EmptyState.ClearRecentRequested += (_, _) => viewModel.ClearRecentSources();
         EmptyState.TogglePinRequested += (_, id) => viewModel.TogglePin(id);
+        EmptyState.RenameRequested += (_, rename) => viewModel.RenameSavedSource(rename.Id, rename.Name);
+        EmptyState.RemoveRequested += (_, id) => viewModel.RemoveSavedSource(id);
         EmptyState.LocationsRequested += (_, _) => EmptyState.SetLocations(viewModel.GetConfigLocations());
         EmptyState.BrowseFromFolderRequested += async (_, folder) => await BrowseForFile(folder);
         EmptyState.SetLocations(viewModel.GetConfigLocations());
@@ -835,12 +841,24 @@ public partial class MainWindow : Window
             entry.RequestStop();
     }
 
-    private void ShowToast(string message)
+    private void ShowToast(string message) => ShowToast(message, action: null);
+
+    /// <summary>
+    /// Shows <paramref name="message"/> - with <paramref name="action"/>, as a toast that can be
+    /// clicked and stays up long enough to be read and acted on. A plain toast cannot be clicked,
+    /// so it never gets in the way of what is under it.
+    /// </summary>
+    private void ShowToast(string message, ToastAction? action)
     {
         ToastText.Text = message;
+        toastAction = action;
+        ToastActionButton.Content = action?.Label;
+        ToastActionButton.IsVisible = action is not null;
+        ToastBorder.IsHitTestVisible = action is not null;
         ToastBorder.IsVisible = true;
 
-        toastTimer ??= new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.5) };
+        toastTimer ??= new DispatcherTimer();
+        toastTimer.Interval = TimeSpan.FromSeconds(action is null ? 1.5 : 6);
         toastTimer.Stop();
         toastTimer.Tick -= OnToastTimerTick;
         toastTimer.Tick += OnToastTimerTick;
@@ -851,5 +869,15 @@ public partial class MainWindow : Window
     {
         toastTimer!.Stop();
         ToastBorder.IsVisible = false;
+        toastAction = null;
+    }
+
+    private void OnToastActionClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        var action = toastAction;
+        toastTimer?.Stop();
+        ToastBorder.IsVisible = false;
+        toastAction = null;
+        action?.Run();
     }
 }

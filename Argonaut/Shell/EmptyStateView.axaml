@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:shell="using:Argonaut.Shell"
+             xmlns:icons="clr-namespace:Argonaut.Ui.Icons"
              x:Class="Argonaut.Shell.EmptyStateView">
     <UserControl.Styles>
         <Style Selector="Button.recentfile">
@@ -27,6 +28,20 @@
         <Style Selector="Path.starshape.pinned">
             <Setter Property="Fill" Value="{DynamicResource AppAccentBrush}" />
         </Style>
+        <Style Selector="Button.star:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource AppHoverBackgroundBrush}" />
+        </Style>
+        <Style Selector="Button.rowmenu">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="8" />
+            <Setter Property="VerticalAlignment" Value="Stretch" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Foreground" Value="{DynamicResource AppMutedTextBrush}" />
+        </Style>
+        <Style Selector="Button.rowmenu:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource AppHoverBackgroundBrush}" />
+        </Style>
         <Style Selector="Button.recentfile:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource AppHoverBackgroundBrush}" />
         </Style>
@@ -34,9 +49,9 @@
 
     <UserControl.Resources>
         <DataTemplate x:Key="FileRow" x:DataType="shell:SavedSourceRow">
-            <Grid ColumnDefinitions="*,Auto">
+            <Grid ColumnDefinitions="*,Auto,Auto">
                 <Button Classes="recentfile" ToolTip.Tip="{Binding LocationText}" Click="OnRecentFileClick">
-                    <Grid ColumnDefinitions="Auto,*">
+                    <Grid ColumnDefinitions="Auto,*,Auto">
                         <Border Background="{DynamicResource AppAccentSurfaceBrush}" CornerRadius="6"
                                 Padding="6" Margin="0,0,10,0" VerticalAlignment="Center">
                             <Path Width="11" Height="14" Stretch="Uniform" StrokeThickness="1.5"
@@ -45,9 +60,29 @@
                         </Border>
                         <TextBlock Grid.Column="1" Text="{Binding Name}" FontWeight="Medium"
                                    VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                        <!-- Only for what is not a file: a file is the usual case and needs no label. -->
+                        <Border Grid.Column="2" IsVisible="{Binding HasPill}" CornerRadius="3" Padding="5,1"
+                                Margin="8,0,0,0" VerticalAlignment="Center"
+                                Background="{DynamicResource AppAccentSurfaceBrush}">
+                            <TextBlock Text="{Binding Pill}" FontSize="10" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource AppAccentBrush}" />
+                        </Border>
                     </Grid>
                 </Button>
-                <Button Grid.Column="1" Classes="star" Click="OnToggleFavourite"
+                <!-- Laid over the name while renaming; Enter keeps the name, Escape or leaving drops it. -->
+                <TextBox x:Name="RenameBox" Classes="rename" IsVisible="False" Margin="44,2,4,2"
+                         VerticalAlignment="Center" FontWeight="Medium"
+                         KeyDown="OnRenameKeyDown" LostFocus="OnRenameLostFocus" />
+                <Button Grid.Column="1" Classes="rowmenu" ToolTip.Tip="More">
+                    <icons:LucideIcon Data="{StaticResource Icon.More}" />
+                    <Button.Flyout>
+                        <MenuFlyout Placement="BottomEdgeAlignedRight">
+                            <MenuItem Header="Rename" Click="OnRename" />
+                            <MenuItem Header="Remove from list" Click="OnRemove" />
+                        </MenuFlyout>
+                    </Button.Flyout>
+                </Button>
+                <Button Grid.Column="2" Classes="star" Click="OnToggleFavourite"
                         ToolTip.Tip="Pin or unpin">
                     <Path Classes="starshape" Classes.pinned="{Binding IsPinned}" Width="16" Height="16"
                           Stretch="Uniform" StrokeThickness="1.5" Stroke="{DynamicResource AppAccentBrush}"

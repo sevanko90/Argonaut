@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Argonaut.Engine.Locations;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.LogicalTree;
 
 namespace Argonaut.Shell;
 
@@ -26,6 +29,12 @@ public partial class EmptyStateView : UserControl
 
     /// <summary>Raised with the id of the saved source to pin or unpin.</summary>
     public event EventHandler<string>? TogglePinRequested;
+
+    /// <summary>Raised with the id of a saved source and the name the user gave it.</summary>
+    public event EventHandler<(string Id, string Name)>? RenameRequested;
+
+    /// <summary>Raised with the id of the saved source to take off the list.</summary>
+    public event EventHandler<string>? RemoveRequested;
 
     /// <summary>Raised with a folder the user chose to browse from.</summary>
     public event EventHandler<string>? BrowseFromFolderRequested;
@@ -103,6 +112,62 @@ public partial class EmptyStateView : UserControl
     {
         if ((sender as Button)?.DataContext is SavedSourceRow row)
             TogglePinRequested?.Invoke(this, row.Id);
+    }
+
+    /// <summary>Lays the rename box over the row's name, filled and selected.</summary>
+    private void OnRename(object? sender, RoutedEventArgs e)
+    {
+        if ((sender as MenuItem)?.DataContext is not SavedSourceRow row || RenameBoxOf(row) is not { } box)
+            return;
+
+        box.Text = row.Name;
+        box.IsVisible = true;
+        box.Focus();
+        box.SelectAll();
+    }
+
+    private void OnRemove(object? sender, RoutedEventArgs e)
+    {
+        if ((sender as MenuItem)?.DataContext is SavedSourceRow row)
+            RemoveRequested?.Invoke(this, row.Id);
+    }
+
+    private void OnRenameKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (sender is not TextBox box || box.DataContext is not SavedSourceRow row)
+            return;
+
+        if (e.Key == Key.Enter)
+        {
+            box.IsVisible = false;
+            RenameRequested?.Invoke(this, (row.Id, box.Text ?? string.Empty));
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Escape)
+        {
+            box.IsVisible = false;
+            e.Handled = true;
+        }
+    }
+
+    // Clicking away drops the edit, as Escape does: only Enter changes the name.
+    private void OnRenameLostFocus(object? sender, RoutedEventArgs e)
+    {
+        if (sender is TextBox box)
+            box.IsVisible = false;
+    }
+
+    /// <summary>The rename box in <paramref name="row"/>'s container, in whichever list shows it.
+    /// Found from the list rather than from the menu item, which lives in a popup outside the row.</summary>
+    private TextBox? RenameBoxOf(SavedSourceRow row)
+    {
+        foreach (var list in new[] { FavouritesList, RecentFilesList })
+        {
+            if (list.ContainerFromItem(row) is { } container)
+                return container.GetLogicalDescendants().OfType<TextBox>().FirstOrDefault();
+        }
+
+        return null;
     }
 
     private void OnRecentFileClick(object? sender, RoutedEventArgs e)

@@ -354,6 +354,50 @@ public sealed class MainWindowViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task RenameSavedSource_ChangesTheRowsName()
+    {
+        string path = WriteJsonFile();
+        var vm = CreateViewModel((_, _, _) => Task.FromResult<IDocumentViewModel>(new FakeDocument { FilePath = path }));
+        await vm.OpenPathAsync(path);
+
+        vm.RenameSavedSource(Assert.Single(vm.RecentSources).Id, "Orders");
+
+        Assert.Equal("Orders", Assert.Single(vm.RecentSources).Name);
+    }
+
+    [Fact]
+    public async Task ASavedFileThatIsGone_OffersToRemoveIt_AndKeepsItOtherwise()
+    {
+        string path = WriteJsonFile();
+        var vm = CreateViewModel((_, _, _) => Task.FromResult<IDocumentViewModel>(new FakeDocument { FilePath = path }));
+        await vm.OpenPathAsync(path);
+        await vm.CloseFileAsync();
+        File.Delete(path);
+        string id = Assert.Single(vm.RecentSources).Id;
+
+        var offered = new List<(string Message, ToastAction Action)>();
+        void Capture(string message, ToastAction action) => offered.Add((message, action));
+        ToastService.ActionRequested += Capture;
+        try
+        {
+            vm.OpenSavedSource(id);
+        }
+        finally
+        {
+            ToastService.ActionRequested -= Capture;
+        }
+
+        var (message, action) = Assert.Single(offered);
+        Assert.Contains(Path.GetFileName(path), message);
+        Assert.Equal(MainWindowViewModel.RemoveFromListLabel, action.Label);
+        Assert.Single(vm.RecentSources);
+
+        action.Run();
+
+        Assert.Empty(vm.RecentSources);
+    }
+
+    [Fact]
     public async Task OpenPath_NonexistentFile_IsIgnored()
     {
         var vm = CreateViewModel((_, _, _) => throw new Exception("loader must not be called"));

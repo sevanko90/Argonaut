@@ -108,8 +108,9 @@ key, so the old unsealed `recentFiles`, `favouriteFiles` and `schemaBindings` ar
   second branch.
 - The retired `recentFiles` and `favouriteFiles` keys are dropped from the file at startup
   (`ISettingsStore.Forget`), so their unsealed paths do not linger.
-- Empty state rows: name, location as the tooltip, the kind pill on non-file rows, pin, and
-  rename (inline edit on the name).
+- Empty state rows: name, location as the tooltip, the kind pill on non-file rows, an
+  always-visible ⋯ menu (Rename, Remove from list) and the star for one-click pinning (user's
+  choice of four layouts). Rename edits in place: Enter keeps it, Escape or clicking away drops it.
 
 ### Schema bindings
 
@@ -119,8 +120,10 @@ folder work is separate.
 
 ### Toasts with an action
 
-`ToastService.Show(message)` gains an overload with one action (label + callback), used for
-"Remove from list". The toast host draws it as a link button.
+`ToastService.Show(message, ToastAction)` raises a separate event, so plain toasts are untouched.
+The host draws the action as a link, makes that toast clickable, and keeps it up for 6 s instead
+of 1.5 s. A saved file that is gone when reopened is checked before opening and gets "Couldn't
+find …" with "Remove from list"; other failures keep the open's usual reporting.
 
 ## Steps
 
@@ -133,7 +136,7 @@ folder work is separate.
 3. [x] `SavedSourceStore` replacing recents and favourites, sealed; the shell records locators
    and reopens through `ISourceOpener`. Tests: add-or-touch, cap on unpinned only, rename, pin,
    sealed on disk (no path text in `settings.json`), empty when the blob will not open.
-4. [ ] Empty-state rows: rename, pill on non-file rows; toast action and "Remove from list" on
+4. [x] Empty-state rows: rename, pill on non-file rows; toast action and "Remove from list" on
    a failed reopen. Look from a screenshot.
 5. [ ] `IFileAccess` with the macOS bookmark implementation; `FileByteOrigin` holds the grant.
    Tests: describe/open round trip on a temp file, a moved file found through its bookmark

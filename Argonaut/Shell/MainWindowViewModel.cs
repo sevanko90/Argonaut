@@ -1322,11 +1322,40 @@ public sealed class MainWindowViewModel : ObservableObject
         appearance.ContentFont = ContentFontMode;
     }
 
-    /// <summary>Opens a saved source again from where its locator says it is.</summary>
+    /// <summary>What a toast about a saved source that cannot be reopened offers.</summary>
+    public const string RemoveFromListLabel = "Remove from list";
+
+    /// <summary>
+    /// Opens a saved source again from where its locator says it is. A file that is no longer
+    /// there is not opened and not forgotten: the entry stays, and a toast offers to remove it -
+    /// a file on a drive that is not mounted right now is still worth keeping.
+    /// </summary>
     public void OpenSavedSource(string id)
     {
-        if (savedSources.Find(id)?.Locator is FileLocator file)
-            _ = OpenPathAsync(file.Path);
+        if (savedSources.Find(id) is not { Locator: FileLocator file } source)
+            return;
+
+        if (!File.Exists(file.Path))
+        {
+            ToastService.Show($"Couldn't find {source.Name}",
+                new ToastAction(RemoveFromListLabel, () => RemoveSavedSource(id)));
+            return;
+        }
+
+        _ = OpenPathAsync(file.Path);
+    }
+
+    /// <summary>Renames a saved source; a blank name goes back to its locator's own.</summary>
+    public void RenameSavedSource(string id, string name)
+    {
+        savedSources.Rename(id, name);
+        ReloadSavedSources();
+    }
+
+    public void RemoveSavedSource(string id)
+    {
+        savedSources.Remove(id);
+        ReloadSavedSources();
     }
 
     public void ClearRecentSources()

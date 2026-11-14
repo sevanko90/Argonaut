@@ -231,15 +231,16 @@ The XML tree view is built (see "The XML tree" in architecture.md). What remains
   non-zero count of unquoted commas for CSV, so a log whose first lines happen to match opens
   in the table. A second signal - the same count on a few more lines, or no line much longer
   than the others - would keep prose out.
-- **Load from URL.** An `HttpByteOrigin` reporting an `HttpLocator`, so a URL becomes a saved
-  source (with the "http" pill) and keys a remembered schema like any file; reopening it is a
-  second branch in `MainWindowViewModel.OpenSavedSource`, where an `ISourceOpener` seam is then
-  worth having. The download runs on the background with progress and
-  cancellation, reporting `AvailableLength` as bytes land and `LengthSettled` when the response
-  completes. The indexers already consume growth, so the work is in the origin. An in-flight source
-  cannot be an `MMapFile` - a mapping is a fixed snapshot - so it is in-memory chunks or a
-  pre-sized mapping whose written extent is tracked separately (and whose unwritten tail is never
-  reported as data - see CLAUDE.md).
+- **The request manager.** The request pane is its start: headers (and with them choosing a POST
+  body's content type, today guessed as JSON or text), authentication, other methods, folders of
+  saved requests and history. The saved-source ids and the pane's own feature folder are there for
+  it to grow from.
+- **Showing a response as it downloads.** Every view reads whole ranges, so a still-growing
+  response needs a mapping pre-sized to its final length whose written extent is reported
+  separately (see CLAUDE.md on `AvailableLength`). A compressed response states only its
+  compressed size, so that works for uncompressed responses alone; compressed ones would need the
+  file mapped in growing chunks. Only worth it for tens of MB over a slow connection.
+- **HTML colouring in the raw view**, for HTML responses and error pages, which show as plain text.
 - **Ctrl+Shift+V to paste as a new document** while one is open. Plain Ctrl+V pastes only while
   nothing is open, so it can mean "paste into the document" in the raw editor.
 - **Reload, or "open containing folder"**, whenever either arrives: it reads the origin's

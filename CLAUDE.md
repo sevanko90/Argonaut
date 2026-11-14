@@ -145,8 +145,10 @@ Other rules that fall out of the split:
   document source. A mapping is a fixed snapshot of a byte range and can never grow, so an
   in-flight streamed source is never an `MMapFile`.
 - **`Locator` says where a document can be fetched again, and a file is one kind of it.**
-  `IByteOrigin.Locator` is a `SourceLocator` - a `FileLocator` for a file on disk - or null for a
-  document with nowhere to go back to (a paste, an excerpt, a diff side). There is no separate
+  `IByteOrigin.Locator` is a `SourceLocator` - a `FileLocator` for a file on disk, an
+  `HttpLocator` for a request's response - or null for a document with nowhere to go back to (a
+  paste, an excerpt, a diff side). A response is read from a file in the response folder, but its
+  locator is the request: that file is never the user's to save over or reveal. There is no separate
   path: a path is the file locator's. The place-keyed features (saved sources, the remembered
   schema binding) skip a document with no locator; never key anything by `DisplayName` (two
   pastes would collide). Anything that touches the file system

@@ -135,7 +135,7 @@ the document area, and opens what Send produces through `OpenOriginAsync`.
 6. [x] `ResponseStore` and the budget; closing keeps the response; reopening a saved request
    opens it with its age; Clear kept responses; the startup sweep. Tests for eviction order, the
    over-budget response, removal with its request, orphans.
-7. [ ] Architecture doc, CLAUDE.md where origins are described, roadmap.
+7. [x] Architecture doc, CLAUDE.md where origins are described, roadmap.
 
 ## Not in this plan
 

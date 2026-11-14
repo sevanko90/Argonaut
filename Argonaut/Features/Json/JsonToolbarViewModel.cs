@@ -212,14 +212,16 @@ public sealed class JsonToolbarViewModel : ObservableObject
                     return;
                 }
 
-                _ = schemaSettings.SelectAsync(chosen);
-
                 // Clearing the binding leaves nothing further to choose; picking one leaves the
-                // type open until the scores say whether it needs choosing at all.
+                // type open until the scores say whether it needs choosing at all. Armed before
+                // the load starts: a parse that has already finished by the time SelectAsync
+                // awaits it continues inline and raises RootOptions before SelectAsync returns.
                 if (clearing)
                     IsSchemaFlyoutOpen = false;
                 else
                     awaitingSchemaCloseDecision = true;
+
+                _ = schemaSettings.SelectAsync(chosen);
             });
         }
     }

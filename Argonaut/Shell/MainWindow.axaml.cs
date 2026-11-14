@@ -29,6 +29,7 @@ using Argonaut.Ui.Progress;
 using System.Threading.Tasks;
 using Velopack;
 
+using Argonaut.Engine.Http;
 using Argonaut.Shell.Files;
 
 namespace Argonaut.Shell;
@@ -72,12 +73,14 @@ public partial class MainWindow : Window
     /// for this run only.</param>
     /// <param name="fileAccess">Describes and reopens remembered files - by bookmark on macOS; null
     /// goes by path.</param>
+    /// <param name="responseDownloader">Sends requests and keeps their responses; null offers the
+    /// request pane but cannot send.</param>
     /// <param name="launcher">Opens folders and links - About, Notices and the views' value hints;
     /// null takes this build's own
     /// (see <see cref="SystemLaunchers.ForThisBuild"/>).</param>
     public MainWindow(ISettingsStore settings, JsonSchemaCatalog schemaCatalog, IDiagnosticLog log, Action? openLogFolder = null,
         IConfigLocationSource? configLocations = null, IRecipeStore? recipes = null, ISystemLauncher? launcher = null,
-        ISettingsSealer? settingsSealer = null, IFileAccess? fileAccess = null)
+        ISettingsSealer? settingsSealer = null, IFileAccess? fileAccess = null, ResponseDownloader? responseDownloader = null)
     {
         InitializeComponent();
 
@@ -113,6 +116,7 @@ public partial class MainWindow : Window
             log: log,
             settingsSealer: settingsSealer,
             fileAccess: fileAccess,
+            responseDownloader: responseDownloader,
             configLocations: configLocations,
             filterFiles: new SelectionFilterFiles(),
             recipes: recipes,
@@ -141,6 +145,7 @@ public partial class MainWindow : Window
         EmptyState.ChooseFileRequested += async (_, _) => await BrowseForFile();
         EmptyState.PasteRequested += async (_, _) => await viewModel.PasteAsync();
         EmptyState.NewDocumentRequested += async (_, _) => await viewModel.NewDocumentAsync();
+        EmptyState.NewRequestRequested += async (_, _) => await viewModel.NewRequestAsync();
         EmptyState.SetPasteAvailable(viewModel.CanPaste);
         EmptyState.OpenSavedSourceRequested += (_, id) => viewModel.OpenSavedSource(id);
         EmptyState.ClearRecentRequested += (_, _) => viewModel.ClearRecentSources();
@@ -430,6 +435,14 @@ public partial class MainWindow : Window
                 e.Handled = true;
             }
 
+            return;
+        }
+
+        // A new request, as a browser's address bar is reached: with a document open it asks first.
+        if (e.Key == Key.L && cmdOrCtrl)
+        {
+            _ = viewModel.NewRequestAsync();
+            e.Handled = true;
             return;
         }
 
@@ -876,6 +889,8 @@ public partial class MainWindow : Window
         ToastBorder.IsVisible = false;
         toastAction = null;
     }
+
+    private void OnNewRequest(object? sender, Avalonia.Interactivity.RoutedEventArgs e) => _ = viewModel.NewRequestAsync();
 
     private void OnToastActionClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {

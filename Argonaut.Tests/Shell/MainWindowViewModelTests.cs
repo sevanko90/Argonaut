@@ -1,3 +1,6 @@
+using Argonaut.Tests.Engine.Http;
+using Argonaut.Engine.Http;
+using System.Text;
 using Argonaut.Tests.Support;
 using System.Threading;
 using Argonaut.Engine.Bytes;
@@ -437,6 +440,110 @@ public sealed class MainWindowViewModelTests : IDisposable
         public FileLocator Describe(string path) => new(path, bookmark: [1]);
 
         public FileAccessGrant Open(FileLocator locator) => new(new FileLocator(movedTo, bookmark: [2]), () => Released++);
+    }
+
+    private MainWindowViewModel RequestShell(IHttpFetcher fetcher, List<IByteOrigin> loaded)
+        => new(SettingsStore.InMemory(), TestSchemas.Catalog(), _ => Task.FromResult(true),
+            documentLoader: (_, origin, _) =>
+            {
+                loaded.Add(origin);
+                return Task.FromResult<IDocumentViewModel>(new FakeDocument { FilePath = origin.LocationText(), Origin = origin });
+            },
+            lineEndings: new FakeLineEndingDetector(),
+            responseDownloader: new ResponseDownloader(fetcher, Path.Combine(tempDir, "Responses")));
+
+    [Fact]
+    public async Task NewRequest_ShowsThePane_InPlaceOfTheEmptyState()
+    {
+        var vm = RequestShell(new FakeHttpFetcher([], 1, false), []);
+
+        await vm.NewRequestAsync();
+
+        Assert.NotNull(vm.RequestEditor);
+        Assert.False(vm.IsEmptyStateVisible);
+        Assert.True(vm.IsAwaitingResponse);
+    }
+
+    [Fact]
+    public async Task Sending_OpensTheResponseBelowThePane_AndSavesTheRequest()
+    {
+        var loaded = new List<IByteOrigin>();
+        var vm = RequestShell(new FakeHttpFetcher(Encoding.UTF8.GetBytes("""{"a":1}"""), 4, true), loaded);
+        await vm.NewRequestAsync();
+        vm.RequestEditor!.UrlText = "https://api.example.com/items?page=2";
+
+        await vm.RequestEditor.SendAsync();
+
+        var origin = Assert.IsType<HttpResponseOrigin>(Assert.Single(loaded));
+        Assert.Equal(7, origin.AvailableLength);
+        Assert.NotNull(vm.RequestEditor);
+        Assert.False(vm.IsAwaitingResponse);
+        Assert.StartsWith("Response from", vm.RequestEditor.StatusText);
+        var saved = Assert.Single(vm.RecentSources);
+        Assert.Equal("items · api.example.com", saved.Name);
+        Assert.Equal("http", saved.Pill);
+    }
+
+    [Fact]
+    public async Task SendingAgain_ReplacesTheResponse_AndKeepsThePane()
+    {
+        var loaded = new List<IByteOrigin>();
+        var vm = RequestShell(new FakeHttpFetcher(Encoding.UTF8.GetBytes("[]"), 2, true), loaded);
+        await vm.NewRequestAsync();
+        var editor = vm.RequestEditor!;
+        editor.UrlText = "https://x.test/a";
+
+        await editor.SendAsync();
+        await editor.SendAsync();
+
+        Assert.Equal(2, loaded.Count);
+        Assert.Same(editor, vm.RequestEditor);
+        Assert.Single(vm.RecentSources);
+    }
+
+    [Fact]
+    public async Task AFailedRequest_IsSaidInThePane_AndLoadsNothing()
+    {
+        var loaded = new List<IByteOrigin>();
+        var vm = RequestShell(new FakeHttpFetcher([], 1, false) { Status = System.Net.HttpStatusCode.NotFound }, loaded);
+        await vm.NewRequestAsync();
+        vm.RequestEditor!.UrlText = "https://x.test/missing";
+
+        await vm.RequestEditor.SendAsync();
+
+        Assert.Empty(loaded);
+        Assert.Contains("404", vm.RequestEditor.StatusText);
+        Assert.True(vm.IsAwaitingResponse);
+    }
+
+    [Fact]
+    public async Task OpeningAFile_ClosesThePane()
+    {
+        var vm = RequestShell(new FakeHttpFetcher([], 1, false), []);
+        await vm.NewRequestAsync();
+
+        await vm.OpenPathAsync(WriteJsonFile());
+
+        Assert.Null(vm.RequestEditor);
+    }
+
+    [Fact]
+    public async Task ReopeningASavedRequest_FillsThePaneAndSendsIt()
+    {
+        var loaded = new List<IByteOrigin>();
+        var fetcher = new FakeHttpFetcher(Encoding.UTF8.GetBytes("{}"), 2, true);
+        var vm = RequestShell(fetcher, loaded);
+        await vm.NewRequestAsync();
+        vm.RequestEditor!.UrlText = "https://x.test/a?b=1";
+        await vm.RequestEditor.SendAsync();
+        await vm.CloseFileAsync();
+        Assert.Null(vm.RequestEditor);
+
+        vm.OpenSavedSource(Assert.Single(vm.RecentSources).Id);
+        await WaitUntil(() => loaded.Count == 2);
+
+        Assert.Equal("https://x.test/a?b=1", vm.RequestEditor!.UrlText);
+        Assert.Equal(2, fetcher.Sent.Count);
     }
 
     [Fact]

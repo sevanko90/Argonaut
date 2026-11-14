@@ -11,6 +11,7 @@ using Argonaut.Engine.Logging;
 using Argonaut.Engine.Settings;
 using Argonaut.Engine.Transforms;
 using Argonaut.Features.Json.Schema;
+using Argonaut.Engine.Http;
 using Argonaut.Shell;
 using Argonaut.Shell.Files;
 using Argonaut.Shell.Sealing;
@@ -68,7 +69,8 @@ public partial class App : Application
 
             var window = new MainWindow(settings, schemaCatalog, log, OpenLogFolderAction(launcher),
                 ConfigLocationSource.ForCurrentPlatform(), recipes, launcher,
-                SettingsSealers.ForThisPlatform(AppDataPaths.SealingKeyFile), FileAccesses.ForThisPlatform());
+                SettingsSealers.ForThisPlatform(AppDataPaths.SealingKeyFile), FileAccesses.ForThisPlatform(),
+                new ResponseDownloader(new HttpClientFetcher(new System.Net.Http.HttpClient()), AppDataPaths.ResponsesDirectory));
             mainWindow = window;
             desktop.MainWindow = window;
 

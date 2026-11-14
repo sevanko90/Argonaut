@@ -129,6 +129,9 @@
                     <Button Content="New document" Classes="secondary"
                             Click="OnNewDocument"
                             ToolTip.Tip="Start an empty document to type or paste into (Ctrl+N or Cmd+N)" />
+                    <Button Content="New request" Classes="secondary"
+                            Click="OnNewRequest"
+                            ToolTip.Tip="Open the response to an HTTP request as a document (Ctrl+L or Cmd+L)" />
                 </StackPanel>
             </StackPanel>
         </Border>

@@ -34,6 +34,9 @@ using Argonaut.Ui.ViewModels;
 using Avalonia.Threading;
 using Argonaut.Ui.Launching;
 
+using Argonaut.Engine.Http;
+using Argonaut.Features.Requests;
+using Argonaut.Features.Raw;
 using Argonaut.Shell.Files;
 using Argonaut.Shell.Sources;
 
@@ -56,7 +59,7 @@ namespace Argonaut.Shell;
 /// is disposed by its hosting view's DetachedFromVisualTree handler when the content swap
 /// tears it down.
 /// </summary>
-public sealed class MainWindowViewModel : ObservableObject
+public sealed class MainWindowViewModel : ObservableObject, IRequestSender
 {
     /// <summary>
     /// Builds the document view model for a detected file kind. Injectable so tests can
@@ -83,6 +86,9 @@ public sealed class MainWindowViewModel : ObservableObject
     private readonly AppearanceSettings appearance;
     private readonly SavedSourceStore savedSources;
     private readonly IFileAccess fileAccess;
+    private readonly ResponseDownloader? responseDownloader;
+    private readonly RawViewSettings rawViewSettings;
+    private RequestEditorViewModel? requestEditor;
     private readonly JsonViewSettings jsonViewSettings;
     private readonly IConfigLocationSource? configLocations;
     private readonly ISelectionFilterFiles filterFiles;
@@ -203,9 +209,12 @@ public sealed class MainWindowViewModel : ObservableObject
         ISystemLauncher? launcher = null,
         ILineEndingDetector? lineEndings = null,
         ISettingsSealer? settingsSealer = null,
-        IFileAccess? fileAccess = null)
+        IFileAccess? fileAccess = null,
+        ResponseDownloader? responseDownloader = null)
     {
         this.fileAccess = fileAccess ?? new PlainFileAccess();
+        this.responseDownloader = responseDownloader;
+        this.rawViewSettings = settings.Get<RawViewSettings>();
         this.lineEndings = lineEndings ?? new LineEndingDetector();
         this.appearance = settings.Get<AppearanceSettings>();
         this.savedSources = new SavedSourceStore(settings.Get<SavedSourcesBlock>(), settingsSealer);
@@ -408,6 +417,30 @@ public sealed class MainWindowViewModel : ObservableObject
     /// <summary>True when a document is loaded; drives the toolbar's visibility.</summary>
     public bool IsFileOpen => currentFilePath is not null;
 
+    /// <summary>The request pane, while the input is a request or New request was chosen; null
+    /// otherwise.</summary>
+    public RequestEditorViewModel? RequestEditor
+    {
+        get => requestEditor;
+        private set
+        {
+            if (!SetField(ref requestEditor, value))
+                return;
+
+            OnPropertyChanged(nameof(IsRequestPaneVisible));
+            OnPropertyChanged(nameof(IsEmptyStateVisible));
+            OnPropertyChanged(nameof(IsAwaitingResponse));
+        }
+    }
+
+    public bool IsRequestPaneVisible => requestEditor is not null;
+
+    /// <summary>The empty state shows when nothing is open and no request is being written.</summary>
+    public bool IsEmptyStateVisible => !IsFileOpen && !IsRequestPaneVisible;
+
+    /// <summary>A request is being written and nothing has loaded under it yet.</summary>
+    public bool IsAwaitingResponse => !IsFileOpen && IsRequestPaneVisible;
+
     /// <summary>Whether <see cref="PasteAsync"/> can do anything - false when the view model was
     /// built without a clipboard reader.</summary>
     public bool CanPaste => this.readClipboardBytes is not null;
@@ -570,6 +603,7 @@ public sealed class MainWindowViewModel : ObservableObject
     /// </summary>
     public async Task OpenDiffAsync(IByteOrigin leftOrigin, IByteOrigin rightOrigin)
     {
+        CloseRequestPane();
         var requestId = BeginOpenRequest();
         string leftPath = leftOrigin.LocationText();
         string rightPath = rightOrigin.LocationText();
@@ -1336,6 +1370,12 @@ public sealed class MainWindowViewModel : ObservableObject
     /// </summary>
     public void OpenSavedSource(string id)
     {
+        if (savedSources.Find(id) is { Locator: HttpLocator http })
+        {
+            _ = ReopenRequestAsync(http.Request);
+            return;
+        }
+
         if (savedSources.Find(id) is not { Locator: FileLocator file } source)
             return;
 
@@ -1357,6 +1397,23 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         _ = OpenPathAsync(grant.Path, grant: grant);
+    }
+
+    /// <summary>A saved request: the pane filled in, and sent.</summary>
+    private async Task ReopenRequestAsync(HttpRequestSpec request)
+    {
+        if (RefusedWhileSaving())
+            return;
+
+        if (IsFileOpen)
+        {
+            if (!await ResolveUnsavedChangesAsync($"opening {new HttpLocator(request).DefaultName}"))
+                return;
+            CloseCurrentDocument();
+        }
+
+        var editor = await OpenRequestPaneAsync(request);
+        await editor.SendAsync();
     }
 
     /// <summary>The locator to remember for an opened or saved document: a file described by the
@@ -1547,8 +1604,13 @@ public sealed class MainWindowViewModel : ObservableObject
     /// otherwise passes to the shell's own ownership (see <see cref="AdoptOrigins"/>).
     /// </summary>
     /// <param name="view">The view to open it in; null detects one.</param>
-    private async Task OpenOriginAsync(IByteOrigin origin, bool addToRecents, FileTypeDetector.FileKind? view = null)
+    /// <param name="fromRequest">The origin is the response to the request pane's request, which
+    /// stays; any other input closes the pane, since it is no longer what is open.</param>
+    private async Task OpenOriginAsync(IByteOrigin origin, bool addToRecents, FileTypeDetector.FileKind? view = null, bool fromRequest = false)
     {
+        if (!fromRequest)
+            CloseRequestPane();
+
         var requestId = BeginOpenRequest();
         string name = origin.LocationText();
 
@@ -1898,6 +1960,8 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         OnPropertyChanged(nameof(IsFileOpen));
+        OnPropertyChanged(nameof(IsEmptyStateVisible));
+        OnPropertyChanged(nameof(IsAwaitingResponse));
         OnPropertyChanged(nameof(FilePath));
         OnPropertyChanged(nameof(CanCompare));
         NotifyFailurePropertiesChanged();
@@ -1966,6 +2030,111 @@ public sealed class MainWindowViewModel : ObservableObject
         SetCurrentDocument(null, null);
         AdoptOrigins();
         ReloadSavedSources();
+        CloseRequestPane();
+    }
+
+    // ── Requests ────────────────────────────────────────────────────────────────────────
+
+    /// <summary>What the pane says while it waits for a first response.</summary>
+    public const string AwaitingResponseText = "Send to load the response";
+
+    /// <summary>
+    /// Opens the request pane with an empty request, closing what is open first (asking about
+    /// unsaved changes, as opening a file does). The response to whatever it sends opens below it.
+    /// </summary>
+    public async Task NewRequestAsync()
+    {
+        if (RefusedWhileSaving())
+            return;
+
+        if (IsFileOpen)
+        {
+            if (!await ResolveUnsavedChangesAsync("starting a new request"))
+                return;
+            CloseCurrentDocument();
+        }
+
+        await OpenRequestPaneAsync(request: null);
+    }
+
+    /// <summary>A fresh pane - filled from <paramref name="request"/> when reopening a saved one.</summary>
+    private async Task<RequestEditorViewModel> OpenRequestPaneAsync(HttpRequestSpec? request)
+    {
+        CloseRequestPane();
+        var editor = new RequestEditorViewModel(this, new RequestBodyEditor(rawViewSettings));
+        RequestEditor = editor;
+        if (request is not null)
+            await editor.LoadAsync(request);
+        else
+            await editor.Body!.LoadAsync([]);
+        return editor;
+    }
+
+    private void CloseRequestPane()
+    {
+        var editor = requestEditor;
+        RequestEditor = null;
+        editor?.Dispose();
+    }
+
+    /// <summary>
+    /// Sends the pane's request: downloads the response under a progress entry with Stop, then
+    /// opens it as the document below the pane, replacing the last one. A failure or a stop is said
+    /// in the pane and leaves the document that was there.
+    /// </summary>
+    async Task IRequestSender.SendAsync(HttpRequestSpec request)
+    {
+        if (requestEditor is not { } editor)
+            return;
+
+        if (responseDownloader is null)
+        {
+            editor.StatusText = "Sending requests isn't available in this build.";
+            return;
+        }
+
+        if (RefusedWhileSaving() || !await ResolveUnsavedChangesAsync("sending the request"))
+            return;
+
+        var locator = new HttpLocator(request);
+        using var stopping = new CancellationTokenSource();
+        var progress = this.progressBoard.Begin($"Downloading {locator.DefaultName}", stopping.Cancel);
+        HttpResponseOrigin origin;
+        try
+        {
+            // Off the UI thread: a large response is many chunks, and none should post here.
+            var downloader = responseDownloader;
+            origin = await Task.Run(() => downloader.DownloadAsync(request, progress, stopping.Token));
+        }
+        catch (OperationCanceledException)
+        {
+            editor.StatusText = "Stopped - nothing was loaded.";
+            return;
+        }
+        catch (HttpFetchException ex)
+        {
+            editor.StatusText = ex.Message;
+            return;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            editor.StatusText = $"Couldn't keep the response: {ex.Message}";
+            return;
+        }
+        finally
+        {
+            progress.Finish();
+        }
+
+        // The pane may have closed while the response downloaded; then it is not wanted.
+        if (!ReferenceEquals(requestEditor, editor))
+        {
+            origin.Dispose();
+            return;
+        }
+
+        await OpenOriginAsync(origin, addToRecents: true, fromRequest: true);
+        editor.StatusText = $"Response from {DateTime.Now:d MMM, HH:mm}";
     }
 
     // ── Save ────────────────────────────────────────────────────────────────────────────

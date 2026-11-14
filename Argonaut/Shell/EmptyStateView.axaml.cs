@@ -22,6 +22,7 @@ public partial class EmptyStateView : UserControl
     public event EventHandler? ChooseFileRequested;
     public event EventHandler? PasteRequested;
     public event EventHandler? NewDocumentRequested;
+    public event EventHandler? NewRequestRequested;
     public event EventHandler? ClearRecentRequested;
 
     /// <summary>Raised with the id of the saved source to open.</summary>
@@ -101,6 +102,11 @@ public partial class EmptyStateView : UserControl
     private void OnNewDocument(object? sender, RoutedEventArgs e)
     {
         NewDocumentRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void OnNewRequest(object? sender, RoutedEventArgs e)
+    {
+        NewRequestRequested?.Invoke(this, EventArgs.Empty);
     }
 
     private void OnClearRecentFiles(object? sender, RoutedEventArgs e)

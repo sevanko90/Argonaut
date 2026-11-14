@@ -5,6 +5,7 @@
         mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
         x:Class="Argonaut.Shell.MainWindow"
         x:DataType="shell:MainWindowViewModel"
+        xmlns:requests="clr-namespace:Argonaut.Features.Requests"
         xmlns:shell="clr-namespace:Argonaut.Shell"
         xmlns:find="clr-namespace:Argonaut.Ui.Find"
         xmlns:json="clr-namespace:Argonaut.Features.Json"
@@ -208,6 +209,12 @@
                             IsVisible="{Binding IsFileOpen}">
                     <Border Classes="toolseparator"
                             IsVisible="{Binding CurrentDocument.Toolbar, Converter={x:Static ObjectConverters.IsNotNull}, FallbackValue=False}" />
+                    <Button x:Name="NewRequestButton"
+                            Classes="tool icononly"
+                            Click="OnNewRequest"
+                            ToolTip.Tip="New request (Ctrl+L / Cmd+L)">
+                        <icons:LucideIcon Data="{StaticResource Icon.Request}" />
+                    </Button>
                     <Button x:Name="CompareFileButton"
                             Classes="tool icononly"
                             IsVisible="{Binding CanCompare}"
@@ -267,8 +274,15 @@
             </Grid>
         </Border>
 
-        <Grid Grid.Row="1" RowDefinitions="Auto,*">
-            <Border Grid.Row="0"
+        <Grid Grid.Row="1" RowDefinitions="Auto,Auto,*">
+            <!-- The request pane: docked above whatever its request loaded, while the input is a
+                 request (or New request was chosen). -->
+            <requests:RequestEditorView Grid.Row="0"
+                                        x:Name="RequestPane"
+                                        DataContext="{Binding RequestEditor}"
+                                        IsVisible="{Binding $self.DataContext, Converter={x:Static ObjectConverters.IsNotNull}}" />
+
+            <Border Grid.Row="1"
                     x:Name="FailureBanner"
                     IsVisible="{Binding IsFailureBannerVisible}"
                     Background="{DynamicResource AppPanelBackgroundBrush}"
@@ -298,14 +312,21 @@
                 </Grid>
             </Border>
 
-            <ContentControl Grid.Row="1"
+            <ContentControl Grid.Row="2"
                             x:Name="ContentArea"
                             Content="{Binding CurrentDocument}" />
+
+            <TextBlock Grid.Row="2"
+                       Text="{x:Static shell:MainWindowViewModel.AwaitingResponseText}"
+                       IsVisible="{Binding IsAwaitingResponse}"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       Foreground="{DynamicResource AppMutedTextBrush}" />
         </Grid>
 
         <shell:EmptyStateView Grid.Row="1"
                               x:Name="EmptyState"
-                              IsVisible="{Binding !IsFileOpen}" />
+                              IsVisible="{Binding IsEmptyStateVisible}" />
 
         <!-- Work in progress: shown only for operations that outlast ProgressBoard.ShowAfter, kept
              for at least ShowAtLeast, and faded rather than snapped away - so the everyday

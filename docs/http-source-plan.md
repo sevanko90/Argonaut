@@ -115,7 +115,7 @@ the document area, and opens what Send produces through `OpenOriginAsync`.
 3. [x] `IHttpFetcher` and the download to a temp file with progress and Stop; `HttpResponseOrigin`.
    Tests against a fake fetcher: progress with and without a length, a cancelled download leaves
    nothing, a non-2xx status fails with its status line.
-4. [ ] The request pane: URL, method, argument list kept in step with the URL, body editor. Look
+4. [x] The request pane: URL, method, argument list kept in step with the URL, body editor. Look
    from screenshots. Tests on the view model's two-way sync.
 5. [ ] Shell: New request, the docked pane, Send opens the response, sending again, collapsing,
    other inputs closing the pane.

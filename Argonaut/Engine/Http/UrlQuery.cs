@@ -9,6 +9,10 @@ namespace Argonaut.Engine.Http;
 /// flag (<c>?debug</c>) and an empty one for <c>?empty=</c>.</summary>
 public sealed record QueryArgument(string Key, string? Value);
 
+/// <summary>An argument and the text it has in the URL - as typed for one parsed from a URL,
+/// minimally encoded for one made with <see cref="UrlQuery.Part"/>.</summary>
+public sealed record QueryPart(QueryArgument Argument, string Raw);
+
 /// <summary>
 /// A URL taken apart into what the request pane edits: the base (everything before the query),
 /// the query's arguments in order, and the fragment. Immutable - every edit returns a new one.
@@ -41,6 +45,16 @@ public sealed class UrlQuery
     public string? Fragment { get; }
 
     public IReadOnlyList<QueryArgument> Arguments => entries.Select(static e => e.Argument).ToArray();
+
+    /// <summary>The arguments with the text each has in the URL, for an editor that keeps them.</summary>
+    public IReadOnlyList<QueryPart> Parts => entries.Select(static e => new QueryPart(e.Argument, e.Raw)).ToArray();
+
+    /// <summary>The same base and fragment with <paramref name="parts"/> as the query.</summary>
+    public UrlQuery WithParts(IEnumerable<QueryPart> parts)
+        => new(Base, parts.Select(static p => (p.Argument, p.Raw)).ToArray(), Fragment);
+
+    /// <summary><paramref name="argument"/> as a new part, encoded only where it must be.</summary>
+    public static QueryPart Part(QueryArgument argument) => new(argument, Encode(argument));
 
     public static UrlQuery Parse(string text)
     {

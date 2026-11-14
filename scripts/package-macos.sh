@@ -78,7 +78,10 @@ if [ -n "${ARGONAUT_PROVISION_PROFILE:-}" ]; then
     cp "$ARGONAUT_PROVISION_PROFILE" "$APP_BUNDLE/Contents/embedded.provisionprofile"
     ENTITLEMENTS="$APP_STAGE_DIR/entitlements.entitlements"
     cp "$ROOT_DIR/Argonaut/entitlements.entitlements" "$ENTITLEMENTS"
-    APP_IDENTIFIER="$TEAM_ID.$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP_BUNDLE/Contents/Info.plist")"
+    # The entitlement must match the profile's App ID exactly, so it is read from the profile
+    # rather than built from CFBundleIdentifier - the portal may have registered it in other case.
+    APP_IDENTIFIER="$(security cms -D -i "$ARGONAUT_PROVISION_PROFILE" \
+        | plutil -extract Entitlements.com\\.apple\\.application-identifier raw -o - -)"
     /usr/libexec/PlistBuddy \
         -c "Add :com.apple.application-identifier string $APP_IDENTIFIER" \
         -c "Add :com.apple.developer.team-identifier string $TEAM_ID" \

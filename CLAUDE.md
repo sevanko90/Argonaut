@@ -144,13 +144,15 @@ Other rules that fall out of the split:
   arrived, so growth (`AvailableLength`/`LengthSettled`) lives on the origin and on the whole
   document source. A mapping is a fixed snapshot of a byte range and can never grow, so an
   in-flight streamed source is never an `MMapFile`.
-- **`Path` is null for a document that is not a file**, and that is the single thing the
-  path-keyed features consult - today recent files and the remembered
-  schema binding. Degrade off `Path is not null`; never key anything by `DisplayName`
-  (two pastes would collide) and never write a path-keyed preference for a document that has no
-  path. Anything added later that touches the file system belongs on this list.
-- **`FilePath` on a view model is display text** (`Path ?? DisplayName`). Anything that touches the
-  file system reads `Origin.Path` instead.
+- **`Locator` says where a document can be fetched again, and a file is one kind of it.**
+  `IByteOrigin.Locator` is a `SourceLocator` - a `FileLocator` for a file on disk - or null for a
+  document with nowhere to go back to (a paste, an excerpt, a diff side). There is no separate
+  path: a path is the file locator's. The place-keyed features (saved sources, the remembered
+  schema binding) skip a document with no locator; never key anything by `DisplayName` (two
+  pastes would collide). Anything that touches the file system
+  asks for the file kind - `origin.Locator is FileLocator file` - and degrades without it.
+- **`FilePath` on a view model is display text** (`origin.LocationText()`: the locator's text, or
+  the display name). Anything that touches the file system reads the `FileLocator` instead.
 
 ## Raw row boundaries are cap-anchored
 

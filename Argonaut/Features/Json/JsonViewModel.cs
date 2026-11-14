@@ -148,8 +148,8 @@ public sealed class JsonViewModel : TreeDocumentViewModel
 
         // Keyed by path, so a document without one (a paste) does not remember its choice -
         // keying it by display name would let two different pastes overwrite each other.
-        if (Origin?.Path is { } documentPath)
-            schemaBindings.Remember(documentPath, SchemaSettings.SelectedEntry?.FilePath, SchemaSettings.IsRootExplicitlyChosen ? SchemaSettings.SelectedRootName : null);
+        if (Origin?.Locator?.Identity is { } documentKey)
+            schemaBindings.Remember(documentKey, SchemaSettings.SelectedEntry?.FilePath, SchemaSettings.IsRootExplicitlyChosen ? SchemaSettings.SelectedRootName : null);
     }
 
     /// <summary>
@@ -238,7 +238,7 @@ public sealed class JsonViewModel : TreeDocumentViewModel
         AdoptOrigin(origin, new ScanTarget(origin));
         DefaultExpandDepth = ViewSettings.ExpandDepth;
         toolbar = new JsonToolbarViewModel(HintSettings, SchemaSettings, DefaultExpandDepth, ChooseExpandDepth, NavigateToPathAsync,
-            refreshSchemaEntries: () => RefreshSchemaEntriesAsync(origin.Path), openSchemaFolder: schemaCatalog.OpenUserDirectory,
+            refreshSchemaEntries: () => RefreshSchemaEntriesAsync(origin.Locator?.Identity), openSchemaFolder: schemaCatalog.OpenUserDirectory,
             showIndentGuides: ShowIndentGuides, applyIndentGuides: ChooseIndentGuides,
             openMatchedSchemas: jsonViewSettings.OpenMatchedSchemas,
             applyOpenMatchedSchemas: catalogMeasurement is null ? null : ChooseOpenMatchedSchemas);
@@ -249,7 +249,7 @@ public sealed class JsonViewModel : TreeDocumentViewModel
         // Runs alongside indexing rather than blocking the open: whichever finishes first, the
         // other side picks the schema up (LoadCore applies whatever is current when it builds
         // the tree; OnSchemaChanged handles the reverse order).
-        _ = ApplyInitialSchemaAsync(origin.Path);
+        _ = ApplyInitialSchemaAsync(origin.Locator?.Identity);
 
         return loadTask;
     }
@@ -259,10 +259,10 @@ public sealed class JsonViewModel : TreeDocumentViewModel
     /// schema last bound to this path (see <see cref="SchemaBindings"/>). Nothing here is ever an
     /// error - a missing schema and an unreadable schema folder both just mean "no schema".
     /// </summary>
-    private async Task ApplyInitialSchemaAsync(string? documentPath)
+    private async Task ApplyInitialSchemaAsync(string? documentKey)
     {
         var bindings = schemaBindings.Entries;
-        var (entries, preselected, rootName) = await Task.Run(() => schemaCatalog.GatherForDocument(documentPath, bindings));
+        var (entries, preselected, rootName) = await Task.Run(() => schemaCatalog.GatherForDocument(documentKey, bindings));
         if (IsDisposed)
             return;
 
@@ -270,7 +270,7 @@ public sealed class JsonViewModel : TreeDocumentViewModel
 
         // Selected before the catalog counts as gathered, so a match cannot get in first.
         var restoring = preselected is { } entry ? SchemaSettings.SelectAsync(entry, rootName) : Task.CompletedTask;
-        catalogMeasurement?.CatalogGathered(bindings, documentPath);
+        catalogMeasurement?.CatalogGathered(bindings, documentKey);
 
         // Measured even when a binding is restored: it binds nothing then, but still ranks the list.
         await MeasureCatalogAsync(mayBind: true);
@@ -279,10 +279,10 @@ public sealed class JsonViewModel : TreeDocumentViewModel
 
     /// <summary>Re-lists the schema catalog without touching the current selection - so a
     /// schema dropped into the user folder mid-session shows up next time the combo opens.</summary>
-    private async Task RefreshSchemaEntriesAsync(string? documentPath)
+    private async Task RefreshSchemaEntriesAsync(string? documentKey)
     {
         var bindings = schemaBindings.Entries;
-        var (entries, _, _) = await Task.Run(() => schemaCatalog.GatherForDocument(documentPath, bindings));
+        var (entries, _, _) = await Task.Run(() => schemaCatalog.GatherForDocument(documentKey, bindings));
         if (IsDisposed)
             return;
 

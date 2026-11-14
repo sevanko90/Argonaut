@@ -10,7 +10,7 @@ them). Keep this in sync when the ownership chain changes.
   drag/drop), file picker, replace-confirmation dialog, toast, and the theme-mode reaction
   (variant + toggle icon). No file-open/close or status logic.
 - `MainWindowViewModel` owns all shell state and the open/close lifecycle: `CurrentDocument`,
-  status line, title, toolbar visibility, recent files, find controller, the view switcher
+  status line, title, toolbar visibility, saved sources, find controller, the view switcher
   (`AvailableViews`/`SelectedView`), the failure banner (`IsFailureBannerVisible`), and the
   theme / expand-depth / date-hint preferences.
 - `MainWindow.axaml` binds `ContentControl.Content="{Binding CurrentDocument}"`; implicit
@@ -33,6 +33,14 @@ them). Keep this in sync when the ownership chain changes.
   `FileByteOrigin`, `PasteAsync` wraps the clipboard's bytes in a `MemoryByteOrigin` (declined
   past `MaxPasteBytes`, 64 MB), and `OpenDiffAsync` takes two. From there detection runs on the
   bytes, not the extension, so a paste with no name is detected the same way a file is.
+- **Saved sources** (`Shell/Sources`) are what the empty state lists: one `SavedSourceStore`
+  of entries - id, name, kind, location, pinned - with the recent list (newest first, capped at
+  `MaxRecent` unpinned) and the pinned list (in pin order) as two views of it. Opening or saving
+  a document with a locator touches its entry; reopening goes back through the entry's locator.
+  The list lives in one settings block holding a single string sealed by the injected
+  `ISettingsSealer` (`SettingsSealers.ForThisPlatform`: DPAPI on Windows, AES-GCM with the key in
+  the macOS Keychain or a user-only key file on Linux), so neither paths nor URLs are readable from
+  `settings.json`; a block that will not open is an empty list.
 - **The shell owns the origins for the open input** (`ownedOrigins`, one per input, two when
   diffing) and releases them only when the input actually changes, in `AdoptOrigins`. A view
   switch keeps them, which is what stops JSON → Raw from re-materialising a paste.
@@ -90,8 +98,9 @@ them). Keep this in sync when the ownership chain changes.
   inferred default flowing up doesn't ping-pong against the master flowing down. A future
   multi-pane view (e.g. a diff) follows the same pattern rather than adding shell knowledge.
 - **Matching schemas to a document.** A schema is bound one of three ways, in this order: the
-  binding remembered for the file (`SchemaBindings`, which also remembers "No schema" as a
-  choice), the user's pick this session, or a match. `SchemaCatalogMeasurement` - one per JSON
+  binding remembered for the document (`SchemaBindings`, keyed by its locator's identity and
+  sealed like the saved sources; it also remembers "No schema" as a choice), the user's pick this
+  session, or a match. `SchemaCatalogMeasurement` - one per JSON
   or NDJSON document, built only for a shell document - samples the outermost object's property
   names (`JsonDocumentKeySampler` over the tree; `JsonTextKeySampler` over the first 64 KB of an
   NDJSON file's first line) at open and again when indexing completes, and hands them to the
@@ -121,7 +130,7 @@ them). Keep this in sync when the ownership chain changes.
   `currentKind` before reassigning `SelectedView`.
 - `SwitchViewAsync` re-indexes the *same* origin as a different kind, opening a fresh source
   over it rather than re-materialising anything: unlike `OpenPathAsync`, it
-  skips the replace-confirmation and doesn't touch recent files, but otherwise shares the exact
+  skips the replace-confirmation and doesn't touch saved sources, but otherwise shares the exact
   publish path (`LoadAndPublishAsync`) — including the staleness guard and the pre-flight/failure
   handling below.
 
@@ -247,7 +256,8 @@ The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLeng
 `RequireContiguous`) are specified in CLAUDE.md; this section is about who owns what.
 
 - **`IByteOrigin` (`Engine/Bytes/IByteOrigin.cs`) is where the bytes came from.** It carries
-  `DisplayName`, `Path` (null for a document that is not a file) and the arrival state
+  `DisplayName`, `Locator` (where it can be fetched again - a `FileLocator` for a file, null
+  for a paste, an excerpt or a diff side) and the arrival state
   (`AvailableLength`/`LengthSettled`/`WaitForLength`), and it is the only thing that hands out
   sources: `Open()` for the whole document, `OpenRange(offset, length)` for one NDJSON line, an
   array's bytes as a table, or one search chunk. Implemented by `FileByteOrigin` (holds no

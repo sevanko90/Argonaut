@@ -237,7 +237,7 @@ public sealed class CsvViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     public async Task LoadAsync(IByteOrigin origin, byte delimiter, IProgressReporter? progressReporter = null)
     {
         this.Origin = origin;
-        this.FilePath = origin.Path ?? origin.DisplayName;
+        this.FilePath = origin.LocationText();
         FollowLineNumbering(this.lineNumbers);
         this.delimiter = delimiter;
 

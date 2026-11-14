@@ -164,7 +164,7 @@ public class JsonArrayTableEntryPointTests
         await WithRequestForAsync(json, itemsStart, request =>
         {
             Assert.NotNull(request);
-            string bytes = File.ReadAllText(request!.Value.Origin.Path!)
+            string bytes = File.ReadAllText(request!.Value.Origin.FilePathOf()!)
                 .Substring((int)request.Value.Offset, (int)request.Value.Length);
             Assert.Equal("[1,2,3]", bytes);
             return Task.CompletedTask;

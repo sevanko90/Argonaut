@@ -30,7 +30,7 @@ public class ByteOriginTests
             File.WriteAllText(path, "{}");
             var origin = new FileByteOrigin(path);
 
-            Assert.Equal(Path.GetFullPath(path), origin.Path);
+            Assert.Equal(Path.GetFullPath(path), origin.FilePathOf());
             Assert.Equal(Path.GetFileName(path), origin.DisplayName);
             Assert.Equal(2, origin.AvailableLength);
             Assert.True(origin.LengthSettled);
@@ -46,7 +46,7 @@ public class ByteOriginTests
     {
         var origin = Pasted("{\"a\":1}");
 
-        Assert.Null(origin.Path);
+        Assert.Null(origin.Locator);
         Assert.Equal("Pasted text", origin.DisplayName);
         Assert.Equal(7, origin.AvailableLength);
         Assert.True(origin.LengthSettled);

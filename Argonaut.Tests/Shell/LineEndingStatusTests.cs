@@ -36,7 +36,7 @@ public class LineEndingStatusTests : IDisposable
 
         Assert.Equal("CRLF", vm.LineEndingLabel);
         Assert.Equal("Line endings in the first 1 MB\nCRLF: 1,234", vm.LineEndingToolTip);
-        Assert.Equal(path, Assert.Single(detector.Asked).Path);
+        Assert.Equal(path, Assert.Single(detector.Asked).FilePathOf());
     }
 
     [Fact]
@@ -237,7 +237,7 @@ public class LineEndingStatusTests : IDisposable
         public List<LineEndingTally> Given { get; } = new();
         public event PropertyChangedEventHandler? PropertyChanged;
         public IByteOrigin? Origin => origin;
-        public string FilePath => origin.Path ?? origin.DisplayName;
+        public string FilePath => origin.LocationText();
         public string StatusDetail => "text";
         public IndexFailure? IndexFailure => null;
         public Task IndexingTask => Task.CompletedTask;
@@ -262,7 +262,7 @@ public class LineEndingStatusTests : IDisposable
     {
         public event PropertyChangedEventHandler? PropertyChanged { add { } remove { } }
         public IByteOrigin? Origin => origin;
-        public string FilePath => origin.Path ?? origin.DisplayName;
+        public string FilePath => origin.LocationText();
         public string StatusDetail => detail;
         public IndexFailure? IndexFailure => null;
         public Task IndexingTask => Task.CompletedTask;

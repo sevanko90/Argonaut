@@ -37,7 +37,7 @@ existing publish step.
 are **not** put in the UWP AppContainer sandbox by default (`runFullTrust` capability).
 Practically, `MemoryMappedFile`/arbitrary file access continues to work the same as
 today's portable exe — this is the main reason Windows Store is comparatively cheap to
-add: no code changes to `MMapFile.cs` or `RecentFileHistory.cs` should be required.
+add: no code changes to `MMapFile.cs` or the saved sources should be required.
 
 **Review.** Submissions run through the Windows App Certification Kit + a
 store review pass — typically fast (hours to a couple of days), automatable via
@@ -68,18 +68,20 @@ for this codebase:
   and-drop (`MainWindow.OnDrop`, [Argonaut/Shell/MainWindow.axaml.cs](../Argonaut/Shell/MainWindow.axaml.cs)) —
   both are sandbox-exempt (the OS grants temporary read access for files chosen
   through its own picker/drop APIs), so **first open of a file needs no code change.**
-- **Recent files do need a code change.** [RecentFileHistory.cs](../Argonaut/Engine/Settings/RecentFileHistory.cs)
-  persists plain path strings. Under App Sandbox, a stored path with no accompanying
-  grant gives no access on relaunch — reopening a recent file would silently fail.
-  This needs security-scoped bookmarks (`NSURL` bookmark data, `startAccessingSecurityScopedResource`)
-  persisted instead of/alongside the plain path, resolved back into an access grant
-  each time a recent entry is reopened. This is a real, non-trivial implementation
-  item, not just a build-config change.
+- **Saved sources already reopen through security-scoped bookmarks.** Every macOS build
+  remembers a file with its `NSURL` bookmark (`MacFileAccess`, [Argonaut/Shell/Files](../Argonaut/Shell/Files)),
+  resolves it when the entry is reopened and holds the access (`startAccessingSecurityScopedResource`)
+  for as long as the document is open, so the sandbox's relaunch problem is handled by the code the
+  GitHub build already runs. What the store build still needs is the bookmark entitlement
+  (`com.apple.security.files.bookmarks.app-scope`) in a sandbox entitlements file, which does not
+  exist yet - today's `entitlements.entitlements` is the Developer ID hardened-runtime set.
 - **The schema features read files the user never picked, and would silently lose them.**
   Two path-keyed behaviours in [JsonSchemaCatalog.cs](../Argonaut/Features/Json/Schema/JsonSchemaCatalog.cs)
   assume ordinary file-system access:
   - The remembered schema binding can name a schema outside the catalog folders, stored as a
-    plain path - the same relaunch problem as recent files, and the same bookmark fix.
+    plain path. The binding's *document* key is a locator identity and needs no access, but the
+    schema file itself would need a bookmark - the fix `MacFileAccess` already applies to saved
+    sources.
   - "Open schema folder…" (`OpenUserDirectory`) reveals `AppDataPaths.SchemasDirectory`.
     Under the sandbox, application data resolves inside
     `~/Library/Containers/<bundle id>/…`, which users do not browse to and which is hard to drop
@@ -111,7 +113,8 @@ for this codebase:
   denied. The save path is built behind `IFileReplacer` for this reason - see
   [roadmap.md](roadmap.md) for the replacement - and needs the
   `com.apple.security.files.user-selected.read-write` entitlement plus read-write (not read-only)
-  security-scoped bookmarks for recent files that should stay saveable.
+  security-scoped bookmarks for saved files that should stay saveable (`MacFileAccess` asks for a
+  security-scoped bookmark today; it would need to be created without the read-only option).
 - `MMapFile`/`Utf8JsonReader` etc. operate on whatever `SafeFileHandle`/stream the
   sandboxed access grant already opened, so no changes needed once the file handle is
   legitimately obtained — the sandbox constraint is entirely about *how the app is
@@ -139,7 +142,7 @@ entirely for that distribution.
 | | Velopack + GitHub Releases | Microsoft Store (MSIX) | Mac App Store |
 |---|---|---|---|
 | Source of truth | GH tag/release (this stays true regardless) | Same GH tag, packaged downstream | Same GH tag, packaged downstream |
-| Code changes required | None beyond the update plumbing itself | None expected (full-trust Desktop Bridge) | Real: sandbox entitlements, security-scoped bookmarks (recent files, remembered schemas), schema folder rework, sandboxed save, command-line options left out |
+| Code changes required | None beyond the update plumbing itself | None expected (full-trust Desktop Bridge) | Real: sandbox entitlements, a bookmark for a remembered schema outside the catalog (saved sources already have theirs), schema folder rework, sandboxed save, command-line options left out |
 | New signing identity | Optional (Developer ID improves macOS UX) | Store-managed | Required, separate from Developer ID |
 | Monetary cost | $0 (or $99/yr Apple if adding notarization) | $0 (free as of 2026) | $99/yr Apple Developer Program |
 | Release latency | Immediate — publish = live | Hours–days (store review) | Hours–days, sometimes longer (App Review) |
@@ -156,9 +159,9 @@ latency, needs no sandboxing rework, and is built and already the source of trut
 - **Microsoft Store is comparatively cheap to add** if there's a reason to want it
   (discoverability, org policies that only allow Store-installed software) — no
   sandbox rework, no recurring cost, and a fairly light CI addition.
-- **Mac App Store is the more expensive of the two** — it requires the security-scoped
-  bookmark work for recent files and remembered schemas, rework of the schema
-  folder, a second signing identity, a recurring $99/yr, and
+- **Mac App Store is the more expensive of the two** — it requires a bookmark for a
+  remembered schema outside the catalog (saved sources already reopen by bookmark), rework of
+  the schema folder, a second signing identity, a recurring $99/yr, and
   decouples release cadence from GH tagging via App Review turnaround. Worth doing
   only if there's a concrete reason (e.g. users specifically expect to find/update the
   app through the Mac App Store) rather than by default.

@@ -58,16 +58,19 @@ public sealed class DocumentViewCatalog
     /// <paramref name="settings"/> when null.</param>
     /// <param name="recipes">The recipes the raw view offers; null offers none.</param>
     /// <param name="launcher">Opens the links the views' value hints offer; null opens none.</param>
+    /// <param name="settingsSealer">Seals the remembered schema choices; null keeps them for this
+    /// run only.</param>
     /// <param name="schemaMatcher">Measures the schema catalog against each JSON document; one
     /// over the catalog's files, kept for the catalog's life, when null.</param>
     public DocumentViewCatalog(ISettingsStore settings, JsonSchemaCatalog schemaCatalog, LineNumberingPreference? lineNumbers = null,
-        IRecipeStore? recipes = null, ISystemLauncher? launcher = null, ISchemaMatcher? schemaMatcher = null)
+        IRecipeStore? recipes = null, ISystemLauncher? launcher = null, ISchemaMatcher? schemaMatcher = null,
+        ISettingsSealer? settingsSealer = null)
     {
         schemaMatcher ??= new CachedSchemaMatcher();
         lineNumbers ??= new LineNumberingPreference(settings.Get<LineNumberingSettings>());
         var jsonView = settings.Get<JsonViewSettings>();
         var xmlView = settings.Get<XmlViewSettings>();
-        var schemaBindings = settings.Get<SchemaBindings>();
+        var schemaBindings = new SchemaBindings(settings.Get<SchemaBindingsBlock>(), settingsSealer);
         var rawView = settings.Get<RawViewSettings>();
 
         registrations =

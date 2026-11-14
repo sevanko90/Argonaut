@@ -30,9 +30,9 @@ public sealed class SchemaCatalogMeasurement(ISchemaMatcher matcher, JsonSchemaS
 
     /// <summary>The catalog has been listed for this document: from here on it can be measured.
     /// Call after any remembered binding has been selected, so a match cannot race it.</summary>
-    public void CatalogGathered(IReadOnlyList<SchemaBinding> bindings, string? documentPath)
+    public void CatalogGathered(IReadOnlyList<SchemaBinding> bindings, string? documentKey)
     {
-        choseNoSchema = SchemaBindings.ChoseNoSchema(bindings, documentPath);
+        choseNoSchema = SchemaBindings.ChoseNoSchema(bindings, documentKey);
         catalogGathered = true;
     }
 

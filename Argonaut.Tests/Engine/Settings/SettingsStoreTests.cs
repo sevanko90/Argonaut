@@ -150,6 +150,22 @@ public sealed class SettingsStoreTests : IDisposable
 
         public static JsonTypeInfo<ImpostorCounter> JsonTypeInfo => TestSettingsJson.Default.ImpostorCounter;
     }
+
+    [Fact]
+    public void ARetiredKey_IsDroppedFromTheFileOnSave()
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(FilePath, """{ "recentFiles": { "paths": ["/secret/path.json"] }, "kept": 1 }""");
+        var store = SettingsStore.Open(FilePath);
+
+        store.Forget("recentFiles");
+        store.Save();
+
+        string written = File.ReadAllText(FilePath);
+        Assert.DoesNotContain("recentFiles", written);
+        Assert.DoesNotContain("/secret/path.json", written);
+        Assert.Contains("kept", written);
+    }
 }
 
 [JsonSerializable(typeof(SettingsStoreTests.Counter))]

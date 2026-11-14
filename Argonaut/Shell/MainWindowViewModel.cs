@@ -34,6 +34,9 @@ using Argonaut.Ui.ViewModels;
 using Avalonia.Threading;
 using Argonaut.Ui.Launching;
 
+using Argonaut.Shell.Files;
+using Argonaut.Shell.Sources;
+
 namespace Argonaut.Shell;
 
 /// <summary>
@@ -78,8 +81,8 @@ public sealed class MainWindowViewModel : ObservableObject
     internal const long MaxPasteBytes = 64L * 1024 * 1024;
 
     private readonly AppearanceSettings appearance;
-    private readonly RecentFileHistory recentFileHistory;
-    private readonly FavouriteFiles favouriteFiles;
+    private readonly SavedSourceStore savedSources;
+    private readonly IFileAccess fileAccess;
     private readonly JsonViewSettings jsonViewSettings;
     private readonly IConfigLocationSource? configLocations;
     private readonly ISelectionFilterFiles filterFiles;
@@ -124,8 +127,8 @@ public sealed class MainWindowViewModel : ObservableObject
     private string? lineEndingToolTip;
     private string title = DefaultTitle;
     private string fileName = string.Empty;
-    private IReadOnlyList<RecentFileItem> recentFiles = Array.Empty<RecentFileItem>();
-    private IReadOnlyList<RecentFileItem> favourites = Array.Empty<RecentFileItem>();
+    private IReadOnlyList<SavedSourceRow> recentSources = Array.Empty<SavedSourceRow>();
+    private IReadOnlyList<SavedSourceRow> pinnedSources = Array.Empty<SavedSourceRow>();
     private ThemeMode themeMode;
     private ContentFontMode contentFontMode;
     private DocumentViewOption? selectedView;
@@ -153,7 +156,7 @@ public sealed class MainWindowViewModel : ObservableObject
     /// <summary>Raised when the find bar should clear its term/status (file open, switch, or close).</summary>
     public event Action? FindBarResetRequested;
 
-    /// <param name="settings">The app's settings; the shell keeps its appearance and recent files
+    /// <param name="settings">The app's settings; the shell keeps its appearance and saved sources
     /// there, and hands the document views their own blocks.</param>
     /// <param name="schemaCatalog">The schemas a JSON document can be bound to.</param>
     /// <param name="confirmReplace">
@@ -198,12 +201,14 @@ public sealed class MainWindowViewModel : ObservableObject
         ISelectionFilterFiles? filterFiles = null,
         IRecipeStore? recipes = null,
         ISystemLauncher? launcher = null,
-        ILineEndingDetector? lineEndings = null)
+        ILineEndingDetector? lineEndings = null,
+        ISettingsSealer? settingsSealer = null,
+        IFileAccess? fileAccess = null)
     {
+        this.fileAccess = fileAccess ?? new PlainFileAccess();
         this.lineEndings = lineEndings ?? new LineEndingDetector();
         this.appearance = settings.Get<AppearanceSettings>();
-        this.recentFileHistory = settings.Get<RecentFileHistory>();
-        this.favouriteFiles = settings.Get<FavouriteFiles>();
+        this.savedSources = new SavedSourceStore(settings.Get<SavedSourcesBlock>(), settingsSealer);
         this.jsonViewSettings = settings.Get<JsonViewSettings>();
         this.configLocations = configLocations;
         this.filterFiles = filterFiles ?? new SelectionFilterFiles();
@@ -211,7 +216,7 @@ public sealed class MainWindowViewModel : ObservableObject
         this.readClipboardBytes = readClipboardBytes;
         this.lineNumbers = new LineNumberingPreference(settings.Get<LineNumberingSettings>());
         this.lineNumbers.PropertyChanged += (_, _) => OnPropertyChanged(nameof(NumberExcerptFromSource));
-        this.documentLoader = documentLoader ?? new DocumentViewCatalog(settings, schemaCatalog, this.lineNumbers, recipes, launcher).LoadAsync;
+        this.documentLoader = documentLoader ?? new DocumentViewCatalog(settings, schemaCatalog, this.lineNumbers, recipes, launcher, settingsSealer: settingsSealer).LoadAsync;
         this.pickSaveDestination = pickSaveDestination;
         this.askAboutUnsavedChanges = askAboutUnsavedChanges;
         this.reportFailure = reportFailure;
@@ -226,7 +231,7 @@ public sealed class MainWindowViewModel : ObservableObject
             status => FindStatusChanged?.Invoke(status),
             () => currentFilePath is null ? null : this.progressBoard.Begin($"Searching {FileName}", StopFind));
 
-        ReloadRecentFiles();
+        ReloadSavedSources();
     }
 
     /// <summary>What the progress bar shows.</summary>
@@ -502,29 +507,29 @@ public sealed class MainWindowViewModel : ObservableObject
             await navigable.RevealByteRangeAsync(range);
     }
 
-    /// <summary>Recently opened files, newest first, without the ones already pinned.</summary>
-    public IReadOnlyList<RecentFileItem> RecentFiles
+    /// <summary>Recently opened sources, newest first, without the pinned ones.</summary>
+    public IReadOnlyList<SavedSourceRow> RecentSources
     {
-        get => recentFiles;
-        private set => SetField(ref recentFiles, value);
+        get => recentSources;
+        private set => SetField(ref recentSources, value);
     }
 
-    /// <summary>The pinned files, in the order they were pinned.</summary>
-    public IReadOnlyList<RecentFileItem> Favourites
+    /// <summary>The pinned sources, in the order they were pinned.</summary>
+    public IReadOnlyList<SavedSourceRow> PinnedSources
     {
-        get => favourites;
-        private set => SetField(ref favourites, value);
+        get => pinnedSources;
+        private set => SetField(ref pinnedSources, value);
     }
 
     /// <summary>The configuration folders that exist right now. Read when the list is shown, not
     /// cached, so it reflects the machine as it is.</summary>
     public IReadOnlyList<ConfigLocation> GetConfigLocations() => configLocations?.GetExisting() ?? [];
 
-    /// <summary>Pins the file if it is not pinned, unpins it if it is.</summary>
-    public void ToggleFavourite(string path)
+    /// <summary>Pins the saved source if it is not pinned, unpins it if it is.</summary>
+    public void TogglePin(string id)
     {
-        favouriteFiles.Toggle(path);
-        ReloadRecentFiles();
+        savedSources.TogglePin(id);
+        ReloadSavedSources();
     }
 
     /// <summary>True when "Compare with…" applies: the current document is being viewed as
@@ -558,7 +563,7 @@ public sealed class MainWindowViewModel : ObservableObject
     /// never via <see cref="FileTypeDetector"/> - so the published document carries
     /// <see cref="FileTypeDetector.FileKind.Unknown"/>: the view switcher shows no selection
     /// for it, and picking any view there re-indexes the left file as that kind through the
-    /// normal switch path, disposing the diff on the way out. Not added to recent files in v1
+    /// normal switch path, disposing the diff on the way out. Not added to saved sources in v1
     /// (a diff is not a reopenable path). Shared core behind <see cref="CompareWithAsync"/>
     /// (which requires a document already open) and <see cref="OpenPathsAsync"/> (the
     /// command-line startup path, which has none yet).
@@ -566,8 +571,8 @@ public sealed class MainWindowViewModel : ObservableObject
     public async Task OpenDiffAsync(IByteOrigin leftOrigin, IByteOrigin rightOrigin)
     {
         var requestId = BeginOpenRequest();
-        string leftPath = leftOrigin.Path ?? leftOrigin.DisplayName;
-        string rightPath = rightOrigin.Path ?? rightOrigin.DisplayName;
+        string leftPath = leftOrigin.LocationText();
+        string rightPath = rightOrigin.LocationText();
 
         // UI hygiene: clears the highlight term and the find-bar status before the swap. NOT
         // crash safety - that comes from each search scan owning its own chunk mappings, so a
@@ -615,7 +620,7 @@ public sealed class MainWindowViewModel : ObservableObject
     /// switch path, which is a second route back for free. Publishing it as
     /// <see cref="FileTypeDetector.FileKind.Json"/> instead would make
     /// <see cref="SwitchViewAsync"/> no-op on the unchanged kind and strand the user on the
-    /// banner link. Not added to recent files - a byte range is not a reopenable path.
+    /// banner link. Not added to saved sources - a byte range is not a reopenable place.
     ///
     /// The table reports its own indexing progress (like a diff), so the shell's part is only to
     /// silence the outgoing load's reporter.
@@ -629,7 +634,7 @@ public sealed class MainWindowViewModel : ObservableObject
         DetachFind();
         FindBarResetRequested?.Invoke();
         loadProgress?.Finish();
-        string sourceName = request.Origin.Path ?? request.Origin.DisplayName;
+        string sourceName = request.Origin.LocationText();
         StatusText = $"Opening {request.ArrayPath} as a table…";
 
         var document = new JsonArrayTableViewModel(jsonViewSettings);
@@ -1037,7 +1042,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private async Task ReloadSelectionOnceAsync()
     {
-        if (this.followedSelection is not { Whole.Path: { } path } current || !ReferenceEquals(Selection, current)
+        if (this.followedSelection is not { Whole.Locator: FileLocator { Path: var path } } current || !ReferenceEquals(Selection, current)
             || this.selectionFilterPath is not { } filterPath)
         {
             return;
@@ -1194,7 +1199,7 @@ public sealed class MainWindowViewModel : ObservableObject
     public async Task OpenWholeFileAsync()
     {
         var part = (IByteOrigin?)Excerpt ?? Selection;
-        if (PartOf is not { Path: { } path } whole || !File.Exists(path))
+        if (PartOf is not { Locator: FileLocator { Path: var path } } whole || !File.Exists(path))
             return;
 
         if (RefusedWhileSaving() || !await ResolveUnsavedChangesAsync($"opening the whole of \"{whole.DisplayName}\""))
@@ -1215,7 +1220,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
         await OpenOriginAsync(new FileByteOrigin(path), addToRecents: true, view);
 
-        if (CurrentDocument is IByteRangeNavigable navigable && CurrentDocument.Origin?.Path == path)
+        if (CurrentDocument is IByteRangeNavigable navigable && CurrentDocument.Origin?.Locator is FileLocator { } opened && opened.IsSamePlace(new FileLocator(path)))
             await navigable.RevealByteRangeAsync(reveal);
     }
 
@@ -1321,24 +1326,72 @@ public sealed class MainWindowViewModel : ObservableObject
         appearance.ContentFont = ContentFontMode;
     }
 
-    public void OpenRecentFile(string path) => _ = OpenPathAsync(path);
+    /// <summary>What a toast about a saved source that cannot be reopened offers.</summary>
+    public const string RemoveFromListLabel = "Remove from list";
 
-    public void ClearRecentFiles()
+    /// <summary>
+    /// Opens a saved source again from where its locator says it is. A file that is no longer
+    /// there is not opened and not forgotten: the entry stays, and a toast offers to remove it -
+    /// a file on a drive that is not mounted right now is still worth keeping.
+    /// </summary>
+    public void OpenSavedSource(string id)
     {
-        recentFileHistory.Clear();
-        ReloadRecentFiles();
+        if (savedSources.Find(id) is not { Locator: FileLocator file } source)
+            return;
+
+        // Through the file access, so a bookmark finds a file that was moved - and the entry
+        // follows it there - and a sandboxed build gets permission to read it.
+        var grant = fileAccess.Open(file);
+        if (!grant.Locator.IsSamePlace(file))
+        {
+            savedSources.Relocate(id, grant.Locator);
+            ReloadSavedSources();
+        }
+
+        if (!File.Exists(grant.Path))
+        {
+            grant.Dispose();
+            ToastService.Show($"Couldn't find {source.Name}",
+                new ToastAction(RemoveFromListLabel, () => RemoveSavedSource(id)));
+            return;
+        }
+
+        _ = OpenPathAsync(grant.Path, grant: grant);
     }
 
-    private void ReloadRecentFiles()
+    /// <summary>The locator to remember for an opened or saved document: a file described by the
+    /// file access, so it is remembered with its bookmark.</summary>
+    private SourceLocator Rememberable(SourceLocator locator)
+        => locator is FileLocator { Bookmark: null } file ? fileAccess.Describe(file.Path) : locator;
+
+    /// <summary>Renames a saved source; a blank name goes back to its locator's own.</summary>
+    public void RenameSavedSource(string id, string name)
     {
-        Favourites = favouriteFiles.Paths
-            .Select(path => new RecentFileItem(path, Path.GetFileName(path), IsFavourite: true))
-            .ToList();
-        RecentFiles = recentFileHistory.Paths
-            .Where(path => !favouriteFiles.Contains(path))
-            .Select(path => new RecentFileItem(path, Path.GetFileName(path)))
-            .ToList();
+        savedSources.Rename(id, name);
+        ReloadSavedSources();
     }
+
+    public void RemoveSavedSource(string id)
+    {
+        savedSources.Remove(id);
+        ReloadSavedSources();
+    }
+
+    public void ClearRecentSources()
+    {
+        savedSources.ClearRecent();
+        ReloadSavedSources();
+    }
+
+    private void ReloadSavedSources()
+    {
+        PinnedSources = savedSources.Pinned.Select(Row).ToList();
+        RecentSources = savedSources.Recent.Select(Row).ToList();
+    }
+
+    /// <summary>A saved source as the empty state shows it - a pill for anything but a file.</summary>
+    private static SavedSourceRow Row(SavedSource source)
+        => new(source.Id, source.Name, source.Locator!.DisplayText, source.Locator is FileLocator ? null : source.Kind, source.IsPinned);
 
     /// <summary>
     /// Opens <paramref name="path"/>, replacing any current document. <see cref="openRequest"/>
@@ -1346,45 +1399,65 @@ public sealed class MainWindowViewModel : ObservableObject
     /// (never published), so its mapping is released.
     /// </summary>
     /// <param name="view">The view to open it in, instead of the one detection picks.</param>
-    public async Task OpenPathAsync(string? path, FileTypeDetector.FileKind? view = null)
+    /// <param name="grant">Permission to read the file, from the file access, which the opened
+    /// origin then holds - or which is given back here if the file is not opened after all.</param>
+    public async Task OpenPathAsync(string? path, FileTypeDetector.FileKind? view = null, FileAccessGrant? grant = null)
+    {
+        try
+        {
+            if (await OpenPathCoreAsync(path, view, grant))
+                grant = null;
+        }
+        finally
+        {
+            grant?.Dispose();
+        }
+    }
+
+    /// <returns>Whether an origin was opened - and so took over <paramref name="grant"/>.</returns>
+    private async Task<bool> OpenPathCoreAsync(string? path, FileTypeDetector.FileKind? view, FileAccessGrant? grant)
     {
         if (string.IsNullOrWhiteSpace(path))
         {
             this.log.Write("OpenPath: path is null/whitespace, returning");
-            return;
+            return false;
         }
 
         var normalizedPath = Path.GetFullPath(path);
         if (!File.Exists(normalizedPath))
         {
             this.log.Write($"OpenPath: File.Exists false for '{normalizedPath}'");
-            return;
+            return false;
         }
 
         if (RefusedWhileSaving())
-            return;
+            return false;
 
         if (HasUnsavedChanges)
         {
             // Asked instead of the replace confirmation, not as well as it: this question already
             // says the document is going, and offers the one thing worth doing about it.
             if (!await ResolveUnsavedChangesAsync($"opening \"{Path.GetFileName(normalizedPath)}\""))
-                return;
+                return false;
         }
         else if (currentFilePath is not null && !string.Equals(currentFilePath, normalizedPath, StringComparison.OrdinalIgnoreCase))
         {
             var confirmed = await confirmReplace(
                 $"Replace the currently loaded file with \"{Path.GetFileName(normalizedPath)}\"?");
             if (!confirmed)
-                return;
+                return false;
         }
 
-        await OpenOriginAsync(new FileByteOrigin(normalizedPath), addToRecents: true, view);
+        // From here the origin owns the grant: OpenOriginAsync disposes an origin it does not keep.
+        bool underGrant = grant is not null && string.Equals(grant.Path, normalizedPath, StringComparison.Ordinal);
+        var origin = underGrant ? new FileByteOrigin(grant!) : new FileByteOrigin(normalizedPath);
+        await OpenOriginAsync(origin, addToRecents: true, view);
+        return underGrant;
     }
 
     /// <summary>
     /// Reads the clipboard as text and opens it as a document in its own right - no file
-    /// involved, so <see cref="IByteOrigin.Path"/> is null and every path-keyed feature skips it.
+    /// involved, so <see cref="IByteOrigin.Locator"/> is null and every place-keyed feature skips it.
     /// No-op when no clipboard reader was supplied (the view model can be constructed without
     /// one, and tests usually are).
     ///
@@ -1477,7 +1550,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private async Task OpenOriginAsync(IByteOrigin origin, bool addToRecents, FileTypeDetector.FileKind? view = null)
     {
         var requestId = BeginOpenRequest();
-        string name = origin.Path ?? origin.DisplayName;
+        string name = origin.LocationText();
 
         FileTypeDetector.FileKind fileType;
         try
@@ -1539,7 +1612,7 @@ public sealed class MainWindowViewModel : ObservableObject
         // Deliberately the origin already open, not a new one: re-indexing the same input as a
         // different kind must not re-materialise it.
         var origin = this.ownedOrigins[0];
-        string path = origin.Path ?? origin.DisplayName;
+        string path = origin.LocationText();
         var requestId = BeginOpenRequest();
 
         // UI hygiene and defence in depth (see the remark in OpenDiffAsync) - the outgoing
@@ -1567,7 +1640,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private async Task LoadAndPublishAsync(FileTypeDetector.FileKind kind, IByteOrigin origin, long requestId, bool addToRecents)
     {
         string attemptedViewName = DisplayNameFor(kind);
-        string path = origin.Path ?? origin.DisplayName;
+        string path = origin.LocationText();
 
         bool isPlausible;
         string reason;
@@ -1699,7 +1772,7 @@ public sealed class MainWindowViewModel : ObservableObject
         // Nothing is indexing behind the placeholder.
         loadProgress?.Finish();
 
-        string path = origin.Path ?? origin.DisplayName;
+        string path = origin.LocationText();
         var incompatible = new IncompatibleViewModel(origin, path, attemptedViewName, failure,
             openAsRawText: () => _ = SwitchViewAsync(FileTypeDetector.FileKind.Unidentified),
             jumpToFailureLocation: () => _ = JumpToRawOffsetAsync(failure.ByteOffset ?? 0));
@@ -1723,12 +1796,12 @@ public sealed class MainWindowViewModel : ObservableObject
         findController.Attach(navigator);
         IsFindAvailable = navigator is not null;
 
-        // Only a document that is a file on disk is reopenable, so a paste or a download adds
-        // nothing here rather than recording a path that does not exist.
-        if (addToRecents && origins.Length > 0 && origins[0].Path is { } diskPath)
+        // Only a document with somewhere to go back to is saved - a paste or an excerpt adds
+        // nothing rather than recording a place that does not exist.
+        if (addToRecents && origins.Length > 0 && origins[0].Locator is { } locator)
         {
-            recentFileHistory.Add(diskPath);
-            ReloadRecentFiles();
+            savedSources.Touch(Rememberable(locator));
+            ReloadSavedSources();
         }
     }
 
@@ -1892,7 +1965,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
         SetCurrentDocument(null, null);
         AdoptOrigins();
-        ReloadRecentFiles();
+        ReloadSavedSources();
     }
 
     // ── Save ────────────────────────────────────────────────────────────────────────────
@@ -1943,7 +2016,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
         var current = this.ownedOrigins[0];
         IByteOrigin destination;
-        if (!chooseDestination && current.Path is not null)
+        if (!chooseDestination && current.Locator is FileLocator)
         {
             if (!saveable.HasUnsavedChanges)
                 return true;
@@ -1962,7 +2035,7 @@ public sealed class MainWindowViewModel : ObservableObject
             // Saving as the file already open is an ordinary save; the origin is kept, not
             // replaced by a second one naming the same file.
             string full = Path.GetFullPath(picked);
-            destination = current.Path is { } open && PathsEqual(open, full) ? current : new FileByteOrigin(full);
+            destination = current.Locator is FileLocator { Path: var open } && PathsEqual(open, full) ? current : new FileByteOrigin(full);
         }
 
         return await RunSaveAsync(saveable, current, destination);
@@ -1981,7 +2054,7 @@ public sealed class MainWindowViewModel : ObservableObject
             await findController.StopSearchAndWaitAsync();
             await StopLineEndingDetectionAndWaitAsync();
 
-            string name = destination.Path is { } path ? Path.GetFileName(path) : destination.DisplayName;
+            string name = destination.DisplayName;
             using var stopping = new CancellationTokenSource();
             var progress = this.progressBoard.Begin($"Saving {name}", stopping.Cancel);
             StatusText = $"Saving {name}…";
@@ -2015,10 +2088,10 @@ public sealed class MainWindowViewModel : ObservableObject
                 if (!ReferenceEquals(destination, current))
                     AdoptSavedAs(destination);
 
-                if (destination.Path is { } savedPath)
+                if (destination.Locator is { } savedTo)
                 {
-                    recentFileHistory.Add(savedPath);
-                    ReloadRecentFiles();
+                    savedSources.Touch(Rememberable(savedTo));
+                    ReloadSavedSources();
                 }
 
                 ToastService.Show($"Saved {FileName}");
@@ -2052,7 +2125,7 @@ public sealed class MainWindowViewModel : ObservableObject
     {
         AdoptOrigins(destination);
 
-        currentFilePath = destination.Path ?? destination.DisplayName;
+        currentFilePath = destination.LocationText();
         FileName = Path.GetFileName(currentFilePath);
         Title = currentDocument?.WindowTitle ?? $"{DefaultTitle} — {FileName}";
         OnPropertyChanged(nameof(FilePath));

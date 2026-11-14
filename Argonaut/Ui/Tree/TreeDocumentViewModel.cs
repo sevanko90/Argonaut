@@ -220,7 +220,7 @@ public abstract class TreeDocumentViewModel : IndexedDocumentViewModel, IPathNav
     protected void AdoptOrigin(IByteOrigin origin, ScanTarget scanTarget)
     {
         Origin = origin;
-        FilePath = origin.Path ?? origin.DisplayName;
+        FilePath = origin.LocationText();
         ScanTarget = scanTarget;
     }
 

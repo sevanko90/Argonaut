@@ -29,6 +29,8 @@ using Argonaut.Ui.Progress;
 using System.Threading.Tasks;
 using Velopack;
 
+using Argonaut.Shell.Files;
+
 namespace Argonaut.Shell;
 
 /// <summary>
@@ -50,6 +52,9 @@ public partial class MainWindow : Window
     private readonly UpdateSettings updateSettings;
     private DispatcherTimer? toastTimer;
 
+    // What the toast showing now offers to do, if anything.
+    private ToastAction? toastAction;
+
     /// <summary>For the XAML runtime loader and the designer only - settings go nowhere. The app
     /// constructs the window through the other constructor.</summary>
     public MainWindow() : this(SettingsStore.InMemory(), new JsonSchemaCatalog(
@@ -63,11 +68,16 @@ public partial class MainWindow : Window
     /// <param name="openLogFolder">Shows the folder <paramref name="log"/> writes to, or null
     /// when there is none to show - which hides the status bar's button for it.</param>
     /// <param name="recipes">The recipes the raw view offers; null offers none.</param>
+    /// <param name="settingsSealer">Seals the saved sources in the settings file; null keeps them
+    /// for this run only.</param>
+    /// <param name="fileAccess">Describes and reopens remembered files - by bookmark on macOS; null
+    /// goes by path.</param>
     /// <param name="launcher">Opens folders and links - About, Notices and the views' value hints;
     /// null takes this build's own
     /// (see <see cref="SystemLaunchers.ForThisBuild"/>).</param>
     public MainWindow(ISettingsStore settings, JsonSchemaCatalog schemaCatalog, IDiagnosticLog log, Action? openLogFolder = null,
-        IConfigLocationSource? configLocations = null, IRecipeStore? recipes = null, ISystemLauncher? launcher = null)
+        IConfigLocationSource? configLocations = null, IRecipeStore? recipes = null, ISystemLauncher? launcher = null,
+        ISettingsSealer? settingsSealer = null, IFileAccess? fileAccess = null)
     {
         InitializeComponent();
 
@@ -101,6 +111,8 @@ public partial class MainWindow : Window
             askAboutUnsavedChanges: message => UnsavedChangesDialog.Show(this, message),
             reportFailure: message => ConfirmDialog.Inform(this, message),
             log: log,
+            settingsSealer: settingsSealer,
+            fileAccess: fileAccess,
             configLocations: configLocations,
             filterFiles: new SelectionFilterFiles(),
             recipes: recipes,
@@ -111,6 +123,7 @@ public partial class MainWindow : Window
         viewModel.FindBarResetRequested += () => FindBarControl.Reset();
 
         ToastService.Requested += ShowToast;
+        ToastService.ActionRequested += ShowToast;
         viewModel.Progress.WorkStarted += (_, _) => StartProgressTicks();
         RawJumpService.Requested += range => _ = viewModel.RevealInTextViewAsync(range);
         ArrayTableService.Requested += request => _ = viewModel.OpenArrayTableAsync(request);
@@ -129,14 +142,16 @@ public partial class MainWindow : Window
         EmptyState.PasteRequested += async (_, _) => await viewModel.PasteAsync();
         EmptyState.NewDocumentRequested += async (_, _) => await viewModel.NewDocumentAsync();
         EmptyState.SetPasteAvailable(viewModel.CanPaste);
-        EmptyState.OpenRecentFileRequested += (_, path) => viewModel.OpenRecentFile(path);
-        EmptyState.ClearRecentFilesRequested += (_, _) => viewModel.ClearRecentFiles();
-        EmptyState.ToggleFavouriteRequested += (_, path) => viewModel.ToggleFavourite(path);
+        EmptyState.OpenSavedSourceRequested += (_, id) => viewModel.OpenSavedSource(id);
+        EmptyState.ClearRecentRequested += (_, _) => viewModel.ClearRecentSources();
+        EmptyState.TogglePinRequested += (_, id) => viewModel.TogglePin(id);
+        EmptyState.RenameRequested += (_, rename) => viewModel.RenameSavedSource(rename.Id, rename.Name);
+        EmptyState.RemoveRequested += (_, id) => viewModel.RemoveSavedSource(id);
         EmptyState.LocationsRequested += (_, _) => EmptyState.SetLocations(viewModel.GetConfigLocations());
         EmptyState.BrowseFromFolderRequested += async (_, folder) => await BrowseForFile(folder);
         EmptyState.SetLocations(viewModel.GetConfigLocations());
-        EmptyState.SetFavourites(viewModel.Favourites);
-        EmptyState.SetRecentFiles(viewModel.RecentFiles);
+        EmptyState.SetPinned(viewModel.PinnedSources);
+        EmptyState.SetRecent(viewModel.RecentSources);
 
         ApplyThemeMode(viewModel.ThemeMode);
         ApplyContentFontMode(viewModel.ContentFontMode);
@@ -311,11 +326,11 @@ public partial class MainWindow : Window
         if (e.PropertyName is null or nameof(MainWindowViewModel.ContentFontMode))
             ApplyContentFontMode(viewModel.ContentFontMode);
 
-        if (e.PropertyName is null or nameof(MainWindowViewModel.RecentFiles))
-            EmptyState.SetRecentFiles(viewModel.RecentFiles);
+        if (e.PropertyName is null or nameof(MainWindowViewModel.RecentSources))
+            EmptyState.SetRecent(viewModel.RecentSources);
 
-        if (e.PropertyName is null or nameof(MainWindowViewModel.Favourites))
-            EmptyState.SetFavourites(viewModel.Favourites);
+        if (e.PropertyName is null or nameof(MainWindowViewModel.PinnedSources))
+            EmptyState.SetPinned(viewModel.PinnedSources);
 
 #if DEBUG
         if (e.PropertyName is null or nameof(MainWindowViewModel.CurrentDocument))
@@ -609,11 +624,11 @@ public partial class MainWindow : Window
         var options = new FilePickerSaveOptions
         {
             Title = "Save as",
-            SuggestedFileName = current.Path is { } path ? System.IO.Path.GetFileName(path) : $"{current.DisplayName}.txt",
+            SuggestedFileName = current.Locator is FileLocator ? current.DisplayName : $"{current.DisplayName}.txt",
             ShowOverwritePrompt = true,
         };
 
-        if (current.Path is { } file && System.IO.Path.GetDirectoryName(file) is { } folder)
+        if (current.Locator is FileLocator file && System.IO.Path.GetDirectoryName(file.Path) is { } folder)
             options.SuggestedStartLocation = await StorageProvider.TryGetFolderFromPathAsync(folder);
 
         var picked = await StorageProvider.SaveFilePickerAsync(options);
@@ -831,12 +846,24 @@ public partial class MainWindow : Window
             entry.RequestStop();
     }
 
-    private void ShowToast(string message)
+    private void ShowToast(string message) => ShowToast(message, action: null);
+
+    /// <summary>
+    /// Shows <paramref name="message"/> - with <paramref name="action"/>, as a toast that can be
+    /// clicked and stays up long enough to be read and acted on. A plain toast cannot be clicked,
+    /// so it never gets in the way of what is under it.
+    /// </summary>
+    private void ShowToast(string message, ToastAction? action)
     {
         ToastText.Text = message;
+        toastAction = action;
+        ToastActionButton.Content = action?.Label;
+        ToastActionButton.IsVisible = action is not null;
+        ToastBorder.IsHitTestVisible = action is not null;
         ToastBorder.IsVisible = true;
 
-        toastTimer ??= new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.5) };
+        toastTimer ??= new DispatcherTimer();
+        toastTimer.Interval = TimeSpan.FromSeconds(action is null ? 1.5 : 6);
         toastTimer.Stop();
         toastTimer.Tick -= OnToastTimerTick;
         toastTimer.Tick += OnToastTimerTick;
@@ -847,5 +874,15 @@ public partial class MainWindow : Window
     {
         toastTimer!.Stop();
         ToastBorder.IsVisible = false;
+        toastAction = null;
+    }
+
+    private void OnToastActionClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        var action = toastAction;
+        toastTimer?.Stop();
+        ToastBorder.IsVisible = false;
+        toastAction = null;
+        action?.Run();
     }
 }

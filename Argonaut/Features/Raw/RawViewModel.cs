@@ -1056,7 +1056,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     public async Task LoadAsync(IByteOrigin origin, IProgressReporter? progressReporter = null)
     {
         this.Origin = origin;
-        this.FilePath = origin.Path ?? origin.DisplayName;
+        this.FilePath = origin.LocationText();
         FollowLineNumbering(this.lineNumbers);
         this.wrapWidth = this.settings.WrapWidth;
         this.toolbar = new RawToolbarViewModel(this.wrapWidth, ChooseWrapWidth, SetEditing, ChooseColours,
@@ -1119,7 +1119,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
     /// </summary>
     private IRawLexer? ChooseAutoLexer(IByteOrigin origin)
     {
-        if (RawLexerChoice.ForPath(origin.Path) is { } named)
+        if (RawLexerChoice.ForPath((origin.Locator as FileLocator)?.Path) is { } named)
             return named;
 
         var lineStarts = new List<string>(RawLexerChoice.MaxSniffedLines);
@@ -1577,7 +1577,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
             this.wrapWidth = wanted;
 
         // Named for where it now reads from - after a Save As, the new file.
-        string name = destination.Path is { } path ? Path.GetFileName(path) : destination.DisplayName;
+        string name = destination.DisplayName;
         var progress = this.progressBoard.Begin($"Indexing {name}");
         var session = StartSession(destination, progress);
         progress.FinishWhen(session.IndexingTask);
@@ -1591,7 +1591,7 @@ public sealed class RawViewModel : IndexedDocumentViewModel, IByteRangeNavigable
         PlaceAcrossRewrap = null; // a reopen puts the caret back with a reveal instead
         IndexGeneration++;
 
-        FilePath = destination.Path ?? destination.DisplayName;
+        FilePath = destination.LocationText();
         SelectedRowIndex = null;
         IndexFailure = null;
         Caret = new RawCaretController(session.Index, session.Bytes);

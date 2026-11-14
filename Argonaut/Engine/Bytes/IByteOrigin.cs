@@ -29,18 +29,19 @@ public interface IByteOrigin : IDisposable
 {
     /// <summary>
     /// What the toolbar, status line and window title call this document. Always present, even
-    /// when <see cref="Path"/> is not - a file's name, or something like "Pasted text".
+    /// when <see cref="Locator"/> is not - a file's name, or something like "Pasted text".
     /// </summary>
     string DisplayName { get; }
 
     /// <summary>
-    /// The file on disk these bytes are, or null when there is none - a paste, or a download
-    /// served from memory. This is the one thing the path-keyed features consult: recent files
-    /// and the remembered schema binding. Each of
-    /// those skips a document with no path rather than substituting <see cref="DisplayName"/> -
-    /// two pastes would collide in a path-keyed store.
+    /// Where these bytes can be fetched again - a <see cref="FileLocator"/> for a file on disk -
+    /// or null when there is nowhere: a paste, an excerpt, a diff side. This is the one thing the
+    /// place-keyed features consult: saved sources and the remembered schema binding. Each of
+    /// those skips a document with no locator rather than substituting <see cref="DisplayName"/> -
+    /// two pastes would collide in a place-keyed store. What touches the file system asks for the
+    /// file kind.
     /// </summary>
-    string? Path { get; }
+    SourceLocator? Locator { get; }
 
     /// <summary>
     /// How much has arrived, whether that is final, and how to wait for more. Growth lives here

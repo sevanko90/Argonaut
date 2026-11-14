@@ -1,3 +1,5 @@
+using Argonaut.Engine.Settings;
+using Argonaut.Tests.Support;
 using Argonaut.Features.Json.Schema;
 
 namespace Argonaut.Tests.Features.Json.Schema;
@@ -36,16 +38,31 @@ public sealed class SchemaBindingsTests
     }
 
     [Fact]
-    public void NoSchemaChoice_RoundTripsThroughTheSettingsFile()
+    public void Choices_RoundTripThroughTheSealedBlock_AndAreNotReadableInIt()
     {
-        var bindings = new SchemaBindings();
-        bindings.Remember("/docs/none.json", null);
-        bindings.Remember("/docs/bound.json", "/one.json", "Root");
+        var keys = new MemorySealingKeyStore();
+        var block = new SchemaBindingsBlock();
+        var bindings = new SchemaBindings(block, new AesGcmSettingsSealer(keys));
+        bindings.Remember("file:/DOCS/NONE.JSON", null);
+        bindings.Remember("file:/DOCS/BOUND.JSON", "/schemas/one.json", "Root");
 
-        string json = System.Text.Json.JsonSerializer.Serialize(bindings, SchemaBindings.JsonTypeInfo);
-        var read = System.Text.Json.JsonSerializer.Deserialize(json, SchemaBindings.JsonTypeInfo)!;
+        string json = System.Text.Json.JsonSerializer.Serialize(block, SchemaBindingsBlock.JsonTypeInfo);
+        Assert.DoesNotContain("DOCS", json);
+        Assert.DoesNotContain("schemas", json);
 
-        Assert.Equal(bindings.Entries, read.Entries);
+        var reread = System.Text.Json.JsonSerializer.Deserialize(json, SchemaBindingsBlock.JsonTypeInfo)!;
+        var reopened = new SchemaBindings(reread, new AesGcmSettingsSealer(keys));
+
+        Assert.Equal(bindings.Entries, reopened.Entries);
+    }
+
+    [Fact]
+    public void ABlockThatWillNotOpen_StartsEmpty()
+    {
+        var block = new SchemaBindingsBlock();
+        new SchemaBindings(block, new AesGcmSettingsSealer(new MemorySealingKeyStore())).Remember("file:/A", "/s.json");
+
+        Assert.Empty(new SchemaBindings(block, new AesGcmSettingsSealer(new MemorySealingKeyStore())).Entries);
     }
 
     [Fact]
@@ -88,12 +105,14 @@ public sealed class SchemaBindingsTests
     }
 
     [Fact]
-    public void Entries_SetFromAHandEditedFile_IsCappedAndNeverNull()
+    public void TheList_IsCapped()
     {
-        var bindings = new SchemaBindings { Entries = null! };
-        Assert.Empty(bindings.Entries);
+        var bindings = new SchemaBindings();
 
-        bindings.Entries = Enumerable.Range(0, 150).Select(i => new SchemaBinding($"/d/{i}", $"/s/{i}")).ToArray();
+        for (int i = 0; i < 150; i++)
+            bindings.Remember($"file:/d/{i}", $"/s/{i}");
+
         Assert.Equal(100, bindings.Entries.Count);
+        Assert.Equal("file:/d/149", bindings.Entries[0].DocumentKey);
     }
 }

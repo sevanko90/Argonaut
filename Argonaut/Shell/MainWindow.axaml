@@ -381,9 +381,22 @@
                 Padding="12,6"
                 CornerRadius="6"
                 Background="{DynamicResource AppAccentBrush}">
-            <TextBlock x:Name="ToastText"
-                       Foreground="White"
-                       FontSize="12" />
+            <StackPanel Orientation="Horizontal" Spacing="12">
+                <TextBlock x:Name="ToastText"
+                           Foreground="White"
+                           VerticalAlignment="Center"
+                           FontSize="12" />
+                <!-- Only for a toast that offers something to do about what it reports. -->
+                <Button x:Name="ToastActionButton"
+                        IsVisible="False"
+                        Classes="linklike"
+                        Foreground="White"
+                        FontSize="12"
+                        FontWeight="SemiBold"
+                        Padding="0"
+                        VerticalAlignment="Center"
+                        Click="OnToastActionClick" />
+            </StackPanel>
         </Border>
 
         <Border Grid.Row="2"

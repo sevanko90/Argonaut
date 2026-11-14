@@ -4,8 +4,8 @@ namespace Argonaut.Engine.Bytes;
 
 /// <summary>
 /// A document that arrived as bytes rather than as a file - a clipboard paste, or a small
-/// download. <see cref="Path"/> is null, which is what the path-shaped features (recent files,
-/// the remembered schema binding, save, reveal in folder) key off to degrade rather than guess a path.
+/// download. <see cref="Locator"/> is null, which is what the place-keyed features (saved sources,
+/// the remembered schema binding, save, reveal in folder) key off to degrade rather than guess one.
 ///
 /// Every source it hands out is a window over the one array, so <see cref="OpenRange"/> costs
 /// nothing: a sub-document inside a paste is a view, never a copy. Nothing holds an OS resource,
@@ -41,7 +41,7 @@ public sealed class MemoryByteOrigin : IByteOrigin
     /// <summary>Always null: these bytes are not a file, so anything keyed by path has to skip
     /// this document rather than key itself by a name that is not one. Today that is recent
     /// files and the remembered schema binding.</summary>
-    public string? Path => null;
+    public SourceLocator? Locator => null;
 
     public long AvailableLength => this.bytes.Length;
 

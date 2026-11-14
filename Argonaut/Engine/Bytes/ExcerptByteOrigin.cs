@@ -20,7 +20,7 @@ namespace Argonaut.Engine.Bytes;
 /// taken by bytes does not: finding out would mean counting every newline before it, which is
 /// the scan opening by bytes exists to skip.
 ///
-/// <see cref="Path"/> is null, deliberately: the excerpt is not the file, so recent files and the
+/// <see cref="Locator"/> is null, deliberately: the excerpt is not the file, so saved sources and the
 /// remembered schema binding pass it over, and a save is a Save As - an
 /// edited excerpt can never be written over the whole file it came from.
 ///
@@ -72,7 +72,7 @@ public sealed class ExcerptByteOrigin : IByteOrigin
     public string DisplayName { get; }
 
     /// <summary>Always null - see the class remarks.</summary>
-    public string? Path => null;
+    public SourceLocator? Locator => null;
 
     /// <summary>The excerpt's length. Always settled: its bytes had arrived before it could be
     /// opened.</summary>

@@ -195,7 +195,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         var docA = new FakeDocument { FilePath = pathA };
         var docB = new FakeDocument { FilePath = pathB, StatusDetail = "B loaded" };
 
-        var vm = CreateViewModel((_, origin, _) =>            Task.FromResult<IDocumentViewModel>(origin.Path == pathA ? docA : docB));
+        var vm = CreateViewModel((_, origin, _) =>            Task.FromResult<IDocumentViewModel>(origin.FilePathOf() == pathA ? docA : docB));
 
         await vm.OpenPathAsync(pathA);
         await vm.OpenPathAsync(pathB);
@@ -215,7 +215,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         var gateA = new TaskCompletionSource<IDocumentViewModel>();
         var gateB = new TaskCompletionSource<IDocumentViewModel>();
 
-        var vm = CreateViewModel((_, origin, _) => origin.Path == pathA ? gateA.Task : gateB.Task);
+        var vm = CreateViewModel((_, origin, _) => origin.FilePathOf() == pathA ? gateA.Task : gateB.Task);
 
         // Both opens suspend at the loader await; the second bumps the request id, so the
         // first is now stale even though its load finishes last.
@@ -258,7 +258,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         string pathB = WriteJsonFile("b.json");
         var docA = new FakeDocument { FilePath = pathA };
         var docB = new FakeDocument { FilePath = pathB };
-        var vm = CreateViewModel((_, origin, _) =>            Task.FromResult<IDocumentViewModel>(origin.Path == pathA ? docA : docB));
+        var vm = CreateViewModel((_, origin, _) =>            Task.FromResult<IDocumentViewModel>(origin.FilePathOf() == pathA ? docA : docB));
 
         await vm.OpenPathAsync(pathA);
         await vm.OpenPathAsync(pathB);
@@ -283,37 +283,47 @@ public sealed class MainWindowViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task ToggleFavourite_MovesAFileFromRecentToFavouritesAndBack()
+    public async Task TogglePin_MovesASourceFromRecentToPinnedAndBack()
     {
         string path = WriteJsonFile();
         var document = new FakeDocument { FilePath = path };
         var vm = CreateViewModel((_, _, _) => Task.FromResult<IDocumentViewModel>(document));
         await vm.OpenPathAsync(path);
+        string id = Assert.Single(vm.RecentSources).Id;
 
-        vm.ToggleFavourite(path);
+        vm.TogglePin(id);
 
-        Assert.Contains(vm.Favourites, item => item.IsFavourite && string.Equals(item.Path, path, StringComparison.OrdinalIgnoreCase));
-        Assert.DoesNotContain(vm.RecentFiles, item => string.Equals(item.Path, path, StringComparison.OrdinalIgnoreCase));
+        Assert.True(Assert.Single(vm.PinnedSources).IsPinned);
+        Assert.Empty(vm.RecentSources);
 
-        vm.ToggleFavourite(path);
+        vm.TogglePin(id);
 
-        Assert.Empty(vm.Favourites);
-        Assert.Contains(vm.RecentFiles, item => string.Equals(item.Path, path, StringComparison.OrdinalIgnoreCase));
+        Assert.Empty(vm.PinnedSources);
+        Assert.Equal(id, Assert.Single(vm.RecentSources).Id);
     }
 
     [Fact]
-    public void Favourites_SurviveReopeningTheSettings()
+    public async Task PinnedSources_SurviveReopeningTheSettings()
     {
         var settings = SettingsStore.InMemory();
-        settings.Get<FavouriteFiles>().Toggle(Path.Combine(tempDir, "pinned.ini"));
+        var sealer = new AesGcmSettingsSealer(new MemorySealingKeyStore());
+        string path = WriteJsonFile();
+        var first = new MainWindowViewModel(settings, TestSchemas.Catalog(), _ => Task.FromResult(true),
+            documentLoader: (_, _, _) => Task.FromResult<IDocumentViewModel>(new FakeDocument { FilePath = path }), settingsSealer: sealer);
+        await first.OpenPathAsync(path);
+        first.TogglePin(Assert.Single(first.RecentSources).Id);
 
-        var vm = CreateViewModel((_, _, _) => throw new InvalidOperationException(), settings);
+        var reopened = new MainWindowViewModel(settings, TestSchemas.Catalog(), _ => Task.FromResult(true),
+            documentLoader: (_, _, _) => throw new InvalidOperationException(), settingsSealer: sealer);
 
-        Assert.Equal("pinned.ini", Assert.Single(vm.Favourites).FileName);
+        var pinned = Assert.Single(reopened.PinnedSources);
+        Assert.Equal(Path.GetFileName(path), pinned.Name);
+        Assert.Equal(Path.GetFullPath(path), pinned.LocationText);
+        Assert.Null(pinned.Pill);
     }
 
     [Fact]
-    public async Task OpenPath_AddsToRecentFiles()
+    public async Task OpenPath_AddsToRecentSources()
     {
         string path = WriteJsonFile();
         var document = new FakeDocument { FilePath = path };
@@ -321,7 +331,112 @@ public sealed class MainWindowViewModelTests : IDisposable
 
         await vm.OpenPathAsync(path);
 
-        Assert.Contains(vm.RecentFiles, item => string.Equals(item.Path, path, StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(Path.GetFullPath(path), Assert.Single(vm.RecentSources).LocationText);
+    }
+
+    [Fact]
+    public async Task OpenSavedSource_OpensItsFileAgain()
+    {
+        string path = WriteJsonFile();
+        var opened = new List<IByteOrigin>();
+        var vm = CreateViewModel((_, origin, _) =>
+        {
+            opened.Add(origin);
+            return Task.FromResult<IDocumentViewModel>(new FakeDocument { FilePath = path, Origin = origin });
+        });
+        await vm.OpenPathAsync(path);
+        await vm.CloseFileAsync();
+
+        vm.OpenSavedSource(Assert.Single(vm.RecentSources).Id);
+        await WaitUntil(() => opened.Count == 2);
+
+        Assert.Equal(Path.GetFullPath(path), opened[1].FilePathOf());
+    }
+
+    [Fact]
+    public async Task RenameSavedSource_ChangesTheRowsName()
+    {
+        string path = WriteJsonFile();
+        var vm = CreateViewModel((_, _, _) => Task.FromResult<IDocumentViewModel>(new FakeDocument { FilePath = path }));
+        await vm.OpenPathAsync(path);
+
+        vm.RenameSavedSource(Assert.Single(vm.RecentSources).Id, "Orders");
+
+        Assert.Equal("Orders", Assert.Single(vm.RecentSources).Name);
+    }
+
+    [Fact]
+    public async Task ASavedFileThatIsGone_OffersToRemoveIt_AndKeepsItOtherwise()
+    {
+        string path = WriteJsonFile();
+        var vm = CreateViewModel((_, _, _) => Task.FromResult<IDocumentViewModel>(new FakeDocument { FilePath = path }));
+        await vm.OpenPathAsync(path);
+        await vm.CloseFileAsync();
+        File.Delete(path);
+        string id = Assert.Single(vm.RecentSources).Id;
+
+        var offered = new List<(string Message, ToastAction Action)>();
+        void Capture(string message, ToastAction action) => offered.Add((message, action));
+        ToastService.ActionRequested += Capture;
+        try
+        {
+            vm.OpenSavedSource(id);
+        }
+        finally
+        {
+            ToastService.ActionRequested -= Capture;
+        }
+
+        var (message, action) = Assert.Single(offered);
+        Assert.Contains(Path.GetFileName(path), message);
+        Assert.Equal(MainWindowViewModel.RemoveFromListLabel, action.Label);
+        Assert.Single(vm.RecentSources);
+
+        action.Run();
+
+        Assert.Empty(vm.RecentSources);
+    }
+
+    [Fact]
+    public async Task ASavedFileFoundElsewhere_IsOpenedThere_AndTheEntryFollowsIt()
+    {
+        string before = WriteJsonFile();
+        string after = Path.Combine(tempDir, "moved.json");
+        var access = new MovingFileAccess(after);
+        var opened = new List<IByteOrigin>();
+        var vm = new MainWindowViewModel(SettingsStore.InMemory(), TestSchemas.Catalog(), _ => Task.FromResult(true),
+            documentLoader: (_, origin, _) =>
+            {
+                opened.Add(origin);
+                return Task.FromResult<IDocumentViewModel>(new FakeDocument { FilePath = origin.LocationText(), Origin = origin });
+            },
+            fileAccess: access,
+            // The real count reads the file in the background, and Windows will not move a file
+            // something has open - this test is about the move, not the count.
+            lineEndings: new FakeLineEndingDetector());
+        await vm.OpenPathAsync(before);
+        await vm.CloseFileAsync();
+        File.Move(before, after);
+
+        vm.OpenSavedSource(Assert.Single(vm.RecentSources).Id);
+        await WaitUntil(() => opened.Count == 2);
+
+        Assert.Equal(Path.GetFullPath(after), opened[1].FilePathOf());
+        Assert.Equal(Path.GetFullPath(after), Assert.Single(vm.RecentSources).LocationText);
+        Assert.Equal(0, access.Released);
+        await vm.CloseFileAsync();
+        Assert.Equal(1, access.Released);
+    }
+
+    /// <summary>A file access whose bookmarks always find the file at one new place, counting the
+    /// grants given back.</summary>
+    private sealed class MovingFileAccess(string movedTo) : Argonaut.Shell.Files.IFileAccess
+    {
+        public int Released { get; private set; }
+
+        public FileLocator Describe(string path) => new(path, bookmark: [1]);
+
+        public FileAccessGrant Open(FileLocator locator) => new(new FileLocator(movedTo, bookmark: [2]), () => Released++);
     }
 
     [Fact]
@@ -441,14 +556,14 @@ public sealed class MainWindowViewModelTests : IDisposable
             Task.FromResult<IDocumentViewModel>(kind == FileTypeDetector.FileKind.Json ? initial : switched));
 
         await vm.OpenPathAsync(path);
-        int recentCountAfterOpen = vm.RecentFiles.Count;
+        int recentCountAfterOpen = vm.RecentSources.Count;
 
         await vm.SwitchViewAsync(FileTypeDetector.FileKind.Ndjson);
 
         Assert.True(initial.Disposed, "the outgoing document must be disposed before the swap");
         Assert.False(switched.Disposed);
         Assert.Same(switched, vm.CurrentDocument);
-        Assert.Equal(recentCountAfterOpen, vm.RecentFiles.Count);
+        Assert.Equal(recentCountAfterOpen, vm.RecentSources.Count);
     }
 
     [Fact]
@@ -650,7 +765,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         var vm = CreateViewModel((_, origin, _) =>
         {
             seen.Add(origin);
-            return Task.FromResult<IDocumentViewModel>(new FakeDocument { Origin = origin, FilePath = origin.Path! });
+            return Task.FromResult<IDocumentViewModel>(new FakeDocument { Origin = origin, FilePath = origin.FilePathOf()! });
         });
 
         await vm.OpenPathAsync(pathA);
@@ -658,8 +773,8 @@ public sealed class MainWindowViewModelTests : IDisposable
 
         Assert.Equal(2, seen.Count);
         Assert.NotSame(seen[0], seen[1]);
-        Assert.Equal(Path.GetFullPath(pathA), seen[0].Path);
-        Assert.Equal(Path.GetFullPath(pathB), seen[1].Path);
+        Assert.Equal(Path.GetFullPath(pathA), seen[0].FilePathOf());
+        Assert.Equal(Path.GetFullPath(pathB), seen[1].FilePathOf());
     }
 
     /// <summary>
@@ -677,7 +792,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         await vm.OpenPathAsync(path);
 
         Assert.NotNull(vm.CurrentDocument!.Origin);
-        Assert.Equal(Path.GetFullPath(path), vm.CurrentDocument.Origin!.Path);
+        Assert.Equal(Path.GetFullPath(path), vm.CurrentDocument.Origin!.FilePathOf());
     }
 
     // ---- command line ------------------------------------------------------------------
@@ -719,7 +834,7 @@ public sealed class MainWindowViewModelTests : IDisposable
 
         var excerpt = Assert.IsType<ExcerptByteOrigin>(loaded);
         Assert.Equal("{\"n\":3}\n{\"n\":4}\n", loadedText);
-        Assert.Null(excerpt.Path);
+        Assert.Null(excerpt.Locator);
         Assert.Equal(3, excerpt.Lines!.Value.FirstLine);
         Assert.Equal(4, excerpt.Lines!.Value.LastLine);
     }
@@ -786,7 +901,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         Assert.Null(vm.Excerpt);
         Assert.Equal(2, loads.Count);
         Assert.Equal(FileTypeDetector.FileKind.Unidentified, loads[1].Kind);
-        Assert.Equal(Path.GetFullPath(path), loads[1].Origin.Path);
+        Assert.Equal(Path.GetFullPath(path), loads[1].Origin.FilePathOf());
     }
 
     private string WriteFilter(string text, string name = "picks.txt")
@@ -851,7 +966,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         var selection = Assert.IsType<SelectionByteOrigin>(loaded);
         Assert.Equal("{\"n\":2}\n{\"n\":3}\n{\"n\":7}\n", loadedText);
         Assert.True(selection.IsReadOnly);
-        Assert.Null(selection.Path);
+        Assert.Null(selection.Locator);
         Assert.Equal(FileTypeDetector.FileKind.Ndjson, loadedAs);
         Assert.True(vm.IsExcerpt);
         Assert.Same(selection, vm.Selection);
@@ -1087,7 +1202,7 @@ public sealed class MainWindowViewModelTests : IDisposable
 
         Assert.Null(vm.Selection);
         Assert.False(vm.IsExcerpt);
-        Assert.Equal(Path.GetFullPath(path), loads[^1].Path);
+        Assert.Equal(Path.GetFullPath(path), loads[^1].FilePathOf());
     }
 
     [Fact]

@@ -76,6 +76,12 @@ public sealed class SettingsStore : ISettingsStore
         }
     }
 
+    public void Forget(string key)
+    {
+        if (!blocks.ContainsKey(key))
+            stored.Remove(key);
+    }
+
     private T Read<T>() where T : class, ISettingsBlock<T>, new()
     {
         if (!stored.TryGetValue(T.Key, out var element))

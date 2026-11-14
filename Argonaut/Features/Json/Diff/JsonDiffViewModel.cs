@@ -424,8 +424,8 @@ public sealed class JsonDiffViewModel : IndexedDocumentViewModel, IDocumentViewM
     public Task LoadAsync(IByteOrigin leftOrigin, IByteOrigin rightOrigin)
     {
         Origin = leftOrigin;
-        FilePath = leftOrigin.Path ?? leftOrigin.DisplayName;
-        RightFilePath = rightOrigin.Path ?? rightOrigin.DisplayName;
+        FilePath = leftOrigin.LocationText();
+        RightFilePath = rightOrigin.LocationText();
 
         var board = ProgressBoard.Shared;
         var leftProgress = board.Begin("Indexing " + leftOrigin.DisplayName);

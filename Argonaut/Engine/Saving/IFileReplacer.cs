@@ -22,7 +22,7 @@ public interface IFileReplacer
     /// <see cref="UnauthorizedAccessException"/> - with a message fit to show - when that is not
     /// possible, including when the volume has no room for it; nothing has been written then.
     /// </summary>
-    /// <param name="destination">Where the content is going. Must have a <see cref="IByteOrigin.Path"/>.</param>
+    /// <param name="destination">Where the content is going. Must be a file - its <see cref="IByteOrigin.Locator"/> a <see cref="FileLocator"/>.</param>
     StagedFile Stage(IByteOrigin destination, long contentLength);
 }
 

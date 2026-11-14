@@ -29,6 +29,8 @@ using Argonaut.Ui.Progress;
 using System.Threading.Tasks;
 using Velopack;
 
+using Argonaut.Shell.Files;
+
 namespace Argonaut.Shell;
 
 /// <summary>
@@ -68,12 +70,14 @@ public partial class MainWindow : Window
     /// <param name="recipes">The recipes the raw view offers; null offers none.</param>
     /// <param name="settingsSealer">Seals the saved sources in the settings file; null keeps them
     /// for this run only.</param>
+    /// <param name="fileAccess">Describes and reopens remembered files - by bookmark on macOS; null
+    /// goes by path.</param>
     /// <param name="launcher">Opens folders and links - About, Notices and the views' value hints;
     /// null takes this build's own
     /// (see <see cref="SystemLaunchers.ForThisBuild"/>).</param>
     public MainWindow(ISettingsStore settings, JsonSchemaCatalog schemaCatalog, IDiagnosticLog log, Action? openLogFolder = null,
         IConfigLocationSource? configLocations = null, IRecipeStore? recipes = null, ISystemLauncher? launcher = null,
-        ISettingsSealer? settingsSealer = null)
+        ISettingsSealer? settingsSealer = null, IFileAccess? fileAccess = null)
     {
         InitializeComponent();
 
@@ -108,6 +112,7 @@ public partial class MainWindow : Window
             reportFailure: message => ConfirmDialog.Inform(this, message),
             log: log,
             settingsSealer: settingsSealer,
+            fileAccess: fileAccess,
             configLocations: configLocations,
             filterFiles: new SelectionFilterFiles(),
             recipes: recipes,

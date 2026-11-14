@@ -63,10 +63,11 @@ public sealed class SavedSourceStore
         }
         else
         {
-            var (kind, location) = SavedSource.Describe(locator);
-            entry = new SavedSource { Name = locator.DefaultName, Kind = kind, Location = location };
+            entry = new SavedSource { Name = locator.DefaultName };
         }
 
+        // Every touch takes the locator as it is now, so a refreshed bookmark replaces the old one.
+        entry.Locate(locator);
         entries.Insert(0, entry);
         TrimRecent();
         Persist();
@@ -84,6 +85,22 @@ public sealed class SavedSourceStore
             pinOrder.Remove(id);
 
         TrimRecent();
+        Persist();
+    }
+
+    /// <summary>
+    /// Points an entry at where its source turned out to be - a file its bookmark found after it
+    /// was moved - keeping its name, pin and place in the list. An entry already naming that place
+    /// is dropped, so the move leaves one entry rather than two.
+    /// </summary>
+    public void Relocate(string id, SourceLocator locator)
+    {
+        if (Find(id) is not { } entry)
+            return;
+
+        entries.RemoveAll(e => e.Id != id && locator.IsSamePlace(e.Locator));
+        pinOrder.RemoveAll(pinned => Find(pinned) is null);
+        entry.Locate(locator);
         Persist();
     }
 

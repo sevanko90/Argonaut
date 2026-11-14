@@ -31,16 +31,24 @@ public abstract record SourceLocator
 }
 
 /// <summary>
-/// A file on disk, by its absolute path.
+/// A file on disk, by its absolute path, and - on macOS - its bookmark: the system's own way back
+/// to a file, which follows it when it is moved or renamed and, in a sandboxed build, carries the
+/// grant to open it again after a relaunch. The bookmark is opaque here; what makes and reads it
+/// is the shell's file access. Identity is the path alone, so a bookmark refreshed on reopening
+/// still names the same place.
 /// </summary>
 public sealed record FileLocator : SourceLocator
 {
     /// <param name="path">Made absolute here, so every file locator compares on full paths.</param>
-    public FileLocator(string path)
+    /// <param name="bookmark">The file's bookmark, or null where the platform has none.</param>
+    public FileLocator(string path, byte[]? bookmark = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         Path = System.IO.Path.GetFullPath(path);
+        Bookmark = bookmark;
     }
+
+    public byte[]? Bookmark { get; }
 
     /// <summary>The absolute path - what the file-system features (saving, revealing, the
     /// line-ending count) open.</summary>

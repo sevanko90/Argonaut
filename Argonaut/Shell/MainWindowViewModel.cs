@@ -34,6 +34,7 @@ using Argonaut.Ui.ViewModels;
 using Avalonia.Threading;
 using Argonaut.Ui.Launching;
 
+using Argonaut.Shell.Files;
 using Argonaut.Shell.Sources;
 
 namespace Argonaut.Shell;
@@ -81,6 +82,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private readonly AppearanceSettings appearance;
     private readonly SavedSourceStore savedSources;
+    private readonly IFileAccess fileAccess;
     private readonly JsonViewSettings jsonViewSettings;
     private readonly IConfigLocationSource? configLocations;
     private readonly ISelectionFilterFiles filterFiles;
@@ -200,8 +202,10 @@ public sealed class MainWindowViewModel : ObservableObject
         IRecipeStore? recipes = null,
         ISystemLauncher? launcher = null,
         ILineEndingDetector? lineEndings = null,
-        ISettingsSealer? settingsSealer = null)
+        ISettingsSealer? settingsSealer = null,
+        IFileAccess? fileAccess = null)
     {
+        this.fileAccess = fileAccess ?? new PlainFileAccess();
         this.lineEndings = lineEndings ?? new LineEndingDetector();
         this.appearance = settings.Get<AppearanceSettings>();
         this.savedSources = new SavedSourceStore(settings.Get<SavedSourcesBlock>(), settingsSealer);
@@ -1335,15 +1339,30 @@ public sealed class MainWindowViewModel : ObservableObject
         if (savedSources.Find(id) is not { Locator: FileLocator file } source)
             return;
 
-        if (!File.Exists(file.Path))
+        // Through the file access, so a bookmark finds a file that was moved - and the entry
+        // follows it there - and a sandboxed build gets permission to read it.
+        var grant = fileAccess.Open(file);
+        if (!grant.Locator.IsSamePlace(file))
         {
+            savedSources.Relocate(id, grant.Locator);
+            ReloadSavedSources();
+        }
+
+        if (!File.Exists(grant.Path))
+        {
+            grant.Dispose();
             ToastService.Show($"Couldn't find {source.Name}",
                 new ToastAction(RemoveFromListLabel, () => RemoveSavedSource(id)));
             return;
         }
 
-        _ = OpenPathAsync(file.Path);
+        _ = OpenPathAsync(grant.Path, grant: grant);
     }
+
+    /// <summary>The locator to remember for an opened or saved document: a file described by the
+    /// file access, so it is remembered with its bookmark.</summary>
+    private SourceLocator Rememberable(SourceLocator locator)
+        => locator is FileLocator { Bookmark: null } file ? fileAccess.Describe(file.Path) : locator;
 
     /// <summary>Renames a saved source; a blank name goes back to its locator's own.</summary>
     public void RenameSavedSource(string id, string name)
@@ -1380,40 +1399,60 @@ public sealed class MainWindowViewModel : ObservableObject
     /// (never published), so its mapping is released.
     /// </summary>
     /// <param name="view">The view to open it in, instead of the one detection picks.</param>
-    public async Task OpenPathAsync(string? path, FileTypeDetector.FileKind? view = null)
+    /// <param name="grant">Permission to read the file, from the file access, which the opened
+    /// origin then holds - or which is given back here if the file is not opened after all.</param>
+    public async Task OpenPathAsync(string? path, FileTypeDetector.FileKind? view = null, FileAccessGrant? grant = null)
+    {
+        try
+        {
+            if (await OpenPathCoreAsync(path, view, grant))
+                grant = null;
+        }
+        finally
+        {
+            grant?.Dispose();
+        }
+    }
+
+    /// <returns>Whether an origin was opened - and so took over <paramref name="grant"/>.</returns>
+    private async Task<bool> OpenPathCoreAsync(string? path, FileTypeDetector.FileKind? view, FileAccessGrant? grant)
     {
         if (string.IsNullOrWhiteSpace(path))
         {
             this.log.Write("OpenPath: path is null/whitespace, returning");
-            return;
+            return false;
         }
 
         var normalizedPath = Path.GetFullPath(path);
         if (!File.Exists(normalizedPath))
         {
             this.log.Write($"OpenPath: File.Exists false for '{normalizedPath}'");
-            return;
+            return false;
         }
 
         if (RefusedWhileSaving())
-            return;
+            return false;
 
         if (HasUnsavedChanges)
         {
             // Asked instead of the replace confirmation, not as well as it: this question already
             // says the document is going, and offers the one thing worth doing about it.
             if (!await ResolveUnsavedChangesAsync($"opening \"{Path.GetFileName(normalizedPath)}\""))
-                return;
+                return false;
         }
         else if (currentFilePath is not null && !string.Equals(currentFilePath, normalizedPath, StringComparison.OrdinalIgnoreCase))
         {
             var confirmed = await confirmReplace(
                 $"Replace the currently loaded file with \"{Path.GetFileName(normalizedPath)}\"?");
             if (!confirmed)
-                return;
+                return false;
         }
 
-        await OpenOriginAsync(new FileByteOrigin(normalizedPath), addToRecents: true, view);
+        // From here the origin owns the grant: OpenOriginAsync disposes an origin it does not keep.
+        bool underGrant = grant is not null && string.Equals(grant.Path, normalizedPath, StringComparison.Ordinal);
+        var origin = underGrant ? new FileByteOrigin(grant!) : new FileByteOrigin(normalizedPath);
+        await OpenOriginAsync(origin, addToRecents: true, view);
+        return underGrant;
     }
 
     /// <summary>
@@ -1761,7 +1800,7 @@ public sealed class MainWindowViewModel : ObservableObject
         // nothing rather than recording a place that does not exist.
         if (addToRecents && origins.Length > 0 && origins[0].Locator is { } locator)
         {
-            savedSources.Touch(locator);
+            savedSources.Touch(Rememberable(locator));
             ReloadSavedSources();
         }
     }
@@ -2051,7 +2090,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
                 if (destination.Locator is { } savedTo)
                 {
-                    savedSources.Touch(savedTo);
+                    savedSources.Touch(Rememberable(savedTo));
                     ReloadSavedSources();
                 }
 

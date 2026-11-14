@@ -28,6 +28,9 @@ public sealed class SavedSource
 
     public bool IsPinned { get; set; }
 
+    /// <summary>A file's bookmark, base64 - what finds it again on macOS - or null.</summary>
+    public string? Access { get; set; }
+
     /// <summary>A file's kind.</summary>
     public const string FileKind = "file";
 
@@ -36,16 +39,36 @@ public sealed class SavedSource
     [JsonIgnore]
     public SourceLocator? Locator => Kind switch
     {
-        FileKind when !string.IsNullOrWhiteSpace(Location) => new FileLocator(Location),
+        FileKind when !string.IsNullOrWhiteSpace(Location) => new FileLocator(Location, Bookmark()),
         _ => null,
     };
 
-    /// <summary>The kind and location stored for <paramref name="locator"/>.</summary>
-    public static (string Kind, string Location) Describe(SourceLocator locator) => locator switch
+    /// <summary>Points this entry at <paramref name="locator"/> - its place and its access.</summary>
+    public void Locate(SourceLocator locator)
     {
-        FileLocator file => (FileKind, file.Path),
-        _ => throw new ArgumentException($"No saved form for {locator.GetType().Name}.", nameof(locator)),
-    };
+        switch (locator)
+        {
+            case FileLocator file:
+                Kind = FileKind;
+                Location = file.Path;
+                Access = file.Bookmark is { } bookmark ? Convert.ToBase64String(bookmark) : null;
+                break;
+            default:
+                throw new ArgumentException($"No saved form for {locator.GetType().Name}.", nameof(locator));
+        }
+    }
+
+    private byte[]? Bookmark()
+    {
+        try
+        {
+            return Access is { Length: > 0 } text ? Convert.FromBase64String(text) : null;
+        }
+        catch (FormatException)
+        {
+            return null;
+        }
+    }
 }
 
 /// <summary>The saved sources as sealed: most recent first, pinned and unpinned together.</summary>

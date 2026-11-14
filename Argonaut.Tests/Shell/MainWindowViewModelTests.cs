@@ -398,6 +398,45 @@ public sealed class MainWindowViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task ASavedFileFoundElsewhere_IsOpenedThere_AndTheEntryFollowsIt()
+    {
+        string before = WriteJsonFile();
+        string after = Path.Combine(tempDir, "moved.json");
+        var access = new MovingFileAccess(after);
+        var opened = new List<IByteOrigin>();
+        var vm = new MainWindowViewModel(SettingsStore.InMemory(), TestSchemas.Catalog(), _ => Task.FromResult(true),
+            documentLoader: (_, origin, _) =>
+            {
+                opened.Add(origin);
+                return Task.FromResult<IDocumentViewModel>(new FakeDocument { FilePath = origin.LocationText(), Origin = origin });
+            },
+            fileAccess: access);
+        await vm.OpenPathAsync(before);
+        await vm.CloseFileAsync();
+        File.Move(before, after);
+
+        vm.OpenSavedSource(Assert.Single(vm.RecentSources).Id);
+        await WaitUntil(() => opened.Count == 2);
+
+        Assert.Equal(Path.GetFullPath(after), opened[1].FilePathOf());
+        Assert.Equal(Path.GetFullPath(after), Assert.Single(vm.RecentSources).LocationText);
+        Assert.Equal(0, access.Released);
+        await vm.CloseFileAsync();
+        Assert.Equal(1, access.Released);
+    }
+
+    /// <summary>A file access whose bookmarks always find the file at one new place, counting the
+    /// grants given back.</summary>
+    private sealed class MovingFileAccess(string movedTo) : Argonaut.Shell.Files.IFileAccess
+    {
+        public int Released { get; private set; }
+
+        public FileLocator Describe(string path) => new(path, bookmark: [1]);
+
+        public FileAccessGrant Open(FileLocator locator) => new(new FileLocator(movedTo, bookmark: [2]), () => Released++);
+    }
+
+    [Fact]
     public async Task OpenPath_NonexistentFile_IsIgnored()
     {
         var vm = CreateViewModel((_, _, _) => throw new Exception("loader must not be called"));

@@ -68,9 +68,9 @@ sealed record HttpLocator(Uri Url) : SourceLocator      // added with the HTTP s
   detection, `ByteOriginVersion`, the views' display paths, reveal-in-folder, schema bindings.
   CLAUDE.md's origin section is rewritten to say "a file locator" where it says "Path".
 
-### File access (`Engine/Bytes`, impls in `Shell`)
+### File access (`FileAccessGrant` in `Engine/Bytes`, `IFileAccess` and impls in `Shell/Files`)
 
-`IFileAccess`, chosen in the composition root:
+`IFileAccess`, chosen in the composition root (`FileAccesses.ForThisPlatform`):
 - `Describe(path)` → the `FileLocator` for a file the user just picked or dropped, with a
   bookmark where the platform has them.
 - `Open(FileLocator)` → a grant (`IDisposable`) plus the path to open now, resolving a bookmark
@@ -81,6 +81,12 @@ sealed record HttpLocator(Uri Url) : SourceLocator      // added with the HTTP s
   the macOS `IFileReplacer` will take. Entitlement for bookmarks on the store build.
 - `FileByteOrigin` holds its grant and releases it on dispose, so access lives exactly as long
   as the input does (`AdoptOrigins` already owns that lifetime).
+- A file counts as moved only when it is no longer at its saved path: a bookmark resolves
+  symlinks (`/var` is `/private/var`), so the resolved spelling is not trusted over a path that
+  still exists. A moved file's entry follows it (`SavedSourceStore.Relocate`); a stale bookmark
+  is refreshed.
+- A security-scoped bookmark is asked for first and a plain one accepted if refused; resolving
+  never prompts or mounts a volume, so an unconnected share falls back to the path at once.
 
 ### Sealing (`Engine/Settings`)
 
@@ -138,7 +144,7 @@ find …" with "Remove from list"; other failures keep the open's usual reportin
    sealed on disk (no path text in `settings.json`), empty when the blob will not open.
 4. [x] Empty-state rows: rename, pill on non-file rows; toast action and "Remove from list" on
    a failed reopen. Look from a screenshot.
-5. [ ] `IFileAccess` with the macOS bookmark implementation; `FileByteOrigin` holds the grant.
+5. [x] `IFileAccess` with the macOS bookmark implementation; `FileByteOrigin` holds the grant.
    Tests: describe/open round trip on a temp file, a moved file found through its bookmark
    (macOS), the grant released on dispose.
 6. [ ] Schema bindings keyed by locator identity and sealed. Tests: an explicit choice

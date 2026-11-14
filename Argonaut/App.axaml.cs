@@ -12,6 +12,7 @@ using Argonaut.Engine.Settings;
 using Argonaut.Engine.Transforms;
 using Argonaut.Features.Json.Schema;
 using Argonaut.Shell;
+using Argonaut.Shell.Files;
 using Argonaut.Shell.Sealing;
 using Argonaut.Shell.CommandLine;
 using Argonaut.Shell.Launching;
@@ -66,7 +67,7 @@ public partial class App : Application
 
             var window = new MainWindow(settings, schemaCatalog, log, OpenLogFolderAction(launcher),
                 ConfigLocationSource.ForCurrentPlatform(), recipes, launcher,
-                SettingsSealers.ForThisPlatform(AppDataPaths.SealingKeyFile));
+                SettingsSealers.ForThisPlatform(AppDataPaths.SealingKeyFile), FileAccesses.ForThisPlatform());
             mainWindow = window;
             desktop.MainWindow = window;
 

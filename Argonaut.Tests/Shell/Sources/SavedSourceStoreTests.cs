@@ -183,4 +183,34 @@ public sealed class SavedSourceStoreTests
         var kept = SavedSourceList.Deserialize(sealer.Open(block.Sealed!)!);
         Assert.Contains(kept!.Entries, e => e.Kind == "ftp");
     }
+
+    [Fact]
+    public void ABookmark_IsKept_AndRefreshedByTheNextTouch()
+    {
+        var block = new SavedSourcesBlock();
+        var store = Store(block);
+        string path = Path.Combine(Path.GetTempPath(), "a.json");
+        store.Touch(new FileLocator(path, bookmark: [1, 2, 3]));
+        store.Touch(new FileLocator(path, bookmark: [4, 5]));
+
+        var reopened = Store(block);
+
+        Assert.Equal([4, 5], ((FileLocator)reopened.Recent[0].Locator!).Bookmark);
+    }
+
+    [Fact]
+    public void Relocating_MovesAnEntryToItsNewPlace_KeepingItsNameAndPin()
+    {
+        var store = Store();
+        store.Touch(File("old.json"));
+        string id = store.Recent[0].Id;
+        store.Rename(id, "Orders");
+        store.TogglePin(id);
+
+        store.Relocate(id, File("new.json"));
+
+        var entry = Assert.Single(store.Pinned);
+        Assert.Equal("Orders", entry.Name);
+        Assert.True(File("new.json").IsSamePlace(entry.Locator));
+    }
 }

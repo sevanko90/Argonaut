@@ -18,6 +18,9 @@ public sealed class FileByteOrigin : IByteOrigin
 {
     private readonly string path;
 
+    // The permission this file was opened under, given back on dispose; null when it needed none.
+    private readonly FileAccessGrant? grant;
+
     public FileByteOrigin(string path)
         : this(new FileLocator(path))
     {
@@ -29,6 +32,13 @@ public sealed class FileByteOrigin : IByteOrigin
         Locator = locator;
         this.path = locator.Path;
         DisplayName = locator.DefaultName;
+    }
+
+    /// <summary>A file opened under <paramref name="grant"/>, which this origin now owns.</summary>
+    public FileByteOrigin(FileAccessGrant grant)
+        : this(grant.Locator)
+    {
+        this.grant = grant;
     }
 
     public string DisplayName { get; }
@@ -64,8 +74,8 @@ public sealed class FileByteOrigin : IByteOrigin
     public void Dispose()
     {
         KeptIndexes.Clear();
-
-        // Nothing to release: the file is the user's, and every source handed out is owned and
-        // released by whoever asked for it.
+        // The only thing to give back is the permission it was opened under: the file is the
+        // user's, and every source handed out is owned and released by whoever asked for it.
+        grant?.Dispose();
     }
 }

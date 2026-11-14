@@ -68,18 +68,27 @@ public sealed class JsonViewModel : TreeDocumentViewModel
     /// since those are never a shell document.</summary>
     public override JsonToolbarViewModel? Toolbar => toolbar;
 
+    private readonly JsonViewSettings jsonViewSettings;
     private readonly SchemaBindings schemaBindings;
     private readonly JsonSchemaCatalog schemaCatalog;
+    private readonly SchemaCatalogMeasurement? catalogMeasurement;
 
-    /// <param name="viewSettings">Where the default expand depth is remembered.</param>
+    /// <param name="viewSettings">Where the default expand depth is remembered, and whether
+    /// matched schemas are opened.</param>
     /// <param name="schemaBindings">Where the schema chosen for each document is remembered.</param>
     /// <param name="schemaCatalog">The schemas a document can be bound to.</param>
     /// <param name="launcher">Opens the links value hints offer; null opens none.</param>
+    /// <param name="schemaMatcher">Measures the catalog against the document - ranking the schema
+    /// list and choosing a schema to bind unasked; null measures nothing (the nested per-NDJSON-line
+    /// instances, whose owner does it).</param>
     public JsonViewModel(JsonViewSettings viewSettings, SchemaBindings schemaBindings, JsonSchemaCatalog schemaCatalog,
-        ISystemLauncher? launcher = null) : base(viewSettings, launcher)
+        ISystemLauncher? launcher = null, ISchemaMatcher? schemaMatcher = null) : base(viewSettings, launcher)
     {
+        jsonViewSettings = viewSettings;
         this.schemaBindings = schemaBindings;
         this.schemaCatalog = schemaCatalog;
+        if (schemaMatcher is not null)
+            catalogMeasurement = new SchemaCatalogMeasurement(schemaMatcher, SchemaSettings, () => jsonViewSettings.OpenMatchedSchemas);
 
         SchemaSettings.SchemaChanged += OnSchemaChanged;
         SchemaSettings.PropertyChanged += OnSchemaSettingsPropertyChanged;
@@ -131,6 +140,10 @@ public sealed class JsonViewModel : TreeDocumentViewModel
     private void OnSchemaSettingsPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName is not (null or nameof(JsonSchemaSettings.SelectedEntry) or nameof(JsonSchemaSettings.SelectedRootName)) || Toolbar is null)
+            return;
+
+        // A matched schema is worked out again on every open, never remembered.
+        if (SchemaSettings.IsMatched)
             return;
 
         // Keyed by path, so a document without one (a paste) does not remember its choice -
@@ -226,7 +239,9 @@ public sealed class JsonViewModel : TreeDocumentViewModel
         DefaultExpandDepth = ViewSettings.ExpandDepth;
         toolbar = new JsonToolbarViewModel(HintSettings, SchemaSettings, DefaultExpandDepth, ChooseExpandDepth, NavigateToPathAsync,
             refreshSchemaEntries: () => RefreshSchemaEntriesAsync(origin.Path), openSchemaFolder: schemaCatalog.OpenUserDirectory,
-            showIndentGuides: ShowIndentGuides, applyIndentGuides: ChooseIndentGuides);
+            showIndentGuides: ShowIndentGuides, applyIndentGuides: ChooseIndentGuides,
+            openMatchedSchemas: jsonViewSettings.OpenMatchedSchemas,
+            applyOpenMatchedSchemas: catalogMeasurement is null ? null : ChooseOpenMatchedSchemas);
 
         indexBasis = IndexBasis.Of(origin);
         var loadTask = LoadCore(origin.Open(), progressReporter, indexBasis?.FindKept<JsonKeptStructure>(JsonKeptStructure.Key));
@@ -253,8 +268,13 @@ public sealed class JsonViewModel : TreeDocumentViewModel
 
         SchemaSettings.SetEntries(entries);
 
-        if (preselected is { } entry)
-            await SchemaSettings.SelectAsync(entry, rootName);
+        // Selected before the catalog counts as gathered, so a match cannot get in first.
+        var restoring = preselected is { } entry ? SchemaSettings.SelectAsync(entry, rootName) : Task.CompletedTask;
+        catalogMeasurement?.CatalogGathered(bindings, documentPath);
+
+        // Measured even when a binding is restored: it binds nothing then, but still ranks the list.
+        await MeasureCatalogAsync(mayBind: true);
+        await restoring;
     }
 
     /// <summary>Re-lists the schema catalog without touching the current selection - so a
@@ -263,8 +283,54 @@ public sealed class JsonViewModel : TreeDocumentViewModel
     {
         var bindings = schemaBindings.Entries;
         var (entries, _, _) = await Task.Run(() => schemaCatalog.GatherForDocument(documentPath, bindings));
-        if (!IsDisposed)
-            SchemaSettings.SetEntries(entries);
+        if (IsDisposed)
+            return;
+
+        SchemaSettings.SetEntries(entries);
+
+        // Re-ranked for the list being opened, but never bound from here: a schema appearing
+        // while the user is looking at the list would be choosing for them.
+        await MeasureCatalogAsync(mayBind: false);
+    }
+
+    /// <summary>
+    /// Measures the catalog against this document's outermost property names: ranks the schema
+    /// list by fit, and - with <paramref name="mayBind"/>, "Open matched schemas" on, and nothing
+    /// chosen for this document - binds the schema that clearly fits. Silent until both the
+    /// catalog and the tree exist, so it is called from both sides and from indexing completing,
+    /// when a sample cut short by a member still arriving can see further.
+    ///
+    /// Only an object document is measured: a type cannot yet be bound as an array root's items,
+    /// so ranking schemas against an array's first element would offer bindings that label the
+    /// wrong level.
+    /// </summary>
+    /// <summary>"Open matched schemas" ticked or unticked: remembered for every document, and
+    /// ticking it tries this one now.</summary>
+    private void ChooseOpenMatchedSchemas(bool open)
+    {
+        jsonViewSettings.OpenMatchedSchemas = open;
+        if (open)
+            _ = MeasureCatalogAsync(mayBind: true);
+    }
+
+    internal Task MeasureCatalogAsync(bool mayBind)
+    {
+        if (catalogMeasurement is null || Toolbar is null)
+            return Task.CompletedTask;
+
+        return catalogMeasurement.MeasureAsync(SampleObjectRootKeys, mayBind);
+    }
+
+    /// <summary>The outermost object's property names, by the bounded walk the type ranking
+    /// takes - up to <see cref="JsonDocumentKeySampler.MaxKeys"/>, copied out, never a subtree -
+    /// or empty for an array document, or before the tree exists.</summary>
+    private IReadOnlyList<byte[]> SampleObjectRootKeys()
+    {
+        if (reader is null || text is null || IsDisposed)
+            return Array.Empty<byte[]>();
+
+        var keys = JsonDocumentKeySampler.ReadRootKeys(reader, text, out bool fromArrayElement);
+        return fromArrayElement ? Array.Empty<byte[]>() : keys;
     }
 
     /// <summary>
@@ -295,6 +361,7 @@ public sealed class JsonViewModel : TreeDocumentViewModel
         ShowTree(reader, painter, gutters);
 
         UpdateSchemaRootMatches();
+        _ = MeasureCatalogAsync(mayBind: true);
 
         // Inference dereferences the mapping, so the session must join it before unmapping.
         _ = InferDefaultDateSchemeAsync(session, reader, text);
@@ -319,6 +386,13 @@ public sealed class JsonViewModel : TreeDocumentViewModel
         StatusDetail = ByteLengthText.Format(Bytes?.AvailableLength ?? 0);
         Tree?.NotifyGrew();
         UpdateSchemaRootMatches();
+        _ = MeasureCatalogAsync(mayBind: true);
+    }
+
+    protected override void DisposeCore()
+    {
+        catalogMeasurement?.Dispose();
+        base.DisposeCore();
     }
 
     /// <summary>Indexing stopped early (failure, or cancellation on <paramref name="failure"/> null).</summary>

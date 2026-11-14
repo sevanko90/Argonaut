@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Globalization;
 using System.Threading;
@@ -157,6 +158,7 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
     private readonly JsonSchemaCatalog schemaCatalog;
     private readonly ISystemLauncher? launcher;
     private readonly LineNumberingPreference? lineNumbers;
+    private readonly SchemaCatalogMeasurement? catalogMeasurement;
 
     /// <param name="viewSettings">Where the default expand depth is remembered; also handed to
     /// each line's nested tree.</param>
@@ -165,14 +167,18 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
     /// <param name="lineNumbers">How an excerpt numbers its lines; null numbers from the start.</param>
     /// <param name="launcher">Handed to each line's nested tree, to open the links its value
     /// hints offer; null opens none.</param>
+    /// <param name="schemaMatcher">Measures the catalog against the first line - ranking the
+    /// schema list and choosing a schema to bind unasked; null measures nothing.</param>
     public NdJsonViewModel(JsonViewSettings viewSettings, SchemaBindings schemaBindings, JsonSchemaCatalog schemaCatalog,
-        LineNumberingPreference? lineNumbers = null, ISystemLauncher? launcher = null)
+        LineNumberingPreference? lineNumbers = null, ISystemLauncher? launcher = null, ISchemaMatcher? schemaMatcher = null)
     {
         this.launcher = launcher;
         this.lineNumbers = lineNumbers;
         this.viewSettings = viewSettings;
         this.schemaBindings = schemaBindings;
         this.schemaCatalog = schemaCatalog;
+        if (schemaMatcher is not null)
+            catalogMeasurement = new SchemaCatalogMeasurement(schemaMatcher, SchemaSettings, () => viewSettings.OpenMatchedSchemas);
 
         HintSettings.PropertyChanged += OnMasterHintSettingsPropertyChanged;
         SchemaSettings.SchemaChanged += OnMasterSchemaChanged;
@@ -190,6 +196,10 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
     private void OnMasterSchemaSettingsPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (Origin?.Path is not { } documentPath)
+            return;
+
+        // A matched schema is worked out again on every open, never remembered.
+        if (SchemaSettings.IsMatched)
             return;
 
         if (e.PropertyName is null or nameof(JsonSchemaSettings.SelectedEntry) or nameof(JsonSchemaSettings.SelectedRootName))
@@ -276,7 +286,9 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
         DefaultExpandDepth = viewSettings.ExpandDepth;
         toolbar = new JsonToolbarViewModel(HintSettings, SchemaSettings, DefaultExpandDepth, ChooseExpandDepth,
             refreshSchemaEntries: () => RefreshSchemaEntriesAsync(origin.Path), openSchemaFolder: schemaCatalog.OpenUserDirectory,
-            showIndentGuides: viewSettings.ShowIndentGuides, applyIndentGuides: ChooseIndentGuides);
+            showIndentGuides: viewSettings.ShowIndentGuides, applyIndentGuides: ChooseIndentGuides,
+            openMatchedSchemas: viewSettings.OpenMatchedSchemas,
+            applyOpenMatchedSchemas: catalogMeasurement is null ? null : ChooseOpenMatchedSchemas);
 
         // Alongside indexing, not blocking it - see JsonViewModel.ApplyInitialSchemaAsync.
         _ = ApplyInitialSchemaAsync(origin.Path);
@@ -300,6 +312,7 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
 
         UpdateStatusDetail();
         MonitorIndexing();
+        _ = MeasureCatalogAsync(mayBind: true);
     }
 
     /// <summary>Populates the schema catalog and applies any remembered binding for the
@@ -313,8 +326,12 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
 
         SchemaSettings.SetEntries(entries);
 
-        if (preselected is { } entry)
-            await SchemaSettings.SelectAsync(entry, rootName);
+        // Selected before the catalog counts as gathered, so a match cannot get in first.
+        var restoring = preselected is { } entry ? SchemaSettings.SelectAsync(entry, rootName) : Task.CompletedTask;
+        catalogMeasurement?.CatalogGathered(bindings, documentPath);
+
+        await MeasureCatalogAsync(mayBind: true);
+        await restoring;
     }
 
     /// <summary>Re-lists the schema catalog without touching the current selection - see
@@ -323,8 +340,38 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
     {
         var bindings = schemaBindings.Entries;
         var (entries, _, _) = await Task.Run(() => schemaCatalog.GatherForDocument(documentPath, bindings));
-        if (!IsDisposed)
-            SchemaSettings.SetEntries(entries);
+        if (IsDisposed)
+            return;
+
+        SchemaSettings.SetEntries(entries);
+
+        // Re-ranked, never bound - see JsonViewModel.RefreshSchemaEntriesAsync.
+        await MeasureCatalogAsync(mayBind: false);
+    }
+
+    /// <summary>Measures the catalog against the first line's property names - the line every
+    /// NDJSON file has, and the one most likely to be representative. See
+    /// <see cref="SchemaCatalogMeasurement"/>.</summary>
+    /// <summary>"Open matched schemas" ticked or unticked - see JsonViewModel's counterpart.</summary>
+    private void ChooseOpenMatchedSchemas(bool open)
+    {
+        viewSettings.OpenMatchedSchemas = open;
+        if (open)
+            _ = MeasureCatalogAsync(mayBind: true);
+    }
+
+    internal Task MeasureCatalogAsync(bool mayBind)
+        => catalogMeasurement?.MeasureAsync(SampleFirstLineKeys, mayBind) ?? Task.CompletedTask;
+
+    /// <summary>The first line's outermost property names, read from at most
+    /// <see cref="JsonTextKeySampler.WindowBytes"/> of it; empty until a line has been indexed.</summary>
+    private IReadOnlyList<byte[]> SampleFirstLineKeys()
+    {
+        if (this.session is not { } current || IsDisposed || current.Index.LineCount == 0)
+            return Array.Empty<byte[]>();
+
+        var line = current.Index.GetLineSpan(0);
+        return JsonTextKeySampler.ReadTopLevelKeys(current.Bytes.RequireContiguous(line.Offset, Math.Min(line.Length, JsonTextKeySampler.WindowBytes)));
     }
 
     public override ISearchNavigator CreateSearchNavigator() => new NdJsonSearchNavigator(this);
@@ -395,6 +442,9 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
     {
         this.indexBasis?.Keep(FileLineAnchors.Key, this.session?.Index.DetachAnchors());
         UpdateStatusDetail();
+
+        // A one-line file without a trailing newline has no line until indexing settles it.
+        _ = MeasureCatalogAsync(mayBind: true);
     }
 
     /// <summary>Indexing stopped early (failure, or cancellation on <paramref name="failure"/> null).</summary>
@@ -486,5 +536,6 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
             selectedLineJsonViewModel.SchemaSettings.PropertyChanged -= OnChildSchemaSettingsPropertyChanged;
         }
         selectedLineJsonViewModel?.Dispose();
+        catalogMeasurement?.Dispose();
     }
 }

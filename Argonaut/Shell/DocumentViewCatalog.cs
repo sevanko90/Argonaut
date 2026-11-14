@@ -58,9 +58,12 @@ public sealed class DocumentViewCatalog
     /// <paramref name="settings"/> when null.</param>
     /// <param name="recipes">The recipes the raw view offers; null offers none.</param>
     /// <param name="launcher">Opens the links the views' value hints offer; null opens none.</param>
+    /// <param name="schemaMatcher">Measures the schema catalog against each JSON document; one
+    /// over the catalog's files, kept for the catalog's life, when null.</param>
     public DocumentViewCatalog(ISettingsStore settings, JsonSchemaCatalog schemaCatalog, LineNumberingPreference? lineNumbers = null,
-        IRecipeStore? recipes = null, ISystemLauncher? launcher = null)
+        IRecipeStore? recipes = null, ISystemLauncher? launcher = null, ISchemaMatcher? schemaMatcher = null)
     {
+        schemaMatcher ??= new CachedSchemaMatcher();
         lineNumbers ??= new LineNumberingPreference(settings.Get<LineNumberingSettings>());
         var jsonView = settings.Get<JsonViewSettings>();
         var xmlView = settings.Get<XmlViewSettings>();
@@ -69,8 +72,8 @@ public sealed class DocumentViewCatalog
 
         registrations =
         [
-            (() => new JsonViewModel(jsonView, schemaBindings, schemaCatalog, launcher), (vm, _, o, r) => ((JsonViewModel)vm).LoadAsync(o, r)),
-            (() => new NdJsonViewModel(jsonView, schemaBindings, schemaCatalog, lineNumbers, launcher), (vm, _, o, r) => ((NdJsonViewModel)vm).LoadAsync(o, r)),
+            (() => new JsonViewModel(jsonView, schemaBindings, schemaCatalog, launcher, schemaMatcher), (vm, _, o, r) => ((JsonViewModel)vm).LoadAsync(o, r)),
+            (() => new NdJsonViewModel(jsonView, schemaBindings, schemaCatalog, lineNumbers, launcher, schemaMatcher), (vm, _, o, r) => ((NdJsonViewModel)vm).LoadAsync(o, r)),
             (() => new XmlViewModel(xmlView, launcher), (vm, _, o, r) => ((XmlViewModel)vm).LoadAsync(o, r)),
             (() => new CsvViewModel(lineNumbers), (vm, k, o, r) => ((CsvViewModel)vm).LoadAsync(o, k == FileTypeDetector.FileKind.Tsv ? (byte)'\t' : (byte)',', r)),
             (() => new RawViewModel(rawView, lineNumbers: lineNumbers, recipes: recipes, launcher: launcher), (vm, _, o, r) => ((RawViewModel)vm).LoadAsync(o, r)),

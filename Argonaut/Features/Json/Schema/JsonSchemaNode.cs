@@ -40,5 +40,11 @@ internal sealed class JsonSchemaNode
 
     public int[]? PropertyNodeIds;
 
+    /// <summary>The names <c>required</c> lists, as UTF-8 and sorted ordinally like
+    /// <see cref="PropertyKeysUtf8"/>. Never used to validate a document - only as evidence when
+    /// deciding whether a schema fits one (see <see cref="SchemaAutoMatchRule"/>). Null when the
+    /// schema lists none.</summary>
+    public byte[][]? RequiredKeysUtf8;
+
     public EnumLabel[]? EnumLabels;
 }

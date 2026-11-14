@@ -1,10 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
 
-  "$comment": "A WORKING SCHEMA THAT DOUBLES AS THE WORKED EXAMPLE. Argonaut ships this as 'geojson' in the schema dropdown - pick it to label any GeoJSON document. Argonaut also copies it into your own schema folder as 'geojson.example.json', purely as something to read and crib from: the dropdown skips any file ending in '.example.json', so your copy does not show up twice. Edit that copy freely. Rename it to 'geojson.json' and it takes over from the built-in one, since a user schema shadows a bundled schema of the same name; rename it to anything else and it appears as its own entry alongside. Every $comment in here is guidance for you as a schema author: JSON Schema reserves $comment for schema maintainers, and Argonaut never displays it. What Argonaut DOES display: 'title' renders as the muted label after a value, and 'description' becomes that label's tooltip. A schema that matches nothing simply shows nothing - it is never an error.",
+  "$comment": "A WORKING SCHEMA THAT DOUBLES AS THE WORKED EXAMPLE. Argonaut ships this as 'geojson' in the schema dropdown - pick it to label any GeoJSON document. Argonaut also copies it into your own schema folder as 'geojson.example.json', purely as something to read and crib from: the dropdown skips any file ending in '.example.json', so your copy does not show up twice. Edit that copy freely. Rename it to 'geojson.json' and it takes over from the built-in one, since a user schema shadows a bundled schema of the same name; rename it to anything else and it appears as its own entry alongside. Every $comment in here is guidance for you as a schema author: JSON Schema reserves $comment for schema maintainers, and Argonaut never displays it. What Argonaut DOES display: 'title' renders as the muted label after a value, and 'description' becomes that label's tooltip. A schema that matches nothing simply shows nothing - it is never an error. 'required' is never validated either: Argonaut only uses it as evidence when deciding whether a schema fits a document it opens ('Open matched schemas' in the schema menu), and listing what a type always carries is what lets a small type like this one be matched on its own.",
 
   "title": "GeoJSON FeatureCollection",
   "description": "A set of geographic features (RFC 7946).",
+
+  "required": ["type", "features"],
 
   "properties": {
     "type": {
@@ -41,6 +43,7 @@
       "$comment": "No title here on purpose - this definition is used as the items of a long array (see properties/features), so a title would label every element. Contrast $defs/geometry, which IS titled because it is referenced from a single-valued property and so renders once per feature. The rule of thumb: a repeated label earns its place only when it distinguishes that row from its siblings.",
       "description": "One geographic feature: a geometry plus arbitrary application properties.",
       "type": "object",
+      "required": ["type", "geometry", "properties"],
       "properties": {
         "type": { "title": "Object type" },
         "id": { "title": "Feature ID", "description": "Optional identifier, a string or a number." },
@@ -60,6 +63,7 @@
       "title": "Geometry",
       "description": "The shape of a feature: a point, a line, an area, or a collection of these.",
       "type": "object",
+      "required": ["type"],
       "properties": {
         "type": {
           "title": "Geometry type",

@@ -430,7 +430,7 @@ public sealed class JsonToolbarViewModelTests : IDisposable
     {
         var toolbar = new JsonToolbarViewModel(new DateHintSettings(), new JsonSchemaSettings(), 0, _ => { });
 
-        Assert.Equal(new[] { JsonToolbarViewModel.NoSchemaLabel, JsonToolbarViewModel.OpenSchemaFolderLabel }, toolbar.SchemaItems);
+        Assert.Equal(new[] { JsonToolbarViewModel.NoSchemaLabel, JsonToolbarViewModel.OpenSchemaFolderLabel }, toolbar.SchemaItems.Select(r => r.Name));
         Assert.Equal(0, toolbar.SelectedSchemaIndex);
     }
 
@@ -444,7 +444,7 @@ public sealed class JsonToolbarViewModelTests : IDisposable
 
         Assert.Equal(
             new[] { JsonToolbarViewModel.NoSchemaLabel, "alpha", "beta", JsonToolbarViewModel.OpenSchemaFolderLabel },
-            toolbar.SchemaItems);
+            toolbar.SchemaItems.Select(r => r.Name));
     }
 
     [Fact]
@@ -590,5 +590,144 @@ public sealed class JsonToolbarViewModelTests : IDisposable
         toolbar.TreeControls.ShowIndentGuides = false;
 
         Assert.Equal(new[] { false }, applied);
+    }
+
+    private static SchemaFit Fit(SchemaCatalogEntry entry, double coverage, int matched = 8)
+        => new(entry, new SchemaRootMatch(null, 0, matched, 8, 8, coverage, coverage));
+
+    [Fact]
+    public void SchemasThatFit_LeadTheList_UnderTheirOwnHeading()
+    {
+        var schemaSettings = new JsonSchemaSettings();
+        var alpha = WriteSchema("alpha");
+        var beta = WriteSchema("beta");
+        var gamma = WriteSchema("gamma");
+        schemaSettings.SetEntries(new[] { alpha, beta, gamma });
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
+
+        schemaSettings.SetFits(new[] { Fit(gamma, 1.0), Fit(alpha, 0.6) });
+
+        Assert.Equal(
+            new[]
+            {
+                JsonToolbarViewModel.NoSchemaLabel,
+                JsonToolbarViewModel.LikelySchemasHeader, "gamma", "alpha",
+                JsonToolbarViewModel.AllSchemasHeader, "beta",
+                JsonToolbarViewModel.OpenSchemaFolderLabel,
+            },
+            toolbar.SchemaItems.Select(r => r.Name));
+        Assert.Equal("100%", toolbar.SchemaItems[2].Score);
+        Assert.True(toolbar.SchemaItems[1].IsHeader);
+        Assert.False(toolbar.SchemaItems[1].IsSelectable);
+        Assert.True(toolbar.SchemaItems[4].ShowSeparator);
+    }
+
+    [Fact]
+    public void OnlyTheSchemaThatWouldBeMatched_IsMarkedBestMatch()
+    {
+        var schemaSettings = new JsonSchemaSettings();
+        var alpha = WriteSchema("alpha");
+        var beta = WriteSchema("beta");
+        schemaSettings.SetEntries(new[] { alpha, beta });
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
+
+        schemaSettings.SetFits(new[] { Fit(beta, 1.0), Fit(alpha, 0.6) }, recommended: beta);
+
+        Assert.True(toolbar.SchemaItems[2].IsRecommended);
+        Assert.False(toolbar.SchemaItems[3].IsRecommended);
+    }
+
+    [Fact]
+    public async Task PickingARankedSchema_BindsThatSchema()
+    {
+        var schemaSettings = new JsonSchemaSettings();
+        var alpha = WriteSchema("alpha");
+        var beta = WriteSchema("beta");
+        schemaSettings.SetEntries(new[] { alpha, beta });
+        schemaSettings.SetFits(new[] { Fit(beta, 1.0) });
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
+
+        SelectSchema(toolbar, 2);
+        await WaitForDocumentAsync(schemaSettings);
+
+        Assert.Equal(beta, schemaSettings.SelectedEntry);
+        Assert.Equal(2, toolbar.SelectedSchemaIndex);
+
+        SelectSchema(toolbar, 4);
+        await WaitForDocumentAsync(schemaSettings);
+
+        Assert.Equal(alpha, schemaSettings.SelectedEntry);
+    }
+
+    [Fact]
+    public async Task ARerankedList_KeepsTheSelectionOnTheSameSchema()
+    {
+        var schemaSettings = new JsonSchemaSettings();
+        var alpha = WriteSchema("alpha");
+        var beta = WriteSchema("beta");
+        schemaSettings.SetEntries(new[] { alpha, beta });
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
+        await schemaSettings.SelectAsync(alpha);
+        Assert.Equal(1, toolbar.SelectedSchemaIndex);
+
+        schemaSettings.SetFits(new[] { Fit(beta, 1.0) });
+
+        Assert.Equal("alpha", toolbar.SchemaItems[toolbar.SelectedSchemaIndex].Name);
+    }
+
+    [Fact]
+    public void AHeader_CannotBePicked()
+    {
+        var schemaSettings = new JsonSchemaSettings();
+        var alpha = WriteSchema("alpha");
+        schemaSettings.SetEntries(new[] { alpha });
+        schemaSettings.SetFits(new[] { Fit(alpha, 1.0) });
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
+
+        SelectSchema(toolbar, 1);
+
+        Assert.Null(schemaSettings.SelectedEntry);
+        Assert.Equal(0, toolbar.SelectedSchemaIndex);
+    }
+
+    [Fact]
+    public async Task AMatchedSchema_SaysSoOnTheButton()
+    {
+        var schemaSettings = new JsonSchemaSettings();
+        var alpha = WriteSchema("alpha");
+        schemaSettings.SetEntries(new[] { alpha });
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), schemaSettings, 0, _ => { });
+
+        await schemaSettings.SelectMatchedAsync(alpha, null);
+
+        Assert.Equal("alpha" + JsonToolbarViewModel.MatchedSuffix, toolbar.SchemaButtonText);
+
+        await schemaSettings.SelectAsync(alpha);
+
+        Assert.Equal("alpha", toolbar.SchemaButtonText);
+    }
+
+    [Fact]
+    public void OpenMatchedSchemas_ReflectsTheSetting_AndTellsTheOwnerWhenChanged()
+    {
+        var changes = new List<bool>();
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), new JsonSchemaSettings(), 0, _ => { },
+            openMatchedSchemas: true, applyOpenMatchedSchemas: changes.Add);
+
+        Assert.True(toolbar.SupportsSchemaMatching);
+        Assert.True(toolbar.OpenMatchedSchemas);
+
+        toolbar.OpenMatchedSchemas = false;
+        toolbar.OpenMatchedSchemas = true;
+
+        Assert.Equal([false, true], changes);
+    }
+
+    [Fact]
+    public void WithoutAnOwnerThatMatches_TheOptionIsHidden()
+    {
+        var toolbar = new JsonToolbarViewModel(new DateHintSettings(), new JsonSchemaSettings(), 0, _ => { });
+
+        Assert.False(toolbar.SupportsSchemaMatching);
     }
 }

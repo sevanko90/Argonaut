@@ -32,12 +32,23 @@ public sealed class JsonToolbarViewModel : ObservableObject
     /// opens the user schema folder and reverts the combo to whatever was selected before.</summary>
     public const string OpenSchemaFolderLabel = "Open schema folder…";
 
+    /// <summary>Heads the schemas that fit the open document, best first.</summary>
+    public const string LikelySchemasHeader = "Likely matches for this document";
+
+    /// <summary>Heads the rest of the catalog, below the likely matches.</summary>
+    public const string AllSchemasHeader = "All schemas";
+
+    /// <summary>Follows the schema's name on the button when it was matched rather than chosen.</summary>
+    public const string MatchedSuffix = " · matched";
+
     private readonly JsonSchemaSettings schemaSettings;
     private readonly Func<string, Task>? navigateToPath;
     private readonly Func<Task>? refreshSchemaEntries;
     private readonly Action? openSchemaFolder;
+    private readonly Action<bool>? applyOpenMatchedSchemas;
     private string jsonPathInput = string.Empty;
-    private IReadOnlyList<string> schemaItems = Array.Empty<string>();
+    private IReadOnlyList<SchemaListRow> schemaItems = Array.Empty<SchemaListRow>();
+    private bool openMatchedSchemas;
     private int selectedSchemaIndex;
     private bool isSchemaFlyoutOpen;
 
@@ -47,8 +58,14 @@ public sealed class JsonToolbarViewModel : ObservableObject
     // has since reopened to browse.
     private bool awaitingSchemaCloseDecision;
 
-    public JsonToolbarViewModel(DateHintSettings settings, JsonSchemaSettings schemaSettings, int initialExpandDepthIndex, Action<int> applyExpandDepth, Func<string, Task>? navigateToPath = null, Func<Task>? refreshSchemaEntries = null, Action? openSchemaFolder = null, bool showIndentGuides = false, Action<bool>? applyIndentGuides = null)
+    /// <param name="openMatchedSchemas">Whether "Open matched schemas" starts ticked.</param>
+    /// <param name="applyOpenMatchedSchemas">Told when the option is ticked or unticked; null hides
+    /// the option, for an owner that does not match schemas.</param>
+    public JsonToolbarViewModel(DateHintSettings settings, JsonSchemaSettings schemaSettings, int initialExpandDepthIndex, Action<int> applyExpandDepth, Func<string, Task>? navigateToPath = null, Func<Task>? refreshSchemaEntries = null, Action? openSchemaFolder = null, bool showIndentGuides = false, Action<bool>? applyIndentGuides = null,
+        bool openMatchedSchemas = false, Action<bool>? applyOpenMatchedSchemas = null)
     {
+        this.openMatchedSchemas = openMatchedSchemas;
+        this.applyOpenMatchedSchemas = applyOpenMatchedSchemas;
         DateHintControls = new DateHintToolbarState(settings);
         this.schemaSettings = schemaSettings;
         this.navigateToPath = navigateToPath;
@@ -116,23 +133,46 @@ public sealed class JsonToolbarViewModel : ObservableObject
             if (schemaSettings.SelectedEntry is not { } entry)
                 return NoSchemaLabel;
 
-            return SchemaRootPicker.IsApplicable
+            string text = SchemaRootPicker.IsApplicable
                 ? entry.DisplayName + SchemaPathSeparator + SchemaRootPicker.ButtonText
                 : entry.DisplayName;
+
+            // A schema nobody chose has to say why it is there, or it reads as a bug.
+            return schemaSettings.IsMatched ? text + MatchedSuffix : text;
         }
     }
 
-    /// <summary>Labels for the schema list: "No schema", one per catalog entry, then
-    /// "Open schema folder…".</summary>
-    public IReadOnlyList<string> SchemaItems
+    /// <summary>Whether the owner matches schemas to its document, and so offers
+    /// <see cref="OpenMatchedSchemas"/>.</summary>
+    public bool SupportsSchemaMatching => applyOpenMatchedSchemas is not null;
+
+    /// <summary>
+    /// "Open matched schemas": whether a document opened with nothing bound is given the catalog
+    /// schema that clearly fits it. Ticking it on also tries now, for this document - see the
+    /// owner's callback. Unticking it leaves a matched schema bound.
+    /// </summary>
+    public bool OpenMatchedSchemas
+    {
+        get => openMatchedSchemas;
+        set
+        {
+            if (SetField(ref openMatchedSchemas, value))
+                applyOpenMatchedSchemas?.Invoke(value);
+        }
+    }
+
+    /// <summary>The schema list: "No schema"; then, when schemas fit the document, those under
+    /// <see cref="LikelySchemasHeader"/> best first and the rest under <see cref="AllSchemasHeader"/>,
+    /// otherwise the catalog as it is; then "Open schema folder…".</summary>
+    public IReadOnlyList<SchemaListRow> SchemaItems
     {
         get => schemaItems;
         private set => SetField(ref schemaItems, value);
     }
 
-    /// <summary>Bound two-way to the schema combo. Index 0 clears the binding, the trailing index
-    /// opens the schema folder without changing the binding, and anything between selects the
-    /// corresponding <see cref="JsonSchemaSettings.Entries"/> item.
+    /// <summary>Bound two-way to the schema list. Index 0 clears the binding, the trailing index
+    /// opens the schema folder without changing the binding, a heading does nothing, and a schema
+    /// row selects that schema.
     ///
     /// The choice is *decided* here and *acted on* one dispatcher turn later: every branch either
     /// closes the flyout or rebuilds <see cref="SchemaItems"/>, and this setter runs inside the
@@ -150,10 +190,17 @@ public sealed class JsonToolbarViewModel : ObservableObject
 
             // Resolved now, against the list the user actually clicked in - by the time the
             // deferred body runs, entries may have been rebuilt underneath it.
+            var row = value < schemaItems.Count ? schemaItems[value] : null;
+            if (row is null || row.IsHeader)
+            {
+                UiDeferral.AfterCurrentInput(() =>
+                    SetField(ref selectedSchemaIndex, IndexOfSelectedEntry(), nameof(SelectedSchemaIndex)));
+                return;
+            }
+
             bool openFolder = value == schemaItems.Count - 1 && schemaItems.Count > 1;
-            var entries = schemaSettings.Entries;
-            bool clearing = !openFolder && (value < 1 || value > entries.Count);
-            SchemaCatalogEntry? chosen = openFolder || clearing ? null : entries[value - 1];
+            SchemaCatalogEntry? chosen = row.Entry;
+            bool clearing = !openFolder && chosen is null;
 
             UiDeferral.AfterCurrentInput(() =>
             {
@@ -165,14 +212,16 @@ public sealed class JsonToolbarViewModel : ObservableObject
                     return;
                 }
 
-                _ = schemaSettings.SelectAsync(chosen);
-
                 // Clearing the binding leaves nothing further to choose; picking one leaves the
-                // type open until the scores say whether it needs choosing at all.
+                // type open until the scores say whether it needs choosing at all. Armed before
+                // the load starts: a parse that has already finished by the time SelectAsync
+                // awaits it continues inline and raises RootOptions before SelectAsync returns.
                 if (clearing)
                     IsSchemaFlyoutOpen = false;
                 else
                     awaitingSchemaCloseDecision = true;
+
+                _ = schemaSettings.SelectAsync(chosen);
             });
         }
     }
@@ -215,7 +264,7 @@ public sealed class JsonToolbarViewModel : ObservableObject
     /// schema selects itself - both have to light up the combo without the user touching it.</summary>
     private void OnSchemaSettingsPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is null or nameof(JsonSchemaSettings.Entries))
+        if (e.PropertyName is null or nameof(JsonSchemaSettings.Entries) or nameof(JsonSchemaSettings.Fits))
             RebuildSchemaItems();
         else if (e.PropertyName is nameof(JsonSchemaSettings.SelectedEntry))
             SetField(ref selectedSchemaIndex, IndexOfSelectedEntry(), nameof(SelectedSchemaIndex));
@@ -224,7 +273,8 @@ public sealed class JsonToolbarViewModel : ObservableObject
         if (e.PropertyName is null
             or nameof(JsonSchemaSettings.SelectedEntry)
             or nameof(JsonSchemaSettings.RootOptions)
-            or nameof(JsonSchemaSettings.SelectedRootName))
+            or nameof(JsonSchemaSettings.SelectedRootName)
+            or nameof(JsonSchemaSettings.IsMatched))
             OnPropertyChanged(nameof(SchemaButtonText));
 
         if (e.PropertyName is null
@@ -253,13 +303,48 @@ public sealed class JsonToolbarViewModel : ObservableObject
     private void RebuildSchemaItems()
     {
         var entries = schemaSettings.Entries;
-        var items = new List<string>(entries.Count + 2) { NoSchemaLabel };
-        foreach (var entry in entries)
-            items.Add(entry.DisplayName);
-        items.Add(OpenSchemaFolderLabel);
+        var fits = schemaSettings.Fits;
+        var rows = new List<SchemaListRow>(entries.Count + 4) { SchemaListRow.Action(NoSchemaLabel) };
+
+        // Only fits still in the catalog: a list refreshed since the measurement may have lost one.
+        var listed = new HashSet<SchemaCatalogEntry>(entries);
+        var ranked = new List<SchemaFit>(fits.Count);
+        foreach (var fit in fits)
+        {
+            if (listed.Contains(fit.Entry))
+                ranked.Add(fit);
+        }
+
+        if (ranked.Count == 0)
+        {
+            foreach (var entry in entries)
+                rows.Add(SchemaListRow.Schema(entry));
+        }
+        else
+        {
+            rows.Add(SchemaListRow.Header(LikelySchemasHeader));
+            var shown = new HashSet<SchemaCatalogEntry>();
+            foreach (var fit in ranked)
+            {
+                rows.Add(SchemaListRow.Schema(fit.Entry, fit.Match, isRecommended: fit.Entry == schemaSettings.RecommendedFit));
+                shown.Add(fit.Entry);
+            }
+
+            if (shown.Count < entries.Count)
+            {
+                rows.Add(SchemaListRow.Header(AllSchemasHeader, showSeparator: true));
+                foreach (var entry in entries)
+                {
+                    if (!shown.Contains(entry))
+                        rows.Add(SchemaListRow.Schema(entry));
+                }
+            }
+        }
+
+        rows.Add(SchemaListRow.Action(OpenSchemaFolderLabel));
 
         // Items first: the index only means anything against the list it indexes into.
-        SchemaItems = items;
+        SchemaItems = rows;
         SetField(ref selectedSchemaIndex, IndexOfSelectedEntry(), nameof(SelectedSchemaIndex));
     }
 
@@ -268,11 +353,10 @@ public sealed class JsonToolbarViewModel : ObservableObject
         if (schemaSettings.SelectedEntry is not { } selected)
             return 0;
 
-        var entries = schemaSettings.Entries;
-        for (int i = 0; i < entries.Count; i++)
+        for (int i = 0; i < schemaItems.Count; i++)
         {
-            if (entries[i] == selected)
-                return i + 1;
+            if (schemaItems[i].Entry == selected)
+                return i;
         }
 
         return 0;

@@ -186,6 +186,16 @@ public sealed class JsonSchemaDocument
             ? nodes[nodeId].PropertyKeysUtf8 ?? Array.Empty<byte[]>()
             : Array.Empty<byte[]>();
 
+    /// <summary>
+    /// The names this node's <c>required</c> lists, ordinally sorted (empty when it lists none),
+    /// merged through <c>$ref</c> and <c>allOf</c> but not <c>oneOf</c>/<c>anyOf</c>. Evidence for
+    /// <see cref="SchemaAutoMatchRule"/> only - nothing validates a document against it.
+    /// </summary>
+    public IReadOnlyList<byte[]> GetRequiredKeys(int nodeId)
+        => (uint)nodeId < (uint)nodes.Length
+            ? nodes[nodeId].RequiredKeysUtf8 ?? Array.Empty<byte[]>()
+            : Array.Empty<byte[]>();
+
     /// <summary>How many properties this node declares - shown in the root picker as a cheap
     /// way to tell a two-field wrapper from the twenty-field payload it wraps.</summary>
     public int GetPropertyCount(int nodeId)

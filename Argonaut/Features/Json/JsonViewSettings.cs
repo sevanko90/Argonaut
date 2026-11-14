@@ -26,6 +26,10 @@ public sealed class JsonViewSettings : ISettingsBlock<JsonViewSettings>, ITreeVi
 
     /// <summary>Whether the tree draws a faint line down each open container's children.</summary>
     public bool ShowIndentGuides { get; set; }
+
+    /// <summary>Whether a document opened with no schema bound to it is given the catalog schema
+    /// that clearly fits it ("Open matched schemas"). On unless turned off.</summary>
+    public bool OpenMatchedSchemas { get; set; } = true;
 }
 
 [JsonSerializable(typeof(JsonViewSettings))]

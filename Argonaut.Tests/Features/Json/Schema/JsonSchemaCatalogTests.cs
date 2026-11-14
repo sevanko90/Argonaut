@@ -414,4 +414,17 @@ public sealed class JsonSchemaCatalogTests : IDisposable
             File.Delete(document);
         }
     }
+
+    [Fact]
+    public void GatherForDocument_AfterNoSchemaWasChosen_PreselectsNothing()
+    {
+        var bindings = new SchemaBindings();
+        bindings.Remember("/docs/a.json", null);
+
+        var (entries, preselected, rootName) = catalog.GatherForDocument("/docs/a.json", bindings.Entries);
+
+        Assert.Null(preselected);
+        Assert.Null(rootName);
+        Assert.Equal(catalog.Enumerate(), entries);
+    }
 }

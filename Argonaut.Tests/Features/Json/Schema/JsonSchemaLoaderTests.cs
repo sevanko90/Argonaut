@@ -282,4 +282,95 @@ public class JsonSchemaLoaderTests
             File.Delete(path);
         }
     }
+
+    private static string[] Required(JsonSchemaDocument schema, int nodeId)
+        => schema.GetRequiredKeys(nodeId).Select(k => Encoding.UTF8.GetString(k)).ToArray();
+
+    [Fact]
+    public void Required_IsReadSorted()
+    {
+        var schema = Parse("""{ "properties": { "b": {}, "a": {} }, "required": ["b", "a", "c"] }""");
+
+        Assert.Equal(["a", "b", "c"], Required(schema, schema.RootId));
+    }
+
+    [Fact]
+    public void Required_IsEmptyWhenAbsentOrMalformed()
+    {
+        var absent = Parse("""{ "properties": { "a": {} } }""");
+        var malformed = Parse("""{ "properties": { "a": {} }, "required": "a" }""");
+
+        Assert.Empty(absent.GetRequiredKeys(absent.RootId));
+        Assert.Empty(malformed.GetRequiredKeys(malformed.RootId));
+    }
+
+    [Fact]
+    public void Required_IsCopiedThroughRef()
+    {
+        var schema = Parse("""
+            {
+              "$ref": "#/$defs/thing",
+              "$defs": { "thing": { "properties": { "a": {} }, "required": ["a"] } }
+            }
+            """);
+
+        Assert.Equal(["a"], Required(schema, schema.RootId));
+    }
+
+    [Fact]
+    public void Required_UnionsAcrossAllOf()
+    {
+        var schema = Parse("""
+            {
+              "required": ["a"],
+              "allOf": [
+                { "properties": { "b": {} }, "required": ["b", "a"] },
+                { "properties": { "c": {} }, "required": ["c"] }
+              ]
+            }
+            """);
+
+        Assert.Equal(["a", "b", "c"], Required(schema, schema.RootId));
+    }
+
+    /// <summary>A oneOf's requirements are alternatives: a document satisfying one branch lacks
+    /// the other's, so unioning them would make the auto-match veto every real document.</summary>
+    [Fact]
+    public void Required_IsNotTakenFromOneOfOrAnyOfBranches()
+    {
+        var schema = Parse("""
+            {
+              "required": ["kind"],
+              "oneOf": [
+                { "properties": { "a": {} }, "required": ["a"] },
+                { "properties": { "b": {} }, "required": ["b"] }
+              ],
+              "anyOf": [ { "properties": { "c": {} }, "required": ["c"] } ]
+            }
+            """);
+
+        Assert.Equal(["kind"], Required(schema, schema.RootId));
+    }
+
+    [Fact]
+    public void Required_OfANamedRootIsReadable()
+    {
+        var schema = Parse("""
+            { "$defs": { "thing": { "properties": { "a": {}, "b": {} }, "required": ["a"] } } }
+            """);
+
+        var thing = schema.NamedRoots.Single(r => r.Name == "thing");
+        Assert.Equal(["a"], Required(schema, thing.NodeId));
+    }
+
+    [Fact]
+    public void BundledGeoJson_RequiresWhatRfc7946Requires()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, JsonSchemaCatalog.BundledFolderName, "geojson.json");
+        var schema = JsonSchemaLoader.TryLoadFile(path) ?? throw new InvalidOperationException("Bundled GeoJSON schema failed to load.");
+
+        Assert.Equal(["features", "type"], Required(schema, schema.DocumentRootId));
+        Assert.Equal(["geometry", "properties", "type"], Required(schema, schema.NamedRoots.Single(r => r.Name == "feature").NodeId));
+        Assert.Equal(["type"], Required(schema, schema.NamedRoots.Single(r => r.Name == "geometry").NodeId));
+    }
 }

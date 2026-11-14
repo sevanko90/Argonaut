@@ -9,7 +9,8 @@ namespace Argonaut.Features.Json.Schema;
 
 /// <summary>
 /// Remembers which JSON Schema was bound to which document, so reopening a file re-applies the
-/// schema the user picked last time.
+/// schema the user picked last time - including "No schema", so a schema that would be matched to
+/// the document is not bound again after the user cleared it.
 ///
 /// Stored most-recent-first and capped, because this grows with every document the user ever
 /// binds a schema to, unlike the other settings which hold a single value.
@@ -49,13 +50,19 @@ public sealed class SchemaBindings : ISettingsBlock<SchemaBindings>
         return null;
     }
 
+    /// <summary>Whether the user's last choice for <paramref name="documentPath"/> was
+    /// "No schema". False for a document never bound, and for one with no path.</summary>
+    public static bool ChoseNoSchema(IReadOnlyList<SchemaBinding> entries, string? documentPath)
+        => documentPath is not null && Find(entries, documentPath) is { SchemaPath: null };
+
     /// <summary>Records the schema bound to <paramref name="documentPath"/>, moving it to the
-    /// front - or, with a null <paramref name="schemaPath"/>, forgets it.</summary>
+    /// front - with a null <paramref name="schemaPath"/>, that the user chose "No schema".</summary>
     public void Remember(string documentPath, string? schemaPath, string? rootName = null)
     {
-        var entries = new List<SchemaBinding>(Math.Min(Entries.Count + 1, MaxEntries));
-        if (schemaPath is not null)
-            entries.Add(new SchemaBinding(documentPath, schemaPath, rootName));
+        var entries = new List<SchemaBinding>(Math.Min(Entries.Count + 1, MaxEntries))
+        {
+            new SchemaBinding(documentPath, schemaPath, schemaPath is null ? null : rootName),
+        };
 
         foreach (var entry in Entries)
         {
@@ -75,9 +82,9 @@ public sealed class SchemaBindings : ISettingsBlock<SchemaBindings>
         => string.Equals(a, b, OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase);
 }
 
-/// <summary>One document's remembered schema: the schema file, plus which of its named roots was
-/// bound (null for the schema's own root).</summary>
-public sealed record SchemaBinding(string DocumentPath, string SchemaPath, string? RootName = null);
+/// <summary>One document's remembered schema: the schema file, or null when the user chose
+/// "No schema", plus which of its named roots was bound (null for the schema's own root).</summary>
+public sealed record SchemaBinding(string DocumentPath, string? SchemaPath, string? RootName = null);
 
 [JsonSerializable(typeof(SchemaBindings))]
 internal sealed partial class SchemaBindingsJson : JsonSerializerContext;

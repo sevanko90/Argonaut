@@ -89,6 +89,22 @@ them). Keep this in sync when the ownership chain changes.
   hint-settings pair is mirrored in both directions with an `IsUserSelected` guard so an
   inferred default flowing up doesn't ping-pong against the master flowing down. A future
   multi-pane view (e.g. a diff) follows the same pattern rather than adding shell knowledge.
+- **Matching schemas to a document.** A schema is bound one of three ways, in this order: the
+  binding remembered for the file (`SchemaBindings`, which also remembers "No schema" as a
+  choice), the user's pick this session, or a match. `SchemaCatalogMeasurement` - one per JSON
+  or NDJSON document, built only for a shell document - samples the outermost object's property
+  names (`JsonDocumentKeySampler` over the tree; `JsonTextKeySampler` over the first 64 KB of an
+  NDJSON file's first line) at open and again when indexing completes, and hands them to the
+  injected `ISchemaMatcher`. `CachedSchemaMatcher` keeps a `SchemaFingerprint` per catalog file
+  (each bindable type's sorted property and `required` names, nothing else), keyed by path,
+  last-write time and length, so the catalog is parsed once per change rather than per open.
+  The result ranks the schema list by fit (`JsonSchemaSettings.Fits`) and, when
+  `SchemaAutoMatchRule` finds one clear winner and "Open matched schemas"
+  (`JsonViewSettings.OpenMatchedSchemas`) is on, binds it through
+  `JsonSchemaSettings.SelectMatchedAsync`. A matched binding is marked `IsMatched`, never
+  remembered, and becomes a choice once the user picks a schema or a type. `required` is read
+  as matching evidence only - nothing validates a document against a schema. Only an object
+  root is matched, since a type cannot be bound as an array root's items.
 
 ## View catalog & the view switcher
 

@@ -19,15 +19,24 @@ public sealed class FileByteOrigin : IByteOrigin
     private readonly string path;
 
     public FileByteOrigin(string path)
+        : this(new FileLocator(path))
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        this.path = System.IO.Path.GetFullPath(path);
-        DisplayName = System.IO.Path.GetFileName(this.path);
+    }
+
+    public FileByteOrigin(FileLocator locator)
+    {
+        ArgumentNullException.ThrowIfNull(locator);
+        Locator = locator;
+        this.path = locator.Path;
+        DisplayName = locator.DefaultName;
     }
 
     public string DisplayName { get; }
 
-    public string? Path => this.path;
+    /// <summary>The file, always - this origin is nothing else.</summary>
+    public FileLocator Locator { get; }
+
+    SourceLocator? IByteOrigin.Locator => Locator;
 
     /// <summary>
     /// The file's length, read from the file system on every access rather than cached: a file

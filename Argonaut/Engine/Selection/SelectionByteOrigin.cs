@@ -16,7 +16,7 @@ namespace Argonaut.Engine.Selection;
 /// <see cref="OpenRange"/> - a search chunk, an NDJSON line's own document - maps only the span
 /// of the file its runs cover, so whoever opens it owns that mapping outright, as search must.
 ///
-/// <see cref="Path"/> is null, as for an excerpt: this is not the file, so nothing path-keyed
+/// <see cref="Locator"/> is null, as for an excerpt: this is not the file, so nothing place-keyed
 /// touches it. Unlike an excerpt it is read-only - no edit, no Save As.
 ///
 /// Owns <see cref="Whole"/>, and disposes it.
@@ -69,7 +69,7 @@ public sealed class SelectionByteOrigin : IByteOrigin
     public string DisplayName { get; }
 
     /// <summary>Always null - see the class remarks.</summary>
-    public string? Path => null;
+    public SourceLocator? Locator => null;
 
     public long AvailableLength => Selection.ViewLength;
 

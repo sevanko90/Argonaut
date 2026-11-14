@@ -47,7 +47,7 @@ remember its schema.
 
 ## Design
 
-### Locators (`Engine/Bytes/Locators`)
+### Locators (`Engine/Bytes`, beside the origins)
 
 ```
 abstract record SourceLocator          // what to open again, and how to name it
@@ -59,13 +59,16 @@ sealed record HttpLocator(Uri Url) : SourceLocator      // added with the HTTP s
 
 - `FileLocator.Identity` is the full path, compared case-insensitively on macOS and Windows.
   `HttpLocator.Identity` is the URL with scheme and host lowercased and the fragment dropped.
+  Each carries its kind, so a file and a URL never collide.
+- `origin.LocationText()` is the display text (the locator's, or the display name), replacing
+  the `Path ?? DisplayName` idiom on the views.
 - `IByteOrigin.Locator` replaces `Path`. `FileByteOrigin` builds a `FileLocator`;
   `ExcerptByteOrigin`, `MemoryByteOrigin` and a diff side report null.
 - The 27 reads of `origin.Path` move to the locator: saving and its `IFileReplacer`, line-ending
   detection, `ByteOriginVersion`, the views' display paths, reveal-in-folder, schema bindings.
   CLAUDE.md's origin section is rewritten to say "a file locator" where it says "Path".
 
-### File access (`Engine/Bytes/Locators`, impls in `Shell`)
+### File access (`Engine/Bytes`, impls in `Shell`)
 
 `IFileAccess`, chosen in the composition root:
 - `Describe(path)` → the `FileLocator` for a file the user just picked or dropped, with a
@@ -113,7 +116,7 @@ folder work is separate.
 
 ## Steps
 
-1. [ ] `SourceLocator`/`FileLocator`; `IByteOrigin.Locator` replaces `Path` at every reader;
+1. [x] `SourceLocator`/`FileLocator`; `IByteOrigin.Locator` replaces `Path` at every reader;
    CLAUDE.md and architecture.md follow. Behaviour unchanged. Tests: identity and default
    names; existing suite green.
 2. [ ] `ISettingsSealer` and its three implementations, plus the test sealer. Tests: round

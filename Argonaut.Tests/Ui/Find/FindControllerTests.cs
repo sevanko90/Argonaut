@@ -91,7 +91,7 @@ public class FindControllerTests
         public ManualResetEventSlim Release { get; } = new();
 
         public string DisplayName => inner.DisplayName;
-        public string? Path => null;
+        public SourceLocator? Locator => null;
         public long AvailableLength => inner.AvailableLength;
         public KeptIndexes KeptIndexes => inner.KeptIndexes;
         public IByteSource Open() => inner.Open();

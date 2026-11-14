@@ -1,3 +1,4 @@
+using Argonaut.Tests.Support;
 using System.Text;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Indexing.Lines;
@@ -61,7 +62,7 @@ public class ExcerptByteOriginTests
     {
         using var excerpt = Excerpt(2, 3);
 
-        Assert.Null(excerpt.Path);
+        Assert.Null(excerpt.Locator);
         Assert.Equal("big.ndjson (lines 2–3)", excerpt.DisplayName);
         Assert.Equal("big.ndjson (line 4)", Excerpt(4, 4).DisplayName);
         Assert.Equal("big.ndjson (lines 2–end)", Excerpt(2, null).DisplayName);

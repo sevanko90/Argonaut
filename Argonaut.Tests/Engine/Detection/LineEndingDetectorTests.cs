@@ -163,7 +163,7 @@ public class LineEndingDetectorTests
         public int Released { get; private set; }
 
         public string DisplayName => "test";
-        public string? Path => null;
+        public SourceLocator? Locator => null;
         public long AvailableLength => Growing.AvailableLength;
         public bool LengthSettled => Growing.LengthSettled;
         public KeptIndexes KeptIndexes => this.kept.KeptIndexes;

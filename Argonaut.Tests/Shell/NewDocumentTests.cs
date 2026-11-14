@@ -32,7 +32,7 @@ public class NewDocumentTests
         await shell.NewDocumentAsync();
 
         var raw = Assert.IsType<RawViewModel>(shell.CurrentDocument);
-        Assert.Null(raw.Origin!.Path);
+        Assert.Null(raw.Origin!.Locator);
         Assert.Equal("Untitled", raw.Origin.DisplayName);
         Assert.Equal(0, raw.Origin.AvailableLength);
         Assert.True(await EventuallyAsync(() => raw.IsEditing));

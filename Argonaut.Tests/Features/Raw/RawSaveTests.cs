@@ -193,7 +193,7 @@ public sealed class RawSaveTests : IDisposable
 
             Assert.Equal(DocumentSaveOutcome.Saved, result.Outcome);
             Assert.Equal("pasted text", File.ReadAllText(path));
-            Assert.Equal(path, vm.Origin!.Path);
+            Assert.Equal(path, vm.Origin!.FilePathOf());
         }
         finally
         {

@@ -247,7 +247,8 @@ The reading contracts themselves (`GetContiguousSpan` truncation, `AvailableLeng
 `RequireContiguous`) are specified in CLAUDE.md; this section is about who owns what.
 
 - **`IByteOrigin` (`Engine/Bytes/IByteOrigin.cs`) is where the bytes came from.** It carries
-  `DisplayName`, `Path` (null for a document that is not a file) and the arrival state
+  `DisplayName`, `Locator` (where it can be fetched again - a `FileLocator` for a file, null
+  for a paste, an excerpt or a diff side) and the arrival state
   (`AvailableLength`/`LengthSettled`/`WaitForLength`), and it is the only thing that hands out
   sources: `Open()` for the whole document, `OpenRange(offset, length)` for one NDJSON line, an
   array's bytes as a table, or one search chunk. Implemented by `FileByteOrigin` (holds no

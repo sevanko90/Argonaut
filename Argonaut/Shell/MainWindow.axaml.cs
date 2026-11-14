@@ -609,11 +609,11 @@ public partial class MainWindow : Window
         var options = new FilePickerSaveOptions
         {
             Title = "Save as",
-            SuggestedFileName = current.Path is { } path ? System.IO.Path.GetFileName(path) : $"{current.DisplayName}.txt",
+            SuggestedFileName = current.Locator is FileLocator ? current.DisplayName : $"{current.DisplayName}.txt",
             ShowOverwritePrompt = true,
         };
 
-        if (current.Path is { } file && System.IO.Path.GetDirectoryName(file) is { } folder)
+        if (current.Locator is FileLocator file && System.IO.Path.GetDirectoryName(file.Path) is { } folder)
             options.SuggestedStartLocation = await StorageProvider.TryGetFolderFromPathAsync(folder);
 
         var picked = await StorageProvider.SaveFilePickerAsync(options);

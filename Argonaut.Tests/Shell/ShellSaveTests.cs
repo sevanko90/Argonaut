@@ -61,7 +61,7 @@ public sealed class ShellSaveTests : IDisposable
 
         public IByteOrigin? Origin { get; set; }
 
-        public string FilePath => Origin?.Path ?? Origin?.DisplayName ?? string.Empty;
+        public string FilePath => Origin?.LocationText() ?? string.Empty;
 
         public string StatusDetail => "loaded";
 
@@ -221,7 +221,7 @@ public sealed class ShellSaveTests : IDisposable
 
         var destination = Assert.Single(harness.Document.SavedTo);
         Assert.NotSame(paste, destination);
-        Assert.Equal(harness.PickedPath, destination.Path);
+        Assert.Equal(harness.PickedPath, destination.FilePathOf());
         Assert.Equal(harness.PickedPath, harness.Shell.FilePath);
         Assert.Equal("kept.txt", harness.Shell.FileName);
         Assert.Contains(harness.Shell.RecentFiles, item => item.Path == harness.PickedPath);

@@ -195,7 +195,7 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
     /// would let two different pastes overwrite each other's binding.</summary>
     private void OnMasterSchemaSettingsPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (Origin?.Path is not { } documentPath)
+        if (Origin?.Locator is not FileLocator { Path: var documentPath })
             return;
 
         // A matched schema is worked out again on every open, never remembered.
@@ -281,17 +281,17 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
     public async Task LoadAsync(IByteOrigin origin, IProgressReporter? progressReporter = null)
     {
         Origin = origin;
-        FilePath = origin.Path ?? origin.DisplayName;
+        FilePath = origin.LocationText();
         FollowLineNumbering(this.lineNumbers);
         DefaultExpandDepth = viewSettings.ExpandDepth;
         toolbar = new JsonToolbarViewModel(HintSettings, SchemaSettings, DefaultExpandDepth, ChooseExpandDepth,
-            refreshSchemaEntries: () => RefreshSchemaEntriesAsync(origin.Path), openSchemaFolder: schemaCatalog.OpenUserDirectory,
+            refreshSchemaEntries: () => RefreshSchemaEntriesAsync((origin.Locator as FileLocator)?.Path), openSchemaFolder: schemaCatalog.OpenUserDirectory,
             showIndentGuides: viewSettings.ShowIndentGuides, applyIndentGuides: ChooseIndentGuides,
             openMatchedSchemas: viewSettings.OpenMatchedSchemas,
             applyOpenMatchedSchemas: catalogMeasurement is null ? null : ChooseOpenMatchedSchemas);
 
         // Alongside indexing, not blocking it - see JsonViewModel.ApplyInitialSchemaAsync.
-        _ = ApplyInitialSchemaAsync(origin.Path);
+        _ = ApplyInitialSchemaAsync((origin.Locator as FileLocator)?.Path);
 
         this.indexBasis = IndexBasis.Of(origin);
         var kept = this.indexBasis?.FindKept<FileLineAnchors>(FileLineAnchors.Key);

@@ -86,7 +86,7 @@ public class DocumentDisposalLifecycleTests
         private readonly MemoryByteOrigin kept = new([], "large.json");
 
         public string DisplayName => "large.json";
-        public string? Path => null;
+        public SourceLocator? Locator => null;
         public long AvailableLength => bytes.AvailableLength;
         public bool LengthSettled => bytes.LengthSettled;
         public KeptIndexes KeptIndexes => this.kept.KeptIndexes;

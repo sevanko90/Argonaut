@@ -13,7 +13,7 @@ internal sealed class GrowingByteOrigin(GrowingByteSource bytes, string displayN
     private readonly MemoryByteOrigin kept = new([], displayName);
 
     public string DisplayName => displayName;
-    public string? Path => null;
+    public SourceLocator? Locator => null;
     public long AvailableLength => bytes.AvailableLength;
     public bool LengthSettled => bytes.LengthSettled;
     public KeptIndexes KeptIndexes => this.kept.KeptIndexes;

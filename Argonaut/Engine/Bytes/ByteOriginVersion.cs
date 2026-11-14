@@ -19,10 +19,10 @@ public readonly record struct ByteOriginVersion(long Length, DateTime? LastWrite
         if (!origin.LengthSettled)
             return null;
 
-        if (origin.Path is not { } path)
+        if (origin.Locator is not FileLocator located)
             return new ByteOriginVersion(origin.AvailableLength, null);
 
-        var file = new FileInfo(path);
+        var file = new FileInfo(located.Path);
         return file.Exists ? new ByteOriginVersion(file.Length, file.LastWriteTimeUtc) : null;
     }
 }

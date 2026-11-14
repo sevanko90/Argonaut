@@ -195,7 +195,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         var docA = new FakeDocument { FilePath = pathA };
         var docB = new FakeDocument { FilePath = pathB, StatusDetail = "B loaded" };
 
-        var vm = CreateViewModel((_, origin, _) =>            Task.FromResult<IDocumentViewModel>(origin.Path == pathA ? docA : docB));
+        var vm = CreateViewModel((_, origin, _) =>            Task.FromResult<IDocumentViewModel>(origin.FilePathOf() == pathA ? docA : docB));
 
         await vm.OpenPathAsync(pathA);
         await vm.OpenPathAsync(pathB);
@@ -215,7 +215,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         var gateA = new TaskCompletionSource<IDocumentViewModel>();
         var gateB = new TaskCompletionSource<IDocumentViewModel>();
 
-        var vm = CreateViewModel((_, origin, _) => origin.Path == pathA ? gateA.Task : gateB.Task);
+        var vm = CreateViewModel((_, origin, _) => origin.FilePathOf() == pathA ? gateA.Task : gateB.Task);
 
         // Both opens suspend at the loader await; the second bumps the request id, so the
         // first is now stale even though its load finishes last.
@@ -258,7 +258,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         string pathB = WriteJsonFile("b.json");
         var docA = new FakeDocument { FilePath = pathA };
         var docB = new FakeDocument { FilePath = pathB };
-        var vm = CreateViewModel((_, origin, _) =>            Task.FromResult<IDocumentViewModel>(origin.Path == pathA ? docA : docB));
+        var vm = CreateViewModel((_, origin, _) =>            Task.FromResult<IDocumentViewModel>(origin.FilePathOf() == pathA ? docA : docB));
 
         await vm.OpenPathAsync(pathA);
         await vm.OpenPathAsync(pathB);
@@ -650,7 +650,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         var vm = CreateViewModel((_, origin, _) =>
         {
             seen.Add(origin);
-            return Task.FromResult<IDocumentViewModel>(new FakeDocument { Origin = origin, FilePath = origin.Path! });
+            return Task.FromResult<IDocumentViewModel>(new FakeDocument { Origin = origin, FilePath = origin.FilePathOf()! });
         });
 
         await vm.OpenPathAsync(pathA);
@@ -658,8 +658,8 @@ public sealed class MainWindowViewModelTests : IDisposable
 
         Assert.Equal(2, seen.Count);
         Assert.NotSame(seen[0], seen[1]);
-        Assert.Equal(Path.GetFullPath(pathA), seen[0].Path);
-        Assert.Equal(Path.GetFullPath(pathB), seen[1].Path);
+        Assert.Equal(Path.GetFullPath(pathA), seen[0].FilePathOf());
+        Assert.Equal(Path.GetFullPath(pathB), seen[1].FilePathOf());
     }
 
     /// <summary>
@@ -677,7 +677,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         await vm.OpenPathAsync(path);
 
         Assert.NotNull(vm.CurrentDocument!.Origin);
-        Assert.Equal(Path.GetFullPath(path), vm.CurrentDocument.Origin!.Path);
+        Assert.Equal(Path.GetFullPath(path), vm.CurrentDocument.Origin!.FilePathOf());
     }
 
     // ---- command line ------------------------------------------------------------------
@@ -719,7 +719,7 @@ public sealed class MainWindowViewModelTests : IDisposable
 
         var excerpt = Assert.IsType<ExcerptByteOrigin>(loaded);
         Assert.Equal("{\"n\":3}\n{\"n\":4}\n", loadedText);
-        Assert.Null(excerpt.Path);
+        Assert.Null(excerpt.Locator);
         Assert.Equal(3, excerpt.Lines!.Value.FirstLine);
         Assert.Equal(4, excerpt.Lines!.Value.LastLine);
     }
@@ -786,7 +786,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         Assert.Null(vm.Excerpt);
         Assert.Equal(2, loads.Count);
         Assert.Equal(FileTypeDetector.FileKind.Unidentified, loads[1].Kind);
-        Assert.Equal(Path.GetFullPath(path), loads[1].Origin.Path);
+        Assert.Equal(Path.GetFullPath(path), loads[1].Origin.FilePathOf());
     }
 
     private string WriteFilter(string text, string name = "picks.txt")
@@ -851,7 +851,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         var selection = Assert.IsType<SelectionByteOrigin>(loaded);
         Assert.Equal("{\"n\":2}\n{\"n\":3}\n{\"n\":7}\n", loadedText);
         Assert.True(selection.IsReadOnly);
-        Assert.Null(selection.Path);
+        Assert.Null(selection.Locator);
         Assert.Equal(FileTypeDetector.FileKind.Ndjson, loadedAs);
         Assert.True(vm.IsExcerpt);
         Assert.Same(selection, vm.Selection);
@@ -1087,7 +1087,7 @@ public sealed class MainWindowViewModelTests : IDisposable
 
         Assert.Null(vm.Selection);
         Assert.False(vm.IsExcerpt);
-        Assert.Equal(Path.GetFullPath(path), loads[^1].Path);
+        Assert.Equal(Path.GetFullPath(path), loads[^1].FilePathOf());
     }
 
     [Fact]

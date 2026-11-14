@@ -70,8 +70,8 @@ public abstract class SiblingFileReplacer : IFileReplacer
         ArgumentNullException.ThrowIfNull(destination);
         ArgumentOutOfRangeException.ThrowIfNegative(contentLength);
 
-        string target = ResolveTarget(destination.Path
-            ?? throw new ArgumentException("A document with no path has nowhere to be replaced; save it as a file instead.", nameof(destination)));
+        string target = ResolveTarget((destination.Locator as FileLocator)?.Path
+            ?? throw new ArgumentException("A document that is not a file has nowhere to be replaced; save it as a file instead.", nameof(destination)));
 
         string directory = Path.GetDirectoryName(target)
             ?? throw new IOException($"\"{target}\" has no containing folder.");

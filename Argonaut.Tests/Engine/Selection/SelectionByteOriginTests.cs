@@ -1,3 +1,4 @@
+using Argonaut.Tests.Support;
 using System.Text;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Selection;
@@ -150,7 +151,7 @@ public class SelectionByteOriginTests
 
         Assert.Equal("big.txt (4 lines selected)", lines.DisplayName);
         Assert.Equal("2 ranges selected", bytes.Description);
-        Assert.Null(lines.Path);
+        Assert.Null(lines.Locator);
     }
 
     [Fact]

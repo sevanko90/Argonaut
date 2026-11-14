@@ -240,7 +240,7 @@ public sealed class JsonArrayTableViewModel : IndexedDocumentViewModel
     public async Task LoadAsync(IByteOrigin origin, long arrayOffset, long arrayLength, string arrayPath, Func<string, Task>? navigateBack = null)
     {
         Origin = origin;
-        FilePath = origin.Path ?? origin.DisplayName;
+        FilePath = origin.LocationText();
 
         // Progress is reported by this document rather than through the shell, the way a diff
         // does it - the entry point publishes directly.

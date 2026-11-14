@@ -37,7 +37,7 @@ public class ClipboardPasteTests
         Assert.True(vm.IsFileOpen);
         Assert.NotNull(vm.CurrentDocument);
         Assert.NotNull(vm.CurrentDocument!.Origin);
-        Assert.Null(vm.CurrentDocument.Origin!.Path);
+        Assert.Null(vm.CurrentDocument.Origin!.Locator);
         Assert.Equal("Pasted text", vm.CurrentDocument.Origin.DisplayName);
     }
 
@@ -173,7 +173,7 @@ public class ClipboardPasteTests
 
             Assert.Equal(1, asked);
             Assert.Same(opened, vm.CurrentDocument);
-            Assert.Equal(Path.GetFullPath(path), vm.CurrentDocument!.Origin!.Path);
+            Assert.Equal(Path.GetFullPath(path), vm.CurrentDocument!.Origin!.FilePathOf());
         }
         finally
         {
@@ -189,7 +189,7 @@ public class ClipboardPasteTests
 
         public IByteOrigin? Origin { get; }
 
-        public string FilePath => Origin?.Path ?? Origin?.DisplayName ?? string.Empty;
+        public string FilePath => Origin?.LocationText() ?? string.Empty;
 
         public string StatusDetail => "loaded";
 

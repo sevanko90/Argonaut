@@ -39,7 +39,7 @@
                 <TextBox Grid.Column="1"
                          x:Name="UrlBox"
                          Text="{Binding UrlText, Mode=TwoWay}"
-                         Watermark="https://api.example.com/items?page=1"
+                         PlaceholderText="https://api.example.com/items?page=1"
                          FontFamily="{DynamicResource AppMonoFontFamily}"
                          KeyDown="OnUrlKeyDown"
                          VerticalAlignment="Center" />
@@ -70,8 +70,8 @@
                     <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="requests:QueryArgumentRowViewModel">
                             <Grid ColumnDefinitions="2*,3*,Auto" ColumnSpacing="6" Margin="0,0,0,4">
-                                <TextBox Classes="argument" Text="{Binding Key, Mode=TwoWay}" Watermark="key" />
-                                <TextBox Grid.Column="1" Classes="argument" Text="{Binding Value, Mode=TwoWay}" Watermark="value" />
+                                <TextBox Classes="argument" Text="{Binding Key, Mode=TwoWay}" PlaceholderText="key" />
+                                <TextBox Grid.Column="1" Classes="argument" Text="{Binding Value, Mode=TwoWay}" PlaceholderText="value" />
                                 <Button Grid.Column="2" Classes="paneicon" ToolTip.Tip="Remove this argument"
                                         Click="OnRemoveArgument">
                                     <icons:LucideIcon Data="{StaticResource Icon.Close}" Size="13" VerticalAlignment="Center" />

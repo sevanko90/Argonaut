@@ -87,6 +87,7 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
     private readonly SavedSourceStore savedSources;
     private readonly IFileAccess fileAccess;
     private readonly ResponseDownloader? responseDownloader;
+    private readonly ResponseStore? responseStore;
     private readonly RawViewSettings rawViewSettings;
     private RequestEditorViewModel? requestEditor;
 
@@ -219,8 +220,10 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
         IFileAccess? fileAccess = null,
         ResponseDownloader? responseDownloader = null,
         Func<RequestSaveQuestion, Task<RequestSaveChoice>>? askAboutRequest = null,
-        Func<FileTypeDetector.FileKind, IByteOrigin, Task<IDocumentViewModel>>? hostedDocumentLoader = null)
+        Func<FileTypeDetector.FileKind, IByteOrigin, Task<IDocumentViewModel>>? hostedDocumentLoader = null,
+        ResponseStore? responseStore = null)
     {
+        this.responseStore = responseStore;
         this.askAboutRequest = askAboutRequest;
         this.fileAccess = fileAccess ?? new PlainFileAccess();
         this.responseDownloader = responseDownloader;
@@ -228,6 +231,9 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
         this.lineEndings = lineEndings ?? new LineEndingDetector();
         this.appearance = settings.Get<AppearanceSettings>();
         this.savedSources = new SavedSourceStore(settings.Get<SavedSourcesBlock>(), settingsSealer);
+
+        // Before anything downloads: whatever no saved request keeps is a crash's leftovers.
+        responseStore?.Sweep(this.savedSources.KeptResponses.Select(static k => k.FileName).ToHashSet());
         this.jsonViewSettings = settings.Get<JsonViewSettings>();
         this.configLocations = configLocations;
         this.filterFiles = filterFiles ?? new SelectionFilterFiles();
@@ -1454,6 +1460,19 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
 
         var editor = await OpenRequestPaneAsync(request);
         editor.MarkSaved(entryId, request);
+
+        // The response kept from last time opens at once; with none, the request is sent.
+        if (savedSources.Find(entryId) is { ResponseFile: { } file, ResponseFetchedAt: var fetchedAt }
+            && responseStore?.PathOf(file) is { } path)
+        {
+            var locator = new HttpLocator(request);
+            savedSources.Touch(locator);
+            ReloadSavedSources();
+            await OpenOriginAsync(new HttpResponseOrigin(locator, path, kept: true), addToRecents: false, fromRequest: true);
+            editor.Say($"Response from {(fetchedAt ?? DateTimeOffset.Now).ToLocalTime():d MMM, HH:mm} - Send to refresh");
+            return;
+        }
+
         await editor.SendAsync();
     }
 
@@ -1471,13 +1490,48 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
 
     public void RemoveSavedSource(string id)
     {
-        savedSources.Remove(id);
+        DeleteResponses(savedSources.Remove(id));
         ReloadSavedSources();
+    }
+
+    /// <summary>Whether any saved request keeps a response - what "Clear kept responses" offers to
+    /// clear.</summary>
+    public bool HasKeptResponses => savedSources.KeptResponses.Count > 0;
+
+    /// <summary>Deletes every kept response, leaving the saved requests themselves.</summary>
+    public void ClearKeptResponses()
+    {
+        foreach (var kept in savedSources.KeptResponses)
+        {
+            if (savedSources.DropResponse(kept.EntryId) is { } file)
+                DeleteResponse(file);
+        }
+
+        ReloadSavedSources();
+    }
+
+    private void DeleteResponses(IEnumerable<string> files)
+    {
+        foreach (string file in files)
+            DeleteResponse(file);
+    }
+
+    /// <summary>Deletes a kept response - unless it is the response open right now, whose own
+    /// origin then deletes it when it closes.</summary>
+    private void DeleteResponse(string file)
+    {
+        if (ownedOrigins.FirstOrDefault() is HttpResponseOrigin { IsKept: true } open && open.ResponseFileName == file)
+        {
+            open.ReleaseKept();
+            return;
+        }
+
+        responseStore?.Delete(file);
     }
 
     public void ClearRecentSources()
     {
-        savedSources.ClearRecent();
+        DeleteResponses(savedSources.ClearRecent());
         ReloadSavedSources();
     }
 
@@ -1485,6 +1539,7 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
     {
         PinnedSources = savedSources.Pinned.Select(Row).ToList();
         RecentSources = savedSources.Recent.Select(Row).ToList();
+        OnPropertyChanged(nameof(HasKeptResponses));
     }
 
     /// <summary>A saved source as the empty state shows it - a pill for anything but a file.</summary>
@@ -2190,8 +2245,8 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
 
         editor.Failure = null;
         await OpenOriginAsync(origin, addToRecents: false, fromRequest: true);
-        RememberSentRequest(editor, request, locator);
         editor.Say($"Response from {DateTime.Now:d MMM, HH:mm}");
+        RememberSentRequest(editor, request, locator);
         OnPropertyChanged(nameof(IsShowingRequestFailure));
     }
 
@@ -2206,19 +2261,52 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
     /// </summary>
     private void RememberSentRequest(RequestEditorViewModel editor, HttpRequestSpec request, HttpLocator locator)
     {
+        string entryId;
         if (editor.SavedEntryId is { } id && savedSources.Find(id) is not null)
         {
             if (editor.IsDirty)
                 return;
 
-            savedSources.Touch(locator);
+            entryId = savedSources.Touch(locator).Id;
         }
         else
         {
-            editor.MarkSaved(savedSources.Touch(locator).Id, request);
+            entryId = savedSources.Touch(locator).Id;
+            editor.MarkSaved(entryId, request);
         }
 
+        KeepOpenResponse(entryId, editor);
         ReloadSavedSources();
+    }
+
+    /// <summary>
+    /// Keeps the response open now as saved request <paramref name="entryId"/>'s last response -
+    /// when it answers that request as saved - replacing the one it kept, and lets the oldest go if
+    /// that takes the kept responses past the budget. A response larger than the whole budget is
+    /// not kept, and the pane says so.
+    /// </summary>
+    private void KeepOpenResponse(string entryId, RequestEditorViewModel? editor)
+    {
+        if (responseStore is null || ownedOrigins.FirstOrDefault() is not HttpResponseOrigin response
+            || savedSources.Find(entryId)?.Locator is not { } saved || !saved.IsSamePlace(response.Locator))
+            return;
+
+        long size = response.AvailableLength;
+        if (size > ResponseStore.Budget)
+        {
+            editor?.Say($"Response from {DateTime.Now:d MMM, HH:mm} - too large to keep within the {ByteLengthText.Format(ResponseStore.Budget)} kept for responses, so it goes when you close it.");
+            return;
+        }
+
+        response.MarkKept();
+        if (savedSources.SetResponse(entryId, response.ResponseFileName, size, DateTimeOffset.Now) is { } replaced)
+            DeleteResponse(replaced);
+
+        foreach (var evicted in ResponseStore.ChooseEvictions(savedSources.KeptResponses, ResponseStore.Budget, entryId))
+        {
+            if (savedSources.DropResponse(evicted.EntryId) is { } file)
+                DeleteResponse(file);
+        }
     }
 
     /// <summary>
@@ -2446,14 +2534,20 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
         var locator = new HttpLocator(request);
         var choice = await askAboutRequest(new RequestSaveQuestion(saved?.Name ?? locator.DefaultName, saved is not null));
 
+        string entryId;
         switch (choice)
         {
             case RequestSaveChoice.Update when saved is not null:
+                // The response it kept answered the request as it was; it goes unless the response
+                // open now answers the request as updated, which replaces it below.
+                if (savedSources.DropResponse(saved.Id) is { } outdated)
+                    DeleteResponse(outdated);
                 savedSources.Relocate(saved.Id, locator);
+                entryId = saved.Id;
                 break;
             case RequestSaveChoice.Update:
             case RequestSaveChoice.SaveAsNew:
-                savedSources.Touch(locator);
+                entryId = savedSources.Touch(locator).Id;
                 break;
             case RequestSaveChoice.Discard:
                 return true;
@@ -2461,6 +2555,7 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
                 return false;
         }
 
+        KeepOpenResponse(entryId, editor: null);
         ReloadSavedSources();
         return true;
     }

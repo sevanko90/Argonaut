@@ -88,10 +88,16 @@ lowercased and the fragment dropped, and for a POST a hash of the body.
 
 ### Kept responses (`Engine/Http`, folder from the composition root)
 
-`ResponseStore` over the response folder: keeps a finished download for a saved source's id
-(a rename into place, never a copy), finds it again, removes it, enforces the budget, and
-sweeps orphans. The saved source records which file and when it was fetched. The folder path is
-handed down from `App` (`AppDataPaths`), never built here.
+`ResponseStore` over the response folder: finds a kept file, deletes one, sweeps orphans at
+startup, and chooses evictions (oldest first, unpinned requests' before pinned ones', never the
+response just kept). A kept response stays under the name it downloaded as - renaming a file
+that is open fails on Windows - so keeping one is the saved source recording its file, size and
+fetch time, and the response origin no longer deleting it (`HttpResponseOrigin.MarkKept`). A
+response is kept when it answers its saved request as saved: at once for a request saved as
+sent, or on close when an edited request is saved (Update drops the response kept for the old
+version). Removing an entry, clearing the list or "Clear kept responses" deletes the files; one
+still open is deleted by its origin when it closes. The folder path is handed down from `App`
+(`AppDataPaths`), never built here.
 
 ### Saved sources (`Shell/Sources`)
 
@@ -126,7 +132,7 @@ the document area, and opens what Send produces through `OpenOriginAsync`.
    from screenshots. Tests on the view model's two-way sync.
 5. [x] Shell: New request, the docked pane, Send opens the response, sending again, collapsing,
    other inputs closing the pane.
-6. [ ] `ResponseStore` and the budget; closing keeps the response; reopening a saved request
+6. [x] `ResponseStore` and the budget; closing keeps the response; reopening a saved request
    opens it with its age; Clear kept responses; the startup sweep. Tests for eviction order, the
    over-budget response, removal with its request, orphans.
 7. [ ] Architecture doc, CLAUDE.md where origins are described, roadmap.

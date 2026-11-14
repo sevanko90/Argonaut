@@ -70,7 +70,8 @@ public partial class App : Application
             var window = new MainWindow(settings, schemaCatalog, log, OpenLogFolderAction(launcher),
                 ConfigLocationSource.ForCurrentPlatform(), recipes, launcher,
                 SettingsSealers.ForThisPlatform(AppDataPaths.SealingKeyFile), FileAccesses.ForThisPlatform(),
-                new ResponseDownloader(new HttpClientFetcher(new System.Net.Http.HttpClient()), AppDataPaths.ResponsesDirectory));
+                new ResponseDownloader(new HttpClientFetcher(new System.Net.Http.HttpClient()), AppDataPaths.ResponsesDirectory),
+                new ResponseStore(AppDataPaths.ResponsesDirectory));
             mainWindow = window;
             desktop.MainWindow = window;
 

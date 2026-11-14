@@ -10,21 +10,38 @@ namespace Argonaut.Engine.Http;
 /// the request as the saved source, a save is Save As as for a paste, and the response file is
 /// never mistaken for a document of the user's.
 ///
-/// Owns its file and deletes it when disposed. A mapping still open then (a search scanning a
-/// chunk of it) keeps the bytes readable on macOS and Linux; on Windows the delete fails and the
-/// file is left for the response folder's sweep.
+/// Owns its file and deletes it when disposed - unless the response was kept for its saved
+/// request (<see cref="MarkKept"/>), when the file outlives the document. A mapping still open at
+/// the delete (a search scanning a chunk of it) keeps the bytes readable on macOS and Linux; on
+/// Windows the delete fails and the file is left for the response folder's sweep.
 /// </summary>
 public sealed class HttpResponseOrigin : IByteOrigin
 {
     private readonly string path;
+    private bool kept;
 
-    public HttpResponseOrigin(HttpLocator locator, string path)
+    /// <param name="kept">The file is a kept response being reopened, not a fresh download.</param>
+    public HttpResponseOrigin(HttpLocator locator, string path, bool kept = false)
     {
         ArgumentNullException.ThrowIfNull(locator);
         Locator = locator;
         this.path = path;
+        this.kept = kept;
         DisplayName = locator.DefaultName;
     }
+
+    /// <summary>The file's name in the response folder - what a saved request records to keep it.</summary>
+    public string ResponseFileName => Path.GetFileName(this.path);
+
+    /// <summary>Whether the file is kept for a saved request, and so outlives this origin.</summary>
+    public bool IsKept => kept;
+
+    /// <summary>Keeps the file when this origin closes: it is now a saved request's response.</summary>
+    public void MarkKept() => kept = true;
+
+    /// <summary>The file is no longer kept - its request let it go while it is open - so this
+    /// origin deletes it when it closes, as it would a fresh download.</summary>
+    public void ReleaseKept() => kept = false;
 
     public string DisplayName { get; }
 
@@ -51,6 +68,9 @@ public sealed class HttpResponseOrigin : IByteOrigin
     public void Dispose()
     {
         KeptIndexes.Clear();
+        if (kept)
+            return;
+
         try
         {
             File.Delete(this.path);

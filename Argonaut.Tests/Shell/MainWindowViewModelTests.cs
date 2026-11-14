@@ -451,7 +451,12 @@ public sealed class MainWindowViewModelTests : IDisposable
                 return Task.FromResult<IDocumentViewModel>(new FakeDocument { FilePath = origin.LocationText(), Origin = origin });
             },
             lineEndings: new FakeLineEndingDetector(),
-            responseDownloader: new ResponseDownloader(fetcher, Path.Combine(tempDir, "Responses")));
+            responseDownloader: new ResponseDownloader(fetcher, ResponsesFolder),
+            responseStore: new ResponseStore(ResponsesFolder));
+
+    private string ResponsesFolder => Path.Combine(tempDir, "Responses");
+
+    private string[] ResponseFiles() => Directory.Exists(ResponsesFolder) ? Directory.GetFiles(ResponsesFolder) : [];
 
     /// <summary>Regression: the paste shortcut tunnels ahead of the focused control, and it pasted a
     /// URL meant for the request pane's URL box as a new document.</summary>
@@ -546,7 +551,8 @@ public sealed class MainWindowViewModelTests : IDisposable
                 return Task.FromResult<IDocumentViewModel>(new FakeDocument { FilePath = origin.LocationText(), Origin = origin });
             },
             lineEndings: new FakeLineEndingDetector(),
-            responseDownloader: new ResponseDownloader(fetcher, Path.Combine(tempDir, "Responses")),
+            responseDownloader: new ResponseDownloader(fetcher, ResponsesFolder),
+            responseStore: new ResponseStore(ResponsesFolder),
             askAboutRequest: question =>
             {
                 asked.Add(question);
@@ -771,6 +777,129 @@ public sealed class MainWindowViewModelTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task ASavedRequestsResponse_IsKept_AndReopensWithoutSending()
+    {
+        var fetcher = new CountingFetcher();
+        var loaded = new List<IByteOrigin>();
+        var vm = RequestShell(fetcher, loaded, _ => RequestSaveChoice.Cancel, []);
+        await vm.NewRequestAsync();
+        vm.RequestEditor!.UrlText = "https://x.test/a";
+        await vm.RequestEditor.SendAsync();
+        await vm.CloseFileAsync();
+
+        Assert.Single(ResponseFiles());
+
+        vm.OpenSavedSource(Assert.Single(vm.RecentSources).Id);
+        await WaitUntil(() => loaded.Count == 2);
+
+        Assert.Equal(1, fetcher.Sent);
+        var reopened = Assert.IsType<HttpResponseOrigin>(loaded[1]);
+        Assert.Equal("{\"n\":1}", File.ReadAllText(Assert.Single(ResponseFiles())));
+        Assert.Equal(7, reopened.AvailableLength);
+        Assert.StartsWith("Response from", vm.RequestEditor!.StatusText);
+        Assert.Contains("Send to refresh", vm.RequestEditor.StatusText);
+    }
+
+    [Fact]
+    public async Task SendingAgain_KeepsTheNewResponse_AndDeletesTheOld()
+    {
+        var vm = RequestShell(new CountingFetcher(), [], _ => RequestSaveChoice.Cancel, []);
+        await vm.NewRequestAsync();
+        vm.RequestEditor!.UrlText = "https://x.test/a";
+        await vm.RequestEditor.SendAsync();
+        await vm.RequestEditor.SendAsync();
+        await vm.CloseFileAsync();
+
+        Assert.Equal("{\"n\":2}", File.ReadAllText(Assert.Single(ResponseFiles())));
+    }
+
+    [Fact]
+    public async Task AnEditedRequestsResponse_IsKeptOnlyIfTheRequestIsSaved()
+    {
+        var vm = RequestShell(new CountingFetcher(), [], _ => RequestSaveChoice.Update, []);
+        await vm.NewRequestAsync();
+        vm.RequestEditor!.UrlText = "https://x.test/v1";
+        await vm.RequestEditor.SendAsync();
+        vm.RequestEditor.UrlText = "https://x.test/v2";
+        await vm.RequestEditor.SendAsync();
+
+        await vm.CloseFileAsync();
+
+        Assert.Equal("{\"n\":2}", File.ReadAllText(Assert.Single(ResponseFiles())));
+    }
+
+    [Fact]
+    public async Task AnEditedRequestDiscarded_KeepsTheSavedResponse()
+    {
+        var vm = RequestShell(new CountingFetcher(), [], _ => RequestSaveChoice.Discard, []);
+        await vm.NewRequestAsync();
+        vm.RequestEditor!.UrlText = "https://x.test/v1";
+        await vm.RequestEditor.SendAsync();
+        vm.RequestEditor.UrlText = "https://x.test/v2";
+        await vm.RequestEditor.SendAsync();
+
+        await vm.CloseFileAsync();
+
+        Assert.Equal("{\"n\":1}", File.ReadAllText(Assert.Single(ResponseFiles())));
+    }
+
+    [Fact]
+    public async Task RemovingASavedRequest_DeletesItsResponse()
+    {
+        var vm = RequestShell(new CountingFetcher(), [], _ => RequestSaveChoice.Cancel, []);
+        await vm.NewRequestAsync();
+        vm.RequestEditor!.UrlText = "https://x.test/a";
+        await vm.RequestEditor.SendAsync();
+        await vm.CloseFileAsync();
+
+        vm.RemoveSavedSource(Assert.Single(vm.RecentSources).Id);
+
+        Assert.Empty(ResponseFiles());
+    }
+
+    [Fact]
+    public async Task ClearKeptResponses_DeletesThem_AndKeepsTheRequests()
+    {
+        var vm = RequestShell(new CountingFetcher(), [], _ => RequestSaveChoice.Cancel, []);
+        await vm.NewRequestAsync();
+        vm.RequestEditor!.UrlText = "https://x.test/a";
+        await vm.RequestEditor.SendAsync();
+        await vm.CloseFileAsync();
+        Assert.True(vm.HasKeptResponses);
+
+        vm.ClearKeptResponses();
+
+        Assert.Empty(ResponseFiles());
+        Assert.Single(vm.RecentSources);
+        Assert.False(vm.HasKeptResponses);
+    }
+
+    [Fact]
+    public void Startup_SweepsResponsesNoRequestKeeps()
+    {
+        Directory.CreateDirectory(ResponsesFolder);
+        File.WriteAllText(Path.Combine(ResponsesFolder, "abandoned.response"), "x");
+
+        _ = RequestShell(new CountingFetcher(), [], _ => RequestSaveChoice.Cancel, []);
+
+        Assert.Empty(ResponseFiles());
+    }
+
+    /// <summary>Answers each request with {"n":k}, k counting the requests sent.</summary>
+    private sealed class CountingFetcher : IHttpFetcher
+    {
+        public int Sent { get; private set; }
+
+        public async Task FetchAsync(HttpRequestSpec request, Stream destination, Action<long, long?> received, CancellationToken stopping)
+        {
+            Sent++;
+            byte[] body = Encoding.UTF8.GetBytes($"{{\"n\":{Sent}}}");
+            await destination.WriteAsync(body, stopping);
+            received(body.Length, body.Length);
+        }
+    }
+
     private sealed class SwitchableFetcher : IHttpFetcher
     {
         public bool Fail { get; set; }
@@ -799,7 +928,7 @@ public sealed class MainWindowViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task ReopeningASavedRequest_FillsThePaneAndSendsIt()
+    public async Task ReopeningASavedRequestWithNoKeptResponse_FillsThePaneAndSendsIt()
     {
         var loaded = new List<IByteOrigin>();
         var fetcher = new FakeHttpFetcher(Encoding.UTF8.GetBytes("{}"), 2, true);
@@ -808,6 +937,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         vm.RequestEditor!.UrlText = "https://x.test/a?b=1";
         await vm.RequestEditor.SendAsync();
         await vm.CloseFileAsync();
+        vm.ClearKeptResponses();
         Assert.Null(vm.RequestEditor);
 
         vm.OpenSavedSource(Assert.Single(vm.RecentSources).Id);

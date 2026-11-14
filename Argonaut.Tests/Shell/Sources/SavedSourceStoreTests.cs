@@ -232,4 +232,57 @@ public sealed class SavedSourceStoreTests
         Assert.Equal("{\"q\":\"secret\"}", System.Text.Encoding.UTF8.GetString(reopened.Request.Body!));
         Assert.Equal(SavedSource.HttpKind, entry.Kind);
     }
+
+    private static Argonaut.Engine.Http.HttpLocator Request(string url)
+    {
+        Argonaut.Engine.Http.HttpRequestSpec.TryCreate(Argonaut.Engine.Http.HttpRequestMethod.Get, url, null, out var request, out _);
+        return new Argonaut.Engine.Http.HttpLocator(request!);
+    }
+
+    [Fact]
+    public void AKeptResponse_IsRecorded_AndReplacingItHandsBackTheOldFile()
+    {
+        var block = new SavedSourcesBlock();
+        var store = Store(block);
+        string id = store.Touch(Request("https://x.test/a")).Id;
+        var at = new DateTimeOffset(2026, 11, 14, 12, 0, 0, TimeSpan.Zero);
+
+        Assert.Null(store.SetResponse(id, "first.response", 10, at));
+        Assert.Equal("first.response", store.SetResponse(id, "second.response", 20, at.AddMinutes(1)));
+
+        var reopened = Store(block);
+        var kept = Assert.Single(reopened.KeptResponses);
+        Assert.Equal(("second.response", 20L, at.AddMinutes(1)), (kept.FileName, kept.Bytes, kept.FetchedAt));
+        Assert.Equal("second.response", reopened.Find(id)!.ResponseFile);
+    }
+
+    [Fact]
+    public void RemovingEntries_HandsBackTheirResponseFiles()
+    {
+        var store = Store();
+        string a = store.Touch(Request("https://x.test/a")).Id;
+        string b = store.Touch(Request("https://x.test/b")).Id;
+        string pinned = store.Touch(Request("https://x.test/p")).Id;
+        store.TogglePin(pinned);
+        var at = DateTimeOffset.UnixEpoch;
+        store.SetResponse(a, "a.response", 1, at);
+        store.SetResponse(b, "b.response", 1, at);
+        store.SetResponse(pinned, "p.response", 1, at);
+
+        Assert.Equal(["a.response"], store.Remove(a));
+        Assert.Equal(["b.response"], store.ClearRecent());
+        Assert.Equal("p.response", store.DropResponse(pinned));
+        Assert.Empty(store.KeptResponses);
+    }
+
+    [Fact]
+    public void KeptResponses_SayWhichArePinned()
+    {
+        var store = Store();
+        string a = store.Touch(Request("https://x.test/a")).Id;
+        store.TogglePin(a);
+        store.SetResponse(a, "a.response", 5, DateTimeOffset.UnixEpoch);
+
+        Assert.True(Assert.Single(store.KeptResponses).Pinned);
+    }
 }

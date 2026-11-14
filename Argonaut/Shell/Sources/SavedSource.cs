@@ -38,6 +38,16 @@ public sealed class SavedSource
     /// <summary>A POST request's body, base64; null otherwise.</summary>
     public string? Body { get; set; }
 
+    /// <summary>The kept response's file in the response folder - a request's last response - or
+    /// null when none is kept.</summary>
+    public string? ResponseFile { get; set; }
+
+    /// <summary>How large the kept response is, for the budget.</summary>
+    public long ResponseBytes { get; set; }
+
+    /// <summary>When the kept response arrived.</summary>
+    public DateTimeOffset? ResponseFetchedAt { get; set; }
+
     /// <summary>A file's kind.</summary>
     public const string FileKind = "file";
 

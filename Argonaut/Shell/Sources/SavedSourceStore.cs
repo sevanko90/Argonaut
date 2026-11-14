@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Argonaut.Engine.Bytes;
+using Argonaut.Engine.Http;
 using Argonaut.Engine.Settings;
 
 namespace Argonaut.Shell.Sources;
@@ -116,18 +117,55 @@ public sealed class SavedSourceStore
         Persist();
     }
 
-    public void Remove(string id)
-    {
-        entries.RemoveAll(e => e.Id == id);
-        pinOrder.Remove(id);
-        Persist();
-    }
+    /// <returns>The response files the removed entry kept, for the caller to delete.</returns>
+    public IReadOnlyList<string> Remove(string id) => RemoveWhere(e => e.Id == id);
 
     /// <summary>Removes every unpinned entry.</summary>
-    public void ClearRecent()
+    /// <returns>The response files they kept, for the caller to delete.</returns>
+    public IReadOnlyList<string> ClearRecent() => RemoveWhere(static e => !e.IsPinned);
+
+    private IReadOnlyList<string> RemoveWhere(Predicate<SavedSource> removed)
     {
-        entries.RemoveAll(e => !e.IsPinned);
+        var files = entries.Where(e => removed(e) && e.ResponseFile is not null).Select(static e => e.ResponseFile!).ToList();
+        entries.RemoveAll(removed);
+        pinOrder.RemoveAll(id => Find(id) is null);
         Persist();
+        return files;
+    }
+
+    /// <summary>The kept responses, for the budget: one per saved request that has one.</summary>
+    public IReadOnlyList<KeptResponse> KeptResponses
+        => entries.Where(static e => e.ResponseFile is not null)
+            .Select(static e => new KeptResponse(e.Id, e.ResponseFile!, e.ResponseBytes, e.ResponseFetchedAt ?? DateTimeOffset.MinValue, e.IsPinned))
+            .ToList();
+
+    /// <summary>Records <paramref name="fileName"/> as the request's kept response.</summary>
+    /// <returns>The file it replaces, for the caller to delete, or null.</returns>
+    public string? SetResponse(string id, string fileName, long bytes, DateTimeOffset fetchedAt)
+    {
+        if (Find(id) is not { } entry)
+            return null;
+
+        string? previous = entry.ResponseFile == fileName ? null : entry.ResponseFile;
+        entry.ResponseFile = fileName;
+        entry.ResponseBytes = bytes;
+        entry.ResponseFetchedAt = fetchedAt;
+        Persist();
+        return previous;
+    }
+
+    /// <summary>Forgets the request's kept response.</summary>
+    /// <returns>Its file, for the caller to delete, or null.</returns>
+    public string? DropResponse(string id)
+    {
+        if (Find(id) is not { ResponseFile: { } file } entry)
+            return null;
+
+        entry.ResponseFile = null;
+        entry.ResponseBytes = 0;
+        entry.ResponseFetchedAt = null;
+        Persist();
+        return file;
     }
 
     public SavedSource? Find(string id) => entries.FirstOrDefault(e => e.Id == id);

@@ -24,6 +24,7 @@ public partial class EmptyStateView : UserControl
     public event EventHandler? NewDocumentRequested;
     public event EventHandler? NewRequestRequested;
     public event EventHandler? ClearRecentRequested;
+    public event EventHandler? ClearKeptResponsesRequested;
 
     /// <summary>Raised with the id of the saved source to open.</summary>
     public event EventHandler<string>? OpenSavedSourceRequested;
@@ -63,6 +64,9 @@ public partial class EmptyStateView : UserControl
         NoRecentFilesText.IsVisible = items.Count == 0;
         ClearRecentFilesButton.IsVisible = items.Count > 0;
     }
+
+    /// <summary>Offers "Clear kept responses" while there are some to clear.</summary>
+    public void SetHasKeptResponses(bool any) => ClearKeptResponsesButton.IsVisible = any;
 
     /// <summary>Binds the pinned list, showing a hint in its place while nothing is pinned.</summary>
     public void SetPinned(IReadOnlyList<SavedSourceRow> items)
@@ -107,6 +111,11 @@ public partial class EmptyStateView : UserControl
     private void OnNewRequest(object? sender, RoutedEventArgs e)
     {
         NewRequestRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void OnClearKeptResponses(object? sender, RoutedEventArgs e)
+    {
+        ClearKeptResponsesRequested?.Invoke(this, EventArgs.Empty);
     }
 
     private void OnClearRecentFiles(object? sender, RoutedEventArgs e)

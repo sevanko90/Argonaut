@@ -84,8 +84,8 @@
                 </Button>
                 <Button Grid.Column="2" Classes="star" Click="OnToggleFavourite"
                         ToolTip.Tip="Pin or unpin">
-                    <Path Classes="starshape" Classes.pinned="{Binding IsPinned}" Width="16" Height="16"
-                          Stretch="Uniform" StrokeThickness="1.5" Stroke="{DynamicResource AppAccentBrush}"
+                    <Path Classes="starshape" Classes.pinned="{Binding IsPinned}" Width="13" Height="13"
+                          Stretch="Uniform" StrokeThickness="1.4" Stroke="{DynamicResource AppAccentBrush}"
                           Data="M12 2L15 9H22L16.5 13.5L18.5 21L12 16.5L5.5 21L7.5 13.5L2 9H9Z" />
                 </Button>
             </Grid>

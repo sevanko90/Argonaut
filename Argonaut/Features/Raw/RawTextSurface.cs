@@ -299,6 +299,11 @@ public class RawTextSurface : RowSurface
     {
         base.OnDetachedFromVisualTree(e);
 
+        // A flash still running ends here: its next animation frame may arrive after the document
+        // has released its bytes, and would read them for the rows it flashes.
+        this.isFlashingArrival = false;
+        this.arrivalNeedsRoom = false;
+
         if (this.subscribedRows is not null)
         {
             this.subscribedRows.CollectionChanged -= OnRowsChanged;

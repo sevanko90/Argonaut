@@ -338,6 +338,42 @@ public sealed class RawCaretInputTests : IDisposable
         });
 
     /// <summary>
+    /// Regression: an arrival flash still running when its document closes. The flash redraws on
+    /// animation frames, and a frame asked for before the close could run after the document had
+    /// released its bytes, read them for the flash's rows and throw ObjectDisposedException on the
+    /// dispatcher. Leaving the window has to end the flash, so nothing drawn for it reads the
+    /// document again - the same read the frame makes is asserted here, without waiting on frame
+    /// timing.
+    /// </summary>
+    [Fact]
+    public Task ClosingDuringAnArrivalFlash_EndsIt_WithoutReadingTheDocument()
+    {
+        var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(RawCaretInputTests).Assembly);
+        return session.Dispatch(async () =>
+        {
+            var vm = new RawViewModel(new RawViewSettings());
+            await vm.LoadAsync(WriteFile(new string('a', 150) + "\n"));
+            await vm.IndexingTask;
+            var window = new Window { Width = 800, Height = 400, Content = new RawView { DataContext = vm } };
+            window.Show();
+            await PumpAsync();
+            window.UpdateLayout();
+            var surface = window.GetVisualDescendants().OfType<RawTextSurface>().First();
+
+            await vm.RevealByteRangeAsync(ByteRange.At(60));
+            await PumpAsync();
+            Assert.NotNull(surface.ArrivalRect());
+
+            window.Close();
+            vm.Dispose();
+
+            Assert.Null(surface.ArrivalRect());
+            await PumpAsync(100);
+            return true;
+        }, CancellationToken.None);
+    }
+
+    /// <summary>
     /// The whole jump path, as the failure-location link drives it: resolve a byte offset, reveal
     /// it, place the caret. Exercised end to end rather than by calling the surface's reveal
     /// directly, because the ordering between placing the caret and revealing the row is itself

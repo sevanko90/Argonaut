@@ -2093,9 +2093,9 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
     }
 
     /// <summary>
-    /// Sends the pane's request: downloads the response under a progress entry with Stop, then
-    /// opens it as the document below the pane, replacing the last one. A failure or a stop is said
-    /// in the pane and leaves the document that was there.
+    /// Sends the pane's request: saves it, downloads the response under a progress entry with
+    /// Stop, then opens it as the document below the pane, replacing the last one. A failure
+    /// replaces the response with what went wrong; a stop leaves the document that was there.
     /// </summary>
     async Task IRequestSender.SendAsync(HttpRequestSpec request)
     {
@@ -2111,7 +2111,12 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
         if (RefusedWhileSaving() || !await ResolveUnsavedChangesAsync("sending the request"))
             return;
 
+        // Saved when sent, not when a response opens: the request is what is worth keeping, and a
+        // failing one - a key to fix, a body to correct - most of all.
         var locator = new HttpLocator(request);
+        savedSources.Touch(locator);
+        ReloadSavedSources();
+
         using var stopping = new CancellationTokenSource();
         var progress = this.progressBoard.Begin($"Downloading {locator.DefaultName}", stopping.Cancel);
         HttpResponseOrigin origin;

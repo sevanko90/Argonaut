@@ -538,6 +538,28 @@ public sealed class MainWindowViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task AFailedRequest_IsStillSaved_ToTryAgainLater()
+    {
+        var fetcher = new SwitchableFetcher { Fail = true };
+        var vm = RequestShell(fetcher, []);
+        await vm.NewRequestAsync();
+        vm.RequestEditor!.UrlText = "https://x.test/broken?key=abc";
+
+        await vm.RequestEditor.SendAsync();
+        await vm.CloseFileAsync();
+
+        var saved = Assert.Single(vm.RecentSources);
+        Assert.Equal("broken · x.test", saved.Name);
+
+        fetcher.Fail = false;
+        vm.OpenSavedSource(saved.Id);
+        await WaitUntil(() => vm.IsFileOpen);
+
+        Assert.Equal("https://x.test/broken?key=abc", vm.RequestEditor!.UrlText);
+        Assert.Single(vm.RecentSources);
+    }
+
+    [Fact]
     public async Task AFailureAfterAResponse_TakesTheResponseAway()
     {
         var loaded = new List<IByteOrigin>();

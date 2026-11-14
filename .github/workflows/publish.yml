@@ -12,6 +12,9 @@ jobs:
   publish:
     runs-on: ${{ matrix.os }}
     strategy:
+      # Each platform publishes on its own: one failing (Apple's notary refusing, say) must not
+      # cancel the others and leave a release with fewer downloads than it could have.
+      fail-fast: false
       matrix:
         include:
           - os: windows-latest

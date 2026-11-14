@@ -148,10 +148,10 @@ change it. Look settled from a screenshot.
    parsed once across calls, re-parsed after it changes, a broken schema skipped.
 4. [x] Settings: the option, and the "No schema" binding. Tests with a sparse settings file and an
    old bindings file.
-5. [ ] `JsonSchemaSettings.IsMatched`; the JSON view model's two attempts; remembering rules.
+5. [x] `JsonSchemaSettings.IsMatched`; the JSON view model's two attempts; remembering rules.
    Tests: matched at open, not remembered, a remembered binding wins, "No schema" sticks across
    reopen, the user's pick this session stops a late match, the option off does nothing.
-6. [ ] NDJSON first-line sampler and the NDJSON view model. Tests: keys from a line longer than
+6. [x] NDJSON first-line sampler and the NDJSON view model. Tests: keys from a line longer than
    the sample window, a non-object line matching nothing.
 7. [ ] Schema list ranked by fit: plausible schemas first, best first, with their score, as the
    type list shows it. Tests: ordering, the selection index still naming the right entry after

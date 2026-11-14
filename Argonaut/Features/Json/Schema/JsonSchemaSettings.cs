@@ -36,6 +36,9 @@ public sealed class JsonSchemaSettings : ObservableObject
 
     private IReadOnlyList<SchemaRootMatch> rootMatches = Array.Empty<SchemaRootMatch>();
     private bool matchesDescribeArrayElements;
+    private IReadOnlyList<SchemaFit> fits = Array.Empty<SchemaFit>();
+    private bool isMatched;
+    private bool isSchemaChosen;
 
     /// <summary>Schemas offered for selection: the catalog, plus a transient entry for a
     /// remembered schema that has left the catalog folders.</summary>
@@ -44,6 +47,36 @@ public sealed class JsonSchemaSettings : ObservableObject
         get => entries;
         private set => SetField(ref entries, value);
     }
+
+    /// <summary>
+    /// The catalog schemas that plausibly fit this document, best first - what leads the schema
+    /// list - or empty until the owning view model has measured the catalog against the document.
+    /// Ranking only, like <see cref="RootMatches"/>: nothing here binds anything.
+    /// </summary>
+    public IReadOnlyList<SchemaFit> Fits
+    {
+        get => fits;
+        private set => SetField(ref fits, value);
+    }
+
+    public void SetFits(IReadOnlyList<SchemaFit> value) => Fits = value ?? Array.Empty<SchemaFit>();
+
+    /// <summary>
+    /// Whether the bound schema was matched to the document ("Open matched schemas") rather than
+    /// chosen. A matched binding is not remembered - it is worked out again on every open - and
+    /// stops being a match the moment the user picks a schema or a type.
+    /// </summary>
+    public bool IsMatched
+    {
+        get => isMatched;
+        private set => SetField(ref isMatched, value);
+    }
+
+    /// <summary>
+    /// Whether a schema - or "No schema" - has been chosen for this document this session, by the
+    /// user or restored from what they chose before. Once it has, nothing is matched in its place.
+    /// </summary>
+    public bool IsSchemaChosen => isSchemaChosen;
 
     /// <summary>The chosen schema, or null for "no schema".</summary>
     public SchemaCatalogEntry? SelectedEntry
@@ -155,10 +188,33 @@ public sealed class JsonSchemaSettings : ObservableObject
     /// </summary>
     public async Task SelectAsync(SchemaCatalogEntry? entry, string? rootName = null)
     {
-        pendingRootName = rootName;
+        isSchemaChosen = true;
+        IsMatched = false;
 
         // A remembered root was a user choice once, so it still counts as one.
-        rootExplicitlyChosen = rootName is not null;
+        await LoadAsync(entry, rootName, rootChosen: rootName is not null);
+    }
+
+    /// <summary>
+    /// Binds a schema nobody chose, because it fits ("Open matched schemas"): the same as
+    /// <see cref="SelectAsync"/>, except that it is <see cref="IsMatched"/>, its type is not
+    /// treated as chosen (so better scores may still re-point it), and it does nothing once a
+    /// schema has been chosen or bound - a match never replaces a choice.
+    /// </summary>
+    public async Task SelectMatchedAsync(SchemaCatalogEntry entry, string? rootName)
+    {
+        if (isSchemaChosen || SelectedEntry is not null)
+            return;
+
+        // Before the selection changes, so whoever persists a selection sees it is a match.
+        IsMatched = true;
+        await LoadAsync(entry, rootName, rootChosen: false);
+    }
+
+    private async Task LoadAsync(SchemaCatalogEntry? entry, string? rootName, bool rootChosen)
+    {
+        pendingRootName = rootName;
+        rootExplicitlyChosen = rootChosen;
         SelectedEntry = entry;
 
         if (entry is not { } chosen)
@@ -184,6 +240,10 @@ public sealed class JsonSchemaSettings : ObservableObject
     {
         pendingRootName = rootName;
         rootExplicitlyChosen = true;
+
+        // Picking a type in a matched schema makes the schema the user's choice too.
+        isSchemaChosen = true;
+        IsMatched = false;
 
         if (Document is { } current)
             SetDocument(current.WithRoot(rootName));

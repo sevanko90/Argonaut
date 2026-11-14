@@ -60,10 +60,11 @@ public partial class App : Application
 
             var recipes = new RecipeFolderStore(RecipeFolderStore.BundledDirectoryBesideApp, AppDataPaths.RecipesDirectory);
 
-            // The saved sources replaced these two unsealed path lists; dropping them is what keeps
-            // the paths out of settings.json now that their replacement is sealed.
+            // Sealed blocks replaced these unsealed path lists; dropping them is what keeps the
+            // paths out of settings.json now that their replacements are sealed.
             settings.Forget("recentFiles");
             settings.Forget("favouriteFiles");
+            settings.Forget("schemaBindings");
 
             var window = new MainWindow(settings, schemaCatalog, log, OpenLogFolderAction(launcher),
                 ConfigLocationSource.ForCurrentPlatform(), recipes, launcher,

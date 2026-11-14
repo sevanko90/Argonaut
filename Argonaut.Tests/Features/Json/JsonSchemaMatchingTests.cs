@@ -1,3 +1,4 @@
+using Argonaut.Engine.Bytes;
 using System.Text;
 using Argonaut.Features.Json;
 using Argonaut.Features.Json.Schema;
@@ -118,7 +119,7 @@ public sealed class JsonSchemaMatchingTests : IDisposable
     public Task ARememberedBinding_Wins()
     {
         var bindings = new SchemaBindings();
-        bindings.Remember(documentPath, addressSchema);
+        bindings.Remember(new FileLocator(documentPath).Identity, addressSchema);
 
         return WithView(Document(Order), async (vm, _) =>
         {
@@ -134,7 +135,7 @@ public sealed class JsonSchemaMatchingTests : IDisposable
     public Task NoSchemaChosenLastTime_IsNotOverriddenByAMatch()
     {
         var bindings = new SchemaBindings();
-        bindings.Remember(documentPath, null);
+        bindings.Remember(new FileLocator(documentPath).Identity, null);
 
         return WithView(Document(Order), async (vm, _) =>
         {
@@ -153,8 +154,29 @@ public sealed class JsonSchemaMatchingTests : IDisposable
 
         await vm.SchemaSettings.SelectAsync(null);
 
-        Assert.True(SchemaBindings.ChoseNoSchema(bindings.Entries, documentPath));
+        Assert.True(SchemaBindings.ChoseNoSchema(bindings.Entries, new FileLocator(documentPath).Identity));
     });
+
+    [Fact]
+    public async Task AChosenSchema_IsRemembered_ForTheSameDocumentNextTime()
+    {
+        var bindings = new SchemaBindings();
+        var addressEntry = new SchemaCatalogEntry("address", addressSchema, IsUser: true);
+        await WithView(Document(Order), async (vm, _) =>
+        {
+            await UntilAsync(() => vm.SchemaSettings.Document is not null);
+            await vm.SchemaSettings.SelectAsync(addressEntry);
+        }, bindings);
+
+        await WithView(Document(Order), async (vm, _) =>
+        {
+            await UntilAsync(() => vm.SchemaSettings.SelectedEntry is not null);
+            await SettleAsync();
+
+            Assert.Equal(addressSchema, vm.SchemaSettings.SelectedEntry?.FilePath);
+            Assert.False(vm.SchemaSettings.IsMatched);
+        }, bindings);
+    }
 
     [Fact]
     public Task WithTheOptionOff_NothingIsBound_ButTheListIsStillRanked() => WithView(Document(Order), async (vm, _) =>

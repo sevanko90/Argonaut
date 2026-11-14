@@ -231,7 +231,10 @@ The XML tree view is built (see "The XML tree" in architecture.md). What remains
   non-zero count of unquoted commas for CSV, so a log whose first lines happen to match opens
   in the table. A second signal - the same count on a few more lines, or no line much longer
   than the others - would keep prose out.
-- **Load from URL.** An `HttpByteOrigin`: the download on the background with progress and
+- **Load from URL.** An `HttpByteOrigin` reporting an `HttpLocator`, so a URL becomes a saved
+  source (with the "http" pill) and keys a remembered schema like any file; reopening it is a
+  second branch in `MainWindowViewModel.OpenSavedSource`, where an `ISourceOpener` seam is then
+  worth having. The download runs on the background with progress and
   cancellation, reporting `AvailableLength` as bytes land and `LengthSettled` when the response
   completes. The indexers already consume growth, so the work is in the origin. An in-flight source
   cannot be an `MMapFile` - a mapping is a fixed snapshot - so it is in-memory chunks or a
@@ -239,8 +242,8 @@ The XML tree view is built (see "The XML tree" in architecture.md). What remains
   reported as data - see CLAUDE.md).
 - **Ctrl+Shift+V to paste as a new document** while one is open. Plain Ctrl+V pastes only while
   nothing is open, so it can mean "paste into the document" in the raw editor.
-- **Reload, or "open containing folder"**, whenever either arrives: it reads `IByteOrigin.Path`
-  and disables itself when there is none.
+- **Reload, or "open containing folder"**, whenever either arrives: it reads the origin's
+  `FileLocator` and disables itself when there is none.
 - **`FileOptions.DeleteOnClose` on a temp-file spill.** Disposing a temp-file-backed origin while a
   search is scanning it deletes the file under the scan; the scan already degrades that to a failed
   search, and this would remove even that.
@@ -271,10 +274,10 @@ Measure against [index-benchmarks.md](index-benchmarks.md), rerun the same way.
 
 ## Settings
 
-- **A sandboxed build.** The Mac App Store sandbox gives a stored path no access on relaunch, so
-  recent files and schema bindings need security-scoped bookmarks saved with them and resolved when
-  read - "a way back to this file" rather than a bare path. Application data moves into the app's
-  container, which moves `settings.json` and makes the user schema folder something users cannot
+- **A sandboxed build.** The Mac App Store sandbox gives a stored path no access on relaunch.
+  Saved sources already keep and resolve security-scoped bookmarks in every macOS build; a
+  remembered schema outside the catalog folders is still a bare path and would need the same.
+  Application data moves into the app's container, which moves `settings.json` and makes the user schema folder something users cannot
   browse to. The composition root builds the store and the catalog, so the sandboxed build can use
   its own implementations, the way saving sits behind `IFileReplacer`.
 

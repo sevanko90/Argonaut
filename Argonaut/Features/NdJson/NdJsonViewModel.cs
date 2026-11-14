@@ -195,7 +195,7 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
     /// would let two different pastes overwrite each other's binding.</summary>
     private void OnMasterSchemaSettingsPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (Origin?.Locator is not FileLocator { Path: var documentPath })
+        if (Origin?.Locator?.Identity is not { } documentKey)
             return;
 
         // A matched schema is worked out again on every open, never remembered.
@@ -203,7 +203,7 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
             return;
 
         if (e.PropertyName is null or nameof(JsonSchemaSettings.SelectedEntry) or nameof(JsonSchemaSettings.SelectedRootName))
-            schemaBindings.Remember(documentPath, SchemaSettings.SelectedEntry?.FilePath, SchemaSettings.IsRootExplicitlyChosen ? SchemaSettings.SelectedRootName : null);
+            schemaBindings.Remember(documentKey, SchemaSettings.SelectedEntry?.FilePath, SchemaSettings.IsRootExplicitlyChosen ? SchemaSettings.SelectedRootName : null);
     }
 
     /// <summary>Lifts the open line's schema-type match scores into the shared toolbar - see the
@@ -285,13 +285,13 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
         FollowLineNumbering(this.lineNumbers);
         DefaultExpandDepth = viewSettings.ExpandDepth;
         toolbar = new JsonToolbarViewModel(HintSettings, SchemaSettings, DefaultExpandDepth, ChooseExpandDepth,
-            refreshSchemaEntries: () => RefreshSchemaEntriesAsync((origin.Locator as FileLocator)?.Path), openSchemaFolder: schemaCatalog.OpenUserDirectory,
+            refreshSchemaEntries: () => RefreshSchemaEntriesAsync(origin.Locator?.Identity), openSchemaFolder: schemaCatalog.OpenUserDirectory,
             showIndentGuides: viewSettings.ShowIndentGuides, applyIndentGuides: ChooseIndentGuides,
             openMatchedSchemas: viewSettings.OpenMatchedSchemas,
             applyOpenMatchedSchemas: catalogMeasurement is null ? null : ChooseOpenMatchedSchemas);
 
         // Alongside indexing, not blocking it - see JsonViewModel.ApplyInitialSchemaAsync.
-        _ = ApplyInitialSchemaAsync((origin.Locator as FileLocator)?.Path);
+        _ = ApplyInitialSchemaAsync(origin.Locator?.Identity);
 
         this.indexBasis = IndexBasis.Of(origin);
         var kept = this.indexBasis?.FindKept<FileLineAnchors>(FileLineAnchors.Key);
@@ -317,10 +317,10 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
 
     /// <summary>Populates the schema catalog and applies any remembered binding for the
     /// NDJSON file - see <see cref="JsonSchemaCatalog.GatherForDocument"/>.</summary>
-    private async Task ApplyInitialSchemaAsync(string? documentPath)
+    private async Task ApplyInitialSchemaAsync(string? documentKey)
     {
         var bindings = schemaBindings.Entries;
-        var (entries, preselected, rootName) = await Task.Run(() => schemaCatalog.GatherForDocument(documentPath, bindings));
+        var (entries, preselected, rootName) = await Task.Run(() => schemaCatalog.GatherForDocument(documentKey, bindings));
         if (IsDisposed)
             return;
 
@@ -328,7 +328,7 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
 
         // Selected before the catalog counts as gathered, so a match cannot get in first.
         var restoring = preselected is { } entry ? SchemaSettings.SelectAsync(entry, rootName) : Task.CompletedTask;
-        catalogMeasurement?.CatalogGathered(bindings, documentPath);
+        catalogMeasurement?.CatalogGathered(bindings, documentKey);
 
         await MeasureCatalogAsync(mayBind: true);
         await restoring;
@@ -336,10 +336,10 @@ public sealed class NdJsonViewModel : IndexedDocumentViewModel, IByteRangeNaviga
 
     /// <summary>Re-lists the schema catalog without touching the current selection - see
     /// <see cref="JsonViewModel.RefreshSchemaEntriesAsync"/>.</summary>
-    private async Task RefreshSchemaEntriesAsync(string? documentPath)
+    private async Task RefreshSchemaEntriesAsync(string? documentKey)
     {
         var bindings = schemaBindings.Entries;
-        var (entries, _, _) = await Task.Run(() => schemaCatalog.GatherForDocument(documentPath, bindings));
+        var (entries, _, _) = await Task.Run(() => schemaCatalog.GatherForDocument(documentKey, bindings));
         if (IsDisposed)
             return;
 

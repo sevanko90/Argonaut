@@ -68,26 +68,25 @@ public sealed class JsonSchemaCatalog(string bundledDirectory, string userDirect
     ///
     /// Pure filesystem work (two directory listings) - call it off the UI thread.
     /// </summary>
-    /// <param name="documentPath">
-    /// The document's own path, or null when it has no path on disk - a clipboard paste, or a
-    /// download served from memory. The document-specific binding is keyed by path, so with no
-    /// path there is nothing to preselect and the user folder's schemas are all that can
-    /// be offered. That is a real, usable result rather than an error: the user can still pick a
-    /// schema by hand, it just cannot be remembered for next time.
+    /// <param name="documentKey">
+    /// The document's locator identity, or null when it has no locator - a clipboard paste, an
+    /// excerpt. The binding is keyed by it, so with none there is nothing to preselect and the
+    /// catalog is all that can be offered. That is a real, usable result rather than an error: the
+    /// user can still pick a schema by hand, it just cannot be remembered for next time.
     /// </param>
     /// <param name="bindings"><see cref="SchemaBindings.Entries"/>, read on the caller's thread and
     /// passed in as a snapshot.</param>
-    public (IReadOnlyList<SchemaCatalogEntry> Entries, SchemaCatalogEntry? Preselected, string? RootName) GatherForDocument(string? documentPath, IReadOnlyList<SchemaBinding> bindings)
+    public (IReadOnlyList<SchemaCatalogEntry> Entries, SchemaCatalogEntry? Preselected, string? RootName) GatherForDocument(string? documentKey, IReadOnlyList<SchemaBinding> bindings)
     {
         var entries = new List<SchemaCatalogEntry>(Enumerate());
         SchemaCatalogEntry? preselected = null;
         string? rootName = null;
 
-        if (documentPath is null)
+        if (documentKey is null)
             return (entries, null, null);
 
         // A "No schema" choice preselects nothing, which is what it means.
-        if (SchemaBindings.Find(bindings, documentPath) is { SchemaPath: not null } remembered)
+        if (SchemaBindings.Find(bindings, documentKey) is { SchemaPath: not null } remembered)
         {
             // Carried even when the schema file itself can't be found: harmless if unused, and
             // the loader drops a root name the schema no longer offers.

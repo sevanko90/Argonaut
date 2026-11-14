@@ -98,8 +98,9 @@ them). Keep this in sync when the ownership chain changes.
   inferred default flowing up doesn't ping-pong against the master flowing down. A future
   multi-pane view (e.g. a diff) follows the same pattern rather than adding shell knowledge.
 - **Matching schemas to a document.** A schema is bound one of three ways, in this order: the
-  binding remembered for the file (`SchemaBindings`, which also remembers "No schema" as a
-  choice), the user's pick this session, or a match. `SchemaCatalogMeasurement` - one per JSON
+  binding remembered for the document (`SchemaBindings`, keyed by its locator's identity and
+  sealed like the saved sources; it also remembers "No schema" as a choice), the user's pick this
+  session, or a match. `SchemaCatalogMeasurement` - one per JSON
   or NDJSON document, built only for a shell document - samples the outermost object's property
   names (`JsonDocumentKeySampler` over the tree; `JsonTextKeySampler` over the first 64 KB of an
   NDJSON file's first line) at open and again when indexing completes, and hands them to the

@@ -120,9 +120,11 @@ key, so the old unsealed `recentFiles`, `favouriteFiles` and `schemaBindings` ar
 
 ### Schema bindings
 
-`SchemaBindings` keys by locator identity instead of path, sealed like the saved sources. Its
-schema path stays a path: the schema folders are the app's own, and the store build's schema
-folder work is separate.
+`SchemaBindings` keys by locator identity instead of path, sealed like the saved sources in a new
+`documentSchemas` block (the old `schemaBindings` key is dropped at startup). It is no longer a
+settings block itself: `DocumentViewCatalog` builds it over the block with the shell's sealer, and
+one built without a block (tests, a lone view model) lives in memory. Its schema path stays a path:
+the schema folders are the app's own, and the store build's schema folder work is separate.
 
 ### Toasts with an action
 
@@ -147,9 +149,9 @@ find …" with "Remove from list"; other failures keep the open's usual reportin
 5. [x] `IFileAccess` with the macOS bookmark implementation; `FileByteOrigin` holds the grant.
    Tests: describe/open round trip on a temp file, a moved file found through its bookmark
    (macOS), the grant released on dispose.
-6. [ ] Schema bindings keyed by locator identity and sealed. Tests: an explicit choice
+6. [x] Schema bindings keyed by locator identity and sealed. Tests: an explicit choice
    remembered across reopen of the same locator, a matched one still not stored.
-7. [ ] Store doc and roadmap updated: recent-file and remembered-schema bookmarks done; the HTTP
+7. [x] Store doc and roadmap updated: recent-file and remembered-schema bookmarks done; the HTTP
    source plugs in as an `HttpLocator` plus an opener branch.
 
 ## Not in this plan

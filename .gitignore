@@ -107,3 +107,6 @@ Desktop.ini
 # BenchmarkDotNet
 ############################
 BenchmarkDotNet.Artifacts/
+
+# Provisioning profiles stay out of source - the release workflow decodes one from a secret
+*.provisionprofile

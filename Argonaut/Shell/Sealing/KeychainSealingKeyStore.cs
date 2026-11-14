@@ -6,8 +6,20 @@ using Argonaut.Engine.Settings;
 namespace Argonaut.Shell.Sealing;
 
 /// <summary>
-/// The sealing key as a generic-password item in the user's login Keychain - outside the app's
-/// own folders, so it survives a reinstall, and the same item in the GitHub and App Store builds.
+/// The sealing key as a generic-password item in the user's Keychain - outside the app's own
+/// folders, so it survives a reinstall.
+///
+/// The item lives in the data-protection Keychain, whose access is by the app's
+/// <c>keychain-access-groups</c> entitlement rather than an access list of code signatures, so
+/// reading it never raises the "wants to use your confidential information" prompt - not after an
+/// update, and not for a build signed differently from the one that made it. That entitlement
+/// needs an embedded provisioning profile (see <c>scripts/package-macos.sh</c>). A build without
+/// one is refused with <c>errSecMissingEntitlement</c>, and then uses the login Keychain, as every
+/// build did before: a local release build packed without the profile still runs.
+///
+/// A key found only in the login Keychain is moved across on first read, so an update keeps its
+/// saved sources; reading the old item can raise the prompt that one last time if a build signed
+/// differently made it.
 ///
 /// Called through Security.framework and CoreFoundation directly: a query is a CFDictionary of
 /// the framework's own key constants, read out of the framework rather than spelled as strings.
@@ -25,18 +37,18 @@ public sealed class KeychainSealingKeyStore(string service, string account) : IS
     {
         try
         {
-            using var query = Native.Query(service, account, returnData: true);
-            if (Native.SecItemCopyMatching(query.Handle, out nint result) != Native.Success || result == 0)
+            int status = Copy(dataProtection: true, out byte[]? key);
+            if (status == Native.Success)
+                return key;
+
+            bool hasDataProtection = status != Native.MissingEntitlement;
+            if (Copy(dataProtection: false, out key) != Native.Success)
                 return null;
 
-            try
-            {
-                return Native.ReadData(result);
-            }
-            finally
-            {
-                Native.CFRelease(result);
-            }
+            if (hasDataProtection && Add(dataProtection: true, key!) == Native.Success)
+                Delete(dataProtection: false);
+
+            return key;
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
         {
@@ -48,8 +60,11 @@ public sealed class KeychainSealingKeyStore(string service, string account) : IS
     {
         try
         {
-            using var item = Native.Query(service, account, returnData: false, value: key);
-            return Native.SecItemAdd(item.Handle, 0) == Native.Success;
+            int status = Add(dataProtection: true, key);
+            if (status == Native.MissingEntitlement)
+                status = Add(dataProtection: false, key);
+
+            return status == Native.Success;
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
         {
@@ -57,11 +72,43 @@ public sealed class KeychainSealingKeyStore(string service, string account) : IS
         }
     }
 
-    /// <summary>Removes the item - tests clean up with it; the app never deletes its key.</summary>
+    private int Copy(bool dataProtection, out byte[]? key)
+    {
+        key = null;
+        using var query = Native.Query(service, account, dataProtection, returnData: true);
+        int status = Native.SecItemCopyMatching(query.Handle, out nint result);
+        if (status != Native.Success || result == 0)
+            return status == Native.Success ? Native.ItemNotFound : status;
+
+        try
+        {
+            key = Native.ReadData(result);
+            return Native.Success;
+        }
+        finally
+        {
+            Native.CFRelease(result);
+        }
+    }
+
+    private int Add(bool dataProtection, byte[] key)
+    {
+        using var item = Native.Query(service, account, dataProtection, returnData: false, value: key);
+        return Native.SecItemAdd(item.Handle, 0);
+    }
+
+    private void Delete(bool dataProtection)
+    {
+        using var query = Native.Query(service, account, dataProtection, returnData: false);
+        Native.SecItemDelete(query.Handle);
+    }
+
+    /// <summary>Removes the item from both Keychains - tests clean up with it; the app never
+    /// deletes its key, only the login Keychain's copy once it has moved.</summary>
     internal void Delete()
     {
-        using var query = Native.Query(service, account, returnData: false);
-        Native.SecItemDelete(query.Handle);
+        Delete(dataProtection: true);
+        Delete(dataProtection: false);
     }
 
     private static class Native
@@ -71,6 +118,11 @@ public sealed class KeychainSealingKeyStore(string service, string account) : IS
         private const uint Utf8Encoding = 0x08000100;
 
         public const int Success = 0;
+        public const int ItemNotFound = -25300;
+
+        /// <summary><c>errSecMissingEntitlement</c>: the data-protection Keychain refused a build
+        /// with no keychain-access-groups entitlement.</summary>
+        public const int MissingEntitlement = -34018;
 
         [DllImport(Security)]
         public static extern int SecItemCopyMatching(nint query, out nint result);
@@ -108,10 +160,11 @@ public sealed class KeychainSealingKeyStore(string service, string account) : IS
         /// <summary>The address of an exported struct such as the dictionary callbacks.</summary>
         private static nint Address(nint library, string name) => NativeLibrary.GetExport(library, name);
 
-        /// <summary>The generic-password query for one service and account; with
-        /// <paramref name="returnData"/>, asking for the one item's data back, and with
-        /// <paramref name="value"/>, the attributes of an item to add.</summary>
-        public static OwnedCFDictionary Query(string service, string account, bool returnData, byte[]? value = null)
+        /// <summary>The generic-password query for one service and account, in the
+        /// data-protection or the login Keychain; with <paramref name="returnData"/>, asking for
+        /// the one item's data back, and with <paramref name="value"/>, the attributes of an item
+        /// to add.</summary>
+        public static OwnedCFDictionary Query(string service, string account, bool dataProtection, bool returnData, byte[]? value = null)
         {
             var (security, coreFoundation) = Libraries.Value;
             var owned = new OwnedCFDictionary();
@@ -132,6 +185,12 @@ public sealed class KeychainSealingKeyStore(string service, string account) : IS
                 accountText,
             };
 
+            if (dataProtection)
+            {
+                keys.Add(Constant(security, "kSecUseDataProtectionKeychain"));
+                values.Add(Constant(coreFoundation, "kCFBooleanTrue"));
+            }
+
             if (returnData)
             {
                 keys.Add(Constant(security, "kSecReturnData"));
@@ -144,6 +203,14 @@ public sealed class KeychainSealingKeyStore(string service, string account) : IS
             {
                 keys.Add(Constant(security, "kSecValueData"));
                 values.Add(owned.Own(CFDataCreate(0, value, value.Length)));
+
+                // Readable from first unlock after boot, so an app launched at login can open its
+                // settings; never synced off this device.
+                if (dataProtection)
+                {
+                    keys.Add(Constant(security, "kSecAttrAccessible"));
+                    values.Add(Constant(security, "kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly"));
+                }
             }
 
             owned.Handle = CFDictionaryCreate(0, keys.ToArray(), values.ToArray(), keys.Count,

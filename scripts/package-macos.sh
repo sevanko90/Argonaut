@@ -3,8 +3,16 @@ set -euo pipefail
 
 # Publishes Argonaut and packs it into a Velopack release for macOS: a portable .app bundle,
 # a signed installer .pkg, and a .nupkg update payload (see docs/velopack-auto-update-plan.md).
-# `vpk pack` does its own .app assembly (Info.plist, icon, ad-hoc signing) - we no longer
-# hand-assemble the bundle ourselves.
+# The .app is assembled here (Info.plist, icon, provisioning profile) and handed to `vpk pack`,
+# which adds its updater, signs and notarises it: vpk can build a bundle itself, but has no way
+# to put a provisioning profile in one.
+#
+# The profile is what lets the app use the data-protection Keychain (see
+# KeychainSealingKeyStore): its keychain-access-groups entitlement is restricted, and macOS kills
+# at launch an app that claims it without a matching embedded profile. So the entitlements are
+# only added when ARGONAUT_PROVISION_PROFILE names the profile - the release workflow decodes it
+# from a secret; a local run without it builds an app that falls back to the login Keychain. A
+# tagged release refuses to pack without it.
 #
 # Usage: scripts/package-macos.sh [osx-arm64|osx-x64] [version]
 #   version must be a clean SemVer (e.g. 1.4.0, no leading 'v') when packing for release;
@@ -23,6 +31,8 @@ PROJECT="$ROOT_DIR/Argonaut/Argonaut.csproj"
 PUBLISH_DIR="$ROOT_DIR/Argonaut/bin/$CONFIGURATION/net10.0/$RID/publish"
 DIST_DIR="$ROOT_DIR/dist"
 VELOPACK_OUT_DIR="$DIST_DIR/velopack"
+APP_STAGE_DIR="$ROOT_DIR/Argonaut/bin/$CONFIGURATION/net10.0/$RID/app-stage"
+TEAM_ID="5S97A7W8W5"
 
 if [ -z "$RAW_VERSION" ]; then
     PACK_VERSION="0.0.1"
@@ -54,19 +64,49 @@ dotnet publish "$PROJECT" \
     -p:PublishSingleFile=true \
     -p:InformationalVersion="$PACK_VERSION"
 
+echo "Assembling $APP_NAME.app..."
+rm -rf "$APP_STAGE_DIR"
+APP_BUNDLE="$APP_STAGE_DIR/$APP_NAME.app"
+mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"
+ditto "$PUBLISH_DIR" "$APP_BUNDLE/Contents/MacOS"
+cp "$ROOT_DIR/Argonaut/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
+cp "$ROOT_DIR/Argonaut/Assets/Icon/Argonaut.icns" "$APP_BUNDLE/Contents/Resources/Argonaut.icns"
+
+ENTITLEMENTS="$ROOT_DIR/Argonaut/entitlements.entitlements"
+if [ -n "${ARGONAUT_PROVISION_PROFILE:-}" ]; then
+    echo "Embedding provisioning profile and the Keychain entitlements..."
+    cp "$ARGONAUT_PROVISION_PROFILE" "$APP_BUNDLE/Contents/embedded.provisionprofile"
+    ENTITLEMENTS="$APP_STAGE_DIR/entitlements.entitlements"
+    cp "$ROOT_DIR/Argonaut/entitlements.entitlements" "$ENTITLEMENTS"
+    # The entitlement must match the profile's App ID exactly, so it is read from the profile
+    # rather than built from CFBundleIdentifier - the portal may have registered it in other case.
+    APP_IDENTIFIER="$(security cms -D -i "$ARGONAUT_PROVISION_PROFILE" \
+        | plutil -extract Entitlements.com\\.apple\\.application-identifier raw -o - -)"
+    /usr/libexec/PlistBuddy \
+        -c "Add :com.apple.application-identifier string $APP_IDENTIFIER" \
+        -c "Add :com.apple.developer.team-identifier string $TEAM_ID" \
+        -c "Add :keychain-access-groups array" \
+        -c "Add :keychain-access-groups:0 string $APP_IDENTIFIER" \
+        "$ENTITLEMENTS"
+elif [ -n "$RAW_VERSION" ]; then
+    echo "error: a release must embed the provisioning profile - set ARGONAUT_PROVISION_PROFILE." >&2
+    exit 1
+else
+    echo "No ARGONAUT_PROVISION_PROFILE: packing without the Keychain entitlements."
+fi
+
 echo "Packing Velopack release $PACK_VERSION for $RID..."
 rm -rf "$VELOPACK_OUT_DIR"
 vpk --legacyConsole pack \
-    --signAppIdentity "Developer ID Application: Marc Evans (5S97A7W8W5)" \
-    --signInstallIdentity "Developer ID Installer: Marc Evans (5S97A7W8W5)" \
-    --signEntitlements "$ROOT_DIR/Argonaut/entitlements.entitlements" \
+    --signAppIdentity "Developer ID Application: Marc Evans ($TEAM_ID)" \
+    --signInstallIdentity "Developer ID Installer: Marc Evans ($TEAM_ID)" \
+    --signEntitlements "$ENTITLEMENTS" \
     --notaryProfile "argonaut-notary" \
     --packId "$APP_NAME" \
     --packVersion "$PACK_VERSION" \
-    --packDir "$PUBLISH_DIR" \
+    --packDir "$APP_BUNDLE" \
     --mainExe "$APP_NAME" \
     --icon "$ROOT_DIR/Argonaut/Assets/Icon/Argonaut.icns" \
-    --plist "$ROOT_DIR/Argonaut/Info.plist" \
     --delta None \
     --outputDir "$VELOPACK_OUT_DIR" \
     -r "$RID"

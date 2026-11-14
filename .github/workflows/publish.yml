@@ -67,13 +67,22 @@ jobs:
             --key "$RUNNER_TEMP/notary_key.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" \
             --keychain "$KEYCHAIN"
           rm -f "$RUNNER_TEMP/notary_key.p8"
+      - name: Decode provisioning profile
+        if: matrix.os == 'macos-latest'
+        env:
+          MACOS_PROVISION_PROFILE: ${{ secrets.MACOS_PROVISION_PROFILE }}
+        run: |
+          echo "$MACOS_PROVISION_PROFILE" | base64 --decode > "$RUNNER_TEMP/argonaut.provisionprofile"
+          echo "ARGONAUT_PROVISION_PROFILE=$RUNNER_TEMP/argonaut.provisionprofile" >> "$GITHUB_ENV"
       - name: Publish and pack (macOS, Velopack)
         if: matrix.os == 'macos-latest'
         timeout-minutes: 20
         run: ./scripts/package-macos.sh ${{ matrix.rid }} "${{ github.event_name == 'release' && github.ref_name || '' }}"
       - name: Remove build keychain
         if: always() && matrix.os == 'macos-latest'
-        run: security delete-keychain "$RUNNER_TEMP/build.keychain" || true
+        run: |
+          security delete-keychain "$RUNNER_TEMP/build.keychain" || true
+          rm -f "$RUNNER_TEMP/argonaut.provisionprofile"
       - name: Collect binlog on failure
         if: failure()
         run: dotnet publish Argonaut/Argonaut.csproj -c Release -r ${{ matrix.rid }} /bl:publish-${{ matrix.rid }}.binlog

@@ -77,8 +77,57 @@ public sealed class HttpClientFetcherTests
         Assert.Contains("no route", failure.Message);
     }
 
-    private sealed class StubHandler(HttpStatusCode status, string body) : HttpMessageHandler
+    [Theory]
+    [InlineData("gzip")]
+    [InlineData("deflate")]
+    [InlineData("br")]
+    public async Task ACompressedResponse_IsWrittenDecompressed_WithProgressInCompressedBytes(string encoding)
     {
+        string json = string.Concat(Enumerable.Repeat("""{"productType":["0"],"current_SALES_gte":1000}""", 50));
+        byte[] compressed = Compress(Encoding.UTF8.GetBytes(json), encoding);
+        var handler = new StubHandler(HttpStatusCode.OK, compressed, encoding);
+        using var destination = new MemoryStream();
+        var seen = new List<(long Received, long? Total)>();
+
+        await new HttpClientFetcher(new HttpClient(handler)).FetchAsync(Request(HttpRequestMethod.Get), destination, (r, t) => seen.Add((r, t)), CancellationToken.None);
+
+        Assert.Equal(json, Encoding.UTF8.GetString(destination.ToArray()));
+        Assert.Equal((compressed.LongLength, (long?)compressed.LongLength), seen[^1]);
+    }
+
+    [Fact]
+    public async Task EveryRequest_SaysWhichCompressionsItAccepts()
+    {
+        var handler = new StubHandler(HttpStatusCode.OK, "{}");
+
+        await new HttpClientFetcher(new HttpClient(handler)).FetchAsync(Request(HttpRequestMethod.Get), new MemoryStream(), (_, _) => { }, CancellationToken.None);
+
+        Assert.Equal(["gzip", "deflate", "br"], handler.Sent!.Headers.AcceptEncoding.Select(e => e.Value));
+    }
+
+    private static byte[] Compress(byte[] plain, string encoding)
+    {
+        using var packed = new MemoryStream();
+        using (Stream compressor = encoding switch
+        {
+            "gzip" => new System.IO.Compression.GZipStream(packed, System.IO.Compression.CompressionLevel.Optimal, leaveOpen: true),
+            "deflate" => new System.IO.Compression.ZLibStream(packed, System.IO.Compression.CompressionLevel.Optimal, leaveOpen: true),
+            _ => new System.IO.Compression.BrotliStream(packed, System.IO.Compression.CompressionLevel.Optimal, leaveOpen: true),
+        })
+        {
+            compressor.Write(plain);
+        }
+
+        return packed.ToArray();
+    }
+
+    private sealed class StubHandler(HttpStatusCode status, byte[] body, string? contentEncoding = null) : HttpMessageHandler
+    {
+        public StubHandler(HttpStatusCode status, string body)
+            : this(status, Encoding.UTF8.GetBytes(body))
+        {
+        }
+
         public HttpRequestMessage? Sent { get; private set; }
 
         public string? SentBody { get; private set; }
@@ -94,9 +143,11 @@ public sealed class HttpClientFetcherTests
                 SentContentType = content.Headers.ContentType?.MediaType;
             }
 
-            var response = new HttpResponseMessage(status) { Content = new ByteArrayContent(Encoding.UTF8.GetBytes(body)) };
-            response.Content.Headers.ContentLength = Encoding.UTF8.GetByteCount(body);
+            var response = new HttpResponseMessage(status) { Content = new ByteArrayContent(body) };
+            response.Content.Headers.ContentLength = body.Length;
             response.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+            if (contentEncoding is not null)
+                response.Content.Headers.ContentEncoding.Add(contentEncoding);
             return response;
         }
     }

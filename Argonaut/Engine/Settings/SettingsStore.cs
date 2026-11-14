@@ -39,7 +39,11 @@ public sealed class SettingsStore : ISettingsStore
 
     /// <summary>A store backed by the file at <paramref name="filePath"/>, which need not exist
     /// yet. Reads it synchronously - it is small, and read once at startup.</summary>
-    public static SettingsStore Open(string filePath) => new(filePath, ReadFile(filePath));
+    /// <param name="seedFilePath">Read instead while <paramref name="filePath"/> does not exist -
+    /// never written. A Debug build starts from the released build's settings this way, then keeps
+    /// its own.</param>
+    public static SettingsStore Open(string filePath, string? seedFilePath = null)
+        => new(filePath, ReadFile(seedFilePath is not null && !File.Exists(filePath) ? seedFilePath : filePath));
 
     /// <summary>A store that never touches the disk, starting from defaults.</summary>
     public static SettingsStore InMemory() => new(null, new Dictionary<string, JsonElement>(StringComparer.Ordinal));

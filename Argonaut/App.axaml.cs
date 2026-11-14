@@ -50,7 +50,7 @@ public partial class App : Application
         {
             // The composition root: where every file location and OS action is decided, then
             // handed down to what uses it.
-            var settings = SettingsStore.Open(AppDataPaths.SettingsFile);
+            var settings = SettingsStore.Open(AppDataPaths.SettingsFile, AppDataPaths.SettingsSeedFile);
             desktop.Exit += (_, _) => settings.Save();
             if (log is IDisposable ownedLog)
                 desktop.Exit += (_, _) => ownedLog.Dispose();

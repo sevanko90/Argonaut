@@ -48,6 +48,38 @@ public sealed class SettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public void WithNoFileYet_StartsFromTheSeed_AndSavesOnlyToItsOwnFile()
+    {
+        string seedPath = Path.Combine(dir, "seed.json");
+        var seed = SettingsStore.Open(seedPath);
+        seed.Get<Counter>().Count = 42;
+        seed.Save();
+
+        var store = SettingsStore.Open(FilePath, seedPath);
+        Assert.Equal(42, store.Get<Counter>().Count);
+        store.Get<Counter>().Count = 9;
+        store.Save();
+
+        Assert.Equal(42, SettingsStore.Open(seedPath).Get<Counter>().Count);
+        Assert.Equal(9, SettingsStore.Open(FilePath).Get<Counter>().Count);
+    }
+
+    [Fact]
+    public void OnceItsOwnFileExists_TheSeedIsIgnored()
+    {
+        string seedPath = Path.Combine(dir, "seed.json");
+        var seed = SettingsStore.Open(seedPath);
+        seed.Get<Counter>().Count = 42;
+        seed.Save();
+
+        var own = SettingsStore.Open(FilePath);
+        own.Get<Counter>().Count = 9;
+        own.Save();
+
+        Assert.Equal(9, SettingsStore.Open(FilePath, seedPath).Get<Counter>().Count);
+    }
+
+    [Fact]
     public void NothingIsWritten_UntilSave()
     {
         var store = SettingsStore.Open(FilePath);

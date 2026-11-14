@@ -36,7 +36,7 @@ public interface IByteOrigin : IDisposable
     /// <summary>
     /// Where these bytes can be fetched again - a <see cref="FileLocator"/> for a file on disk -
     /// or null when there is nowhere: a paste, an excerpt, a diff side. This is the one thing the
-    /// place-keyed features consult: recent files and the remembered schema binding. Each of
+    /// place-keyed features consult: saved sources and the remembered schema binding. Each of
     /// those skips a document with no locator rather than substituting <see cref="DisplayName"/> -
     /// two pastes would collide in a place-keyed store. What touches the file system asks for the
     /// file kind.

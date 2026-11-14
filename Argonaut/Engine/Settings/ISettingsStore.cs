@@ -16,4 +16,9 @@ public interface ISettingsStore
     /// process without one (an update restart). Nothing watches the blocks, so a change is only
     /// persisted by this.</summary>
     void Save();
+
+    /// <summary>Drops a key no block uses any more, so the next <see cref="Save"/> removes it from
+    /// the file rather than carrying it forward - what a retired, unsealed block must not keep
+    /// doing once its replacement is sealed.</summary>
+    void Forget(string key);
 }

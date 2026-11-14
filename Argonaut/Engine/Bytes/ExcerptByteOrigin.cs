@@ -20,7 +20,7 @@ namespace Argonaut.Engine.Bytes;
 /// taken by bytes does not: finding out would mean counting every newline before it, which is
 /// the scan opening by bytes exists to skip.
 ///
-/// <see cref="Locator"/> is null, deliberately: the excerpt is not the file, so recent files and the
+/// <see cref="Locator"/> is null, deliberately: the excerpt is not the file, so saved sources and the
 /// remembered schema binding pass it over, and a save is a Save As - an
 /// edited excerpt can never be written over the whole file it came from.
 ///

@@ -70,9 +70,9 @@ public class ClipboardPasteTests
 
         await vm.PasteAsync();
 
-        Assert.Equal(before, vm.RecentFiles.Count);
+        Assert.Equal(before, vm.RecentSources.Count);
 
-        static int vmRecentCount(MainWindowViewModel vm) => vm.RecentFiles.Count;
+        static int vmRecentCount(MainWindowViewModel vm) => vm.RecentSources.Count;
     }
 
     [Fact]

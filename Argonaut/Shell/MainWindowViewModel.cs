@@ -34,6 +34,8 @@ using Argonaut.Ui.ViewModels;
 using Avalonia.Threading;
 using Argonaut.Ui.Launching;
 
+using Argonaut.Shell.Sources;
+
 namespace Argonaut.Shell;
 
 /// <summary>
@@ -78,8 +80,7 @@ public sealed class MainWindowViewModel : ObservableObject
     internal const long MaxPasteBytes = 64L * 1024 * 1024;
 
     private readonly AppearanceSettings appearance;
-    private readonly RecentFileHistory recentFileHistory;
-    private readonly FavouriteFiles favouriteFiles;
+    private readonly SavedSourceStore savedSources;
     private readonly JsonViewSettings jsonViewSettings;
     private readonly IConfigLocationSource? configLocations;
     private readonly ISelectionFilterFiles filterFiles;
@@ -124,8 +125,8 @@ public sealed class MainWindowViewModel : ObservableObject
     private string? lineEndingToolTip;
     private string title = DefaultTitle;
     private string fileName = string.Empty;
-    private IReadOnlyList<RecentFileItem> recentFiles = Array.Empty<RecentFileItem>();
-    private IReadOnlyList<RecentFileItem> favourites = Array.Empty<RecentFileItem>();
+    private IReadOnlyList<SavedSourceRow> recentSources = Array.Empty<SavedSourceRow>();
+    private IReadOnlyList<SavedSourceRow> pinnedSources = Array.Empty<SavedSourceRow>();
     private ThemeMode themeMode;
     private ContentFontMode contentFontMode;
     private DocumentViewOption? selectedView;
@@ -153,7 +154,7 @@ public sealed class MainWindowViewModel : ObservableObject
     /// <summary>Raised when the find bar should clear its term/status (file open, switch, or close).</summary>
     public event Action? FindBarResetRequested;
 
-    /// <param name="settings">The app's settings; the shell keeps its appearance and recent files
+    /// <param name="settings">The app's settings; the shell keeps its appearance and saved sources
     /// there, and hands the document views their own blocks.</param>
     /// <param name="schemaCatalog">The schemas a JSON document can be bound to.</param>
     /// <param name="confirmReplace">
@@ -198,12 +199,12 @@ public sealed class MainWindowViewModel : ObservableObject
         ISelectionFilterFiles? filterFiles = null,
         IRecipeStore? recipes = null,
         ISystemLauncher? launcher = null,
-        ILineEndingDetector? lineEndings = null)
+        ILineEndingDetector? lineEndings = null,
+        ISettingsSealer? settingsSealer = null)
     {
         this.lineEndings = lineEndings ?? new LineEndingDetector();
         this.appearance = settings.Get<AppearanceSettings>();
-        this.recentFileHistory = settings.Get<RecentFileHistory>();
-        this.favouriteFiles = settings.Get<FavouriteFiles>();
+        this.savedSources = new SavedSourceStore(settings.Get<SavedSourcesBlock>(), settingsSealer);
         this.jsonViewSettings = settings.Get<JsonViewSettings>();
         this.configLocations = configLocations;
         this.filterFiles = filterFiles ?? new SelectionFilterFiles();
@@ -226,7 +227,7 @@ public sealed class MainWindowViewModel : ObservableObject
             status => FindStatusChanged?.Invoke(status),
             () => currentFilePath is null ? null : this.progressBoard.Begin($"Searching {FileName}", StopFind));
 
-        ReloadRecentFiles();
+        ReloadSavedSources();
     }
 
     /// <summary>What the progress bar shows.</summary>
@@ -502,29 +503,29 @@ public sealed class MainWindowViewModel : ObservableObject
             await navigable.RevealByteRangeAsync(range);
     }
 
-    /// <summary>Recently opened files, newest first, without the ones already pinned.</summary>
-    public IReadOnlyList<RecentFileItem> RecentFiles
+    /// <summary>Recently opened sources, newest first, without the pinned ones.</summary>
+    public IReadOnlyList<SavedSourceRow> RecentSources
     {
-        get => recentFiles;
-        private set => SetField(ref recentFiles, value);
+        get => recentSources;
+        private set => SetField(ref recentSources, value);
     }
 
-    /// <summary>The pinned files, in the order they were pinned.</summary>
-    public IReadOnlyList<RecentFileItem> Favourites
+    /// <summary>The pinned sources, in the order they were pinned.</summary>
+    public IReadOnlyList<SavedSourceRow> PinnedSources
     {
-        get => favourites;
-        private set => SetField(ref favourites, value);
+        get => pinnedSources;
+        private set => SetField(ref pinnedSources, value);
     }
 
     /// <summary>The configuration folders that exist right now. Read when the list is shown, not
     /// cached, so it reflects the machine as it is.</summary>
     public IReadOnlyList<ConfigLocation> GetConfigLocations() => configLocations?.GetExisting() ?? [];
 
-    /// <summary>Pins the file if it is not pinned, unpins it if it is.</summary>
-    public void ToggleFavourite(string path)
+    /// <summary>Pins the saved source if it is not pinned, unpins it if it is.</summary>
+    public void TogglePin(string id)
     {
-        favouriteFiles.Toggle(path);
-        ReloadRecentFiles();
+        savedSources.TogglePin(id);
+        ReloadSavedSources();
     }
 
     /// <summary>True when "Compare with…" applies: the current document is being viewed as
@@ -558,7 +559,7 @@ public sealed class MainWindowViewModel : ObservableObject
     /// never via <see cref="FileTypeDetector"/> - so the published document carries
     /// <see cref="FileTypeDetector.FileKind.Unknown"/>: the view switcher shows no selection
     /// for it, and picking any view there re-indexes the left file as that kind through the
-    /// normal switch path, disposing the diff on the way out. Not added to recent files in v1
+    /// normal switch path, disposing the diff on the way out. Not added to saved sources in v1
     /// (a diff is not a reopenable path). Shared core behind <see cref="CompareWithAsync"/>
     /// (which requires a document already open) and <see cref="OpenPathsAsync"/> (the
     /// command-line startup path, which has none yet).
@@ -615,7 +616,7 @@ public sealed class MainWindowViewModel : ObservableObject
     /// switch path, which is a second route back for free. Publishing it as
     /// <see cref="FileTypeDetector.FileKind.Json"/> instead would make
     /// <see cref="SwitchViewAsync"/> no-op on the unchanged kind and strand the user on the
-    /// banner link. Not added to recent files - a byte range is not a reopenable path.
+    /// banner link. Not added to saved sources - a byte range is not a reopenable place.
     ///
     /// The table reports its own indexing progress (like a diff), so the shell's part is only to
     /// silence the outgoing load's reporter.
@@ -1321,24 +1322,28 @@ public sealed class MainWindowViewModel : ObservableObject
         appearance.ContentFont = ContentFontMode;
     }
 
-    public void OpenRecentFile(string path) => _ = OpenPathAsync(path);
-
-    public void ClearRecentFiles()
+    /// <summary>Opens a saved source again from where its locator says it is.</summary>
+    public void OpenSavedSource(string id)
     {
-        recentFileHistory.Clear();
-        ReloadRecentFiles();
+        if (savedSources.Find(id)?.Locator is FileLocator file)
+            _ = OpenPathAsync(file.Path);
     }
 
-    private void ReloadRecentFiles()
+    public void ClearRecentSources()
     {
-        Favourites = favouriteFiles.Paths
-            .Select(path => new RecentFileItem(path, Path.GetFileName(path), IsFavourite: true))
-            .ToList();
-        RecentFiles = recentFileHistory.Paths
-            .Where(path => !favouriteFiles.Contains(path))
-            .Select(path => new RecentFileItem(path, Path.GetFileName(path)))
-            .ToList();
+        savedSources.ClearRecent();
+        ReloadSavedSources();
     }
+
+    private void ReloadSavedSources()
+    {
+        PinnedSources = savedSources.Pinned.Select(Row).ToList();
+        RecentSources = savedSources.Recent.Select(Row).ToList();
+    }
+
+    /// <summary>A saved source as the empty state shows it - a pill for anything but a file.</summary>
+    private static SavedSourceRow Row(SavedSource source)
+        => new(source.Id, source.Name, source.Locator!.DisplayText, source.Locator is FileLocator ? null : source.Kind, source.IsPinned);
 
     /// <summary>
     /// Opens <paramref name="path"/>, replacing any current document. <see cref="openRequest"/>
@@ -1723,12 +1728,12 @@ public sealed class MainWindowViewModel : ObservableObject
         findController.Attach(navigator);
         IsFindAvailable = navigator is not null;
 
-        // Only a document that is a file on disk is reopenable, so a paste or a download adds
-        // nothing here rather than recording a path that does not exist.
-        if (addToRecents && origins.Length > 0 && origins[0].Locator is FileLocator { Path: var diskPath })
+        // Only a document with somewhere to go back to is saved - a paste or an excerpt adds
+        // nothing rather than recording a place that does not exist.
+        if (addToRecents && origins.Length > 0 && origins[0].Locator is { } locator)
         {
-            recentFileHistory.Add(diskPath);
-            ReloadRecentFiles();
+            savedSources.Touch(locator);
+            ReloadSavedSources();
         }
     }
 
@@ -1892,7 +1897,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
         SetCurrentDocument(null, null);
         AdoptOrigins();
-        ReloadRecentFiles();
+        ReloadSavedSources();
     }
 
     // ── Save ────────────────────────────────────────────────────────────────────────────
@@ -2015,10 +2020,10 @@ public sealed class MainWindowViewModel : ObservableObject
                 if (!ReferenceEquals(destination, current))
                     AdoptSavedAs(destination);
 
-                if (destination.Locator is FileLocator { Path: var savedPath })
+                if (destination.Locator is { } savedTo)
                 {
-                    recentFileHistory.Add(savedPath);
-                    ReloadRecentFiles();
+                    savedSources.Touch(savedTo);
+                    ReloadSavedSources();
                 }
 
                 ToastService.Show($"Saved {FileName}");

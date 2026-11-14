@@ -6,18 +6,26 @@ using Avalonia.Interactivity;
 
 namespace Argonaut.Shell;
 
-/// <summary>One row in the recent or favourite list: full path, the file name shown on the button,
-/// and whether the file is pinned (which fills its star).</summary>
-public sealed record RecentFileItem(string Path, string FileName, bool IsFavourite = false);
+/// <summary>One row in the recent or pinned list: the saved source's id, the name shown on the
+/// button, where it is (the tooltip), the kind pill for anything but a file, and whether it is
+/// pinned (which fills its star).</summary>
+public sealed record SavedSourceRow(string Id, string Name, string LocationText, string? Pill, bool IsPinned)
+{
+    public bool HasPill => Pill is not null;
+}
 
 public partial class EmptyStateView : UserControl
 {
     public event EventHandler? ChooseFileRequested;
     public event EventHandler? PasteRequested;
     public event EventHandler? NewDocumentRequested;
-    public event EventHandler? ClearRecentFilesRequested;
-    public event EventHandler<string>? OpenRecentFileRequested;
-    public event EventHandler<string>? ToggleFavouriteRequested;
+    public event EventHandler? ClearRecentRequested;
+
+    /// <summary>Raised with the id of the saved source to open.</summary>
+    public event EventHandler<string>? OpenSavedSourceRequested;
+
+    /// <summary>Raised with the id of the saved source to pin or unpin.</summary>
+    public event EventHandler<string>? TogglePinRequested;
 
     /// <summary>Raised with a folder the user chose to browse from.</summary>
     public event EventHandler<string>? BrowseFromFolderRequested;
@@ -38,16 +46,16 @@ public partial class EmptyStateView : UserControl
         locationsMenu.Opening += (_, _) => LocationsRequested?.Invoke(this, EventArgs.Empty);
     }
 
-    /// <summary>Binds the recent-files list and toggles the empty-state text / clear button.</summary>
-    public void SetRecentFiles(IReadOnlyList<RecentFileItem> items)
+    /// <summary>Binds the recent list and toggles the empty-state text / clear button.</summary>
+    public void SetRecent(IReadOnlyList<SavedSourceRow> items)
     {
         RecentFilesList.ItemsSource = items;
         NoRecentFilesText.IsVisible = items.Count == 0;
         ClearRecentFilesButton.IsVisible = items.Count > 0;
     }
 
-    /// <summary>Binds the favourites list, showing a hint in its place while nothing is pinned.</summary>
-    public void SetFavourites(IReadOnlyList<RecentFileItem> items)
+    /// <summary>Binds the pinned list, showing a hint in its place while nothing is pinned.</summary>
+    public void SetPinned(IReadOnlyList<SavedSourceRow> items)
     {
         FavouritesList.ItemsSource = items;
         NoFavouritesText.IsVisible = items.Count == 0;
@@ -88,18 +96,18 @@ public partial class EmptyStateView : UserControl
 
     private void OnClearRecentFiles(object? sender, RoutedEventArgs e)
     {
-        ClearRecentFilesRequested?.Invoke(this, EventArgs.Empty);
+        ClearRecentRequested?.Invoke(this, EventArgs.Empty);
     }
 
     private void OnToggleFavourite(object? sender, RoutedEventArgs e)
     {
-        if ((sender as Button)?.DataContext is RecentFileItem item)
-            ToggleFavouriteRequested?.Invoke(this, item.Path);
+        if ((sender as Button)?.DataContext is SavedSourceRow row)
+            TogglePinRequested?.Invoke(this, row.Id);
     }
 
     private void OnRecentFileClick(object? sender, RoutedEventArgs e)
     {
-        if ((sender as Button)?.DataContext is RecentFileItem item)
-            OpenRecentFileRequested?.Invoke(this, item.Path);
+        if ((sender as Button)?.DataContext is SavedSourceRow row)
+            OpenSavedSourceRequested?.Invoke(this, row.Id);
     }
 }

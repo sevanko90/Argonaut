@@ -102,10 +102,12 @@ key, so the old unsealed `recentFiles`, `favouriteFiles` and `schemaBindings` ar
 - `SavedSourceStore` - the injected service over the sealed block: add-or-touch on open (by
   locator identity), rename, pin, remove, clear unpinned. Replaces `RecentFileHistory` and
   `FavouriteFiles`.
-- `ISourceOpener` turns a `SavedSource` back into an `IByteOrigin` - a file locator through
-  `IFileAccess`, an HTTP locator through the HTTP origin once it exists. The shell records
-  whatever locator an opened origin reports and reopens through the opener, with no type checks
-  of its own.
+- The shell records whatever locator an opened or saved origin reports. Reopening is a switch on
+  the locator in `MainWindowViewModel.OpenSavedSource` - a file goes through `OpenPathAsync`, which
+  keeps its missing-file handling. An `ISourceOpener` seam waits until the HTTP source gives it a
+  second branch.
+- The retired `recentFiles` and `favouriteFiles` keys are dropped from the file at startup
+  (`ISettingsStore.Forget`), so their unsealed paths do not linger.
 - Empty state rows: name, location as the tooltip, the kind pill on non-file rows, pin, and
   rename (inline edit on the name).
 
@@ -128,7 +130,7 @@ folder work is separate.
 2. [x] `ISettingsSealer` and its three implementations, plus the test sealer. Tests: round
    trip, a tampered or foreign blob opens as nothing, the macOS Keychain key created once and
    reused (macOS-only test), DPAPI on Windows CI.
-3. [ ] `SavedSourceStore` replacing recents and favourites, sealed; the shell records locators
+3. [x] `SavedSourceStore` replacing recents and favourites, sealed; the shell records locators
    and reopens through `ISourceOpener`. Tests: add-or-touch, cap on unpinned only, rename, pin,
    sealed on disk (no path text in `settings.json`), empty when the blob will not open.
 4. [ ] Empty-state rows: rename, pill on non-file rows; toast action and "Remove from list" on

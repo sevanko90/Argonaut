@@ -4,7 +4,7 @@ namespace Argonaut.Engine.Bytes;
 
 /// <summary>
 /// A document that arrived as bytes rather than as a file - a clipboard paste, or a small
-/// download. <see cref="Locator"/> is null, which is what the place-keyed features (recent files,
+/// download. <see cref="Locator"/> is null, which is what the place-keyed features (saved sources,
 /// the remembered schema binding, save, reveal in folder) key off to degrade rather than guess one.
 ///
 /// Every source it hands out is a window over the one array, so <see cref="OpenRange"/> costs

@@ -30,5 +30,9 @@ internal static class AppDataPaths
 
     /// <summary>The diagnostic log a Debug build writes (see
     /// <see cref="Argonaut.Engine.Logging.FileDiagnosticLog"/>).</summary>
+    /// <summary>Where Linux keeps the key that seals settings blocks - see
+    /// <see cref="FileSealingKeyStore"/>. Unused on macOS (the Keychain) and Windows (DPAPI).</summary>
+    public static string SealingKeyFile => Path.Combine(Root, "sealing.key");
+
     public static string DebugLogFile => Path.Combine(Root, "debug.log");
 }

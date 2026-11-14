@@ -147,7 +147,7 @@ Other rules that fall out of the split:
 - **`Locator` says where a document can be fetched again, and a file is one kind of it.**
   `IByteOrigin.Locator` is a `SourceLocator` - a `FileLocator` for a file on disk - or null for a
   document with nowhere to go back to (a paste, an excerpt, a diff side). There is no separate
-  path: a path is the file locator's. The place-keyed features (recent files, the remembered
+  path: a path is the file locator's. The place-keyed features (saved sources, the remembered
   schema binding) skip a document with no locator; never key anything by `DisplayName` (two
   pastes would collide). Anything that touches the file system
   asks for the file kind - `origin.Locator is FileLocator file` - and degrades without it.

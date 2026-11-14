@@ -283,37 +283,47 @@ public sealed class MainWindowViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task ToggleFavourite_MovesAFileFromRecentToFavouritesAndBack()
+    public async Task TogglePin_MovesASourceFromRecentToPinnedAndBack()
     {
         string path = WriteJsonFile();
         var document = new FakeDocument { FilePath = path };
         var vm = CreateViewModel((_, _, _) => Task.FromResult<IDocumentViewModel>(document));
         await vm.OpenPathAsync(path);
+        string id = Assert.Single(vm.RecentSources).Id;
 
-        vm.ToggleFavourite(path);
+        vm.TogglePin(id);
 
-        Assert.Contains(vm.Favourites, item => item.IsFavourite && string.Equals(item.Path, path, StringComparison.OrdinalIgnoreCase));
-        Assert.DoesNotContain(vm.RecentFiles, item => string.Equals(item.Path, path, StringComparison.OrdinalIgnoreCase));
+        Assert.True(Assert.Single(vm.PinnedSources).IsPinned);
+        Assert.Empty(vm.RecentSources);
 
-        vm.ToggleFavourite(path);
+        vm.TogglePin(id);
 
-        Assert.Empty(vm.Favourites);
-        Assert.Contains(vm.RecentFiles, item => string.Equals(item.Path, path, StringComparison.OrdinalIgnoreCase));
+        Assert.Empty(vm.PinnedSources);
+        Assert.Equal(id, Assert.Single(vm.RecentSources).Id);
     }
 
     [Fact]
-    public void Favourites_SurviveReopeningTheSettings()
+    public async Task PinnedSources_SurviveReopeningTheSettings()
     {
         var settings = SettingsStore.InMemory();
-        settings.Get<FavouriteFiles>().Toggle(Path.Combine(tempDir, "pinned.ini"));
+        var sealer = new AesGcmSettingsSealer(new MemorySealingKeyStore());
+        string path = WriteJsonFile();
+        var first = new MainWindowViewModel(settings, TestSchemas.Catalog(), _ => Task.FromResult(true),
+            documentLoader: (_, _, _) => Task.FromResult<IDocumentViewModel>(new FakeDocument { FilePath = path }), settingsSealer: sealer);
+        await first.OpenPathAsync(path);
+        first.TogglePin(Assert.Single(first.RecentSources).Id);
 
-        var vm = CreateViewModel((_, _, _) => throw new InvalidOperationException(), settings);
+        var reopened = new MainWindowViewModel(settings, TestSchemas.Catalog(), _ => Task.FromResult(true),
+            documentLoader: (_, _, _) => throw new InvalidOperationException(), settingsSealer: sealer);
 
-        Assert.Equal("pinned.ini", Assert.Single(vm.Favourites).FileName);
+        var pinned = Assert.Single(reopened.PinnedSources);
+        Assert.Equal(Path.GetFileName(path), pinned.Name);
+        Assert.Equal(Path.GetFullPath(path), pinned.LocationText);
+        Assert.Null(pinned.Pill);
     }
 
     [Fact]
-    public async Task OpenPath_AddsToRecentFiles()
+    public async Task OpenPath_AddsToRecentSources()
     {
         string path = WriteJsonFile();
         var document = new FakeDocument { FilePath = path };
@@ -321,7 +331,26 @@ public sealed class MainWindowViewModelTests : IDisposable
 
         await vm.OpenPathAsync(path);
 
-        Assert.Contains(vm.RecentFiles, item => string.Equals(item.Path, path, StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(Path.GetFullPath(path), Assert.Single(vm.RecentSources).LocationText);
+    }
+
+    [Fact]
+    public async Task OpenSavedSource_OpensItsFileAgain()
+    {
+        string path = WriteJsonFile();
+        var opened = new List<IByteOrigin>();
+        var vm = CreateViewModel((_, origin, _) =>
+        {
+            opened.Add(origin);
+            return Task.FromResult<IDocumentViewModel>(new FakeDocument { FilePath = path, Origin = origin });
+        });
+        await vm.OpenPathAsync(path);
+        await vm.CloseFileAsync();
+
+        vm.OpenSavedSource(Assert.Single(vm.RecentSources).Id);
+        await WaitUntil(() => opened.Count == 2);
+
+        Assert.Equal(Path.GetFullPath(path), opened[1].FilePathOf());
     }
 
     [Fact]
@@ -441,14 +470,14 @@ public sealed class MainWindowViewModelTests : IDisposable
             Task.FromResult<IDocumentViewModel>(kind == FileTypeDetector.FileKind.Json ? initial : switched));
 
         await vm.OpenPathAsync(path);
-        int recentCountAfterOpen = vm.RecentFiles.Count;
+        int recentCountAfterOpen = vm.RecentSources.Count;
 
         await vm.SwitchViewAsync(FileTypeDetector.FileKind.Ndjson);
 
         Assert.True(initial.Disposed, "the outgoing document must be disposed before the swap");
         Assert.False(switched.Disposed);
         Assert.Same(switched, vm.CurrentDocument);
-        Assert.Equal(recentCountAfterOpen, vm.RecentFiles.Count);
+        Assert.Equal(recentCountAfterOpen, vm.RecentSources.Count);
     }
 
     [Fact]

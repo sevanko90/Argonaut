@@ -224,7 +224,7 @@ public sealed class ShellSaveTests : IDisposable
         Assert.Equal(harness.PickedPath, destination.FilePathOf());
         Assert.Equal(harness.PickedPath, harness.Shell.FilePath);
         Assert.Equal("kept.txt", harness.Shell.FileName);
-        Assert.Contains(harness.Shell.RecentFiles, item => item.Path == harness.PickedPath);
+        Assert.Contains(harness.Shell.RecentSources, row => row.LocationText == harness.PickedPath);
     }
 
     [Fact]

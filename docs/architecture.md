@@ -10,7 +10,7 @@ them). Keep this in sync when the ownership chain changes.
   drag/drop), file picker, replace-confirmation dialog, toast, and the theme-mode reaction
   (variant + toggle icon). No file-open/close or status logic.
 - `MainWindowViewModel` owns all shell state and the open/close lifecycle: `CurrentDocument`,
-  status line, title, toolbar visibility, recent files, find controller, the view switcher
+  status line, title, toolbar visibility, saved sources, find controller, the view switcher
   (`AvailableViews`/`SelectedView`), the failure banner (`IsFailureBannerVisible`), and the
   theme / expand-depth / date-hint preferences.
 - `MainWindow.axaml` binds `ContentControl.Content="{Binding CurrentDocument}"`; implicit
@@ -33,6 +33,14 @@ them). Keep this in sync when the ownership chain changes.
   `FileByteOrigin`, `PasteAsync` wraps the clipboard's bytes in a `MemoryByteOrigin` (declined
   past `MaxPasteBytes`, 64 MB), and `OpenDiffAsync` takes two. From there detection runs on the
   bytes, not the extension, so a paste with no name is detected the same way a file is.
+- **Saved sources** (`Shell/Sources`) are what the empty state lists: one `SavedSourceStore`
+  of entries - id, name, kind, location, pinned - with the recent list (newest first, capped at
+  `MaxRecent` unpinned) and the pinned list (in pin order) as two views of it. Opening or saving
+  a document with a locator touches its entry; reopening goes back through the entry's locator.
+  The list lives in one settings block holding a single string sealed by the injected
+  `ISettingsSealer` (`SettingsSealers.ForThisPlatform`: DPAPI on Windows, AES-GCM with the key in
+  the macOS Keychain or a user-only key file on Linux), so neither paths nor URLs are readable from
+  `settings.json`; a block that will not open is an empty list.
 - **The shell owns the origins for the open input** (`ownedOrigins`, one per input, two when
   diffing) and releases them only when the input actually changes, in `AdoptOrigins`. A view
   switch keeps them, which is what stops JSON → Raw from re-materialising a paste.
@@ -121,7 +129,7 @@ them). Keep this in sync when the ownership chain changes.
   `currentKind` before reassigning `SelectedView`.
 - `SwitchViewAsync` re-indexes the *same* origin as a different kind, opening a fresh source
   over it rather than re-materialising anything: unlike `OpenPathAsync`, it
-  skips the replace-confirmation and doesn't touch recent files, but otherwise shares the exact
+  skips the replace-confirmation and doesn't touch saved sources, but otherwise shares the exact
   publish path (`LoadAndPublishAsync`) — including the staleness guard and the pre-flight/failure
   handling below.
 

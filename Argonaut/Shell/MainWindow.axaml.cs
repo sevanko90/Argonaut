@@ -63,11 +63,14 @@ public partial class MainWindow : Window
     /// <param name="openLogFolder">Shows the folder <paramref name="log"/> writes to, or null
     /// when there is none to show - which hides the status bar's button for it.</param>
     /// <param name="recipes">The recipes the raw view offers; null offers none.</param>
+    /// <param name="settingsSealer">Seals the saved sources in the settings file; null keeps them
+    /// for this run only.</param>
     /// <param name="launcher">Opens folders and links - About, Notices and the views' value hints;
     /// null takes this build's own
     /// (see <see cref="SystemLaunchers.ForThisBuild"/>).</param>
     public MainWindow(ISettingsStore settings, JsonSchemaCatalog schemaCatalog, IDiagnosticLog log, Action? openLogFolder = null,
-        IConfigLocationSource? configLocations = null, IRecipeStore? recipes = null, ISystemLauncher? launcher = null)
+        IConfigLocationSource? configLocations = null, IRecipeStore? recipes = null, ISystemLauncher? launcher = null,
+        ISettingsSealer? settingsSealer = null)
     {
         InitializeComponent();
 
@@ -101,6 +104,7 @@ public partial class MainWindow : Window
             askAboutUnsavedChanges: message => UnsavedChangesDialog.Show(this, message),
             reportFailure: message => ConfirmDialog.Inform(this, message),
             log: log,
+            settingsSealer: settingsSealer,
             configLocations: configLocations,
             filterFiles: new SelectionFilterFiles(),
             recipes: recipes,
@@ -129,14 +133,14 @@ public partial class MainWindow : Window
         EmptyState.PasteRequested += async (_, _) => await viewModel.PasteAsync();
         EmptyState.NewDocumentRequested += async (_, _) => await viewModel.NewDocumentAsync();
         EmptyState.SetPasteAvailable(viewModel.CanPaste);
-        EmptyState.OpenRecentFileRequested += (_, path) => viewModel.OpenRecentFile(path);
-        EmptyState.ClearRecentFilesRequested += (_, _) => viewModel.ClearRecentFiles();
-        EmptyState.ToggleFavouriteRequested += (_, path) => viewModel.ToggleFavourite(path);
+        EmptyState.OpenSavedSourceRequested += (_, id) => viewModel.OpenSavedSource(id);
+        EmptyState.ClearRecentRequested += (_, _) => viewModel.ClearRecentSources();
+        EmptyState.TogglePinRequested += (_, id) => viewModel.TogglePin(id);
         EmptyState.LocationsRequested += (_, _) => EmptyState.SetLocations(viewModel.GetConfigLocations());
         EmptyState.BrowseFromFolderRequested += async (_, folder) => await BrowseForFile(folder);
         EmptyState.SetLocations(viewModel.GetConfigLocations());
-        EmptyState.SetFavourites(viewModel.Favourites);
-        EmptyState.SetRecentFiles(viewModel.RecentFiles);
+        EmptyState.SetPinned(viewModel.PinnedSources);
+        EmptyState.SetRecent(viewModel.RecentSources);
 
         ApplyThemeMode(viewModel.ThemeMode);
         ApplyContentFontMode(viewModel.ContentFontMode);
@@ -311,11 +315,11 @@ public partial class MainWindow : Window
         if (e.PropertyName is null or nameof(MainWindowViewModel.ContentFontMode))
             ApplyContentFontMode(viewModel.ContentFontMode);
 
-        if (e.PropertyName is null or nameof(MainWindowViewModel.RecentFiles))
-            EmptyState.SetRecentFiles(viewModel.RecentFiles);
+        if (e.PropertyName is null or nameof(MainWindowViewModel.RecentSources))
+            EmptyState.SetRecent(viewModel.RecentSources);
 
-        if (e.PropertyName is null or nameof(MainWindowViewModel.Favourites))
-            EmptyState.SetFavourites(viewModel.Favourites);
+        if (e.PropertyName is null or nameof(MainWindowViewModel.PinnedSources))
+            EmptyState.SetPinned(viewModel.PinnedSources);
 
 #if DEBUG
         if (e.PropertyName is null or nameof(MainWindowViewModel.CurrentDocument))

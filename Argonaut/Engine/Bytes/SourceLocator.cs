@@ -4,7 +4,7 @@ namespace Argonaut.Engine.Bytes;
 
 /// <summary>
 /// Where a document's bytes can be fetched again: the one description of a document's place in
-/// the world, which recent files and remembered schema bindings key on and which reopening
+/// the world, which saved sources and remembered schema bindings key on and which reopening
 /// reads. A file's path is one kind of locator; a document with nowhere to go back to (a paste,
 /// an excerpt, a diff side) has none - see <see cref="IByteOrigin.Locator"/>.
 ///

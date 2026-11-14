@@ -12,6 +12,7 @@ using Argonaut.Engine.Settings;
 using Argonaut.Engine.Transforms;
 using Argonaut.Features.Json.Schema;
 using Argonaut.Shell;
+using Argonaut.Shell.Sealing;
 using Argonaut.Shell.CommandLine;
 using Argonaut.Shell.Launching;
 using Argonaut.Ui.Launching;
@@ -58,8 +59,14 @@ public partial class App : Application
 
             var recipes = new RecipeFolderStore(RecipeFolderStore.BundledDirectoryBesideApp, AppDataPaths.RecipesDirectory);
 
+            // The saved sources replaced these two unsealed path lists; dropping them is what keeps
+            // the paths out of settings.json now that their replacement is sealed.
+            settings.Forget("recentFiles");
+            settings.Forget("favouriteFiles");
+
             var window = new MainWindow(settings, schemaCatalog, log, OpenLogFolderAction(launcher),
-                ConfigLocationSource.ForCurrentPlatform(), recipes, launcher);
+                ConfigLocationSource.ForCurrentPlatform(), recipes, launcher,
+                SettingsSealers.ForThisPlatform(AppDataPaths.SealingKeyFile));
             mainWindow = window;
             desktop.MainWindow = window;
 

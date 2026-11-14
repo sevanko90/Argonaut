@@ -213,4 +213,23 @@ public sealed class SavedSourceStoreTests
         Assert.Equal("Orders", entry.Name);
         Assert.True(File("new.json").IsSamePlace(entry.Locator));
     }
+
+    [Fact]
+    public void ARequest_IsSavedWithItsMethodAndBody_AndComesBackTheSame()
+    {
+        var block = new SavedSourcesBlock();
+        Argonaut.Engine.Http.HttpRequestSpec.TryCreate(Argonaut.Engine.Http.HttpRequestMethod.Post, "https://api.example.com/search?x=1",
+            System.Text.Encoding.UTF8.GetBytes("{\"q\":\"secret\"}"), out var request, out _);
+        Store(block).Touch(new Argonaut.Engine.Http.HttpLocator(request!));
+
+        string json = System.Text.Json.JsonSerializer.Serialize(block, SavedSourcesBlock.JsonTypeInfo);
+        Assert.DoesNotContain("secret", json);
+        Assert.DoesNotContain("example", json);
+
+        var entry = Assert.Single(Store(block).Recent);
+        var reopened = Assert.IsType<Argonaut.Engine.Http.HttpLocator>(entry.Locator);
+        Assert.Equal(Argonaut.Engine.Http.HttpRequestMethod.Post, reopened.Request.Method);
+        Assert.Equal("{\"q\":\"secret\"}", System.Text.Encoding.UTF8.GetString(reopened.Request.Body!));
+        Assert.Equal(SavedSource.HttpKind, entry.Kind);
+    }
 }

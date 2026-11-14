@@ -57,9 +57,10 @@ response is an origin, and a saved request is a saved source.
   re-encodes only what needs it, so a URL the user typed is not rewritten until they edit the
   list. The base (scheme, host, path) and fragment are carried through untouched.
 
-### Locator (`Engine/Bytes`)
+### Locator (`Engine/Http`)
 
-`HttpLocator(HttpRequestSpec)` beside `FileLocator`. `DefaultName` is the URL's last path segment
+`HttpLocator(HttpRequestSpec)`, a `SourceLocator` beside the request it wraps (in `Engine/Http`,
+so `Engine/Bytes` does not reach up into requests). `DefaultName` is the URL's last path segment
 and host; `DisplayText` the method and URL; `Identity` the method, the URL with scheme and host
 lowercased and the fragment dropped, and for a POST a hash of the body.
 
@@ -110,7 +111,7 @@ the document area, and opens what Send produces through `OpenOriginAsync`.
 
 1. [x] `UrlQuery` and `HttpRequestSpec`. Tests: round trips (order, duplicates, flags, encoding,
    fragment), editing one argument rewrites only the query.
-2. [ ] `HttpLocator`; identity, names, saved-source storage of method and body. Tests.
+2. [x] `HttpLocator`; identity, names, saved-source storage of method and body. Tests.
 3. [ ] `IHttpFetcher` and the download to a temp file with progress and Stop; `HttpResponseOrigin`.
    Tests against a fake fetcher: progress with and without a length, a cancelled download leaves
    nothing, a non-2xx status fails with its status line.

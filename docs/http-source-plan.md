@@ -112,7 +112,7 @@ the document area, and opens what Send produces through `OpenOriginAsync`.
 1. [x] `UrlQuery` and `HttpRequestSpec`. Tests: round trips (order, duplicates, flags, encoding,
    fragment), editing one argument rewrites only the query.
 2. [x] `HttpLocator`; identity, names, saved-source storage of method and body. Tests.
-3. [ ] `IHttpFetcher` and the download to a temp file with progress and Stop; `HttpResponseOrigin`.
+3. [x] `IHttpFetcher` and the download to a temp file with progress and Stop; `HttpResponseOrigin`.
    Tests against a fake fetcher: progress with and without a length, a cancelled download leaves
    nothing, a non-2xx status fails with its status line.
 4. [ ] The request pane: URL, method, argument list kept in step with the URL, body editor. Look

@@ -74,7 +74,7 @@
                          VerticalAlignment="Center" FontWeight="Medium"
                          KeyDown="OnRenameKeyDown" LostFocus="OnRenameLostFocus" />
                 <Button Grid.Column="1" Classes="rowmenu" ToolTip.Tip="More">
-                    <icons:LucideIcon Data="{StaticResource Icon.More}" />
+                    <icons:LucideIcon Data="{StaticResource Icon.More}" VerticalAlignment="Center" />
                     <Button.Flyout>
                         <MenuFlyout Placement="BottomEdgeAlignedRight">
                             <MenuItem Header="Rename" Click="OnRename" />

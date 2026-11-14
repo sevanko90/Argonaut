@@ -410,7 +410,10 @@ public sealed class MainWindowViewModelTests : IDisposable
                 opened.Add(origin);
                 return Task.FromResult<IDocumentViewModel>(new FakeDocument { FilePath = origin.LocationText(), Origin = origin });
             },
-            fileAccess: access);
+            fileAccess: access,
+            // The real count reads the file in the background, and Windows will not move a file
+            // something has open - this test is about the move, not the count.
+            lineEndings: new FakeLineEndingDetector());
         await vm.OpenPathAsync(before);
         await vm.CloseFileAsync();
         File.Move(before, after);

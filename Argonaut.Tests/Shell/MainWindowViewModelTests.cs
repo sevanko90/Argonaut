@@ -590,6 +590,26 @@ public sealed class MainWindowViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task AFailedRequestOnItsOwn_CanBeClosed_BackToTheEmptyState()
+    {
+        var vm = RequestShell(new SwitchableFetcher { Fail = true }, [], _ => RequestSaveChoice.Discard, []);
+        await vm.NewRequestAsync();
+        Assert.True(vm.HasInput);
+        Assert.Equal("New request", vm.InputTitle);
+        vm.RequestEditor!.UrlText = "https://x.test/broken";
+        await vm.RequestEditor.SendAsync();
+
+        Assert.False(vm.IsFileOpen);
+        Assert.True(vm.HasInput);
+        Assert.Equal("broken · x.test", vm.InputTitle);
+
+        await vm.CloseFileAsync();
+
+        Assert.False(vm.HasInput);
+        Assert.True(vm.IsEmptyStateVisible);
+    }
+
+    [Fact]
     public async Task CancellingTheQuestion_KeepsThePaneOpen()
     {
         var vm = RequestShell(new SwitchableFetcher { Fail = true }, [], _ => RequestSaveChoice.Cancel, []);

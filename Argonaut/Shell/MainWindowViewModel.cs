@@ -416,7 +416,10 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
         private set
         {
             if (SetField(ref title, value))
+            {
                 OnPropertyChanged(nameof(HeaderTitle));
+                OnPropertyChanged(nameof(InputTitle));
+            }
         }
     }
 
@@ -425,6 +428,20 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
     /// changes whenever the document or its file does. An excerpt is named by its file; which
     /// lines it is, the excerpt control says.</summary>
     public string HeaderTitle => PartOf is { } whole ? whole.DisplayName : currentDocument?.HeaderTitle ?? FileName;
+
+    /// <summary>
+    /// Something is open to close: a document, or the request pane on its own - a request not yet
+    /// sent, or one whose send failed, which has no document under it. The header's name and close
+    /// button follow this, so there is always a way back to the empty state.
+    /// </summary>
+    public bool HasInput => IsFileOpen || IsRequestPaneVisible;
+
+    /// <summary>What the header names: the document, or - with only the request pane open - the
+    /// request.</summary>
+    public string InputTitle => IsFileOpen ? HeaderTitle : RequestPaneTitle;
+
+    private string RequestPaneTitle
+        => requestEditor?.CurrentRequest is { } request ? new HttpLocator(request).DefaultName : "New request";
 
     /// <summary>True when a document is loaded; drives the toolbar's visibility.</summary>
     public bool IsFileOpen => currentFilePath is not null;
@@ -440,6 +457,8 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
                 return;
 
             OnPropertyChanged(nameof(IsRequestPaneVisible));
+            OnPropertyChanged(nameof(HasInput));
+            OnPropertyChanged(nameof(InputTitle));
             OnPropertyChanged(nameof(IsEmptyStateVisible));
             OnPropertyChanged(nameof(IsAwaitingResponse));
             OnPropertyChanged(nameof(IsShowingRequestFailure));
@@ -1943,6 +1962,7 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
         OnPropertyChanged(nameof(ExcerptSourceName));
         OnPropertyChanged(nameof(ExcerptSourceNumberingLabel));
         OnPropertyChanged(nameof(HeaderTitle));
+        OnPropertyChanged(nameof(InputTitle));
     }
 
     private void SetCurrentDocument(IDocumentViewModel? document, string? path, FileTypeDetector.FileKind kind = FileTypeDetector.FileKind.Unknown)
@@ -1982,6 +2002,8 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
         }
 
         OnPropertyChanged(nameof(IsFileOpen));
+        OnPropertyChanged(nameof(HasInput));
+        OnPropertyChanged(nameof(InputTitle));
         OnPropertyChanged(nameof(IsEmptyStateVisible));
         OnPropertyChanged(nameof(IsAwaitingResponse));
         OnPropertyChanged(nameof(IsShowingRequestFailure));
@@ -2086,6 +2108,12 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
     {
         CloseRequestPane();
         var editor = new RequestEditorViewModel(this, new RequestBodyEditor(rawViewSettings));
+        editor.PropertyChanged += (_, e) =>
+        {
+            // The header names the request while it is all that is open.
+            if (e.PropertyName is nameof(RequestEditorViewModel.UrlText) or nameof(RequestEditorViewModel.Method))
+                OnPropertyChanged(nameof(InputTitle));
+        };
         RequestEditor = editor;
         if (request is not null)
             await editor.LoadAsync(request);

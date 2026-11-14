@@ -134,15 +134,15 @@
                     <!-- Left-aligned, so the close button sits right after the name rather than at
                          the far end of the column, and the name's star column truncates it. -->
                     <Grid ColumnDefinitions="*,Auto,Auto" HorizontalAlignment="Left">
-                        <TextBlock Text="{Binding HeaderTitle}"
-                                   IsVisible="{Binding IsFileOpen}"
+                        <TextBlock Text="{Binding InputTitle}"
+                                   IsVisible="{Binding HasInput}"
                                    IsHitTestVisible="False"
                                    FontSize="13"
                                    FontWeight="SemiBold"
                                    TextTrimming="CharacterEllipsis"
                                    VerticalAlignment="Center" />
                         <TextBlock Text="Argonaut"
-                                   IsVisible="{Binding !IsFileOpen}"
+                                   IsVisible="{Binding !HasInput}"
                                    IsHitTestVisible="False"
                                    FontSize="13"
                                    FontWeight="SemiBold"
@@ -150,7 +150,7 @@
                         <Button Grid.Column="1"
                                 x:Name="CloseFileButton"
                                 Classes="tool"
-                                IsVisible="{Binding IsFileOpen}"
+                                IsVisible="{Binding HasInput}"
                                 Click="OnCloseFile"
                                 MinHeight="0"
                                 Width="22" Height="22"

@@ -100,6 +100,10 @@ public abstract class TreeDocumentViewModel : IndexedDocumentViewModel, IPathNav
     /// </summary>
     public int DefaultExpandDepth { get; set; } = 2;
 
+    /// <summary>Opens with every container expanded, whatever the depth setting - for a small
+    /// document hosted inside another view, such as a failed request's server message.</summary>
+    public bool ExpandsFully { get; init; }
+
     /// <summary>The selected row, or null.</summary>
     public TreeRow? SelectedRow
     {
@@ -203,7 +207,7 @@ public abstract class TreeDocumentViewModel : IndexedDocumentViewModel, IPathNav
     {
         var current = session!;
         var sourceBytes = current.Bytes;
-        expand = new TreeExpandState(DefaultExpandDepth);
+        expand = new TreeExpandState(ExpandsFully ? int.MaxValue : DefaultExpandDepth);
         tree = new TreeDocument(current.Index.Structure, reader, painter, expand, () => sourceBytes.AvailableLength, gutters);
 
         if (!current.Index.AllItemsPublished)

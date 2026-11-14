@@ -694,14 +694,73 @@ public sealed class MainWindowViewModelTests : IDisposable
         Assert.False(vm.IsShowingRequestFailure);
     }
 
+    [Fact]
+    public async Task AJsonServerMessage_IsShownInAHostedJsonView()
+    {
+        var hosted = new List<FileTypeDetector.FileKind>();
+        var vm = new MainWindowViewModel(SettingsStore.InMemory(), TestSchemas.Catalog(), _ => Task.FromResult(true),
+            documentLoader: (_, origin, _) => Task.FromResult<IDocumentViewModel>(new FakeDocument { Origin = origin, FilePath = origin.LocationText() }),
+            lineEndings: new FakeLineEndingDetector(),
+            responseDownloader: new ResponseDownloader(new SwitchableFetcher { Fail = true, Said = """{"error":"invalid key"}""" }, Path.Combine(tempDir, "Responses")),
+            hostedDocumentLoader: (kind, origin) =>
+            {
+                hosted.Add(kind);
+                return Task.FromResult<IDocumentViewModel>(new FakeDocument { Origin = origin, FilePath = origin.LocationText() });
+            });
+        await vm.NewRequestAsync();
+        vm.RequestEditor!.UrlText = "https://x.test/a";
+
+        await vm.RequestEditor.SendAsync();
+        var failure = vm.RequestEditor.Failure!;
+        await failure.Message!.Shown.Loading;
+
+        Assert.Equal(FileTypeDetector.FileKind.Json, failure.Message.DetectedKind);
+        Assert.Equal([FileTypeDetector.FileKind.Json], hosted);
+        Assert.NotNull(failure.Message.Shown.Document);
+        Assert.False(failure.ShowsPlainMessage);
+    }
+
+    [Fact]
+    public async Task StopInThePane_StopsALongDownload_AndLoadsNothing()
+    {
+        var loaded = new List<IByteOrigin>();
+        var vm = RequestShell(new StallingFetcher(), loaded);
+        await vm.NewRequestAsync();
+        var editor = vm.RequestEditor!;
+        editor.UrlText = "https://x.test/huge";
+
+        var sending = editor.SendAsync();
+        await WaitUntil(() => editor.IsSending);
+        editor.Stop();
+        await sending;
+
+        Assert.Empty(loaded);
+        Assert.False(editor.IsSending);
+        Assert.StartsWith("Stopped", editor.StatusText);
+        Assert.Empty(Directory.GetFiles(Path.Combine(tempDir, "Responses")));
+    }
+
+    /// <summary>A server that sends a little and then nothing, until the request is stopped.</summary>
+    private sealed class StallingFetcher : IHttpFetcher
+    {
+        public async Task FetchAsync(HttpRequestSpec request, Stream destination, Action<long, long?> received, CancellationToken stopping)
+        {
+            await destination.WriteAsync(new byte[1024], stopping);
+            received(1024, 1_000_000_000);
+            await Task.Delay(Timeout.Infinite, stopping);
+        }
+    }
+
     private sealed class SwitchableFetcher : IHttpFetcher
     {
         public bool Fail { get; set; }
 
+        public string Said { get; init; } = "The server said no";
+
         public async Task FetchAsync(HttpRequestSpec request, Stream destination, Action<long, long?> received, CancellationToken stopping)
         {
             if (Fail)
-                throw new HttpFetchException(403, "Forbidden", "The server said no");
+                throw new HttpFetchException(403, "Forbidden", Encoding.UTF8.GetBytes(Said));
 
             await destination.WriteAsync("{}"u8.ToArray(), stopping);
             received(2, 2);

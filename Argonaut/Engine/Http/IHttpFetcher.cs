@@ -28,12 +28,12 @@ public sealed class HttpFetchException : Exception
     public const int MaxServerMessageBytes = 64 * 1024;
 
     /// <summary>The server answered, with a failure status - and, usually, a body saying why.</summary>
-    public HttpFetchException(int statusCode, string reason, string? serverMessage = null)
+    public HttpFetchException(int statusCode, string reason, byte[]? serverMessage = null)
         : base($"The server answered {statusCode} {reason}.")
     {
         StatusCode = statusCode;
         Reason = reason;
-        ServerMessage = string.IsNullOrWhiteSpace(serverMessage) ? null : serverMessage;
+        ServerMessageBytes = serverMessage is { Length: > 0 } ? serverMessage : null;
     }
 
     /// <summary>The server could not be reached, or the answer could not be read.</summary>
@@ -48,7 +48,10 @@ public sealed class HttpFetchException : Exception
     /// <summary>The status's reason phrase ("Forbidden"), or null when no answer came.</summary>
     public string? Reason { get; }
 
-    /// <summary>The start of the failure's body, decoded as text - an API's own explanation - or
-    /// null when it sent none.</summary>
-    public string? ServerMessage { get; }
+    /// <summary>The start of the failure's body, decompressed - an API's own explanation, often
+    /// JSON - or null when it sent none.</summary>
+    public byte[]? ServerMessageBytes { get; }
+
+    /// <summary><see cref="ServerMessageBytes"/> as text.</summary>
+    public string? ServerMessage => ServerMessageBytes is { } bytes ? System.Text.Encoding.UTF8.GetString(bytes) : null;
 }

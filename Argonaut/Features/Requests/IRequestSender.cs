@@ -14,4 +14,8 @@ public interface IRequestSender
     /// response has opened, failed, or been stopped. Never throws - a failure is reported to the
     /// user by the sender.</summary>
     Task SendAsync(HttpRequestSpec request);
+
+    /// <summary>Stops the send in progress, if any - cooperative, returns at once; the send
+    /// itself then completes, reporting that it was stopped.</summary>
+    void RequestStop();
 }

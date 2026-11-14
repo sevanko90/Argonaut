@@ -18,6 +18,8 @@ public partial class RequestEditorView : UserControl
 
     private void OnSend(object? sender, RoutedEventArgs e) => _ = Editor?.SendAsync();
 
+    private void OnStop(object? sender, RoutedEventArgs e) => Editor?.Stop();
+
     private void OnUrlKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key != Key.Enter || Editor is not { } editor)

@@ -89,6 +89,9 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
     private readonly ResponseDownloader? responseDownloader;
     private readonly RawViewSettings rawViewSettings;
     private RequestEditorViewModel? requestEditor;
+
+    // Stops the send in progress; null while nothing is being sent.
+    private CancellationTokenSource? sendStopping;
     private readonly JsonViewSettings jsonViewSettings;
     private readonly IConfigLocationSource? configLocations;
     private readonly ISelectionFilterFiles filterFiles;
@@ -99,6 +102,9 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
     private readonly Func<IByteOrigin, Task<string?>>? pickSaveDestination;
     private readonly Func<string, Task<UnsavedChangesChoice>>? askAboutUnsavedChanges;
     private readonly Func<RequestSaveQuestion, Task<RequestSaveChoice>>? askAboutRequest;
+
+    // Loads documents hosted inside other views - a failed request's server message.
+    private readonly Func<FileTypeDetector.FileKind, IByteOrigin, Task<IDocumentViewModel>>? hostedDocumentLoader;
     private readonly Func<string, Task>? reportFailure;
     private readonly IFileReplacer fileReplacer;
     private readonly IDiagnosticLog log;
@@ -212,7 +218,8 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
         ISettingsSealer? settingsSealer = null,
         IFileAccess? fileAccess = null,
         ResponseDownloader? responseDownloader = null,
-        Func<RequestSaveQuestion, Task<RequestSaveChoice>>? askAboutRequest = null)
+        Func<RequestSaveQuestion, Task<RequestSaveChoice>>? askAboutRequest = null,
+        Func<FileTypeDetector.FileKind, IByteOrigin, Task<IDocumentViewModel>>? hostedDocumentLoader = null)
     {
         this.askAboutRequest = askAboutRequest;
         this.fileAccess = fileAccess ?? new PlainFileAccess();
@@ -228,7 +235,9 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
         this.readClipboardBytes = readClipboardBytes;
         this.lineNumbers = new LineNumberingPreference(settings.Get<LineNumberingSettings>());
         this.lineNumbers.PropertyChanged += (_, _) => OnPropertyChanged(nameof(NumberExcerptFromSource));
-        this.documentLoader = documentLoader ?? new DocumentViewCatalog(settings, schemaCatalog, this.lineNumbers, recipes, launcher, settingsSealer: settingsSealer).LoadAsync;
+        var views = documentLoader is null ? new DocumentViewCatalog(settings, schemaCatalog, this.lineNumbers, recipes, launcher, settingsSealer: settingsSealer) : null;
+        this.documentLoader = documentLoader ?? views!.LoadAsync;
+        this.hostedDocumentLoader = hostedDocumentLoader ?? (views is null ? null : views.LoadHostedAsync);
         this.pickSaveDestination = pickSaveDestination;
         this.askAboutUnsavedChanges = askAboutUnsavedChanges;
         this.reportFailure = reportFailure;
@@ -2114,6 +2123,7 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
         var locator = new HttpLocator(request);
 
         using var stopping = new CancellationTokenSource();
+        sendStopping = stopping;
         var progress = this.progressBoard.Begin($"Downloading {locator.DefaultName}", stopping.Cancel);
         HttpResponseOrigin origin;
         try
@@ -2129,7 +2139,7 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
         }
         catch (HttpFetchException ex)
         {
-            ShowRequestFailure(editor, RequestFailure.From(ex));
+            ShowRequestFailure(editor, RequestFailure.From(ex, hostedDocumentLoader));
             return;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -2140,6 +2150,7 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
         finally
         {
             progress.Finish();
+            sendStopping = null;
         }
 
         // The pane may have closed while the response downloaded; then it is not wanted.
@@ -2155,6 +2166,9 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
         editor.Say($"Response from {DateTime.Now:d MMM, HH:mm}");
         OnPropertyChanged(nameof(IsShowingRequestFailure));
     }
+
+    /// <summary>The pane's Stop: the same as the download's Stop on the progress board.</summary>
+    void IRequestSender.RequestStop() => sendStopping?.Cancel();
 
     /// <summary>
     /// What a successful send saves. A request never saved is saved now - the list keeps what
@@ -2189,6 +2203,7 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
             CloseCurrentDocument(keepRequestPane: true);
 
         editor.Failure = failure;
+        _ = failure.Message?.ShowAsync();
         editor.Say(failure.Title, isProblem: true);
         OnPropertyChanged(nameof(IsAwaitingResponse));
         OnPropertyChanged(nameof(IsShowingRequestFailure));

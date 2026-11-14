@@ -63,11 +63,17 @@ public sealed class RequestEditorViewModel : ObservableObject, IDisposable
         private set => SetField(ref isStatusAProblem, value);
     }
 
-    /// <summary>The last send's failure, shown in place of a response; null once one arrives.</summary>
+    /// <summary>The last send's failure, shown in place of a response; null once one arrives.
+    /// Owns it: a failure replaced, or the pane closing, releases its hosted view.</summary>
     public RequestFailure? Failure
     {
         get => failure;
-        set => SetField(ref failure, value);
+        set
+        {
+            var previous = failure;
+            if (SetField(ref failure, value))
+                previous?.Dispose();
+        }
     }
 
     /// <summary>The saved request this pane edits, or null for one never saved.</summary>
@@ -131,6 +137,14 @@ public sealed class RequestEditorViewModel : ObservableObject, IDisposable
     }
 
     public bool CanSend => !isSending && sender is not null;
+
+    /// <summary>Stops the request on its way - the pane's Stop, which takes Send's place while one
+    /// is sending.</summary>
+    public void Stop()
+    {
+        if (isSending)
+            sender?.RequestStop();
+    }
 
     /// <summary>
     /// Builds the request and hands it to the sender, or says why it cannot be built. What happens
@@ -237,7 +251,11 @@ public sealed class RequestEditorViewModel : ObservableObject, IDisposable
         return Body?.LoadAsync(request.Body ?? []) ?? Task.CompletedTask;
     }
 
-    public void Dispose() => Body?.Dispose();
+    public void Dispose()
+    {
+        Body?.Dispose();
+        Failure = null;
+    }
 
     /// <summary>The request to send, with <paramref name="body"/> for a POST, or null and a
     /// sentence in <paramref name="problem"/> saying why there is none.</summary>

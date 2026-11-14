@@ -205,7 +205,11 @@ public sealed class JsonViewModel : TreeDocumentViewModel
     /// sub-range documents NDJSON nests per line: their offsets are relative to the line, not
     /// the file, so the table would map the wrong bytes.
     /// </summary>
-    public bool SupportsArrayTable => ScanTarget.Offset == 0;
+    public bool SupportsArrayTable => OffersArrayTable && ScanTarget.Offset == 0;
+
+    /// <summary>Whether an array can be opened as a table - which replaces the window's document,
+    /// so a view hosted inside another (a server message) does not offer it.</summary>
+    public bool OffersArrayTable { get; init; } = true;
 
     /// <summary>
     /// Resolves the array starting at <paramref name="arrayStart"/> to a byte range and raises an

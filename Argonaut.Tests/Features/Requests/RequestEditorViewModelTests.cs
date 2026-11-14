@@ -162,6 +162,10 @@ public sealed class RequestEditorViewModelTests
 
     private sealed class RecordingSender : IRequestSender
     {
+        public int Stops { get; private set; }
+
+        public void RequestStop() => Stops++;
+
         public List<HttpRequestSpec> Sent { get; } = [];
 
         public Task Gate { get; init; } = Task.CompletedTask;

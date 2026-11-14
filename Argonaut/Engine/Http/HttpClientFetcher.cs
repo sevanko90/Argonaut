@@ -83,7 +83,7 @@ public sealed class HttpClientFetcher(HttpClient client) : IHttpFetcher
     /// <summary>The start of a failure's body as text - up to
     /// <see cref="HttpFetchException.MaxServerMessageBytes"/>, decompressed - or null when it cannot
     /// be read. Best effort: the failure is the status, and this only explains it.</summary>
-    private static async Task<string?> ReadServerMessageAsync(HttpResponseMessage response, CancellationToken stopping)
+    private static async Task<byte[]?> ReadServerMessageAsync(HttpResponseMessage response, CancellationToken stopping)
     {
         try
         {
@@ -94,7 +94,7 @@ public sealed class HttpClientFetcher(HttpClient client) : IHttpFetcher
             while (filled < buffer.Length && (read = await decoded.ReadAsync(buffer.AsMemory(filled), stopping)) > 0)
                 filled += read;
 
-            return System.Text.Encoding.UTF8.GetString(buffer, 0, filled);
+            return buffer[..filled];
         }
         catch (Exception ex) when (ex is IOException or HttpRequestException or InvalidDataException or NotSupportedException)
         {

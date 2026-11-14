@@ -1,0 +1,22 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Argonaut.Shell.Dialogs.RequestSaveDialog"
+        Title="Unsaved request"
+        Width="460" SizeToContent="Height"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource AppWindowBackgroundBrush}">
+    <StackPanel Margin="24" Spacing="16">
+        <TextBlock x:Name="MessageText" TextWrapping="Wrap" FontSize="14" />
+        <TextBlock x:Name="DetailText"
+                   TextWrapping="Wrap"
+                   FontSize="12"
+                   Foreground="{DynamicResource AppMutedTextBrush}" />
+        <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto">
+            <Button Grid.Column="0" Content="Don't Save" Click="OnDiscard" />
+            <Button Grid.Column="2" Content="Cancel" Click="OnCancel" Margin="0,0,8,0" />
+            <Button Grid.Column="3" x:Name="SaveAsNewButton" Content="Save as New" Click="OnSaveAsNew" Margin="0,0,8,0" />
+            <Button Grid.Column="4" x:Name="UpdateButton" Content="Update" Click="OnUpdate" Classes="accent" />
+        </Grid>
+    </StackPanel>
+</Window>

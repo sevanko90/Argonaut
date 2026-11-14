@@ -50,7 +50,8 @@ public sealed class SavedSourceStore
     /// Records that <paramref name="locator"/> was opened: moves its entry to the front, or adds
     /// one named for it. Keeps a name the user gave, and a pin.
     /// </summary>
-    public void Touch(SourceLocator locator)
+    /// <returns>The entry, new or moved.</returns>
+    public SavedSource Touch(SourceLocator locator)
     {
         ArgumentNullException.ThrowIfNull(locator);
 
@@ -71,6 +72,7 @@ public sealed class SavedSourceStore
         entries.Insert(0, entry);
         TrimRecent();
         Persist();
+        return entry;
     }
 
     public void TogglePin(string id)

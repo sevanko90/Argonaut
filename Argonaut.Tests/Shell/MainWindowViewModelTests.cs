@@ -1,3 +1,4 @@
+using Argonaut.Shell.Dialogs;
 using Argonaut.Tests.Engine.Http;
 using Argonaut.Engine.Http;
 using System.Text;
@@ -537,25 +538,131 @@ public sealed class MainWindowViewModelTests : IDisposable
         Assert.False(vm.IsAwaitingResponse);
     }
 
+    private MainWindowViewModel RequestShell(IHttpFetcher fetcher, List<IByteOrigin> loaded, Func<RequestSaveQuestion, RequestSaveChoice> answer, List<RequestSaveQuestion> asked)
+        => new(SettingsStore.InMemory(), TestSchemas.Catalog(), _ => Task.FromResult(true),
+            documentLoader: (_, origin, _) =>
+            {
+                loaded.Add(origin);
+                return Task.FromResult<IDocumentViewModel>(new FakeDocument { FilePath = origin.LocationText(), Origin = origin });
+            },
+            lineEndings: new FakeLineEndingDetector(),
+            responseDownloader: new ResponseDownloader(fetcher, Path.Combine(tempDir, "Responses")),
+            askAboutRequest: question =>
+            {
+                asked.Add(question);
+                return Task.FromResult(answer(question));
+            });
+
     [Fact]
-    public async Task AFailedRequest_IsStillSaved_ToTryAgainLater()
+    public async Task ANewRequestThatSucceeds_IsSavedOnItsOwn_AndClosesWithoutAsking()
     {
-        var fetcher = new SwitchableFetcher { Fail = true };
-        var vm = RequestShell(fetcher, []);
+        var asked = new List<RequestSaveQuestion>();
+        var vm = RequestShell(new SwitchableFetcher(), [], _ => RequestSaveChoice.Cancel, asked);
+        await vm.NewRequestAsync();
+        vm.RequestEditor!.UrlText = "https://x.test/good";
+
+        await vm.RequestEditor.SendAsync();
+
+        Assert.Equal("good · x.test", Assert.Single(vm.RecentSources).Name);
+        Assert.False(vm.RequestEditor.IsDirty);
+        await vm.CloseFileAsync();
+        Assert.Empty(asked);
+        Assert.Null(vm.RequestEditor);
+    }
+
+    [Fact]
+    public async Task ANewRequestThatFails_IsNotSavedOnItsOwn_ButClosingOffersToSaveIt()
+    {
+        var asked = new List<RequestSaveQuestion>();
+        var vm = RequestShell(new SwitchableFetcher { Fail = true }, [], _ => RequestSaveChoice.SaveAsNew, asked);
         await vm.NewRequestAsync();
         vm.RequestEditor!.UrlText = "https://x.test/broken?key=abc";
 
         await vm.RequestEditor.SendAsync();
+        Assert.Empty(vm.RecentSources);
+        Assert.Empty(asked);
+
         await vm.CloseFileAsync();
 
-        var saved = Assert.Single(vm.RecentSources);
-        Assert.Equal("broken · x.test", saved.Name);
+        var question = Assert.Single(asked);
+        Assert.False(question.IsSaved);
+        Assert.Equal("broken · x.test", Assert.Single(vm.RecentSources).Name);
+    }
 
-        fetcher.Fail = false;
-        vm.OpenSavedSource(saved.Id);
-        await WaitUntil(() => vm.IsFileOpen);
+    [Fact]
+    public async Task CancellingTheQuestion_KeepsThePaneOpen()
+    {
+        var vm = RequestShell(new SwitchableFetcher { Fail = true }, [], _ => RequestSaveChoice.Cancel, []);
+        await vm.NewRequestAsync();
+        vm.RequestEditor!.UrlText = "https://x.test/broken";
 
-        Assert.Equal("https://x.test/broken?key=abc", vm.RequestEditor!.UrlText);
+        await vm.CloseFileAsync();
+
+        Assert.NotNull(vm.RequestEditor);
+        Assert.Empty(vm.RecentSources);
+    }
+
+    [Theory]
+    [InlineData(RequestSaveChoice.Update, 1, "https://x.test/v2")]
+    [InlineData(RequestSaveChoice.SaveAsNew, 2, "https://x.test/v1")]
+    [InlineData(RequestSaveChoice.Discard, 1, "https://x.test/v1")]
+    public async Task AnEditedSavedRequest_IsLeftAlone_UntilClosingAsksWhatToDo(RequestSaveChoice choice, int entries, string original)
+    {
+        var asked = new List<RequestSaveQuestion>();
+        var vm = RequestShell(new SwitchableFetcher(), [], _ => choice, asked);
+        await vm.NewRequestAsync();
+        vm.RequestEditor!.UrlText = "https://x.test/v1";
+        await vm.RequestEditor.SendAsync();
+        string id = Assert.Single(vm.RecentSources).Id;
+        vm.RenameSavedSource(id, "Feed");
+
+        vm.RequestEditor.UrlText = "https://x.test/v2";
+        Assert.True(vm.RequestEditor.IsDirty);
+        await vm.RequestEditor.SendAsync();
+        Assert.Equal("https://x.test/v1", Assert.Single(vm.RecentSources).LocationText.Split(' ')[1]);
+
+        await vm.CloseFileAsync();
+
+        var question = Assert.Single(asked);
+        Assert.True(question.IsSaved);
+        Assert.Equal("Feed", question.RequestName);
+        Assert.Equal(entries, vm.RecentSources.Count + vm.PinnedSources.Count);
+        var kept = vm.RecentSources.Single(r => r.Id == id);
+        Assert.Equal("Feed", kept.Name);
+        Assert.EndsWith(original, kept.LocationText);
+    }
+
+    [Fact]
+    public async Task SendingNeverAsksAboutTheRequest()
+    {
+        var asked = new List<RequestSaveQuestion>();
+        var vm = RequestShell(new SwitchableFetcher(), [], _ => RequestSaveChoice.Cancel, asked);
+        await vm.NewRequestAsync();
+        vm.RequestEditor!.UrlText = "https://x.test/v1";
+        await vm.RequestEditor.SendAsync();
+        vm.RequestEditor.UrlText = "https://x.test/v2";
+
+        await vm.RequestEditor.SendAsync();
+
+        Assert.Empty(asked);
+    }
+
+    [Fact]
+    public async Task AnUneditedSavedRequest_ReopenedAndSent_ClosesWithoutAsking()
+    {
+        var asked = new List<RequestSaveQuestion>();
+        var loaded = new List<IByteOrigin>();
+        var vm = RequestShell(new SwitchableFetcher(), loaded, _ => RequestSaveChoice.Cancel, asked);
+        await vm.NewRequestAsync();
+        vm.RequestEditor!.UrlText = "https://x.test/a";
+        await vm.RequestEditor.SendAsync();
+        await vm.CloseFileAsync();
+
+        vm.OpenSavedSource(Assert.Single(vm.RecentSources).Id);
+        await WaitUntil(() => loaded.Count == 2);
+        await vm.CloseFileAsync();
+
+        Assert.Empty(asked);
         Assert.Single(vm.RecentSources);
     }
 

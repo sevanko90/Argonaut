@@ -98,6 +98,7 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
     private readonly FindController findController;
     private readonly Func<IByteOrigin, Task<string?>>? pickSaveDestination;
     private readonly Func<string, Task<UnsavedChangesChoice>>? askAboutUnsavedChanges;
+    private readonly Func<RequestSaveQuestion, Task<RequestSaveChoice>>? askAboutRequest;
     private readonly Func<string, Task>? reportFailure;
     private readonly IFileReplacer fileReplacer;
     private readonly IDiagnosticLog log;
@@ -210,8 +211,10 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
         ILineEndingDetector? lineEndings = null,
         ISettingsSealer? settingsSealer = null,
         IFileAccess? fileAccess = null,
-        ResponseDownloader? responseDownloader = null)
+        ResponseDownloader? responseDownloader = null,
+        Func<RequestSaveQuestion, Task<RequestSaveChoice>>? askAboutRequest = null)
     {
+        this.askAboutRequest = askAboutRequest;
         this.fileAccess = fileAccess ?? new PlainFileAccess();
         this.responseDownloader = responseDownloader;
         this.rawViewSettings = settings.Get<RawViewSettings>();
@@ -1383,7 +1386,7 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
     {
         if (savedSources.Find(id) is { Locator: HttpLocator http })
         {
-            _ = ReopenRequestAsync(http.Request);
+            _ = ReopenRequestAsync(http.Request, id);
             return;
         }
 
@@ -1411,19 +1414,18 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
     }
 
     /// <summary>A saved request: the pane filled in, and sent.</summary>
-    private async Task ReopenRequestAsync(HttpRequestSpec request)
+    private async Task ReopenRequestAsync(HttpRequestSpec request, string entryId)
     {
         if (RefusedWhileSaving())
             return;
 
+        if (!await ResolveUnsavedChangesAsync($"opening {new HttpLocator(request).DefaultName}"))
+            return;
         if (IsFileOpen)
-        {
-            if (!await ResolveUnsavedChangesAsync($"opening {new HttpLocator(request).DefaultName}"))
-                return;
             CloseCurrentDocument();
-        }
 
         var editor = await OpenRequestPaneAsync(request);
+        editor.MarkSaved(entryId, request);
         await editor.SendAsync();
     }
 
@@ -1501,7 +1503,7 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
         if (RefusedWhileSaving())
             return false;
 
-        if (HasUnsavedChanges)
+        if (HasUnsavedChanges || HasUnsavedRequest)
         {
             // Asked instead of the replace confirmation, not as well as it: this question already
             // says the document is going, and offers the one thing worth doing about it.
@@ -1589,7 +1591,7 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
         if (RefusedWhileSaving())
             return;
 
-        if (HasUnsavedChanges)
+        if (HasUnsavedChanges || HasUnsavedRequest)
         {
             if (!await ResolveUnsavedChangesAsync($"opening {description}"))
                 return;
@@ -1670,7 +1672,7 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
         if (this.ownedOrigins.Count == 0 || kind == currentKind)
             return;
 
-        if (RefusedWhileSaving() || !await ResolveUnsavedChangesAsync($"switching to the {DisplayNameFor(kind)} view"))
+        if (RefusedWhileSaving() || !await ResolveUnsavedChangesAsync($"switching to the {DisplayNameFor(kind)} view", includeRequest: false))
         {
             // Put the switcher back on the view that is still showing.
             SelectedView = DocumentViewCatalog.Options.FirstOrDefault(o => o.Kind == currentKind);
@@ -2062,12 +2064,10 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
         if (RefusedWhileSaving())
             return;
 
+        if (!await ResolveUnsavedChangesAsync("starting a new request"))
+            return;
         if (IsFileOpen)
-        {
-            if (!await ResolveUnsavedChangesAsync("starting a new request"))
-                return;
             CloseCurrentDocument();
-        }
 
         await OpenRequestPaneAsync(request: null);
     }
@@ -2108,14 +2108,10 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
             return;
         }
 
-        if (RefusedWhileSaving() || !await ResolveUnsavedChangesAsync("sending the request"))
+        if (RefusedWhileSaving() || !await ResolveUnsavedChangesAsync("sending the request", includeRequest: false))
             return;
 
-        // Saved when sent, not when a response opens: the request is what is worth keeping, and a
-        // failing one - a key to fix, a body to correct - most of all.
         var locator = new HttpLocator(request);
-        savedSources.Touch(locator);
-        ReloadSavedSources();
 
         using var stopping = new CancellationTokenSource();
         var progress = this.progressBoard.Begin($"Downloading {locator.DefaultName}", stopping.Cancel);
@@ -2154,9 +2150,33 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
         }
 
         editor.Failure = null;
-        await OpenOriginAsync(origin, addToRecents: true, fromRequest: true);
+        await OpenOriginAsync(origin, addToRecents: false, fromRequest: true);
+        RememberSentRequest(editor, request, locator);
         editor.Say($"Response from {DateTime.Now:d MMM, HH:mm}");
         OnPropertyChanged(nameof(IsShowingRequestFailure));
+    }
+
+    /// <summary>
+    /// What a successful send saves. A request never saved is saved now - the list keeps what
+    /// worked, so a run of failures never pushes good entries off it. A saved request sent as it
+    /// was moves to the top. A saved request sent with edits is left alone: what to do with the
+    /// edits is asked when the pane closes, never decided by sending.
+    /// </summary>
+    private void RememberSentRequest(RequestEditorViewModel editor, HttpRequestSpec request, HttpLocator locator)
+    {
+        if (editor.SavedEntryId is { } id && savedSources.Find(id) is not null)
+        {
+            if (editor.IsDirty)
+                return;
+
+            savedSources.Touch(locator);
+        }
+        else
+        {
+            editor.MarkSaved(savedSources.Touch(locator).Id, request);
+        }
+
+        ReloadSavedSources();
     }
 
     /// <summary>
@@ -2189,6 +2209,10 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
 
     /// <summary>True when the current document reads differently from its file.</summary>
     public bool HasUnsavedChanges => currentDocument is ISaveableDocument { HasUnsavedChanges: true };
+
+    /// <summary>The request pane holds a request with changes nobody saved - see
+    /// <see cref="RequestEditorViewModel.IsDirty"/>.</summary>
+    public bool HasUnsavedRequest => requestEditor is { IsDirty: true };
 
     /// <summary>Whether Save does anything now: there are changes, the document is ready to write
     /// them, and no save is already running.</summary>
@@ -2342,21 +2366,60 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
     /// "opening x.json"), and saves if asked to. True when it is fine to go on: there was nothing
     /// unsaved, the user chose not to keep it, or the save succeeded.
     /// </summary>
-    public async Task<bool> ResolveUnsavedChangesAsync(string beforeWhat)
+    /// <param name="includeRequest">Also settle the request pane's unsaved request - false for
+    /// what keeps the pane (sending, switching the response's view).</param>
+    public async Task<bool> ResolveUnsavedChangesAsync(string beforeWhat, bool includeRequest = true)
     {
         if (isSaving)
             return false;
 
-        if (!HasUnsavedChanges || this.askAboutUnsavedChanges is null)
+        if (HasUnsavedChanges && this.askAboutUnsavedChanges is not null)
+        {
+            var choice = await this.askAboutUnsavedChanges($"Save your changes to \"{FileName}\" before {beforeWhat}?");
+            bool goOn = choice switch
+            {
+                UnsavedChangesChoice.Discard => true,
+                UnsavedChangesChoice.Save => await SaveAsync(),
+                _ => false,
+            };
+            if (!goOn)
+                return false;
+        }
+
+        return !includeRequest || await ResolveUnsavedRequestAsync();
+    }
+
+    /// <summary>
+    /// Asks what to do with the pane's request when it has changes nobody saved - a request never
+    /// saved (it has not worked yet, or was never sent), or a saved one that was edited - and does
+    /// it. True when it is fine for the pane to close.
+    /// </summary>
+    private async Task<bool> ResolveUnsavedRequestAsync()
+    {
+        if (requestEditor is not { IsDirty: true } editor || editor.CurrentRequest is not { } request || askAboutRequest is null)
             return true;
 
-        var choice = await this.askAboutUnsavedChanges($"Save your changes to \"{FileName}\" before {beforeWhat}?");
-        return choice switch
+        var saved = editor.SavedEntryId is { } id ? savedSources.Find(id) : null;
+        var locator = new HttpLocator(request);
+        var choice = await askAboutRequest(new RequestSaveQuestion(saved?.Name ?? locator.DefaultName, saved is not null));
+
+        switch (choice)
         {
-            UnsavedChangesChoice.Discard => true,
-            UnsavedChangesChoice.Save => await SaveAsync(),
-            _ => false,
-        };
+            case RequestSaveChoice.Update when saved is not null:
+                savedSources.Relocate(saved.Id, locator);
+                break;
+            case RequestSaveChoice.Update:
+            case RequestSaveChoice.SaveAsNew:
+                savedSources.Touch(locator);
+                break;
+            case RequestSaveChoice.Discard:
+                return true;
+            default:
+                return false;
+        }
+
+        ReloadSavedSources();
+        return true;
     }
 
     /// <summary>True, with a toast saying why, while a save is running.</summary>

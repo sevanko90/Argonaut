@@ -112,6 +112,7 @@ public partial class MainWindow : Window
             readClipboardBytes: ReadClipboardBytesAsync,
             pickSaveDestination: PickSaveDestinationAsync,
             askAboutUnsavedChanges: message => UnsavedChangesDialog.Show(this, message),
+            askAboutRequest: question => RequestSaveDialog.Show(this, question),
             reportFailure: message => ConfirmDialog.Inform(this, message),
             log: log,
             settingsSealer: settingsSealer,

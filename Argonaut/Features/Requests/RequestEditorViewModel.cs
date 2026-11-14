@@ -29,6 +29,10 @@ public sealed class RequestEditorViewModel : ObservableObject, IDisposable
     private bool isStatusAProblem;
     private RequestFailure? failure;
 
+    // The saved entry this pane edits, and the request as it was saved; null for one never saved.
+    private string? savedEntryId;
+    private HttpRequestSpec? savedRequest;
+
     /// <param name="sender">Sends what Send builds - the shell, which downloads and opens the
     /// response; null sends nothing (tests of the editing alone).</param>
     /// <param name="body">The POST body box; null gives a pane whose body is always empty.</param>
@@ -36,6 +40,8 @@ public sealed class RequestEditorViewModel : ObservableObject, IDisposable
     {
         this.sender = sender;
         Body = body;
+        if (body is not null)
+            body.BodyChanged += (_, _) => OnPropertyChanged(nameof(IsDirty));
     }
 
     /// <summary>The hosted raw editor for a POST body, or null when the pane has none.</summary>
@@ -63,6 +69,41 @@ public sealed class RequestEditorViewModel : ObservableObject, IDisposable
         get => failure;
         set => SetField(ref failure, value);
     }
+
+    /// <summary>The saved request this pane edits, or null for one never saved.</summary>
+    public string? SavedEntryId => savedEntryId;
+
+    /// <summary>Records that the pane's request is saved as <paramref name="entryId"/>, as
+    /// <paramref name="request"/> - after a first successful send, or when opened from the list.</summary>
+    public void MarkSaved(string entryId, HttpRequestSpec request)
+    {
+        savedEntryId = entryId;
+        savedRequest = request;
+        OnPropertyChanged(nameof(SavedEntryId));
+        OnPropertyChanged(nameof(IsDirty));
+    }
+
+    /// <summary>
+    /// Whether the request differs from what is saved - for one never saved, whether anything has
+    /// been typed. Sending does not clear it: only saving does, so an edited saved request is
+    /// never overwritten without being asked.
+    /// </summary>
+    public bool IsDirty
+    {
+        get
+        {
+            if (savedRequest is null)
+                return urlText.Trim().Length > 0;
+
+            if (method != savedRequest.Method || !string.Equals(urlText.Trim(), savedRequest.Url.OriginalString.Trim(), StringComparison.Ordinal))
+                return true;
+
+            return HasBody && !(Body?.ReadBody() ?? []).AsSpan().SequenceEqual(savedRequest.Body ?? []);
+        }
+    }
+
+    /// <summary>The request as it stands, or null when it is not one that could be sent.</summary>
+    public HttpRequestSpec? CurrentRequest => BuildRequest(HasBody ? Body?.ReadBody() : null, out _);
 
     /// <summary>Says <paramref name="text"/> under the URL, as an error or as information.</summary>
     public void Say(string? text, bool isProblem = false)
@@ -135,6 +176,7 @@ public sealed class RequestEditorViewModel : ObservableObject, IDisposable
 
             OnPropertyChanged(nameof(HasBody));
             OnPropertyChanged(nameof(MethodIndex));
+            OnPropertyChanged(nameof(IsDirty));
         }
     }
 
@@ -165,6 +207,7 @@ public sealed class RequestEditorViewModel : ObservableObject, IDisposable
                 return;
 
             RebuildRows();
+            OnPropertyChanged(nameof(IsDirty));
         }
     }
 
@@ -228,6 +271,7 @@ public sealed class RequestEditorViewModel : ObservableObject, IDisposable
         // Set on the field, not through UrlText: the rows already say what the URL now holds, and
         // re-parsing would rebuild them under the row being edited.
         string written = UrlQuery.Parse(urlText).WithParts(Arguments.Where(static r => !r.IsEmpty).Select(static r => r.Part)).ToString();
-        SetField(ref urlText, written, nameof(UrlText));
+        if (SetField(ref urlText, written, nameof(UrlText)))
+            OnPropertyChanged(nameof(IsDirty));
     }
 }

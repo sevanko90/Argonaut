@@ -36,6 +36,9 @@ public sealed class RequestBodyEditor(RawViewSettings settings) : ObservableObje
     /// <summary>Raised when <see cref="Editor"/> is replaced.</summary>
     public event EventHandler? EditorChanged;
 
+    /// <summary>Raised when the body's text changes - an edit, or a new body loaded.</summary>
+    public event EventHandler? BodyChanged;
+
     /// <summary>
     /// Starts editing <paramref name="body"/>, replacing whatever was being edited. The new editor
     /// is published only once it has loaded - a view bound to it lays out its rows at once, and a
@@ -55,8 +58,12 @@ public sealed class RequestBodyEditor(RawViewSettings settings) : ObservableObje
         }
 
         var previous = Editor;
+        if (previous is not null)
+            previous.PropertyChanged -= OnEditorPropertyChanged;
+        next.PropertyChanged += OnEditorPropertyChanged;
         Editor = next;
         previous?.Dispose();
+        BodyChanged?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>The body as it stands, edits included; empty before anything has loaded.</summary>
@@ -78,9 +85,17 @@ public sealed class RequestBodyEditor(RawViewSettings settings) : ObservableObje
         return copied == bytes.Length ? bytes : bytes[..copied];
     }
 
+    private void OnEditorPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(RawViewModel.IsDirty) or nameof(RawViewModel.HasUnsavedChanges))
+            BodyChanged?.Invoke(this, EventArgs.Empty);
+    }
+
     public void Dispose()
     {
         disposed = true;
+        if (Editor is { } current)
+            current.PropertyChanged -= OnEditorPropertyChanged;
         Editor?.Dispose();
         Editor = null;
     }

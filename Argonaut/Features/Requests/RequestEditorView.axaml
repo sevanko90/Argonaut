@@ -38,7 +38,7 @@
             BorderThickness="0,0,0,1"
             Padding="12,8">
         <StackPanel Spacing="8">
-            <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="8">
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="8">
                 <ComboBox ItemsSource="{Binding MethodNames}"
                           SelectedIndex="{Binding MethodIndex, Mode=TwoWay}"
                           MinWidth="84"
@@ -50,13 +50,21 @@
                          FontFamily="{DynamicResource AppMonoFontFamily}"
                          KeyDown="OnUrlKeyDown"
                          VerticalAlignment="Center" />
-                <Button Grid.Column="2"
+                <!-- Unsaved: closing will ask what to do with it. -->
+                <TextBlock Grid.Column="2"
+                           Text="•"
+                           FontSize="18"
+                           IsVisible="{Binding IsDirty}"
+                           VerticalAlignment="Center"
+                           Foreground="{DynamicResource AppAccentBrush}"
+                           ToolTip.Tip="Unsaved changes - closing asks whether to keep them" />
+                <Button Grid.Column="3"
                         Content="Send"
                         Classes="accent"
                         IsEnabled="{Binding CanSend}"
                         Click="OnSend"
                         VerticalAlignment="Center" />
-                <Button Grid.Column="3"
+                <Button Grid.Column="4"
                         Classes="paneicon"
                         ToolTip.Tip="Fold the request away"
                         Click="OnToggleCollapsed">

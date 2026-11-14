@@ -32,6 +32,13 @@ response is an origin, and a saved request is a saved source.
   previous response (if any) as it was.
 - **A request is a saved source** - method, URL and body, sealed with the rest - with the "http"
   pill. Two POSTs to one URL with different bodies are two entries.
+- **Saving follows what worked, and never overwrites without asking.** A new request is saved
+  on its first successful send, so a run of failures never pushes good entries off the list. A
+  saved request is never changed by sending: the pane remembers the entry it came from, and once
+  its method, URL or body differ the request is unsaved (a • beside the URL). Closing the pane -
+  closing the document, New request, any other input, quitting - asks: Update the saved request,
+  Save as new beside it, or Don't save; a request never saved that failed or was never sent is
+  offered Save. A saved request sent as it was moves to the top of the list.
 - **The last response is kept** on disk, beside the request it answered: closing the document
   keeps both. Reopening the saved request opens the kept response at once - an ordinary mapped
   file, however large - with the pane reading "Response from 14 Nov, 14:32 - Send to refresh". A

@@ -26,6 +26,8 @@ public sealed class RequestEditorViewModel : ObservableObject, IDisposable
     private string? statusText;
     private bool isCollapsed;
     private bool isSending;
+    private bool isStatusAProblem;
+    private RequestFailure? failure;
 
     /// <param name="sender">Sends what Send builds - the shell, which downloads and opens the
     /// response; null sends nothing (tests of the editing alone).</param>
@@ -45,6 +47,28 @@ public sealed class RequestEditorViewModel : ObservableObject, IDisposable
     {
         get => statusText;
         set => SetField(ref statusText, value);
+    }
+
+    /// <summary>Whether <see cref="StatusText"/> says something is wrong, so it is drawn as an
+    /// error rather than as information.</summary>
+    public bool IsStatusAProblem
+    {
+        get => isStatusAProblem;
+        private set => SetField(ref isStatusAProblem, value);
+    }
+
+    /// <summary>The last send's failure, shown in place of a response; null once one arrives.</summary>
+    public RequestFailure? Failure
+    {
+        get => failure;
+        set => SetField(ref failure, value);
+    }
+
+    /// <summary>Says <paramref name="text"/> under the URL, as an error or as information.</summary>
+    public void Say(string? text, bool isProblem = false)
+    {
+        StatusText = text;
+        IsStatusAProblem = isProblem && text is not null;
     }
 
     /// <summary>Folded to its URL line, to give the response the height.</summary>
@@ -78,12 +102,12 @@ public sealed class RequestEditorViewModel : ObservableObject, IDisposable
 
         if (BuildRequest(HasBody ? Body?.ReadBody() : null, out string? problem) is not { } request)
         {
-            StatusText = problem;
+            Say(problem, isProblem: true);
             return;
         }
 
         IsSending = true;
-        StatusText = null;
+        Say(null);
         try
         {
             await sender!.SendAsync(request);

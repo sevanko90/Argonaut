@@ -23,11 +23,17 @@ public interface IHttpFetcher
 /// <summary>Why a request produced no response worth showing, as a sentence for the user.</summary>
 public sealed class HttpFetchException : Exception
 {
-    /// <summary>The server answered, with a failure status.</summary>
-    public HttpFetchException(int statusCode, string reason)
+    /// <summary>How much of a failure's body is kept: enough for any error message an API
+    /// writes, never a whole document someone served with an error status.</summary>
+    public const int MaxServerMessageBytes = 64 * 1024;
+
+    /// <summary>The server answered, with a failure status - and, usually, a body saying why.</summary>
+    public HttpFetchException(int statusCode, string reason, string? serverMessage = null)
         : base($"The server answered {statusCode} {reason}.")
     {
         StatusCode = statusCode;
+        Reason = reason;
+        ServerMessage = string.IsNullOrWhiteSpace(serverMessage) ? null : serverMessage;
     }
 
     /// <summary>The server could not be reached, or the answer could not be read.</summary>
@@ -38,4 +44,11 @@ public sealed class HttpFetchException : Exception
 
     /// <summary>The failure status, or null when no answer came.</summary>
     public int? StatusCode { get; }
+
+    /// <summary>The status's reason phrase ("Forbidden"), or null when no answer came.</summary>
+    public string? Reason { get; }
+
+    /// <summary>The start of the failure's body, decoded as text - an API's own explanation - or
+    /// null when it sent none.</summary>
+    public string? ServerMessage { get; }
 }

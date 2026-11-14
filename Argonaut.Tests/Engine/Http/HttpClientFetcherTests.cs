@@ -66,6 +66,30 @@ public sealed class HttpClientFetcherTests
     }
 
     [Fact]
+    public async Task AFailureStatus_KeepsWhatTheServerSaid_Decompressed()
+    {
+        byte[] said = Compress(Encoding.UTF8.GetBytes("""{"error":"invalid key"}"""), "gzip");
+        var handler = new StubHandler(HttpStatusCode.Forbidden, said, "gzip");
+
+        var failure = await Assert.ThrowsAsync<HttpFetchException>(() =>
+            new HttpClientFetcher(new HttpClient(handler)).FetchAsync(Request(HttpRequestMethod.Get), new MemoryStream(), (_, _) => { }, CancellationToken.None));
+
+        Assert.Equal(403, failure.StatusCode);
+        Assert.Equal("""{"error":"invalid key"}""", failure.ServerMessage);
+    }
+
+    [Fact]
+    public async Task AFailureStatusWithALongBody_KeepsOnlyItsStart()
+    {
+        var handler = new StubHandler(HttpStatusCode.InternalServerError, new string('x', 200_000));
+
+        var failure = await Assert.ThrowsAsync<HttpFetchException>(() =>
+            new HttpClientFetcher(new HttpClient(handler)).FetchAsync(Request(HttpRequestMethod.Get), new MemoryStream(), (_, _) => { }, CancellationToken.None));
+
+        Assert.Equal(HttpFetchException.MaxServerMessageBytes, failure.ServerMessage!.Length);
+    }
+
+    [Fact]
     public async Task ANetworkFailure_ThrowsWithWhatWentWrong()
     {
         var fetcher = new HttpClientFetcher(new HttpClient(new FailingHandler()));

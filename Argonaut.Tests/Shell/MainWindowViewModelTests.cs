@@ -531,8 +531,52 @@ public sealed class MainWindowViewModelTests : IDisposable
         await vm.RequestEditor.SendAsync();
 
         Assert.Empty(loaded);
-        Assert.Contains("404", vm.RequestEditor.StatusText);
-        Assert.True(vm.IsAwaitingResponse);
+        Assert.Equal("404 Not Found", vm.RequestEditor.Failure!.Title);
+        Assert.True(vm.RequestEditor.IsStatusAProblem);
+        Assert.True(vm.IsShowingRequestFailure);
+        Assert.False(vm.IsAwaitingResponse);
+    }
+
+    [Fact]
+    public async Task AFailureAfterAResponse_TakesTheResponseAway()
+    {
+        var loaded = new List<IByteOrigin>();
+        var fetcher = new SwitchableFetcher();
+        var vm = RequestShell(fetcher, loaded);
+        await vm.NewRequestAsync();
+        var editor = vm.RequestEditor!;
+        editor.UrlText = "https://x.test/a";
+        await editor.SendAsync();
+        Assert.True(vm.IsFileOpen);
+
+        fetcher.Fail = true;
+        await editor.SendAsync();
+
+        Assert.False(vm.IsFileOpen);
+        Assert.Same(editor, vm.RequestEditor);
+        Assert.True(vm.IsShowingRequestFailure);
+        Assert.Equal("The server said no", editor.Failure!.ServerMessage);
+
+        fetcher.Fail = false;
+        await editor.SendAsync();
+
+        Assert.True(vm.IsFileOpen);
+        Assert.Null(editor.Failure);
+        Assert.False(vm.IsShowingRequestFailure);
+    }
+
+    private sealed class SwitchableFetcher : IHttpFetcher
+    {
+        public bool Fail { get; set; }
+
+        public async Task FetchAsync(HttpRequestSpec request, Stream destination, Action<long, long?> received, CancellationToken stopping)
+        {
+            if (Fail)
+                throw new HttpFetchException(403, "Forbidden", "The server said no");
+
+            await destination.WriteAsync("{}"u8.ToArray(), stopping);
+            received(2, 2);
+        }
     }
 
     [Fact]

@@ -430,6 +430,7 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
             OnPropertyChanged(nameof(IsRequestPaneVisible));
             OnPropertyChanged(nameof(IsEmptyStateVisible));
             OnPropertyChanged(nameof(IsAwaitingResponse));
+            OnPropertyChanged(nameof(IsShowingRequestFailure));
         }
     }
 
@@ -446,7 +447,10 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
     public bool CanPasteAsNewDocument => IsEmptyStateVisible && CanPaste;
 
     /// <summary>A request is being written and nothing has loaded under it yet.</summary>
-    public bool IsAwaitingResponse => !IsFileOpen && IsRequestPaneVisible;
+    public bool IsAwaitingResponse => !IsFileOpen && requestEditor is { Failure: null };
+
+    /// <summary>The last send failed, and the response area says so instead of showing a response.</summary>
+    public bool IsShowingRequestFailure => !IsFileOpen && requestEditor is { Failure: not null };
 
     /// <summary>Whether <see cref="PasteAsync"/> can do anything - false when the view model was
     /// built without a clipboard reader.</summary>
@@ -1969,6 +1973,7 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
         OnPropertyChanged(nameof(IsFileOpen));
         OnPropertyChanged(nameof(IsEmptyStateVisible));
         OnPropertyChanged(nameof(IsAwaitingResponse));
+        OnPropertyChanged(nameof(IsShowingRequestFailure));
         OnPropertyChanged(nameof(FilePath));
         OnPropertyChanged(nameof(CanCompare));
         NotifyFailurePropertiesChanged();
@@ -2023,7 +2028,9 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
 
     /// <summary>Closes the document with no questions asked - the tail of
     /// <see cref="CloseFileAsync"/>, and what a save that lost its document falls back to.</summary>
-    private void CloseCurrentDocument()
+    /// <param name="keepRequestPane">Leave the request pane up - a failed send clearing the last
+    /// response from under it.</param>
+    private void CloseCurrentDocument(bool keepRequestPane = false)
     {
         BeginOpenRequest();
         loadProgress?.Finish();
@@ -2037,7 +2044,8 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
         SetCurrentDocument(null, null);
         AdoptOrigins();
         ReloadSavedSources();
-        CloseRequestPane();
+        if (!keepRequestPane)
+            CloseRequestPane();
     }
 
     // ── Requests ────────────────────────────────────────────────────────────────────────
@@ -2096,7 +2104,7 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
 
         if (responseDownloader is null)
         {
-            editor.StatusText = "Sending requests isn't available in this build.";
+            editor.Say("Sending requests isn't available in this build.", isProblem: true);
             return;
         }
 
@@ -2115,17 +2123,17 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
         }
         catch (OperationCanceledException)
         {
-            editor.StatusText = "Stopped - nothing was loaded.";
+            editor.Say("Stopped - nothing new was loaded.");
             return;
         }
         catch (HttpFetchException ex)
         {
-            editor.StatusText = ex.Message;
+            ShowRequestFailure(editor, RequestFailure.From(ex));
             return;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            editor.StatusText = $"Couldn't keep the response: {ex.Message}";
+            editor.Say($"Couldn't keep the response: {ex.Message}", isProblem: true);
             return;
         }
         finally
@@ -2140,8 +2148,25 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
             return;
         }
 
+        editor.Failure = null;
         await OpenOriginAsync(origin, addToRecents: true, fromRequest: true);
-        editor.StatusText = $"Response from {DateTime.Now:d MMM, HH:mm}";
+        editor.Say($"Response from {DateTime.Now:d MMM, HH:mm}");
+        OnPropertyChanged(nameof(IsShowingRequestFailure));
+    }
+
+    /// <summary>
+    /// Puts a failed send in place of the response: the last response is closed - leaving it up
+    /// would look like the same answer had come back - and the response area shows the failure.
+    /// </summary>
+    private void ShowRequestFailure(RequestEditorViewModel editor, RequestFailure failure)
+    {
+        if (IsFileOpen)
+            CloseCurrentDocument(keepRequestPane: true);
+
+        editor.Failure = failure;
+        editor.Say(failure.Title, isProblem: true);
+        OnPropertyChanged(nameof(IsAwaitingResponse));
+        OnPropertyChanged(nameof(IsShowingRequestFailure));
     }
 
     // ── Save ────────────────────────────────────────────────────────────────────────────

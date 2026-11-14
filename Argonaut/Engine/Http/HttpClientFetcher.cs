@@ -48,7 +48,10 @@ public sealed class HttpClientFetcher(HttpClient client) : IHttpFetcher
         using (response)
         {
             if (!response.IsSuccessStatusCode)
-                throw new HttpFetchException((int)response.StatusCode, response.ReasonPhrase ?? response.StatusCode.ToString());
+            {
+                throw new HttpFetchException((int)response.StatusCode, response.ReasonPhrase ?? response.StatusCode.ToString(),
+                    await ReadServerMessageAsync(response, stopping));
+            }
 
             long? total = response.Content.Headers.ContentLength;
             try
@@ -76,6 +79,28 @@ public sealed class HttpClientFetcher(HttpClient client) : IHttpFetcher
     }
 
     private static readonly string[] AcceptedEncodings = ["gzip", "deflate", "br"];
+
+    /// <summary>The start of a failure's body as text - up to
+    /// <see cref="HttpFetchException.MaxServerMessageBytes"/>, decompressed - or null when it cannot
+    /// be read. Best effort: the failure is the status, and this only explains it.</summary>
+    private static async Task<string?> ReadServerMessageAsync(HttpResponseMessage response, CancellationToken stopping)
+    {
+        try
+        {
+            await using var arriving = await response.Content.ReadAsStreamAsync(stopping);
+            await using var decoded = Decode(arriving, response.Content.Headers.ContentEncoding);
+            var buffer = new byte[HttpFetchException.MaxServerMessageBytes];
+            int filled = 0, read;
+            while (filled < buffer.Length && (read = await decoded.ReadAsync(buffer.AsMemory(filled), stopping)) > 0)
+                filled += read;
+
+            return System.Text.Encoding.UTF8.GetString(buffer, 0, filled);
+        }
+        catch (Exception ex) when (ex is IOException or HttpRequestException or InvalidDataException or NotSupportedException)
+        {
+            return null;
+        }
+    }
 
     /// <summary>
     /// <paramref name="body"/> with each of the response's content codings undone, last applied

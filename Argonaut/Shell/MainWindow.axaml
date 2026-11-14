@@ -316,6 +316,10 @@
                             x:Name="ContentArea"
                             Content="{Binding CurrentDocument}" />
 
+            <requests:RequestFailureView Grid.Row="2"
+                                         DataContext="{Binding RequestEditor.Failure}"
+                                         IsVisible="{Binding $self.DataContext, Converter={x:Static ObjectConverters.IsNotNull}}" />
+
             <TextBlock Grid.Row="2"
                        Text="{x:Static shell:MainWindowViewModel.AwaitingResponseText}"
                        IsVisible="{Binding IsAwaitingResponse}"

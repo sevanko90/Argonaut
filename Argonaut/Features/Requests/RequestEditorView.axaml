@@ -17,6 +17,13 @@
         <Style Selector="Button.paneicon:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="{DynamicResource AppHoverBackgroundBrush}" />
         </Style>
+        <Style Selector="TextBlock.status">
+            <Setter Property="Foreground" Value="{DynamicResource AppMutedTextBrush}" />
+        </Style>
+        <Style Selector="TextBlock.status.problem">
+            <Setter Property="Foreground" Value="{DynamicResource AppDangerHoverBrush}" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
         <Style Selector="TextBox.argument">
             <Setter Property="FontSize" Value="12" />
             <Setter Property="MinHeight" Value="0" />
@@ -58,10 +65,11 @@
             </Grid>
 
             <TextBlock Text="{Binding StatusText}"
+                       Classes="status"
+                       Classes.problem="{Binding IsStatusAProblem}"
                        IsVisible="{Binding StatusText, Converter={x:Static ObjectConverters.IsNotNull}}"
                        FontSize="12"
-                       TextWrapping="Wrap"
-                       Foreground="{DynamicResource AppMutedTextBrush}" />
+                       TextWrapping="Wrap" />
 
             <StackPanel Spacing="4" IsVisible="{Binding !IsCollapsed}">
                 <TextBlock Text="Query arguments" FontSize="11" FontWeight="SemiBold"

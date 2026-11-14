@@ -1,0 +1,41 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:requests="clr-namespace:Argonaut.Features.Requests"
+             x:Class="Argonaut.Features.Requests.RequestFailureView"
+             x:DataType="requests:RequestFailure">
+    <!-- In place of the response when a send fails: unmistakably not a response, with the
+         server's own explanation where it gave one. -->
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Margin="32,28" Spacing="10" MaxWidth="900" HorizontalAlignment="Left">
+            <StackPanel Orientation="Horizontal" Spacing="10">
+                <Viewbox Width="22" Height="22" VerticalAlignment="Center">
+                    <!-- Material "warning" -->
+                    <Path Fill="{DynamicResource AppDangerHoverBrush}"
+                          Data="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z" />
+                </Viewbox>
+                <TextBlock Text="{Binding Title}"
+                           FontSize="20"
+                           FontWeight="SemiBold"
+                           VerticalAlignment="Center" />
+            </StackPanel>
+            <TextBlock Text="{Binding Explanation}"
+                       TextWrapping="Wrap"
+                       Foreground="{DynamicResource AppMutedTextBrush}" />
+            <StackPanel Spacing="6" Margin="0,8,0,0"
+                        IsVisible="{Binding ServerMessage, Converter={x:Static ObjectConverters.IsNotNull}}">
+                <TextBlock Text="The server said" FontSize="11" FontWeight="SemiBold"
+                           Foreground="{DynamicResource AppMutedTextBrush}" />
+                <Border BorderBrush="{DynamicResource AppBorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="4"
+                        Padding="12,10"
+                        Background="{DynamicResource AppPanelBackgroundBrush}">
+                    <SelectableTextBlock Text="{Binding ServerMessage}"
+                                         TextWrapping="Wrap"
+                                         FontFamily="{DynamicResource AppMonoFontFamily}"
+                                         FontSize="12" />
+                </Border>
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

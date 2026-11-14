@@ -56,7 +56,9 @@ them). Keep this in sync when the ownership chain changes.
   a document with a locator touches its entry; reopening goes back through the entry's locator.
   The list lives in one settings block holding a single string sealed by the injected
   `ISettingsSealer` (`SettingsSealers.ForThisPlatform`: DPAPI on Windows, AES-GCM with the key in
-  the macOS Keychain or a user-only key file on Linux), so neither paths nor URLs are readable from
+  the macOS Keychain or a user-only key file on Linux and in a macOS Debug build, which would
+  otherwise raise the Keychain prompt on every rebuild - a Debug build therefore keeps its own
+  `settings.debug.json`, seeded from `settings.json` on its first run), so neither paths nor URLs are readable from
   `settings.json`; a block that will not open is an empty list.
 - **The shell owns the origins for the open input** (`ownedOrigins`, one per input, two when
   diffing) and releases them only when the input actually changes, in `AdoptOrigins`. A view

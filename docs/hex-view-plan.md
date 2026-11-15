@@ -138,7 +138,19 @@ size, because decoding is whole-image in memory.
    near the end of the document (fewer than 8 bytes left).
 7. [ ] UTF-8 character column, if measuring says the boundary rule reads well. Tests: a character
    crossing a row, invalid and truncated sequences, the 3-byte look-back at a row start.
-8. [ ] Architecture doc, roadmap.
+8. [ ] Visual polish - the look is still step 1's plain dump. A full pass, done from screenshots
+   with variants to choose between, not a restyle. To explore:
+   - **Hex and characters as separate panels**, each with its own background and a divider
+     between them, rather than one line of text with spaces between the columns.
+   - **A pinned offset gutter**, styled like the raw view's line numbers, so panning moves only the
+     bytes.
+   - **A column header** (`00 01 … 0F`) above the hex panel, pinned while scrolling.
+   - Separating the two groups of eight more clearly, and possibly faint shading on alternate rows
+     or every fourth column, so a byte's column can be followed down the dump.
+   - Hover: the byte under the pointer highlighted in both panels at once. This becomes the
+     selection's look once step 3 is in.
+   - Colours by byte class tuned in both themes.
+9. [ ] Architecture doc, roadmap.
 
 ## Not in this plan
 

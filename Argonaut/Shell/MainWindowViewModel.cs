@@ -102,6 +102,9 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
     private readonly FindController findController;
     private readonly Func<IByteOrigin, Task<string?>>? pickSaveDestination;
 
+    /// <summary>Shows a saved file in the file manager; none, and nothing is shown.</summary>
+    private readonly ISystemLauncher? launcher;
+
     /// <summary>Asks where to save a copy of a kept response, offering the file name given; null
     /// when the user cancels.</summary>
     private readonly Func<string, Task<string?>>? pickCopyDestination;
@@ -231,6 +234,7 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
     {
         this.responseStore = responseStore;
         this.pickCopyDestination = pickCopyDestination;
+        this.launcher = launcher;
         this.askAboutRequest = askAboutRequest;
         this.fileAccess = fileAccess ?? new PlainFileAccess();
         this.responseDownloader = responseDownloader;
@@ -1462,6 +1466,33 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
         _ = OpenPathAsync(grant.Path, grant: grant);
     }
 
+    /// <summary>
+    /// Shows a saved file selected in the platform's file manager. Found the way opening finds it -
+    /// through the file access, so a moved file is followed and a sandboxed build may reach it - and
+    /// one that is gone is reported as opening reports it, with the offer to remove it.
+    /// </summary>
+    public void RevealSavedSource(string id)
+    {
+        if (launcher is null || savedSources.Find(id) is not { Locator: FileLocator file } source)
+            return;
+
+        using var grant = fileAccess.Open(file);
+        if (!grant.Locator.IsSamePlace(file))
+        {
+            savedSources.Relocate(id, grant.Locator);
+            ReloadSavedSources();
+        }
+
+        if (!File.Exists(grant.Path))
+        {
+            ToastService.Show($"Couldn't find {source.Name}",
+                new ToastAction(RemoveFromListLabel, () => RemoveSavedSource(id)));
+            return;
+        }
+
+        launcher.RevealFile(grant.Path);
+    }
+
     /// <summary>A saved request: the pane filled in, and sent.</summary>
     private async Task ReopenRequestAsync(HttpRequestSpec request, string entryId)
     {
@@ -1588,7 +1619,7 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
     /// <summary>A saved source as the empty state shows it - a pill for anything but a file.</summary>
     private static SavedSourceRow Row(SavedSource source)
         => new(source.Id, source.Name, source.Locator!.DisplayText, source.Locator is FileLocator ? null : source.Kind, source.IsPinned,
-            HasKeptResponse: source.ResponseFile is not null);
+            HasKeptResponse: source.ResponseFile is not null, IsFile: source.Locator is FileLocator);
 
     /// <summary>
     /// Opens <paramref name="path"/>, replacing any current document. <see cref="openRequest"/>

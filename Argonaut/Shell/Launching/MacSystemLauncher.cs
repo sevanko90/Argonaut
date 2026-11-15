@@ -34,6 +34,12 @@ public sealed class MacSystemLauncher : ISystemLauncher
             fallback?.OpenFile(path);
     }
 
+    public void RevealFile(string path)
+    {
+        if (!TrySelectInFinder(path))
+            fallback?.RevealFile(path);
+    }
+
     public void OpenAddress(Uri address)
     {
         if (!TryOpen("URLWithString:", address.AbsoluteUri))
@@ -52,6 +58,29 @@ public sealed class MacSystemLauncher : ISystemLauncher
             {
                 var workspace = ObjC.Send(ObjC.Class("NSWorkspace"), ObjC.Selector("sharedWorkspace"));
                 ObjC.Send(workspace, ObjC.Selector("openURL:"), url);
+            }
+
+            return true;
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Selects the file in a Finder window through
+    /// <c>NSWorkspace.activateFileViewerSelectingURLs:</c>, which the sandbox allows.</summary>
+    /// <returns>False only if the runtime could not be reached.</returns>
+    private static bool TrySelectInFinder(string path)
+    {
+        try
+        {
+            var url = ObjC.Send(ObjC.Class("NSURL"), ObjC.Selector("fileURLWithPath:"), ObjC.String(path));
+            if (url != 0)
+            {
+                var urls = ObjC.Send(ObjC.Class("NSArray"), ObjC.Selector("arrayWithObject:"), url);
+                var workspace = ObjC.Send(ObjC.Class("NSWorkspace"), ObjC.Selector("sharedWorkspace"));
+                ObjC.Send(workspace, ObjC.Selector("activateFileViewerSelectingURLs:"), urls);
             }
 
             return true;

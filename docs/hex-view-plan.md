@@ -8,18 +8,18 @@ default app.
 
 Status: planned, nothing built.
 
-## To decide
+## Decided
 
-- **Does Hex replace the Binary view or sit beside it?** Recommended: replace it. A detected binary
-  document opens in Hex, and the format line, media type, size, Save as… and Open in default app
-  move into the hex view's toolbar. The switcher then offers Hex for every document, text included,
-  which is useful in itself (finding a stray BOM, a NUL, a mis-encoded byte). Keeping both means two
-  views for the same bytes, and one of them can only describe them.
-- **Bytes per row.** Recommended: 16, fixed, which is what every hex tool shows and what makes
-  offsets easy to read. Fitting the width (8/16/32) is a later option. A fixed width is also what
-  makes the row geometry pure arithmetic.
-- **Character column encoding.** Recommended: ASCII printable bytes, with `.` for the rest. A UTF-8
-  column (a multi-byte character drawn across its bytes) is a later option.
+- **Hex replaces the Binary view.** A detected binary document opens in Hex, and the format line,
+  media type, size, Save as… and Open in default app move into the hex view's toolbar. The switcher
+  offers Hex for every document, text included, which is useful in itself (finding a stray BOM, a
+  NUL, a mis-encoded byte). `BinaryViewModel` and its view go; `IBinaryDocumentActions` and
+  `DocumentExport` stay, consumed by the hex toolbar instead.
+- **16 bytes per row, fixed.** It is what every hex tool shows, it keeps offsets easy to read, and
+  it makes the row geometry pure arithmetic. Other widths (8/32) are a later option.
+- **The character column is ASCII**: printable bytes (0x20-0x7E) as themselves, `.` for everything
+  else. A UTF-8 column is a later option, held back by characters that cross a row boundary
+  (below).
 
 ## Design
 
@@ -84,9 +84,32 @@ match as a selected byte range.
 
 ### Value inspector (later step)
 
-For the byte at the caret, show it read as int8/16/32/64 (signed and unsigned, little- and
+For the bytes at the caret, show them read as int8/16/32/64 (signed and unsigned, little- and
 big-endian), float32/64, a UTF-8 character, and a Unix timestamp. It reads at most 8 bytes, so it
 is cheap however large the document.
+
+It also offers **bits** as a view option: the same 1, 2, 4 or 8 bytes as 0/1 digits, grouped by
+byte (`0100 1001`) and following the inspector's endianness switch. That makes flags and packed
+fields readable without converting by hand.
+
+### A UTF-8 character column (later option)
+
+The hard part is a character whose bytes cross a row boundary: its lead byte ends one row and its
+continuation bytes start the next, so no single row can draw it whole. One rule keeps every cell
+mapped to exactly one byte:
+
+- The character is drawn once, at its lead byte's cell. Within a row it may spread over its own
+  continuation cells (a wide CJK glyph or an emoji takes the room its 3-4 bytes give it).
+- When it crosses the row end, it is clipped at the row's last cell, and a continuation mark
+  shows it carries on.
+- Continuation bytes at the start of the next row show a muted continuation mark, not `.`, so they
+  read as part of the character above, not as unknown bytes.
+- To tell a row's leading continuation bytes apart, a row looks back at most 3 bytes before it
+  starts. That keeps the geometry arithmetic and needs no scan.
+
+Invalid sequences show `.` as the ASCII column does. Measure this against real files before it is
+built: if clipped glyphs read badly, the alternative is to draw a crossing character on the row
+where it ends instead.
 
 ### Image preview (separate, later)
 
@@ -101,16 +124,19 @@ size, because decoding is whole-image in memory.
    status line. Tests: geometry (`long` rows, last partial row), a `GrowingByteSource` row count,
    a `SplitByteSource` row straddling a boundary, and a headless scroll-then-`CaptureRenderedFrame`
    test (as `RowSurfaceTests` does).
-2. [ ] The decision on Binary: if Hex replaces it, the toolbar takes over Binary's actions and
-   detection's `FileKind.Binary` opens Hex. Tests: a detected binary document opens in Hex, and
-   the toolbar's actions reach `IBinaryDocumentActions`.
+2. [ ] Hex replaces Binary: the toolbar takes over Binary's description and actions, detection's
+   binary documents open in Hex, and `BinaryViewModel` and its view are removed. Tests: a detected
+   binary document opens in Hex, and the toolbar's actions reach `IBinaryDocumentActions`.
 3. [ ] Caret, selection, keyboard movement, copy (hex, characters, bytes); `IByteRangeNavigable`.
    Tests on the view model; a switch from Raw lands on the same bytes.
 4. [ ] Go to offset.
 5. [ ] `BytePatternMatcher` and the find bar's Hex mode. Tests: parsing (`0x` prefixes, spacing,
    odd digit counts rejected), matches across chunk boundaries (`ChunkOverlap`).
-6. [ ] Value inspector.
-7. [ ] Architecture doc, roadmap.
+6. [ ] Value inspector, with the bits option. Tests: each reading at both endiannesses, reads
+   near the end of the document (fewer than 8 bytes left).
+7. [ ] UTF-8 character column, if measuring says the boundary rule reads well. Tests: a character
+   crossing a row, invalid and truncated sequences, the 3-byte look-back at a row start.
+8. [ ] Architecture doc, roadmap.
 
 ## Not in this plan
 

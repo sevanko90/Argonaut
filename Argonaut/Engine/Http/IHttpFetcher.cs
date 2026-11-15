@@ -17,7 +17,9 @@ public interface IHttpFetcher
     /// <exception cref="HttpFetchException">The server answered with anything but 2xx, or could not
     /// be reached - nothing has been written.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="stopping"/> fired.</exception>
-    Task FetchAsync(HttpRequestSpec request, Stream destination, Action<long, long?> received, CancellationToken stopping);
+    /// <returns>The response's media type - its <c>Content-Type</c> without parameters - or null
+    /// when the server stated none.</returns>
+    Task<string?> FetchAsync(HttpRequestSpec request, Stream destination, Action<long, long?> received, CancellationToken stopping);
 }
 
 /// <summary>Why a request produced no response worth showing, as a sentence for the user.</summary>

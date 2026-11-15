@@ -99,4 +99,10 @@ public interface IByteOrigin : IDisposable
     /// from somewhere (a file, a download, a value a hint decoded) starts read-only, and the user
     /// asks for editing.</summary>
     bool StartsEditable => false;
+
+    /// <summary>What the document's source said it is - a response's <c>Content-Type</c> without
+    /// parameters - or null when nothing said. Detection trusts it over the bytes where it is
+    /// decisive (<see cref="Detection.BinaryContent.IsBinaryMediaType"/>), and a saved copy takes
+    /// its extension from it.</summary>
+    string? MediaType => null;
 }

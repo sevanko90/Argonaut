@@ -46,6 +46,10 @@ internal static class AppDataPaths
     /// App Store sandbox always allows.</summary>
     public static string ResponsesDirectory => Path.Combine(Root, "Responses");
 
+    /// <summary>Where a document with no file of its own (a response, a paste) is copied so
+    /// another app can open it - cleared at each start (<see cref="Saving.OriginExporter.Sweep"/>).</summary>
+    public static string OpenedDirectory => Path.Combine(Root, "Opened");
+
     /// <summary>Where Linux, and a Debug build on macOS, keeps the key that seals settings blocks -
     /// see <see cref="FileSealingKeyStore"/>. Unused by a released macOS build (the Keychain) and on
     /// Windows (DPAPI).</summary>

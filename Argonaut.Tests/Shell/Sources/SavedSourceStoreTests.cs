@@ -257,6 +257,20 @@ public sealed class SavedSourceStoreTests
     }
 
     [Fact]
+    public void AKeptResponsesMediaType_IsRecorded_AndGoesWithTheResponse()
+    {
+        var block = new SavedSourcesBlock();
+        var store = Store(block);
+        string id = store.Touch(Request("https://x.test/a")).Id;
+
+        store.SetResponse(id, "a.response", 3, DateTimeOffset.UnixEpoch, "image/png");
+        Assert.Equal("image/png", Store(block).Find(id)!.ResponseMediaType);
+
+        store.DropResponse(id);
+        Assert.Null(Store(block).Find(id)!.ResponseMediaType);
+    }
+
+    [Fact]
     public void RemovingEntries_HandsBackTheirResponseFiles()
     {
         var store = Store();

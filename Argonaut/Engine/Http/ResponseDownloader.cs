@@ -31,15 +31,16 @@ public sealed class ResponseDownloader(IHttpFetcher fetcher, string folder)
             if (!OperatingSystem.IsWindows())
                 options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
 
+            string? mediaType;
             await using (var file = new FileStream(path, options))
             {
                 string message = $"Downloading {locator.DefaultName}";
                 progress?.Report(message);
-                await fetcher.FetchAsync(request, file, (received, total) => progress?.Report(message, received, total), stopping);
+                mediaType = await fetcher.FetchAsync(request, file, (received, total) => progress?.Report(message, received, total), stopping);
             }
 
             stopping.ThrowIfCancellationRequested();
-            return new HttpResponseOrigin(locator, path);
+            return new HttpResponseOrigin(locator, path, mediaType);
         }
         catch
         {

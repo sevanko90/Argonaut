@@ -1,0 +1,23 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:binary="clr-namespace:Argonaut.Features.Binary"
+             xmlns:icons="clr-namespace:Argonaut.Ui.Icons"
+             x:Class="Argonaut.Features.Binary.BinaryView"
+             x:DataType="binary:BinaryViewModel">
+    <!-- Bytes no text view can draw: what they are, and where they can go instead. -->
+    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10" MaxWidth="460" Margin="32">
+        <icons:LucideIcon Data="{StaticResource Icon.Binary}" Size="36" HorizontalAlignment="Center"
+                          Foreground="{DynamicResource AppMutedTextBrush}" />
+        <TextBlock Text="{Binding Title}" FontSize="20" FontWeight="SemiBold" HorizontalAlignment="Center" />
+        <TextBlock Text="{Binding Detail}" HorizontalAlignment="Center"
+                   Foreground="{DynamicResource AppMutedTextBrush}" />
+        <TextBlock TextWrapping="Wrap" TextAlignment="Center" Margin="0,6,0,0"
+                   Foreground="{DynamicResource AppMutedTextBrush}"
+                   Text="This isn't text, so it can't be shown here. Save a copy, or open it in the app your system uses for it. The view switcher still shows it as raw text." />
+        <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center" Margin="0,10,0,0"
+                    IsVisible="{Binding OffersActions}">
+            <Button Content="Save as…" Classes="primary" Click="OnSaveCopy" />
+            <Button Content="Open in default app" Classes="secondary" Click="OnOpenInDefaultApp" />
+        </StackPanel>
+    </StackPanel>
+</UserControl>

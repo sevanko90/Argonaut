@@ -28,6 +28,12 @@ public sealed class MacSystemLauncher : ISystemLauncher
             fallback?.ShowFolder(path);
     }
 
+    public void OpenFile(string path)
+    {
+        if (!TryOpen("fileURLWithPath:", path))
+            fallback?.OpenFile(path);
+    }
+
     public void OpenAddress(Uri address)
     {
         if (!TryOpen("URLWithString:", address.AbsoluteUri))

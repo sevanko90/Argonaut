@@ -8,6 +8,7 @@ using Avalonia.Markup.Xaml;
 using Avalonia.Platform.Storage;
 using Argonaut.Engine.Locations;
 using Argonaut.Engine.Logging;
+using Argonaut.Engine.Saving;
 using Argonaut.Engine.Settings;
 using Argonaut.Engine.Transforms;
 using Argonaut.Features.Json.Schema;
@@ -71,7 +72,8 @@ public partial class App : Application
                 ConfigLocationSource.ForCurrentPlatform(), recipes, launcher,
                 SettingsSealers.ForThisPlatform(AppDataPaths.SealingKeyFile), FileAccesses.ForThisPlatform(),
                 new ResponseDownloader(new HttpClientFetcher(new System.Net.Http.HttpClient()), AppDataPaths.ResponsesDirectory),
-                new ResponseStore(AppDataPaths.ResponsesDirectory));
+                new ResponseStore(AppDataPaths.ResponsesDirectory),
+                OpenedCopies());
             mainWindow = window;
             desktop.MainWindow = window;
 
@@ -113,6 +115,15 @@ public partial class App : Application
     /// <summary>What the status bar's log-folder button does: Debug builds only, since no other
     /// build writes a log. Creates the folder first, because the log's writer creates it in the
     /// background and may not have got there yet.</summary>
+    /// <summary>The exporter the binary view saves and opens through, with what an earlier run
+    /// staged for opening in another app cleared.</summary>
+    private static OriginExporter OpenedCopies()
+    {
+        var exporter = new OriginExporter(AppDataPaths.OpenedDirectory);
+        exporter.Sweep();
+        return exporter;
+    }
+
     private static Action? OpenLogFolderAction(ISystemLauncher launcher)
     {
 #if DEBUG

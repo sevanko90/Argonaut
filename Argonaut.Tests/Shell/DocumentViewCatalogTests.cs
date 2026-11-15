@@ -1,6 +1,7 @@
 using System.Text;
 using Argonaut.Engine.Detection;
 using Argonaut.Engine.Progress;
+using Argonaut.Features.Binary;
 using Argonaut.Features.Csv;
 using Argonaut.Features.Json;
 using Argonaut.Features.NdJson;
@@ -39,7 +40,8 @@ public class DocumentViewCatalogTests
         Assert.Contains(FileTypeDetector.FileKind.Tsv, kinds);
         Assert.Contains(FileTypeDetector.FileKind.Xml, kinds);
         Assert.Contains(FileTypeDetector.FileKind.Unidentified, kinds);
-        Assert.Equal(6, kinds.Count);
+        Assert.Contains(FileTypeDetector.FileKind.Binary, kinds);
+        Assert.Equal(7, kinds.Count);
     }
 
     [Fact]
@@ -53,11 +55,12 @@ public class DocumentViewCatalogTests
         Assert.Equal("TSV", byKind[FileTypeDetector.FileKind.Tsv]);
         Assert.Equal("Raw text", byKind[FileTypeDetector.FileKind.Unidentified]);
         Assert.Equal("XML", byKind[FileTypeDetector.FileKind.Xml]);
+        Assert.Equal("Binary", byKind[FileTypeDetector.FileKind.Binary]);
     }
 
     [Fact]
     public void Options_ListTheTreesFirst()
-        => Assert.Equal(["JSON", "NDJSON", "XML", "CSV", "TSV", "Raw text"], DocumentViewCatalog.Options.Select(o => o.DisplayName).ToList());
+        => Assert.Equal(["JSON", "NDJSON", "XML", "CSV", "TSV", "Raw text", "Binary"], DocumentViewCatalog.Options.Select(o => o.DisplayName).ToList());
 
     [Theory]
     [InlineData(FileTypeDetector.FileKind.Json, typeof(JsonViewModel))]
@@ -66,6 +69,7 @@ public class DocumentViewCatalogTests
     [InlineData(FileTypeDetector.FileKind.Tsv, typeof(CsvViewModel))]
     [InlineData(FileTypeDetector.FileKind.Unidentified, typeof(RawViewModel))]
     [InlineData(FileTypeDetector.FileKind.Xml, typeof(XmlViewModel))]
+    [InlineData(FileTypeDetector.FileKind.Binary, typeof(BinaryViewModel))]
     public async Task LoadAsync_ResolvesToTheViewModelThatClaimsTheKind(FileTypeDetector.FileKind kind, Type expectedType)
     {
         string path = WriteTempFile("""{"a":1}"""); // structurally valid enough for every loader to succeed

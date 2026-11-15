@@ -10,7 +10,11 @@ internal sealed class RecordingSystemLauncher : ISystemLauncher
 
     public List<Uri> AddressesOpened { get; } = [];
 
+    public List<string> FilesOpened { get; } = [];
+
     public void ShowFolder(string path) => FoldersShown.Add(path);
+
+    public void OpenFile(string path) => FilesOpened.Add(path);
 
     public void OpenAddress(Uri address) => AddressesOpened.Add(address);
 }

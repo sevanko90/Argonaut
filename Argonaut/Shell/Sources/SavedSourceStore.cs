@@ -141,7 +141,7 @@ public sealed class SavedSourceStore
 
     /// <summary>Records <paramref name="fileName"/> as the request's kept response.</summary>
     /// <returns>The file it replaces, for the caller to delete, or null.</returns>
-    public string? SetResponse(string id, string fileName, long bytes, DateTimeOffset fetchedAt)
+    public string? SetResponse(string id, string fileName, long bytes, DateTimeOffset fetchedAt, string? mediaType = null)
     {
         if (Find(id) is not { } entry)
             return null;
@@ -150,6 +150,7 @@ public sealed class SavedSourceStore
         entry.ResponseFile = fileName;
         entry.ResponseBytes = bytes;
         entry.ResponseFetchedAt = fetchedAt;
+        entry.ResponseMediaType = mediaType;
         Persist();
         return previous;
     }
@@ -164,6 +165,7 @@ public sealed class SavedSourceStore
         entry.ResponseFile = null;
         entry.ResponseBytes = 0;
         entry.ResponseFetchedAt = null;
+        entry.ResponseMediaType = null;
         Persist();
         return file;
     }

@@ -543,7 +543,8 @@ public sealed class MainWindowViewModelTests : IDisposable
         Assert.False(vm.IsAwaitingResponse);
     }
 
-    private MainWindowViewModel RequestShell(IHttpFetcher fetcher, List<IByteOrigin> loaded, Func<RequestSaveQuestion, RequestSaveChoice> answer, List<RequestSaveQuestion> asked)
+    private MainWindowViewModel RequestShell(IHttpFetcher fetcher, List<IByteOrigin> loaded, Func<RequestSaveQuestion, RequestSaveChoice> answer, List<RequestSaveQuestion> asked,
+        Func<string, Task<string?>>? pickCopyDestination = null)
         => new(SettingsStore.InMemory(), TestSchemas.Catalog(), _ => Task.FromResult(true),
             documentLoader: (_, origin, _) =>
             {
@@ -553,6 +554,7 @@ public sealed class MainWindowViewModelTests : IDisposable
             lineEndings: new FakeLineEndingDetector(),
             responseDownloader: new ResponseDownloader(fetcher, ResponsesFolder),
             responseStore: new ResponseStore(ResponsesFolder),
+            pickCopyDestination: pickCopyDestination,
             askAboutRequest: question =>
             {
                 asked.Add(question);
@@ -769,11 +771,12 @@ public sealed class MainWindowViewModelTests : IDisposable
     /// <summary>A server that sends a little and then nothing, until the request is stopped.</summary>
     private sealed class StallingFetcher : IHttpFetcher
     {
-        public async Task FetchAsync(HttpRequestSpec request, Stream destination, Action<long, long?> received, CancellationToken stopping)
+        public async Task<string?> FetchAsync(HttpRequestSpec request, Stream destination, Action<long, long?> received, CancellationToken stopping)
         {
             await destination.WriteAsync(new byte[1024], stopping);
             received(1024, 1_000_000_000);
             await Task.Delay(Timeout.Infinite, stopping);
+            return null;
         }
     }
 
@@ -797,6 +800,7 @@ public sealed class MainWindowViewModelTests : IDisposable
         var reopened = Assert.IsType<HttpResponseOrigin>(loaded[1]);
         Assert.Equal("{\"n\":1}", File.ReadAllText(Assert.Single(ResponseFiles())));
         Assert.Equal(7, reopened.AvailableLength);
+        Assert.Equal("application/json", reopened.MediaType);
         Assert.StartsWith("Response from", vm.RequestEditor!.StatusText);
         Assert.Contains("Send to refresh", vm.RequestEditor.StatusText);
     }
@@ -871,8 +875,49 @@ public sealed class MainWindowViewModelTests : IDisposable
         vm.ClearKeptResponses();
 
         Assert.Empty(ResponseFiles());
-        Assert.Single(vm.RecentSources);
+        Assert.False(Assert.Single(vm.RecentSources).HasKeptResponse);
         Assert.False(vm.HasKeptResponses);
+    }
+
+    [Fact]
+    public async Task AKeptResponse_IsSavedAsACopy_UnderItsRequestsName_WithItsMediaTypesExtension()
+    {
+        string? offered = null;
+        string destination = Path.Combine(tempDir, "copy.json");
+        var vm = RequestShell(new CountingFetcher(), [], _ => RequestSaveChoice.Cancel, [],
+            pickCopyDestination: name =>
+            {
+                offered = name;
+                return Task.FromResult<string?>(destination);
+            });
+        await vm.NewRequestAsync();
+        vm.RequestEditor!.UrlText = "https://x.test/a";
+        await vm.RequestEditor.SendAsync();
+        await vm.CloseFileAsync();
+        var row = Assert.Single(vm.RecentSources);
+        Assert.True(row.HasKeptResponse);
+
+        await vm.SaveResponseAsAsync(row.Id);
+
+        Assert.Equal("a · x.test.json", offered);
+        Assert.Equal("{\"n\":1}", File.ReadAllText(destination));
+        Assert.Single(ResponseFiles());
+    }
+
+    [Fact]
+    public async Task SavingAResponseCopy_ThatIsCancelled_WritesNothing()
+    {
+        var vm = RequestShell(new CountingFetcher(), [], _ => RequestSaveChoice.Cancel, [],
+            pickCopyDestination: _ => Task.FromResult<string?>(null));
+        await vm.NewRequestAsync();
+        vm.RequestEditor!.UrlText = "https://x.test/a";
+        await vm.RequestEditor.SendAsync();
+        await vm.CloseFileAsync();
+
+        await vm.SaveResponseAsAsync(Assert.Single(vm.RecentSources).Id);
+
+        Assert.Single(ResponseFiles());
+        Assert.Empty(Directory.GetFiles(tempDir));
     }
 
     [Fact]
@@ -891,12 +936,13 @@ public sealed class MainWindowViewModelTests : IDisposable
     {
         public int Sent { get; private set; }
 
-        public async Task FetchAsync(HttpRequestSpec request, Stream destination, Action<long, long?> received, CancellationToken stopping)
+        public async Task<string?> FetchAsync(HttpRequestSpec request, Stream destination, Action<long, long?> received, CancellationToken stopping)
         {
             Sent++;
             byte[] body = Encoding.UTF8.GetBytes($"{{\"n\":{Sent}}}");
             await destination.WriteAsync(body, stopping);
             received(body.Length, body.Length);
+            return "application/json";
         }
     }
 
@@ -906,13 +952,14 @@ public sealed class MainWindowViewModelTests : IDisposable
 
         public string Said { get; init; } = "The server said no";
 
-        public async Task FetchAsync(HttpRequestSpec request, Stream destination, Action<long, long?> received, CancellationToken stopping)
+        public async Task<string?> FetchAsync(HttpRequestSpec request, Stream destination, Action<long, long?> received, CancellationToken stopping)
         {
             if (Fail)
                 throw new HttpFetchException(403, "Forbidden", Encoding.UTF8.GetBytes(Said));
 
             await destination.WriteAsync("{}"u8.ToArray(), stopping);
             received(2, 2);
+            return null;
         }
     }
 

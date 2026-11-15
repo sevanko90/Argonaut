@@ -11,8 +11,8 @@ namespace Argonaut.Shell;
 
 /// <summary>One row in the recent or pinned list: the saved source's id, the name shown on the
 /// button, where it is (the tooltip), the kind pill for anything but a file, and whether it is
-/// pinned (which fills its star).</summary>
-public sealed record SavedSourceRow(string Id, string Name, string LocationText, string? Pill, bool IsPinned)
+/// pinned (which fills its star), and whether a request keeps a response to save a copy of.</summary>
+public sealed record SavedSourceRow(string Id, string Name, string LocationText, string? Pill, bool IsPinned, bool HasKeptResponse = false)
 {
     public bool HasPill => Pill is not null;
 }
@@ -25,6 +25,9 @@ public partial class EmptyStateView : UserControl
     public event EventHandler? NewRequestRequested;
     public event EventHandler? ClearRecentRequested;
     public event EventHandler? ClearKeptResponsesRequested;
+
+    /// <summary>Raised with the id of the saved request whose kept response to save a copy of.</summary>
+    public event EventHandler<string>? SaveResponseRequested;
 
     /// <summary>Raised with the id of the saved source to open.</summary>
     public event EventHandler<string>? OpenSavedSourceRequested;
@@ -145,6 +148,12 @@ public partial class EmptyStateView : UserControl
     {
         if ((sender as MenuItem)?.DataContext is SavedSourceRow row)
             RemoveRequested?.Invoke(this, row.Id);
+    }
+
+    private void OnSaveResponse(object? sender, RoutedEventArgs e)
+    {
+        if ((sender as MenuItem)?.DataContext is SavedSourceRow row)
+            SaveResponseRequested?.Invoke(this, row.Id);
     }
 
     private void OnRenameKeyDown(object? sender, KeyEventArgs e)

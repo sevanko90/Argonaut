@@ -7,6 +7,7 @@ using Argonaut.Engine.Detection;
 using Argonaut.Engine.Progress;
 using Argonaut.Engine.Settings;
 using Argonaut.Engine.Transforms;
+using Argonaut.Features.Binary;
 using Argonaut.Features.Csv;
 using Argonaut.Features.Json;
 using Argonaut.Features.Json.Schema;
@@ -49,6 +50,7 @@ public sealed class DocumentViewCatalog
         (FileTypeDetector.FileKind.Csv, "CSV"),
         (FileTypeDetector.FileKind.Tsv, "TSV"),
         (FileTypeDetector.FileKind.Unidentified, "Raw text"),
+        (FileTypeDetector.FileKind.Binary, "Binary"),
     };
 
     private readonly IReadOnlyDictionary<FileTypeDetector.FileKind, int> kindToRegistration;
@@ -62,11 +64,13 @@ public sealed class DocumentViewCatalog
     /// <param name="launcher">Opens the links the views' value hints offer; null opens none.</param>
     /// <param name="settingsSealer">Seals the remembered schema choices; null keeps them for this
     /// run only.</param>
+    /// <param name="binaryActions">What the binary view offers - saving a copy, opening in another
+    /// app; null offers neither.</param>
     /// <param name="schemaMatcher">Measures the schema catalog against each JSON document; one
     /// over the catalog's files, kept for the catalog's life, when null.</param>
     public DocumentViewCatalog(ISettingsStore settings, JsonSchemaCatalog schemaCatalog, LineNumberingPreference? lineNumbers = null,
         IRecipeStore? recipes = null, ISystemLauncher? launcher = null, ISchemaMatcher? schemaMatcher = null,
-        ISettingsSealer? settingsSealer = null)
+        ISettingsSealer? settingsSealer = null, IBinaryDocumentActions? binaryActions = null)
     {
         this.schemaCatalog = schemaCatalog;
         this.launcher = launcher;
@@ -84,11 +88,12 @@ public sealed class DocumentViewCatalog
             (() => new XmlViewModel(xmlView, launcher), (vm, _, o, r) => ((XmlViewModel)vm).LoadAsync(o, r)),
             (() => new CsvViewModel(lineNumbers), (vm, k, o, r) => ((CsvViewModel)vm).LoadAsync(o, k == FileTypeDetector.FileKind.Tsv ? (byte)'\t' : (byte)',', r)),
             (() => new RawViewModel(rawView, lineNumbers: lineNumbers, recipes: recipes, launcher: launcher), (vm, _, o, r) => ((RawViewModel)vm).LoadAsync(o, r)),
+            (() => new BinaryViewModel(binaryActions), (vm, _, o, _) => ((BinaryViewModel)vm).LoadAsync(o)),
         ];
         kindToRegistration = BuildMap();
     }
 
-    /// <summary>All switchable views, in display order: JSON, NDJSON, XML, CSV, TSV, Raw text.</summary>
+    /// <summary>All switchable views, in display order: JSON, NDJSON, XML, CSV, TSV, Raw text, Binary.</summary>
     public static IReadOnlyList<DocumentViewOption> Options { get; } =
         DisplayOrder.Select(e => new DocumentViewOption(e.Kind, e.DisplayName)).ToArray();
 

@@ -101,6 +101,10 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
     private readonly DocumentLoader documentLoader;
     private readonly FindController findController;
     private readonly Func<IByteOrigin, Task<string?>>? pickSaveDestination;
+
+    /// <summary>Asks where to save a copy of a kept response, offering the file name given; null
+    /// when the user cancels.</summary>
+    private readonly Func<string, Task<string?>>? pickCopyDestination;
     private readonly Func<string, Task<UnsavedChangesChoice>>? askAboutUnsavedChanges;
     private readonly Func<RequestSaveQuestion, Task<RequestSaveChoice>>? askAboutRequest;
 
@@ -221,9 +225,12 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
         ResponseDownloader? responseDownloader = null,
         Func<RequestSaveQuestion, Task<RequestSaveChoice>>? askAboutRequest = null,
         Func<FileTypeDetector.FileKind, IByteOrigin, Task<IDocumentViewModel>>? hostedDocumentLoader = null,
-        ResponseStore? responseStore = null)
+        ResponseStore? responseStore = null,
+        Func<string, Task<string?>>? pickCopyDestination = null,
+        IOriginExporter? exporter = null)
     {
         this.responseStore = responseStore;
+        this.pickCopyDestination = pickCopyDestination;
         this.askAboutRequest = askAboutRequest;
         this.fileAccess = fileAccess ?? new PlainFileAccess();
         this.responseDownloader = responseDownloader;
@@ -241,7 +248,14 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
         this.readClipboardBytes = readClipboardBytes;
         this.lineNumbers = new LineNumberingPreference(settings.Get<LineNumberingSettings>());
         this.lineNumbers.PropertyChanged += (_, _) => OnPropertyChanged(nameof(NumberExcerptFromSource));
-        var views = documentLoader is null ? new DocumentViewCatalog(settings, schemaCatalog, this.lineNumbers, recipes, launcher, settingsSealer: settingsSealer) : null;
+        // Saving a copy and opening elsewhere need a place to ask about, bytes to move and an app
+        // to hand them to; without all three the binary view offers neither.
+        var binaryActions = exporter is not null && pickCopyDestination is not null && launcher is not null
+            ? new DocumentExport(exporter, pickCopyDestination, launcher, log ?? NullDiagnosticLog.Instance)
+            : null;
+        var views = documentLoader is null
+            ? new DocumentViewCatalog(settings, schemaCatalog, this.lineNumbers, recipes, launcher, settingsSealer: settingsSealer, binaryActions: binaryActions)
+            : null;
         this.documentLoader = documentLoader ?? views!.LoadAsync;
         this.hostedDocumentLoader = hostedDocumentLoader ?? (views is null ? null : views.LoadHostedAsync);
         this.pickSaveDestination = pickSaveDestination;
@@ -319,11 +333,12 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
 
     /// <summary>
     /// Counts the line endings of the input now adopted, unless they were already counted for this
-    /// very origin. Only a single input has them; a comparison of two shows none.
+    /// very origin. Only a single input has them; a comparison of two shows none, and neither does
+    /// a binary document, whose bytes have no lines - switching it to a text view counts them then.
     /// </summary>
     private void DetectLineEndingsOfInput()
     {
-        var origin = this.ownedOrigins.Count == 1 ? this.ownedOrigins[0] : null;
+        var origin = this.ownedOrigins.Count == 1 && currentKind != FileTypeDetector.FileKind.Binary ? this.ownedOrigins[0] : null;
         if (ReferenceEquals(origin, this.lineEndingsOrigin))
             return;
 
@@ -1462,13 +1477,13 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
         editor.MarkSaved(entryId, request);
 
         // The response kept from last time opens at once; with none, the request is sent.
-        if (savedSources.Find(entryId) is { ResponseFile: { } file, ResponseFetchedAt: var fetchedAt }
+        if (savedSources.Find(entryId) is { ResponseFile: { } file, ResponseFetchedAt: var fetchedAt, ResponseMediaType: var mediaType }
             && responseStore?.PathOf(file) is { } path)
         {
             var locator = new HttpLocator(request);
             savedSources.Touch(locator);
             ReloadSavedSources();
-            await OpenOriginAsync(new HttpResponseOrigin(locator, path, kept: true), addToRecents: false, fromRequest: true);
+            await OpenOriginAsync(new HttpResponseOrigin(locator, path, mediaType, kept: true), addToRecents: false, fromRequest: true);
             editor.Say($"Response from {(fetchedAt ?? DateTimeOffset.Now).ToLocalTime():d MMM, HH:mm} - Send to refresh");
             return;
         }
@@ -1492,6 +1507,34 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
     {
         DeleteResponses(savedSources.Remove(id));
         ReloadSavedSources();
+    }
+
+    /// <summary>
+    /// Saves a copy of saved request <paramref name="id"/>'s kept response where the user picks,
+    /// offering the request's name with the extension its media type implies. The kept file stays
+    /// in the response folder - this is a copy for the user to keep or send, not a reveal of the
+    /// app's own file.
+    /// </summary>
+    public async Task SaveResponseAsAsync(string id)
+    {
+        if (responseStore is null || pickCopyDestination is null
+            || savedSources.Find(id) is not { ResponseFile: { } file } source)
+            return;
+
+        string? destination = await pickCopyDestination(ResponseFileNames.Suggest(source.Name, source.ResponseMediaType));
+        if (destination is null)
+            return;
+
+        try
+        {
+            await responseStore.CopyAsync(file, destination);
+            ToastService.Show($"Saved {Path.GetFileName(destination)}");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            this.log.Write($"Save response: copying {file} to {destination} failed: {ex}");
+            ToastService.Show($"Couldn't save the response: {ex.Message}");
+        }
     }
 
     /// <summary>Whether any saved request keeps a response - what "Clear kept responses" offers to
@@ -1544,7 +1587,8 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
 
     /// <summary>A saved source as the empty state shows it - a pill for anything but a file.</summary>
     private static SavedSourceRow Row(SavedSource source)
-        => new(source.Id, source.Name, source.Locator!.DisplayText, source.Locator is FileLocator ? null : source.Kind, source.IsPinned);
+        => new(source.Id, source.Name, source.Locator!.DisplayText, source.Locator is FileLocator ? null : source.Kind, source.IsPinned,
+            HasKeptResponse: source.ResponseFile is not null);
 
     /// <summary>
     /// Opens <paramref name="path"/>, replacing any current document. <see cref="openRequest"/>
@@ -2299,7 +2343,7 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
         }
 
         response.MarkKept();
-        if (savedSources.SetResponse(entryId, response.ResponseFileName, size, DateTimeOffset.Now) is { } replaced)
+        if (savedSources.SetResponse(entryId, response.ResponseFileName, size, DateTimeOffset.Now, response.MediaType) is { } replaced)
             DeleteResponse(replaced);
 
         foreach (var evicted in ResponseStore.ChooseEvictions(savedSources.KeptResponses, ResponseStore.Budget, entryId))

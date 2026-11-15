@@ -20,15 +20,22 @@ public sealed class HttpResponseOrigin : IByteOrigin
     private readonly string path;
     private bool kept;
 
+    /// <param name="mediaType">What the server said the response is (<c>Content-Type</c> without
+    /// parameters), or null when it said nothing.</param>
     /// <param name="kept">The file is a kept response being reopened, not a fresh download.</param>
-    public HttpResponseOrigin(HttpLocator locator, string path, bool kept = false)
+    public HttpResponseOrigin(HttpLocator locator, string path, string? mediaType, bool kept = false)
     {
         ArgumentNullException.ThrowIfNull(locator);
         Locator = locator;
         this.path = path;
         this.kept = kept;
+        MediaType = mediaType;
         DisplayName = locator.DefaultName;
     }
+
+    /// <summary>What the server said the response is, or null - what a saved copy's extension
+    /// comes from (<see cref="ResponseFileNames"/>).</summary>
+    public string? MediaType { get; }
 
     /// <summary>The file's name in the response folder - what a saved request records to keep it.</summary>
     public string ResponseFileName => Path.GetFileName(this.path);

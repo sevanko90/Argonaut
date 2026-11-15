@@ -240,6 +240,8 @@ The XML tree view is built (see "The XML tree" in architecture.md). What remains
   separately (see CLAUDE.md on `AvailableLength`). A compressed response states only its
   compressed size, so that works for uncompressed responses alone; compressed ones would need the
   file mapped in growing chunks. Only worth it for tens of MB over a slow connection.
+- **A hex view, then an image preview**, for binary responses and files, which today are described
+  and offered for saving or opening elsewhere: [hex-view-plan.md](hex-view-plan.md).
 - **HTML colouring in the raw view**, for HTML responses and error pages, which show as plain text.
 - **Ctrl+Shift+V to paste as a new document** while one is open. Plain Ctrl+V pastes only while
   nothing is open, so it can mean "paste into the document" in the raw editor.

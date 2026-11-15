@@ -38,6 +38,10 @@ public static class FileTypeDetector
         /// XML file.
         /// </summary>
         Xml,
+        /// <summary>
+        /// Binary data - nothing a text view can draw.
+        /// </summary>
+        Binary,
     }
 
     private const int ChunkSize = 64 * 1024;
@@ -62,13 +66,19 @@ public static class FileTypeDetector
         var mmap = origin.Open();
         try
         {
-            return Detect(mmap);
+            return IsBinary(origin.MediaType, mmap) ? FileKind.Binary : Detect(mmap);
         }
         finally
         {
             mmap.Release();
         }
     }
+
+    /// <summary>The media type decides when it is decisive; otherwise the first bytes do. The
+    /// prefix is whatever is contiguous at the start, which is all a sniff needs.</summary>
+    private static bool IsBinary(string? mediaType, IByteSource source)
+        => BinaryContent.IsBinaryMediaType(mediaType)
+            ?? BinaryContent.LooksBinary(source.GetContiguousSpan(0, (int)Math.Min(source.AvailableLength, BinaryContent.SniffLength)));
 
     private static FileKind Detect(IByteSource mmap)
     {
@@ -143,6 +153,11 @@ public static class FileTypeDetector
 
         switch (kind)
         {
+            case FileKind.Binary:
+                // Describing bytes as bytes never fails.
+                reason = "";
+                return true;
+
             case FileKind.Unidentified:
                 // Raw is the guaranteed-safe fallback - always plausible.
                 reason = "";

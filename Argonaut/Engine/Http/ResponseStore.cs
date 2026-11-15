@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 
 namespace Argonaut.Engine.Http;
 
@@ -32,6 +33,23 @@ public sealed class ResponseStore(string folder)
 
         string path = Path.Combine(folder, fileName);
         return File.Exists(path) ? path : null;
+    }
+
+    /// <summary>
+    /// Copies a kept file to <paramref name="destination"/> - a place the user chose, so an
+    /// existing file there is replaced (the save dialog has asked). The copy runs on the
+    /// background, as a kept response can be a gigabyte; the kept file stays where it is, still
+    /// the response folder's.
+    /// </summary>
+    /// <exception cref="FileNotFoundException">The kept file is gone.</exception>
+    /// <exception cref="IOException">The copy failed.</exception>
+    /// <exception cref="UnauthorizedAccessException">The destination cannot be written.</exception>
+    public Task CopyAsync(string fileName, string destination)
+    {
+        if (PathOf(fileName) is not { } path)
+            throw new FileNotFoundException("The kept response is gone.", fileName);
+
+        return Task.Run(() => File.Copy(path, destination, overwrite: true));
     }
 
     /// <summary>Deletes a kept file; one in use (a document still has it open, on Windows) is left

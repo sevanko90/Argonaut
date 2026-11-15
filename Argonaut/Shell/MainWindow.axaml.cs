@@ -15,6 +15,7 @@ using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Locations;
 using Argonaut.Shell.FilePicking;
 using Argonaut.Engine.Logging;
+using Argonaut.Engine.Saving;
 using Argonaut.Engine.Settings;
 using Argonaut.Engine.Transforms;
 using Argonaut.Features.Json.Schema;
@@ -82,7 +83,7 @@ public partial class MainWindow : Window
     public MainWindow(ISettingsStore settings, JsonSchemaCatalog schemaCatalog, IDiagnosticLog log, Action? openLogFolder = null,
         IConfigLocationSource? configLocations = null, IRecipeStore? recipes = null, ISystemLauncher? launcher = null,
         ISettingsSealer? settingsSealer = null, IFileAccess? fileAccess = null, ResponseDownloader? responseDownloader = null,
-        ResponseStore? responseStore = null)
+        ResponseStore? responseStore = null, IOriginExporter? exporter = null)
     {
         InitializeComponent();
 
@@ -121,6 +122,8 @@ public partial class MainWindow : Window
             fileAccess: fileAccess,
             responseDownloader: responseDownloader,
             responseStore: responseStore,
+            pickCopyDestination: PickCopyDestinationAsync,
+            exporter: exporter,
             configLocations: configLocations,
             filterFiles: new SelectionFilterFiles(),
             recipes: recipes,
@@ -158,6 +161,7 @@ public partial class MainWindow : Window
         EmptyState.TogglePinRequested += (_, id) => viewModel.TogglePin(id);
         EmptyState.RenameRequested += (_, rename) => viewModel.RenameSavedSource(rename.Id, rename.Name);
         EmptyState.RemoveRequested += (_, id) => viewModel.RemoveSavedSource(id);
+        EmptyState.SaveResponseRequested += async (_, id) => await viewModel.SaveResponseAsAsync(id);
         EmptyState.LocationsRequested += (_, _) => EmptyState.SetLocations(viewModel.GetConfigLocations());
         EmptyState.BrowseFromFolderRequested += async (_, folder) => await BrowseForFile(folder);
         EmptyState.SetLocations(viewModel.GetConfigLocations());
@@ -655,7 +659,7 @@ public partial class MainWindow : Window
         var options = new FilePickerSaveOptions
         {
             Title = "Save as",
-            SuggestedFileName = current.Locator is FileLocator ? current.DisplayName : $"{current.DisplayName}.txt",
+            SuggestedFileName = DocumentExport.SuggestedFileName(current),
             ShowOverwritePrompt = true,
         };
 
@@ -663,6 +667,17 @@ public partial class MainWindow : Window
             options.SuggestedStartLocation = await StorageProvider.TryGetFolderFromPathAsync(folder);
 
         var picked = await StorageProvider.SaveFilePickerAsync(options);
+        return picked?.TryGetLocalPath();
+    }
+
+    private async Task<string?> PickCopyDestinationAsync(string suggestedFileName)
+    {
+        var picked = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Save a copy as",
+            SuggestedFileName = suggestedFileName,
+            ShowOverwritePrompt = true,
+        });
         return picked?.TryGetLocalPath();
     }
 

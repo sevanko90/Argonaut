@@ -33,16 +33,20 @@ them). Keep this in sync when the ownership chain changes.
   `FileByteOrigin`, `PasteAsync` wraps the clipboard's bytes in a `MemoryByteOrigin` (declined
   past `MaxPasteBytes`, 64 MB), and `OpenDiffAsync` takes two. From there detection runs on the
   bytes, not the extension, so a paste with no name is detected the same way a file is.
-- **Binary documents** (`Features/Binary`, `Engine/Detection/BinaryContent`). Detection decides
-  binary first: a response's media type (`IByteOrigin.MediaType`) when it is decisive (an image,
-  PDF, archive - or a text type, which rules binary out), otherwise the first 8 KB - a known
-  signature, or a NUL outside a UTF-16/32 BOM. A binary document opens in `BinaryViewModel`, which
-  describes it (format, media type, size) and offers Save as… and Open in default app through
-  `IBinaryDocumentActions`; the shell's `DocumentExport` implements them over `IOriginExporter`
-  (`Engine/Saving`), which copies through the origin on the background, and over
-  `ISystemLauncher.OpenFile`. A document with no file of its own is staged for opening under its
-  suggested name in the app's `Opened` folder, cleared at each start. The switcher still offers
-  the text views. A hex view is planned: [hex-view-plan.md](hex-view-plan.md).
+- **Binary documents and the hex view** (`Features/Hex`, `Engine/Detection/BinaryContent`).
+  Detection decides binary first: a response's media type (`IByteOrigin.MediaType`) when it is
+  decisive (an image, PDF, archive - or a text type, which rules binary out), otherwise the first
+  8 KB - a known signature, or a NUL outside a UTF-16/32 BOM. A binary document opens in Hex, which
+  any document can also be switched to (and `--view hex`). `HexRows` is the geometry - 16 bytes a
+  row, every position arithmetic on the offset, rows as `long` - so there is no index and any size
+  opens at once; `HexSurface` draws the rows on screen with `RowSurface`'s exact scroll model,
+  colouring bytes by class. The toolbar names the format (from the signature) and media type and
+  offers Save as… and Open in default app through `IDocumentExportActions`; the shell's
+  `DocumentExport` implements them over `IOriginExporter` (`Engine/Saving`), which copies through
+  the origin on the background, and over `ISystemLauncher.OpenFile`. A document with no file of
+  its own is staged for opening under its suggested name in the app's `Opened` folder, cleared at
+  each start. The line-ending indicator is not shown in Hex. The remaining steps are in
+  [hex-view-plan.md](hex-view-plan.md).
 - **Requests** (`Features/Requests`, `Engine/Http`). New request (empty state, toolbar,
   Ctrl/Cmd+L) opens the request pane - `RequestEditorViewModel` - docked above the document area.
   The shell owns it while the input is a request and implements its `IRequestSender`: Send builds
@@ -152,7 +156,7 @@ them). Keep this in sync when the ownership chain changes.
   mapping in the app: a static `(Create, Load)` registration table per view model, with the
   `FileKind → registration` map *derived* once at startup by probing each registration's
   throwaway instance with `CanHandleFileType` — not restated by hand. `Options` (JSON, NDJSON,
-  XML, CSV, TSV, Raw text, Binary) drives the status-bar `ComboBox`; `LoadAsync` has the exact shape of
+  XML, CSV, TSV, Raw text, Hex) drives the status-bar `ComboBox`; `LoadAsync` has the exact shape of
   `MainWindowViewModel.DocumentLoader`, so it's both the production default and the same seam
   tests fake.
 - The switcher's `SelectedView` setter fires `MainWindowViewModel.SwitchViewAsync(kind)` when

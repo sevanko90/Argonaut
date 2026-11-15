@@ -18,7 +18,6 @@
         xmlns:progress="clr-namespace:Argonaut.Ui.Progress"
         xmlns:icons="clr-namespace:Argonaut.Ui.Icons"
         xmlns:documents="clr-namespace:Argonaut.Ui.Documents"
-        xmlns:binary="clr-namespace:Argonaut.Features.Binary"
         xmlns:hex="clr-namespace:Argonaut.Features.Hex"
         Title="{Binding Title}"
         Background="{DynamicResource AppPanelBackgroundBrush}"
@@ -56,11 +55,6 @@
             </DataTemplate>
         </documents:FreshViewTemplate>
         <documents:FreshViewTemplate>
-            <DataTemplate DataType="binary:BinaryViewModel">
-                <binary:BinaryView />
-            </DataTemplate>
-        </documents:FreshViewTemplate>
-        <documents:FreshViewTemplate>
             <DataTemplate DataType="diff:JsonDiffViewModel">
                 <diff:JsonDiffView />
             </DataTemplate>
@@ -73,6 +67,11 @@
         <documents:FreshViewTemplate>
             <DataTemplate DataType="json:JsonToolbarViewModel">
                 <json:JsonToolbarView />
+            </DataTemplate>
+        </documents:FreshViewTemplate>
+        <documents:FreshViewTemplate>
+            <DataTemplate DataType="hex:HexToolbarViewModel">
+                <hex:HexToolbarView />
             </DataTemplate>
         </documents:FreshViewTemplate>
         <documents:FreshViewTemplate>

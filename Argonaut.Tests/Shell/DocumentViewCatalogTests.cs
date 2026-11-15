@@ -1,7 +1,6 @@
 using System.Text;
 using Argonaut.Engine.Detection;
 using Argonaut.Engine.Progress;
-using Argonaut.Features.Binary;
 using Argonaut.Features.Csv;
 using Argonaut.Features.Hex;
 using Argonaut.Features.Json;
@@ -41,9 +40,8 @@ public class DocumentViewCatalogTests
         Assert.Contains(FileTypeDetector.FileKind.Tsv, kinds);
         Assert.Contains(FileTypeDetector.FileKind.Xml, kinds);
         Assert.Contains(FileTypeDetector.FileKind.Unidentified, kinds);
-        Assert.Contains(FileTypeDetector.FileKind.Binary, kinds);
         Assert.Contains(FileTypeDetector.FileKind.Hex, kinds);
-        Assert.Equal(8, kinds.Count);
+        Assert.Equal(7, kinds.Count);
     }
 
     [Fact]
@@ -57,13 +55,12 @@ public class DocumentViewCatalogTests
         Assert.Equal("TSV", byKind[FileTypeDetector.FileKind.Tsv]);
         Assert.Equal("Raw text", byKind[FileTypeDetector.FileKind.Unidentified]);
         Assert.Equal("XML", byKind[FileTypeDetector.FileKind.Xml]);
-        Assert.Equal("Binary", byKind[FileTypeDetector.FileKind.Binary]);
         Assert.Equal("Hex", byKind[FileTypeDetector.FileKind.Hex]);
     }
 
     [Fact]
     public void Options_ListTheTreesFirst()
-        => Assert.Equal(["JSON", "NDJSON", "XML", "CSV", "TSV", "Raw text", "Hex", "Binary"], DocumentViewCatalog.Options.Select(o => o.DisplayName).ToList());
+        => Assert.Equal(["JSON", "NDJSON", "XML", "CSV", "TSV", "Raw text", "Hex"], DocumentViewCatalog.Options.Select(o => o.DisplayName).ToList());
 
     [Theory]
     [InlineData(FileTypeDetector.FileKind.Json, typeof(JsonViewModel))]
@@ -72,7 +69,6 @@ public class DocumentViewCatalogTests
     [InlineData(FileTypeDetector.FileKind.Tsv, typeof(CsvViewModel))]
     [InlineData(FileTypeDetector.FileKind.Unidentified, typeof(RawViewModel))]
     [InlineData(FileTypeDetector.FileKind.Xml, typeof(XmlViewModel))]
-    [InlineData(FileTypeDetector.FileKind.Binary, typeof(BinaryViewModel))]
     [InlineData(FileTypeDetector.FileKind.Hex, typeof(HexViewModel))]
     public async Task LoadAsync_ResolvesToTheViewModelThatClaimsTheKind(FileTypeDetector.FileKind kind, Type expectedType)
     {

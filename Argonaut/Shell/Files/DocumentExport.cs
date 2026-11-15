@@ -5,19 +5,19 @@ using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Http;
 using Argonaut.Engine.Logging;
 using Argonaut.Engine.Saving;
-using Argonaut.Features.Binary;
+using Argonaut.Features.Hex;
 using Argonaut.Ui.Launching;
 using Argonaut.Ui.Notifications;
 
 namespace Argonaut.Shell.Files;
 
 /// <summary>
-/// The shell's side of the binary view's two actions: asking where to save a copy, and handing a
+/// The shell's side of the hex toolbar's two actions: asking where to save a copy, and handing a
 /// file to the app the system uses for it. The bytes are moved by the exporter; failures become a
 /// toast and a line in the log, never an exception into the view.
 /// </summary>
 public sealed class DocumentExport(IOriginExporter exporter, Func<string, Task<string?>> pickDestination,
-    ISystemLauncher launcher, IDiagnosticLog log) : IBinaryDocumentActions
+    ISystemLauncher launcher, IDiagnosticLog log) : IDocumentExportActions
 {
     /// <summary>The name a copy of <paramref name="origin"/> is offered under: a file's own name,
     /// otherwise its name with the extension its media type implies (<c>.txt</c> without one).</summary>

@@ -2,19 +2,18 @@
 
 Goal: show any document's bytes as a hex dump - offset, hex bytes, and their characters - so a
 binary response or file can be read rather than only saved or handed to another app. It is the
-second step of binary support (#51). The first step is in place: `FileKind.Binary` and
-`BinaryViewModel` (`Features/Binary`) describe a binary document and offer Save as… and Open in
-default app.
+second step of binary support (#51); the first (Binary, describing a binary document with Save as…
+and Open in default app) shipped in v2.3.2 and is folded into the hex view by step 2.
 
-Status: step 1 built on branch `hex-view` - a read-only hex view beside Binary.
+Status: steps 1-2 built on branch `hex-view` - a read-only hex view that binary documents open in.
 
 ## Decided
 
 - **Hex replaces the Binary view.** A detected binary document opens in Hex, and the format line,
   media type, size, Save as… and Open in default app move into the hex view's toolbar. The switcher
   offers Hex for every document, text included, which is useful in itself (finding a stray BOM, a
-  NUL, a mis-encoded byte). `BinaryViewModel` and its view go; `IBinaryDocumentActions` and
-  `DocumentExport` stay, consumed by the hex toolbar instead.
+  NUL, a mis-encoded byte). `BinaryViewModel` and its view go; the actions interface stays, as
+  `IDocumentExportActions` in `Features/Hex`, with `DocumentExport` implementing it.
 - **16 bytes per row, fixed.** It is what every hex tool shows, it keeps offsets easy to read, and
   it makes the row geometry pure arithmetic. Other widths (8/32) are a later option.
 - **The character column is ASCII**: printable bytes (0x20-0x7E) as themselves, `.` for everything
@@ -127,9 +126,9 @@ size, because decoding is whole-image in memory.
    Also `--view hex` on the command line. Still to add: a growing document's new rows show on
    the next scroll or redraw, but nothing redraws as it grows - it needs a growth tick like
    `IndexGrowthMonitor` gives the indexed views.
-2. [ ] Hex replaces Binary: the toolbar takes over Binary's description and actions, detection's
+2. [x] Hex replaces Binary: the toolbar takes over Binary's description and actions, detection's
    binary documents open in Hex, and `BinaryViewModel` and its view are removed. Tests: a detected
-   binary document opens in Hex, and the toolbar's actions reach `IBinaryDocumentActions`.
+   binary document opens in Hex, and the toolbar's actions reach `IDocumentExportActions`.
 3. [ ] Caret, selection, keyboard movement, copy (hex, characters, bytes); `IByteRangeNavigable`.
    Tests on the view model; a switch from Raw lands on the same bytes.
 4. [ ] Go to offset.

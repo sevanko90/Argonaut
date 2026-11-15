@@ -1,0 +1,30 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:hex="clr-namespace:Argonaut.Features.Hex"
+             xmlns:icons="clr-namespace:Argonaut.Ui.Icons"
+             x:Class="Argonaut.Features.Hex.HexToolbarView"
+             x:DataType="hex:HexToolbarViewModel">
+    <!-- What the bytes are, and where they can go: a copy, or the app the system uses for them. -->
+    <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+        <TextBlock Text="{Binding Description}"
+                   IsVisible="{Binding HasDescription}"
+                   FontSize="12"
+                   Foreground="{DynamicResource AppMutedTextBrush}"
+                   VerticalAlignment="Center"
+                   Margin="0,0,10,0" />
+        <Button Classes="tool" Click="OnSaveCopy" IsVisible="{Binding OffersActions}"
+                ToolTip.Tip="Save a copy of these bytes">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+                <icons:LucideIcon Data="{StaticResource Icon.Save}" />
+                <TextBlock Classes="toolvalue" Text="Save as…" />
+            </StackPanel>
+        </Button>
+        <Button Classes="tool" Click="OnOpenInDefaultApp" IsVisible="{Binding OffersActions}"
+                ToolTip.Tip="Open in the app your system uses for this kind of file">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+                <icons:LucideIcon Data="{StaticResource Icon.OpenLink}" />
+                <TextBlock Classes="toolvalue" Text="Open in default app" />
+            </StackPanel>
+        </Button>
+    </StackPanel>
+</UserControl>

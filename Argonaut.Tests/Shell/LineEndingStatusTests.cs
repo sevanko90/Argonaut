@@ -116,15 +116,13 @@ public class LineEndingStatusTests : IDisposable
         Assert.Null(vm.LineEndingLabel);
     }
 
-    [Theory]
-    [InlineData(FileTypeDetector.FileKind.Binary)]
-    [InlineData(FileTypeDetector.FileKind.Hex)]
-    public async Task AByteView_IsNotCounted_UntilItIsShownAsText(FileTypeDetector.FileKind byteView)
+    [Fact]
+    public async Task TheHexView_IsNotCounted_UntilItIsShownAsText()
     {
         var detector = new FakeLineEndingDetector();
         var vm = CreateViewModel(detector);
 
-        await vm.OpenPathAsync(WriteFile("logo.png"), byteView);
+        await vm.OpenPathAsync(WriteFile("logo.png"), FileTypeDetector.FileKind.Hex);
 
         Assert.Empty(detector.Asked);
         Assert.Null(vm.LineEndingLabel);

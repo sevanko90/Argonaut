@@ -6,7 +6,7 @@ second step of binary support (#51). The first step is in place: `FileKind.Binar
 `BinaryViewModel` (`Features/Binary`) describe a binary document and offer Save as… and Open in
 default app.
 
-Status: planned, nothing built.
+Status: step 1 built on branch `hex-view` - a read-only hex view beside Binary.
 
 ## Decided
 
@@ -119,11 +119,14 @@ size, because decoding is whole-image in memory.
 
 ## Steps
 
-1. [ ] `HexRows` geometry and a read-only `HexSurface` + `HexViewModel` registered in
+1. [x] `HexRows` geometry and a read-only `HexSurface` + `HexViewModel` registered in
    `DocumentViewCatalog` (switcher option "Hex"); offset/hex/character columns, scrolling, the
    status line. Tests: geometry (`long` rows, last partial row), a `GrowingByteSource` row count,
    a `SplitByteSource` row straddling a boundary, and a headless scroll-then-`CaptureRenderedFrame`
    test (as `RowSurfaceTests` does).
+   Also `--view hex` on the command line. Still to add: a growing document's new rows show on
+   the next scroll or redraw, but nothing redraws as it grows - it needs a growth tick like
+   `IndexGrowthMonitor` gives the indexed views.
 2. [ ] Hex replaces Binary: the toolbar takes over Binary's description and actions, detection's
    binary documents open in Hex, and `BinaryViewModel` and its view are removed. Tests: a detected
    binary document opens in Hex, and the toolbar's actions reach `IBinaryDocumentActions`.

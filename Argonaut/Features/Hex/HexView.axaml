@@ -1,0 +1,32 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:hex="clr-namespace:Argonaut.Features.Hex"
+             x:Class="Argonaut.Features.Hex.HexView"
+             x:DataType="hex:HexViewModel">
+    <Border Background="{DynamicResource AppWindowBackgroundBrush}" ClipToBounds="True">
+        <Grid RowDefinitions="*,Auto" ColumnDefinitions="*,Auto">
+            <!-- Draws the rows on screen itself; RowScrollBars drives the two bars, as for every
+                 self-drawn view. -->
+            <hex:HexSurface x:Name="Surface"
+                            Background="{DynamicResource AppWindowBackgroundBrush}"
+                            FontFamily="{DynamicResource AppMonoFontFamily}"
+                            FontSize="{DynamicResource AppContentFontSize}"
+                            Foreground="{DynamicResource AppTextBrush}"
+                            GutterForeground="{DynamicResource AppMutedTextBrush}"
+                            OtherByteForeground="{DynamicResource AppJsonNumberBrush}" />
+
+            <ScrollBar x:Name="VerticalScrollBar"
+                       Grid.Column="1"
+                       Orientation="Vertical"
+                       IsVisible="False"
+                       Minimum="0" />
+
+            <ScrollBar x:Name="PanScrollBar"
+                       Grid.Row="1"
+                       Orientation="Horizontal"
+                       AllowAutoHide="False"
+                       IsVisible="False"
+                       Minimum="0" />
+        </Grid>
+    </Border>
+</UserControl>

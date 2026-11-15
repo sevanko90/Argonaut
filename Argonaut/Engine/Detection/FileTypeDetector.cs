@@ -42,6 +42,10 @@ public static class FileTypeDetector
         /// Binary data - nothing a text view can draw.
         /// </summary>
         Binary,
+        /// <summary>
+        /// Any document's bytes as a hex dump. Never detected; chosen in the view switcher.
+        /// </summary>
+        Hex,
     }
 
     private const int ChunkSize = 64 * 1024;
@@ -154,7 +158,8 @@ public static class FileTypeDetector
         switch (kind)
         {
             case FileKind.Binary:
-                // Describing bytes as bytes never fails.
+            case FileKind.Hex:
+                // Describing or dumping bytes as bytes never fails.
                 reason = "";
                 return true;
 

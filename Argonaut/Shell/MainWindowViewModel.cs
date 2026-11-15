@@ -337,12 +337,13 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
 
     /// <summary>
     /// Counts the line endings of the input now adopted, unless they were already counted for this
-    /// very origin. Only a single input has them; a comparison of two shows none, and neither does
-    /// a binary document, whose bytes have no lines - switching it to a text view counts them then.
+    /// very origin. Only a single input has them; a comparison of two shows none, and neither do
+    /// the byte views (Binary, Hex), which do not show lines - switching to a text view counts them
+    /// then.
     /// </summary>
     private void DetectLineEndingsOfInput()
     {
-        var origin = this.ownedOrigins.Count == 1 && currentKind != FileTypeDetector.FileKind.Binary ? this.ownedOrigins[0] : null;
+        var origin = this.ownedOrigins.Count == 1 && !ShowsBytes(currentKind) ? this.ownedOrigins[0] : null;
         if (ReferenceEquals(origin, this.lineEndingsOrigin))
             return;
 
@@ -357,6 +358,9 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
         this.lineEndingsStop = stop;
         this.lineEndingsDetecting = ShowLineEndingsAsync(origin, stop.Token);
     }
+
+    private static bool ShowsBytes(FileTypeDetector.FileKind kind)
+        => kind is FileTypeDetector.FileKind.Binary or FileTypeDetector.FileKind.Hex;
 
     private async Task ShowLineEndingsAsync(IByteOrigin origin, CancellationToken stopping)
     {

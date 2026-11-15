@@ -19,6 +19,7 @@
         xmlns:icons="clr-namespace:Argonaut.Ui.Icons"
         xmlns:documents="clr-namespace:Argonaut.Ui.Documents"
         xmlns:binary="clr-namespace:Argonaut.Features.Binary"
+        xmlns:hex="clr-namespace:Argonaut.Features.Hex"
         Title="{Binding Title}"
         Background="{DynamicResource AppPanelBackgroundBrush}"
         Width="1000" Height="700">
@@ -47,6 +48,11 @@
         <documents:FreshViewTemplate>
             <DataTemplate DataType="raw:RawViewModel">
                 <raw:RawView />
+            </DataTemplate>
+        </documents:FreshViewTemplate>
+        <documents:FreshViewTemplate>
+            <DataTemplate DataType="hex:HexViewModel">
+                <hex:HexView />
             </DataTemplate>
         </documents:FreshViewTemplate>
         <documents:FreshViewTemplate>

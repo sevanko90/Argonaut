@@ -75,6 +75,7 @@ public sealed class StartupArguments
         ("csv", FileTypeDetector.FileKind.Csv),
         ("tsv", FileTypeDetector.FileKind.Tsv),
         ("raw", FileTypeDetector.FileKind.Unidentified),
+        ("hex", FileTypeDetector.FileKind.Hex),
     ];
 
     public static StartupArguments Parse(IReadOnlyList<string> args) => Parse(args, OperatingSystem.IsWindows());

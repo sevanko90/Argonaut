@@ -9,6 +9,7 @@ using Argonaut.Engine.Settings;
 using Argonaut.Engine.Transforms;
 using Argonaut.Features.Binary;
 using Argonaut.Features.Csv;
+using Argonaut.Features.Hex;
 using Argonaut.Features.Json;
 using Argonaut.Features.Json.Schema;
 using Argonaut.Features.NdJson;
@@ -50,6 +51,7 @@ public sealed class DocumentViewCatalog
         (FileTypeDetector.FileKind.Csv, "CSV"),
         (FileTypeDetector.FileKind.Tsv, "TSV"),
         (FileTypeDetector.FileKind.Unidentified, "Raw text"),
+        (FileTypeDetector.FileKind.Hex, "Hex"),
         (FileTypeDetector.FileKind.Binary, "Binary"),
     };
 
@@ -88,12 +90,13 @@ public sealed class DocumentViewCatalog
             (() => new XmlViewModel(xmlView, launcher), (vm, _, o, r) => ((XmlViewModel)vm).LoadAsync(o, r)),
             (() => new CsvViewModel(lineNumbers), (vm, k, o, r) => ((CsvViewModel)vm).LoadAsync(o, k == FileTypeDetector.FileKind.Tsv ? (byte)'\t' : (byte)',', r)),
             (() => new RawViewModel(rawView, lineNumbers: lineNumbers, recipes: recipes, launcher: launcher), (vm, _, o, r) => ((RawViewModel)vm).LoadAsync(o, r)),
+            (() => new HexViewModel(), (vm, _, o, _) => ((HexViewModel)vm).LoadAsync(o)),
             (() => new BinaryViewModel(binaryActions), (vm, _, o, _) => ((BinaryViewModel)vm).LoadAsync(o)),
         ];
         kindToRegistration = BuildMap();
     }
 
-    /// <summary>All switchable views, in display order: JSON, NDJSON, XML, CSV, TSV, Raw text, Binary.</summary>
+    /// <summary>All switchable views, in display order: JSON, NDJSON, XML, CSV, TSV, Raw text, Hex, Binary.</summary>
     public static IReadOnlyList<DocumentViewOption> Options { get; } =
         DisplayOrder.Select(e => new DocumentViewOption(e.Kind, e.DisplayName)).ToArray();
 

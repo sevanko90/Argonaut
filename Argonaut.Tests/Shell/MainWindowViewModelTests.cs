@@ -401,6 +401,66 @@ public sealed class MainWindowViewModelTests : IDisposable
         Assert.Empty(vm.RecentSources);
     }
 
+    private MainWindowViewModel RevealShell(RecordingSystemLauncher launcher, string path)
+        => new(SettingsStore.InMemory(), TestSchemas.Catalog(), _ => Task.FromResult(true),
+            documentLoader: (_, _, _) => Task.FromResult<IDocumentViewModel>(new FakeDocument { FilePath = path }),
+            lineEndings: new FakeLineEndingDetector(),
+            launcher: launcher);
+
+    [Fact]
+    public async Task ASavedFile_IsShownInTheFileManager()
+    {
+        string path = WriteJsonFile();
+        var launcher = new RecordingSystemLauncher();
+        var vm = RevealShell(launcher, path);
+        await vm.OpenPathAsync(path);
+        await vm.CloseFileAsync();
+        var row = Assert.Single(vm.RecentSources);
+        Assert.True(row.IsFile);
+
+        vm.RevealSavedSource(row.Id);
+
+        Assert.Equal(path, Assert.Single(launcher.FilesRevealed));
+    }
+
+    [Fact]
+    public async Task ASavedFileThatIsGone_IsNotShown_AndRemovingItIsOffered()
+    {
+        string path = WriteJsonFile();
+        var launcher = new RecordingSystemLauncher();
+        var vm = RevealShell(launcher, path);
+        await vm.OpenPathAsync(path);
+        await vm.CloseFileAsync();
+        File.Delete(path);
+
+        var offered = new List<ToastAction>();
+        void Capture(string message, ToastAction action) => offered.Add(action);
+        ToastService.ActionRequested += Capture;
+        try
+        {
+            vm.RevealSavedSource(Assert.Single(vm.RecentSources).Id);
+        }
+        finally
+        {
+            ToastService.ActionRequested -= Capture;
+        }
+
+        Assert.Empty(launcher.FilesRevealed);
+        Assert.Equal(MainWindowViewModel.RemoveFromListLabel, Assert.Single(offered).Label);
+    }
+
+    [Fact]
+    public async Task ASavedRequest_IsNotAFileToShow()
+    {
+        var vm = RequestShell(new CountingFetcher(), [], _ => RequestSaveChoice.Cancel, []);
+        await vm.NewRequestAsync();
+        vm.RequestEditor!.UrlText = "https://x.test/a";
+        await vm.RequestEditor.SendAsync();
+        await vm.CloseFileAsync();
+
+        Assert.False(Assert.Single(vm.RecentSources).IsFile);
+    }
+
     [Fact]
     public async Task ASavedFileFoundElsewhere_IsOpenedThere_AndTheEntryFollowsIt()
     {

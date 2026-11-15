@@ -21,6 +21,10 @@ public interface ISystemLauncher
     /// kind - which the system decides by its extension.</summary>
     void OpenFile(string path);
 
+    /// <summary>Shows the file at <paramref name="path"/> selected in the platform's file manager -
+    /// Finder or Explorer; on Linux, which has no common way to select, its folder.</summary>
+    void RevealFile(string path);
+
     /// <summary>Opens <paramref name="address"/> (http, https or mailto) in the app the user
     /// has chosen for it.</summary>
     void OpenAddress(Uri address);

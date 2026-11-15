@@ -162,6 +162,7 @@ public partial class MainWindow : Window
         EmptyState.RenameRequested += (_, rename) => viewModel.RenameSavedSource(rename.Id, rename.Name);
         EmptyState.RemoveRequested += (_, id) => viewModel.RemoveSavedSource(id);
         EmptyState.SaveResponseRequested += async (_, id) => await viewModel.SaveResponseAsAsync(id);
+        EmptyState.RevealRequested += (_, id) => viewModel.RevealSavedSource(id);
         EmptyState.LocationsRequested += (_, _) => EmptyState.SetLocations(viewModel.GetConfigLocations());
         EmptyState.BrowseFromFolderRequested += async (_, folder) => await BrowseForFile(folder);
         EmptyState.SetLocations(viewModel.GetConfigLocations());

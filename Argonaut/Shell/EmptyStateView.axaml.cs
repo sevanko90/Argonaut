@@ -11,8 +11,10 @@ namespace Argonaut.Shell;
 
 /// <summary>One row in the recent or pinned list: the saved source's id, the name shown on the
 /// button, where it is (the tooltip), the kind pill for anything but a file, and whether it is
-/// pinned (which fills its star), and whether a request keeps a response to save a copy of.</summary>
-public sealed record SavedSourceRow(string Id, string Name, string LocationText, string? Pill, bool IsPinned, bool HasKeptResponse = false)
+/// pinned (which fills its star), whether a request keeps a response to save a copy of, and
+/// whether it is a file, which can be shown in the file manager.</summary>
+public sealed record SavedSourceRow(string Id, string Name, string LocationText, string? Pill, bool IsPinned,
+    bool HasKeptResponse = false, bool IsFile = false)
 {
     public bool HasPill => Pill is not null;
 }
@@ -25,6 +27,14 @@ public partial class EmptyStateView : UserControl
     public event EventHandler? NewRequestRequested;
     public event EventHandler? ClearRecentRequested;
     public event EventHandler? ClearKeptResponsesRequested;
+
+    /// <summary>What showing a file in the file manager is called on this platform.</summary>
+    public static string RevealLabel { get; } = OperatingSystem.IsMacOS() ? "Show in Finder"
+        : OperatingSystem.IsWindows() ? "Show in Explorer"
+        : "Show in folder";
+
+    /// <summary>Raised with the id of the saved file to show in the file manager.</summary>
+    public event EventHandler<string>? RevealRequested;
 
     /// <summary>Raised with the id of the saved request whose kept response to save a copy of.</summary>
     public event EventHandler<string>? SaveResponseRequested;
@@ -148,6 +158,12 @@ public partial class EmptyStateView : UserControl
     {
         if ((sender as MenuItem)?.DataContext is SavedSourceRow row)
             RemoveRequested?.Invoke(this, row.Id);
+    }
+
+    private void OnReveal(object? sender, RoutedEventArgs e)
+    {
+        if ((sender as MenuItem)?.DataContext is SavedSourceRow row)
+            RevealRequested?.Invoke(this, row.Id);
     }
 
     private void OnSaveResponse(object? sender, RoutedEventArgs e)

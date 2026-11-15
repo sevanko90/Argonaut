@@ -77,6 +77,8 @@
                     <icons:LucideIcon Data="{StaticResource Icon.More}" VerticalAlignment="Center" />
                     <Button.Flyout>
                         <MenuFlyout Placement="BottomEdgeAlignedRight">
+                            <MenuItem Header="{x:Static shell:EmptyStateView.RevealLabel}" Click="OnReveal"
+                                      IsVisible="{Binding IsFile}" />
                             <MenuItem Header="Save response as…" Click="OnSaveResponse"
                                       IsVisible="{Binding HasKeptResponse}" />
                             <MenuItem Header="Rename" Click="OnRename" />

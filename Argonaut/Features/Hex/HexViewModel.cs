@@ -35,6 +35,9 @@ public sealed class HexViewModel(IDocumentExportActions? actions = null) : Obser
 
     public object? Toolbar => this.toolbar;
 
+    /// <summary>The dump's columns only line up in a monospaced font, so it always uses one.</summary>
+    public bool FollowsContentFont => false;
+
     public IndexFailure? IndexFailure => null;
 
     public Task IndexingTask => Task.CompletedTask;

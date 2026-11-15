@@ -401,6 +401,30 @@ public sealed class MainWindowViewModelTests : IDisposable
         Assert.Empty(vm.RecentSources);
     }
 
+    [Fact]
+    public async Task TheFontToggle_IsOff_InAViewThatIsAlwaysMonospaced()
+    {
+        string path = WriteJsonFile();
+        var vm = CreateViewModel(async (kind, origin, _) =>
+        {
+            if (kind != FileTypeDetector.FileKind.Hex)
+                return new FakeDocument { FilePath = path, Origin = origin };
+
+            var hex = new Argonaut.Features.Hex.HexViewModel();
+            await hex.LoadAsync(origin);
+            return hex;
+        });
+
+        await vm.OpenPathAsync(path, FileTypeDetector.FileKind.Hex);
+        var before = vm.ContentFontMode;
+        Assert.False(vm.CanChooseContentFont);
+        vm.ToggleContentFont();
+        Assert.Equal(before, vm.ContentFontMode);
+
+        await vm.SwitchViewAsync(FileTypeDetector.FileKind.Unidentified);
+        Assert.True(vm.CanChooseContentFont);
+    }
+
     private MainWindowViewModel RevealShell(RecordingSystemLauncher launcher, string path)
         => new(SettingsStore.InMemory(), TestSchemas.Catalog(), _ => Task.FromResult(true),
             documentLoader: (_, _, _) => Task.FromResult<IDocumentViewModel>(new FakeDocument { FilePath = path }),

@@ -285,8 +285,16 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
     public IDocumentViewModel? CurrentDocument
     {
         get => currentDocument;
-        private set => SetField(ref currentDocument, value);
+        private set
+        {
+            if (SetField(ref currentDocument, value))
+                OnPropertyChanged(nameof(CanChooseContentFont));
+        }
     }
+
+    /// <summary>Whether the content font toggle does anything for what is shown: not in a view
+    /// that is always monospaced (<see cref="IDocumentViewModel.FollowsContentFont"/>).</summary>
+    public bool CanChooseContentFont => currentDocument?.FollowsContentFont ?? true;
 
     public string StatusText
     {
@@ -1421,6 +1429,9 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
     /// <see cref="ContentFontMode"/> to swap the AppContentFontFamily resource and tooltip.</summary>
     public void ToggleContentFont()
     {
+        if (!CanChooseContentFont)
+            return;
+
         ContentFontMode = ContentFontMode == ContentFontMode.Monospace
             ? ContentFontMode.SansSerif
             : ContentFontMode.Monospace;

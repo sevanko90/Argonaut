@@ -62,6 +62,14 @@ public interface IDocumentViewModel : INotifyPropertyChanged, IDisposable
     string? HeaderTitle => null;
 
     /// <summary>
+    /// Whether the view draws in the content font the user chooses (monospace or sans-serif).
+    /// False for a view that must be monospaced to make sense - the hex dump's columns - where the
+    /// choice would do nothing visible here and only change the other views; the shell then greys
+    /// the font toggle out.
+    /// </summary>
+    bool FollowsContentFont => true;
+
+    /// <summary>
     /// What the status bar says about this view of the document - <c>1,234 rows</c>,
     /// <c>indexing…</c>, a failure - without its location, which the shell puts in front.
     /// Observable.

@@ -341,6 +341,8 @@ public partial class MainWindow : Window
 
         if (e.PropertyName is null or nameof(MainWindowViewModel.ContentFontMode))
             ApplyContentFontMode(viewModel.ContentFontMode);
+        if (e.PropertyName is nameof(MainWindowViewModel.CanChooseContentFont))
+            ShowContentFontTip(viewModel.ContentFontMode);
 
         if (e.PropertyName is null or nameof(MainWindowViewModel.RecentSources))
             EmptyState.SetRecent(viewModel.RecentSources);
@@ -607,11 +609,15 @@ public partial class MainWindow : Window
         var app = Application.Current!;
         string sourceKey = mode == ContentFontMode.SansSerif ? "AppSansFontFamily" : "AppMonoFontFamily";
         app.Resources["AppContentFontFamily"] = app.Resources[sourceKey];
-
-        ToolTip.SetTip(FontToggleButton, mode == ContentFontMode.SansSerif
-            ? "Content font: Sans-serif (click for Monospace)"
-            : "Content font: Monospace (click for Sans-serif)");
+        ShowContentFontTip(mode);
     }
+
+    private void ShowContentFontTip(ContentFontMode mode)
+        => ToolTip.SetTip(FontToggleButton, !viewModel.CanChooseContentFont
+            ? "This view is always monospaced - the content font applies to the other views"
+            : mode == ContentFontMode.SansSerif
+                ? "Content font: Sans-serif (click for Monospace)"
+                : "Content font: Monospace (click for Sans-serif)");
 
     private async void OnCloseFile(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {

@@ -421,6 +421,13 @@ public partial class MainWindow : Window
     /// Window-wide find shortcuts. Tunneling so they fire regardless of which control has
     /// focus (including the find bar's own TextBox, which never sees a handled event).
     /// </summary>
+    /// <summary>
+    /// Whether the focused element is somewhere the user types, so a window-wide shortcut that
+    /// would act on the same keystroke (Ctrl+V opening the clipboard as a document) must leave it
+    /// to the control. Every text entry in the app is a <see cref="TextBox"/> or hosts one.
+    /// </summary>
+    internal static bool TakesTypedText(IInputElement? focused) => focused is TextBox;
+
     private void OnGlobalKeyDown(object? sender, KeyEventArgs e)
     {
         bool cmdOrCtrl = (e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Meta)) != 0;
@@ -466,8 +473,10 @@ public partial class MainWindow : Window
         // Only while the empty state shows. This handler tunnels, so it sees the keystroke before
         // the focused control: with a document open Ctrl+V means "paste into it", and with the
         // request pane open it means "paste into the URL or the body" - never "replace what is
-        // here". The empty state's button is the affordance that always works.
-        if (e.Key == Key.V && cmdOrCtrl && viewModel.CanPasteAsNewDocument)
+        // here". The empty state's button is the affordance that always works. Text input wins
+        // even on the empty state: a focused text box (renaming a saved source) takes the paste.
+        if (e.Key == Key.V && cmdOrCtrl && viewModel.CanPasteAsNewDocument
+            && !TakesTypedText(FocusManager?.GetFocusedElement()))
         {
             _ = viewModel.PasteAsync();
             e.Handled = true;

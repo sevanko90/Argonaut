@@ -99,10 +99,17 @@ version). Removing an entry, clearing the list or "Clear kept responses" deletes
 still open is deleted by its origin when it closes. The folder path is handed down from `App`
 (`AppDataPaths`), never built here.
 
+The kept file is never handed to the user to reveal or save over. "Save response as…" on a saved
+request's row copies it to a place the user picks (`ResponseStore.CopyAsync`, on the background),
+offered under the request's name with the extension its media type implies
+(`ResponseFileNames`). The media type is the response's `Content-Type` without parameters, which
+`IHttpFetcher.FetchAsync` returns and the kept entry records beside its file. Save As on an open
+response offers the same name.
+
 ### Saved sources (`Shell/Sources`)
 
-`SavedSource` gains what an HTTP entry needs - method, body, and the kept response's file and
-time - as settable properties. The shell's reopen gains its second branch, so the `ISourceOpener`
+`SavedSource` gains what an HTTP entry needs - method, body, and the kept response's file,
+time and media type - as settable properties. The shell's reopen gains its second branch, so the `ISourceOpener`
 seam the first plan deferred is introduced here: a file opens through `IFileAccess`, a request
 through the response store or a fresh send.
 

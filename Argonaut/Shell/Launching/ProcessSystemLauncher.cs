@@ -15,6 +15,8 @@ public sealed class ProcessSystemLauncher : ISystemLauncher
 {
     public void ShowFolder(string path) => Launch(path);
 
+    public void OpenFile(string path) => Launch(path);
+
     public void OpenAddress(Uri address) => Launch(address.AbsoluteUri);
 
     private static void Launch(string target)

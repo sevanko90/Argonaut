@@ -3,7 +3,7 @@ using System;
 namespace Argonaut.Ui.Launching;
 
 /// <summary>
-/// Hands a folder or a web address to the operating system to open in another app - the file
+/// Hands a folder, a file or a web address to the operating system to open in another app - the file
 /// manager, the browser, the mail client. Both are best-effort: a failure to open never reaches
 /// the caller.
 ///
@@ -16,6 +16,10 @@ public interface ISystemLauncher
 {
     /// <summary>Shows <paramref name="path"/> in the platform's file manager.</summary>
     void ShowFolder(string path);
+
+    /// <summary>Opens the file at <paramref name="path"/> in the app the user has chosen for its
+    /// kind - which the system decides by its extension.</summary>
+    void OpenFile(string path);
 
     /// <summary>Opens <paramref name="address"/> (http, https or mailto) in the app the user
     /// has chosen for it.</summary>

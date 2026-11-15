@@ -19,7 +19,7 @@ public sealed class HttpResponseOriginTests : IDisposable
     public void AKeptResponse_OutlivesItsOrigin()
     {
         File.WriteAllText(path, "{}");
-        var origin = new HttpResponseOrigin(Locator(), path);
+        var origin = new HttpResponseOrigin(Locator(), path, mediaType: null);
 
         origin.MarkKept();
         origin.Dispose();
@@ -33,7 +33,7 @@ public sealed class HttpResponseOriginTests : IDisposable
     {
         File.WriteAllText(path, "{}");
 
-        new HttpResponseOrigin(Locator(), path, kept: true).Dispose();
+        new HttpResponseOrigin(Locator(), path, mediaType: null, kept: true).Dispose();
 
         Assert.True(File.Exists(path));
     }

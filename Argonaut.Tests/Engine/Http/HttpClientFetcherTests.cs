@@ -42,6 +42,19 @@ public sealed class HttpClientFetcherTests
         Assert.Equal("application/json", handler.SentContentType);
     }
 
+    [Theory]
+    [InlineData("text/csv; charset=utf-8", "text/csv")]
+    [InlineData("image/png", "image/png")]
+    [InlineData(null, null)]
+    public async Task TheResponsesMediaType_IsReturned_WithoutItsParameters(string? header, string? expected)
+    {
+        var handler = new StubHandler(HttpStatusCode.OK, "a,b") { ContentType = header };
+
+        string? mediaType = await new HttpClientFetcher(new HttpClient(handler)).FetchAsync(Request(HttpRequestMethod.Get), new MemoryStream(), (_, _) => { }, CancellationToken.None);
+
+        Assert.Equal(expected, mediaType);
+    }
+
     [Fact]
     public async Task APostBodyThatIsNotJson_IsSentAsText()
     {
@@ -158,6 +171,9 @@ public sealed class HttpClientFetcherTests
 
         public string? SentContentType { get; private set; }
 
+        /// <summary>The response's <c>Content-Type</c> header as sent, or null for none.</summary>
+        public string? ContentType { get; init; } = "application/json";
+
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Sent = request;
@@ -169,7 +185,7 @@ public sealed class HttpClientFetcherTests
 
             var response = new HttpResponseMessage(status) { Content = new ByteArrayContent(body) };
             response.Content.Headers.ContentLength = body.Length;
-            response.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+            response.Content.Headers.ContentType = ContentType is null ? null : MediaTypeHeaderValue.Parse(ContentType);
             if (contentEncoding is not null)
                 response.Content.Headers.ContentEncoding.Add(contentEncoding);
             return response;

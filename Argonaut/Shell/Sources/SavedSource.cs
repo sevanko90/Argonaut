@@ -48,6 +48,10 @@ public sealed class SavedSource
     /// <summary>When the kept response arrived.</summary>
     public DateTimeOffset? ResponseFetchedAt { get; set; }
 
+    /// <summary>What the server said the kept response is (<c>Content-Type</c> without
+    /// parameters) - what a saved copy's extension comes from - or null when it said nothing.</summary>
+    public string? ResponseMediaType { get; set; }
+
     /// <summary>A file's kind.</summary>
     public const string FileKind = "file";
 

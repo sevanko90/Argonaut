@@ -53,6 +53,16 @@ public sealed class ResponseDownloaderTests : IDisposable
     }
 
     [Fact]
+    public async Task TheOrigin_CarriesWhatTheServerSaidTheResponseIs()
+    {
+        var fetcher = new FakeHttpFetcher([1, 2, 3], chunk: 3, announceLength: true) { MediaType = "image/png" };
+
+        using var origin = await new ResponseDownloader(fetcher, folder).DownloadAsync(Request(), progress: null, CancellationToken.None);
+
+        Assert.Equal("image/png", origin.MediaType);
+    }
+
+    [Fact]
     public async Task Progress_CountsBytes_AgainstTheLengthWhenTheServerGivesOne()
     {
         var withLength = new RecordingProgress();
@@ -137,7 +147,10 @@ internal sealed class FakeHttpFetcher(byte[] body, int chunk, bool announceLengt
 
     public List<HttpRequestSpec> Sent { get; } = [];
 
-    public async Task FetchAsync(HttpRequestSpec request, Stream destination, Action<long, long?> received, CancellationToken stopping)
+    /// <summary>The <c>Content-Type</c> media type the server answers with, or none.</summary>
+    public string? MediaType { get; init; }
+
+    public async Task<string?> FetchAsync(HttpRequestSpec request, Stream destination, Action<long, long?> received, CancellationToken stopping)
     {
         Sent.Add(request);
         if ((int)Status is < 200 or > 299)
@@ -155,5 +168,6 @@ internal sealed class FakeHttpFetcher(byte[] body, int chunk, bool announceLengt
         }
 
         stopping.ThrowIfCancellationRequested();
+        return MediaType;
     }
 }

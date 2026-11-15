@@ -77,6 +77,8 @@
                     <icons:LucideIcon Data="{StaticResource Icon.More}" VerticalAlignment="Center" />
                     <Button.Flyout>
                         <MenuFlyout Placement="BottomEdgeAlignedRight">
+                            <MenuItem Header="Save response as…" Click="OnSaveResponse"
+                                      IsVisible="{Binding HasKeptResponse}" />
                             <MenuItem Header="Rename" Click="OnRename" />
                             <MenuItem Header="Remove from list" Click="OnRemove" />
                         </MenuFlyout>

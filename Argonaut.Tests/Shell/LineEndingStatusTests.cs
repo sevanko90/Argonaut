@@ -117,6 +117,24 @@ public class LineEndingStatusTests : IDisposable
     }
 
     [Fact]
+    public async Task ABinaryDocument_IsNotCounted_UntilItIsShownAsText()
+    {
+        var detector = new FakeLineEndingDetector();
+        var vm = CreateViewModel(detector);
+
+        await vm.OpenPathAsync(WriteFile("logo.png"), FileTypeDetector.FileKind.Binary);
+
+        Assert.Empty(detector.Asked);
+        Assert.Null(vm.LineEndingLabel);
+
+        await vm.SwitchViewAsync(FileTypeDetector.FileKind.Unidentified);
+        await WaitForAsync(() => vm.LineEndingLabel is not null);
+
+        Assert.Single(detector.Asked);
+        Assert.Equal("LF", vm.LineEndingLabel);
+    }
+
+    [Fact]
     public async Task TheStatusLine_IsTheLocationThenTheViewsDetail()
     {
         var (vm, path) = await OpenAsync(new FakeLineEndingDetector(), detail: "42 rows");

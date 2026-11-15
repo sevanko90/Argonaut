@@ -24,7 +24,7 @@ public sealed class HttpClientFetcher(HttpClient client) : IHttpFetcher
 {
     private const int ChunkBytes = 81920;
 
-    public async Task FetchAsync(HttpRequestSpec request, Stream destination, Action<long, long?> received, CancellationToken stopping)
+    public async Task<string?> FetchAsync(HttpRequestSpec request, Stream destination, Action<long, long?> received, CancellationToken stopping)
     {
         using var message = new HttpRequestMessage(request.Method == HttpRequestMethod.Post ? HttpMethod.Post : HttpMethod.Get, request.Url);
         foreach (string encoding in AcceptedEncodings)
@@ -75,6 +75,8 @@ public sealed class HttpClientFetcher(HttpClient client) : IHttpFetcher
             {
                 throw new HttpFetchException($"The response from {request.Url.Host} is compressed in a way this app cannot read ({ex.Message}).", ex);
             }
+
+            return response.Content.Headers.ContentType?.MediaType;
         }
     }
 

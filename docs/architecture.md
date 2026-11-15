@@ -39,8 +39,10 @@ them). Keep this in sync when the ownership chain changes.
   8 KB - a known signature, or a NUL outside a UTF-16/32 BOM. A binary document opens in Hex, which
   any document can also be switched to (and `--view hex`). `HexRows` is the geometry - 16 bytes a
   row, every position arithmetic on the offset, rows as `long` - so there is no index and any size
-  opens at once; `HexSurface` draws the rows on screen with `RowSurface`'s exact scroll model,
-  colouring bytes by class. The toolbar names the format (from the signature) and media type and
+  opens at once; `HexSurface` draws the rows on screen with `RowSurface`'s exact scroll model in
+  three panels (a pinned offset gutter, the bytes, their text) under a pinned header, colouring
+  bytes by class and marking the byte under the pointer in both panels; the view's status strip
+  describes that byte and where it is. The toolbar names the format (from the signature) and media type and
   offers Save as… and Open in default app through `IDocumentExportActions`; the shell's
   `DocumentExport` implements them over `IOriginExporter` (`Engine/Saving`), which copies through
   the origin on the background, and over `ISystemLauncher.OpenFile`. A document with no file of

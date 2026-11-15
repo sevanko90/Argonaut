@@ -1,5 +1,6 @@
 using Argonaut.Features.Hex;
 using Argonaut.Ui.Rows;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Media;
@@ -133,19 +134,77 @@ public sealed class HexSurfaceTests
         surface.OtherByteForeground = other;
         surface.Document = new BytesDocument([0x00, (byte)'A', 0xFF, (byte)'B', 0x00]);
 
-        var layout = surface.LaidOutRow(0);
-        int characters = HexRows.CharacterColumn(8);
+        var (hex, characters) = surface.LaidOutRow(0);
 
-        Assert.Same(muted, BrushAt(layout, 0));
-        Assert.Same(muted, BrushAt(layout, HexRows.HexPosition(8, 0)));
-        Assert.Same(text, BrushAt(layout, HexRows.HexPosition(8, 1)));
-        Assert.Same(other, BrushAt(layout, HexRows.HexPosition(8, 2)));
-        Assert.Same(text, BrushAt(layout, HexRows.HexPosition(8, 3)));
-        Assert.Same(muted, BrushAt(layout, HexRows.HexPosition(8, 4)));
-        Assert.Same(muted, BrushAt(layout, characters));
-        Assert.Same(text, BrushAt(layout, characters + 1));
-        Assert.Same(other, BrushAt(layout, characters + 2));
-        Assert.Same(muted, BrushAt(layout, characters + 4));
+        Assert.Same(muted, BrushAt(hex, 0));
+        Assert.Same(text, BrushAt(hex, 3));
+        Assert.Same(other, BrushAt(hex, 6));
+        Assert.Same(text, BrushAt(hex, 9));
+        Assert.Same(muted, BrushAt(hex, 12));
+        Assert.Same(muted, BrushAt(characters, 0));
+        Assert.Same(text, BrushAt(characters, 1));
+        Assert.Same(other, BrushAt(characters, 2));
+        Assert.Same(muted, BrushAt(characters, 4));
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task ZeroBytes_TakeTheirOwnFainterColour() => With(new FakeDocument(0), (surface, _) =>
+    {
+        var offsets = new SolidColorBrush(Colors.Gray);
+        var zero = new SolidColorBrush(Colors.LightGray);
+        surface.GutterForeground = offsets;
+        surface.ZeroByteForeground = zero;
+        surface.Document = new BytesDocument([0x00, (byte)'A']);
+
+        var (hex, characters) = surface.LaidOutRow(0);
+
+        Assert.Same(zero, BrushAt(hex, 0));
+        Assert.Same(zero, BrushAt(characters, 0));
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task TheBytesUnderThePointer_IsTheSameInEitherPanel() => With(new FakeDocument(1000), (surface, _) =>
+    {
+        foreach (int column in new[] { 0, 7, 8, 15 })
+        {
+            surface.HoverAt(surface.CentreOfByte(column, inCharacters: false));
+            Assert.Equal(column, surface.HoveredOffset);
+
+            surface.HoverAt(surface.CentreOfByte(column, inCharacters: true));
+            Assert.Equal(column, surface.HoveredOffset);
+        }
+
+        // The gutter and the header are no byte.
+        surface.HoverAt(new Point(4, 60));
+        Assert.Null(surface.HoveredOffset);
+        surface.HoverAt(new Point(surface.CentreOfByte(3, inCharacters: false).X, 4));
+        Assert.Null(surface.HoveredOffset);
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task MovingToAnotherByte_IsReported_AndScrollingLetsItGo() => With(new FakeDocument(100_000), (surface, _) =>
+    {
+        var reported = new List<long?>();
+        surface.HoveredOffsetChanged += (_, _) => reported.Add(surface.HoveredOffset);
+
+        surface.HoverAt(surface.CentreOfByte(3, inCharacters: false));
+        surface.HoverAt(surface.CentreOfByte(3, inCharacters: true));
+        surface.ScrollByPixels(RowSurface.RowHeight * 10);
+
+        Assert.Equal([3, null], reported);
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task ThePointerPastTheEnd_MarksNothing() => With(new FakeDocument(3), (surface, _) =>
+    {
+        surface.HoverAt(surface.CentreOfByte(2, inCharacters: false));
+        Assert.Equal(2, surface.HoveredOffset);
+        surface.HoverAt(surface.CentreOfByte(5, inCharacters: false));
+        Assert.Null(surface.HoveredOffset);
         return Task.CompletedTask;
     });
 

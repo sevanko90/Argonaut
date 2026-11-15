@@ -4,7 +4,7 @@
              x:Class="Argonaut.Features.Hex.HexView"
              x:DataType="hex:HexViewModel">
     <Border Background="{DynamicResource AppWindowBackgroundBrush}" ClipToBounds="True">
-        <Grid RowDefinitions="*,Auto" ColumnDefinitions="*,Auto">
+        <Grid RowDefinitions="*,Auto,Auto" ColumnDefinitions="*,Auto">
             <!-- Draws the rows on screen itself; RowScrollBars drives the two bars, as for every
                  self-drawn view. -->
             <hex:HexSurface x:Name="Surface"
@@ -13,7 +13,14 @@
                             FontSize="{DynamicResource AppContentFontSize}"
                             Foreground="{DynamicResource AppTextBrush}"
                             GutterForeground="{DynamicResource AppMutedTextBrush}"
-                            OtherByteForeground="{DynamicResource AppJsonNumberBrush}" />
+                            OtherByteForeground="{DynamicResource AppJsonNumberBrush}"
+                            ZeroByteForeground="{DynamicResource AppSubtleIconBrush}"
+                            HeaderLineBrush="{DynamicResource AppSubtleIconBrush}"
+                            PanelBackground="{DynamicResource AppChipBrush}"
+                            DividerBrush="{DynamicResource AppBorderBrush}"
+                            ByteMarkBrush="{DynamicResource AppAccentBrush}"
+                            ByteMarkForeground="{DynamicResource AppWindowBackgroundBrush}"
+                            RowMarkBrush="{DynamicResource AppHoverBackgroundBrush}" />
 
             <ScrollBar x:Name="VerticalScrollBar"
                        Grid.Column="1"
@@ -27,6 +34,35 @@
                        AllowAutoHide="False"
                        IsVisible="False"
                        Minimum="0" />
+
+            <!-- Status gutter, as the raw view's: what the byte under the pointer is on the left,
+                 where it is on the right. -->
+            <Border Grid.Row="2"
+                    Grid.ColumnSpan="2"
+                    BorderBrush="{DynamicResource AppBorderBrush}"
+                    BorderThickness="0,1,0,0"
+                    Background="{DynamicResource AppPanelBackgroundBrush}"
+                    Padding="8,4"
+                    MinHeight="24">
+                <Grid ColumnDefinitions="*,Auto,Auto">
+                    <TextBlock Grid.Column="0"
+                               Text="{Binding ByteValueText}"
+                               FontSize="11"
+                               FontFamily="{DynamicResource AppMonoFontFamily}"
+                               TextWrapping="NoWrap"
+                               TextTrimming="CharacterEllipsis"
+                               VerticalAlignment="Center" />
+                    <Border Grid.Column="1"
+                            Width="1"
+                            Margin="12,1"
+                            Background="{DynamicResource AppBorderBrush}" />
+                    <TextBlock Grid.Column="2"
+                               Text="{Binding BytePositionText}"
+                               FontSize="11"
+                               FontFamily="{DynamicResource AppMonoFontFamily}"
+                               VerticalAlignment="Center" />
+                </Grid>
+            </Border>
         </Grid>
     </Border>
 </UserControl>

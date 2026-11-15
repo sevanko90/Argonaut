@@ -5,7 +5,7 @@ binary response or file can be read rather than only saved or handed to another 
 second step of binary support (#51); the first (Binary, describing a binary document with Save as…
 and Open in default app) shipped in v2.3.2 and is folded into the hex view by step 2.
 
-Status: steps 1-2 built on branch `hex-view` - a read-only hex view that binary documents open in.
+Status: steps 1, 2 and 8 built on branch `hex-view` - a read-only, polished hex view that binary documents open in.
 
 ## Decided
 
@@ -138,18 +138,18 @@ size, because decoding is whole-image in memory.
    near the end of the document (fewer than 8 bytes left).
 7. [ ] UTF-8 character column, if measuring says the boundary rule reads well. Tests: a character
    crossing a row, invalid and truncated sequences, the 3-byte look-back at a row start.
-8. [ ] Visual polish - the look is still step 1's plain dump. A full pass, done from screenshots
-   with variants to choose between, not a restyle. To explore:
-   - **Hex and characters as separate panels**, each with its own background and a divider
-     between them, rather than one line of text with spaces between the columns.
-   - **A pinned offset gutter**, styled like the raw view's line numbers, so panning moves only the
-     bytes.
-   - **A column header** (`00 01 … 0F`) above the hex panel, pinned while scrolling.
-   - Separating the two groups of eight more clearly, and possibly faint shading on alternate rows
-     or every fourth column, so a byte's column can be followed down the dump.
-   - Hover: the byte under the pointer highlighted in both panels at once. This becomes the
-     selection's look once step 3 is in.
-   - Colours by byte class tuned in both themes.
+8. [x] Visual polish, chosen from screenshots in both themes:
+   - Three panels: a pinned offset gutter and the character panel on the panel tint, the bytes on
+     the window background; the character panel and the header end where the data does.
+   - A pinned header - "Offset", each byte's column, "Text" over the characters (it will hold
+     more than ASCII one day) - set apart by its height, a line and a gap before the rows.
+   - A faint dashed line between the two groups of eight.
+   - The byte under the pointer: a solid accent block in both panels with the byte redrawn on it
+     in the background colour, which keeps purple and white bytes readable; under it, a faint
+     band along its row. (Zebra striping and column bands were tried and dropped for this.)
+   - Zero bytes fainter than the offsets, so they stand clear of black text in light theme.
+   - A status strip, as the raw view's: the byte's hex, decimal, bits and ASCII name, and its
+     position. It follows the pointer until step 3 gives the view a caret to follow.
 9. [ ] Architecture doc, roadmap.
 
 ## Not in this plan

@@ -55,6 +55,29 @@ public sealed class HexViewModelTests
     }
 
     [Fact]
+    public async Task TheStatusStrip_DescribesTheByte_AndWhereItIs()
+    {
+        using var origin = new MemoryByteOrigin([0x00, (byte)'A', 0xC3], "bytes");
+        using var hex = new HexViewModel();
+        await hex.LoadAsync(origin);
+
+        hex.ShowByte(1);
+        Assert.Equal("0x41 · 65 · 0100 0001 · U+0041 LATIN CAPITAL LETTER A", hex.ByteValueText);
+        Assert.Equal("Byte 1    0x00000001", hex.BytePositionText);
+
+        // A byte above 0x7F is no character on its own.
+        hex.ShowByte(2);
+        Assert.Equal("0xC3 · 195 · 1100 0011", hex.ByteValueText);
+
+        hex.ShowByte(null);
+        Assert.Equal(string.Empty, hex.ByteValueText);
+        Assert.Equal(string.Empty, hex.BytePositionText);
+
+        hex.ShowByte(3);
+        Assert.Null(hex.ShownOffset);
+    }
+
+    [Fact]
     public async Task OnceLetGo_RowsReadEmpty()
     {
         using var origin = new MemoryByteOrigin(Counting(32), "bytes");

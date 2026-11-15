@@ -44,6 +44,52 @@ public sealed class HexViewModel(IDocumentExportActions? actions = null) : Obser
 
     public long Length => this.source?.AvailableLength ?? 0;
 
+    private long? shownOffset;
+    private byte shownValue;
+
+    /// <summary>The byte the status strip describes - the one under the pointer - or null.</summary>
+    public long? ShownOffset => this.shownOffset;
+
+    /// <summary>The shown byte's value, e.g. "0x0A · 10 · 0000 1010 · U+000A LINE FEED"; the
+    /// character only for ASCII, which is the only one a single byte is.</summary>
+    public string ByteValueText
+    {
+        get
+        {
+            if (this.shownOffset is null)
+                return string.Empty;
+
+            byte value = this.shownValue;
+            string bits = Convert.ToString(value, 2).PadLeft(8, '0');
+            string text = $"0x{value:X2} · {value} · {bits[..4]} {bits[4..]}";
+            return value < 0x80 ? $"{text} · U+{value:X4} {UnicodeNames.NameOf(value) ?? "unnamed"}" : text;
+        }
+    }
+
+    /// <summary>Where the shown byte is: "Byte 5    0x00000005", as the raw view gives a caret's.</summary>
+    public string BytePositionText
+        => this.shownOffset is { } offset ? $"Byte {offset:N0}    0x{offset.ToString("X").PadLeft(HexRows.OffsetDigits(Length), '0')}" : string.Empty;
+
+    /// <summary>Describes the byte at <paramref name="offset"/> in the status strip, or nothing.</summary>
+    public void ShowByte(long? offset)
+    {
+        long? shown = null;
+        if (offset is { } at && this.source is { } bytes && at >= 0 && at < bytes.AvailableLength)
+        {
+            Span<byte> one = stackalloc byte[1];
+            if (bytes.CopyTo(at, one) == 1)
+            {
+                this.shownValue = one[0];
+                shown = at;
+            }
+        }
+
+        this.shownOffset = shown;
+        OnPropertyChanged(nameof(ShownOffset));
+        OnPropertyChanged(nameof(ByteValueText));
+        OnPropertyChanged(nameof(BytePositionText));
+    }
+
     public Task LoadAsync(IByteOrigin document)
     {
         this.origin = document;

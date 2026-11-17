@@ -5,6 +5,7 @@ using Argonaut.Engine.Detection;
 using Argonaut.Engine.Indexing;
 using Argonaut.Engine.Text;
 using Argonaut.Ui.Documents;
+using Argonaut.Ui.Documents.Navigation;
 using Argonaut.Ui.Find;
 using Argonaut.Ui.ViewModels;
 
@@ -21,11 +22,19 @@ namespace Argonaut.Features.Hex;
 /// It is also where a binary document opens: the toolbar names its format from its first bytes and
 /// offers to save a copy or open it in another app (<see cref="IDocumentExportActions"/>).
 /// </summary>
-public sealed class HexViewModel(IDocumentExportActions? actions = null) : ObservableObject, IDocumentViewModel, IHexDocument
+public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDocument, IByteRangeNavigable
 {
+    private readonly IDocumentExportActions? actions;
     private IByteOrigin? origin;
     private IByteSource? source;
     private HexToolbarViewModel? toolbar;
+
+    public HexViewModel(IDocumentExportActions? actions = null)
+    {
+        this.actions = actions;
+        Cursor = new HexCursor(() => Length);
+        Cursor.Moved += OnCaretMoved;
+    }
 
     public IByteOrigin? Origin => this.origin;
 
@@ -44,50 +53,46 @@ public sealed class HexViewModel(IDocumentExportActions? actions = null) : Obser
 
     public long Length => this.source?.AvailableLength ?? 0;
 
-    private long? shownOffset;
-    private byte shownValue;
+    /// <summary>The caret and selection, moved by the surface and by reveals.</summary>
+    public HexCursor Cursor { get; }
 
-    /// <summary>The byte the status strip describes - the one under the pointer - or null.</summary>
-    public long? ShownOffset => this.shownOffset;
+    /// <summary>Where the caret is: "Byte 1,234    0x000004D2" - its offset in decimal, as the raw
+    /// view gives a caret's, then in hex as the offset gutter shows it.</summary>
+    public string CaretPositionText
+        => Cursor.Caret is { } caret
+            ? $"Byte {caret.Byte:N0}    0x{caret.Byte.ToString("X").PadLeft(HexRows.OffsetDigits(Length), '0')}"
+            : string.Empty;
 
-    /// <summary>The shown byte's value, e.g. "0x0A · 10 · 0000 1010 · U+000A LINE FEED"; the
-    /// character only for ASCII, which is the only one a single byte is.</summary>
-    public string ByteValueText
+    /// <summary>The selection's size, empty when nothing is selected.</summary>
+    public string CaretSelectionText
+        => Cursor.Caret is { IsEmpty: false } caret ? $"{caret.Length:N0} {(caret.Length == 1 ? "byte" : "bytes")}" : string.Empty;
+
+    public ByteRange? SelectedByteRange => Cursor.Position;
+
+    /// <summary>Selects <paramref name="range"/> with the caret at its start and brings it on
+    /// screen. Nothing to wait for: every place in a hex dump is arithmetic.</summary>
+    public Task RevealByteRangeAsync(ByteRange range)
     {
-        get
-        {
-            if (this.shownOffset is null)
-                return string.Empty;
-
-            byte value = this.shownValue;
-            string bits = Convert.ToString(value, 2).PadLeft(8, '0');
-            string text = $"0x{value:X2} · {value} · {bits[..4]} {bits[4..]}";
-            return value < 0x80 ? $"{text} · U+{value:X4} {UnicodeNames.NameOf(value) ?? "unnamed"}" : text;
-        }
+        Cursor.Reveal(range);
+        return Task.CompletedTask;
     }
 
-    /// <summary>Where the shown byte is: "Byte 5    0x00000005", as the raw view gives a caret's.</summary>
-    public string BytePositionText
-        => this.shownOffset is { } offset ? $"Byte {offset:N0}    0x{offset.ToString("X").PadLeft(HexRows.OffsetDigits(Length), '0')}" : string.Empty;
-
-    /// <summary>Describes the byte at <paramref name="offset"/> in the status strip, or nothing.</summary>
-    public void ShowByte(long? offset)
+    /// <summary>The selected bytes, for a copy - false when nothing is selected or the selection
+    /// is larger than <see cref="HexCopy.MaxBytes"/>.</summary>
+    public bool TryReadSelection(out byte[] bytes)
     {
-        long? shown = null;
-        if (offset is { } at && this.source is { } bytes && at >= 0 && at < bytes.AvailableLength)
-        {
-            Span<byte> one = stackalloc byte[1];
-            if (bytes.CopyTo(at, one) == 1)
-            {
-                this.shownValue = one[0];
-                shown = at;
-            }
-        }
+        bytes = [];
+        if (this.source is not { } from || Cursor.Caret is not { IsEmpty: false } caret || caret.Length > HexCopy.MaxBytes)
+            return false;
 
-        this.shownOffset = shown;
-        OnPropertyChanged(nameof(ShownOffset));
-        OnPropertyChanged(nameof(ByteValueText));
-        OnPropertyChanged(nameof(BytePositionText));
+        bytes = new byte[caret.Length];
+        return from.CopyTo(caret.Start, bytes) == bytes.Length;
+    }
+
+    private void OnCaretMoved(object? sender, EventArgs e)
+    {
+        OnPropertyChanged(nameof(CaretPositionText));
+        OnPropertyChanged(nameof(CaretSelectionText));
     }
 
     public Task LoadAsync(IByteOrigin document)
@@ -95,10 +100,11 @@ public sealed class HexViewModel(IDocumentExportActions? actions = null) : Obser
         this.origin = document;
         this.source = document.Open();
         var start = this.source.GetContiguousSpan(0, (int)Math.Min(this.source.AvailableLength, BinaryContent.SniffLength));
-        this.toolbar = new HexToolbarViewModel(document, BinaryContent.FormatOf(start), actions);
+        this.toolbar = new HexToolbarViewModel(document, BinaryContent.FormatOf(start), this.actions);
         OnPropertyChanged(nameof(Toolbar));
         OnPropertyChanged(nameof(FilePath));
         OnPropertyChanged(nameof(StatusDetail));
+        OnCaretMoved(this, EventArgs.Empty);
         return Task.CompletedTask;
     }
 

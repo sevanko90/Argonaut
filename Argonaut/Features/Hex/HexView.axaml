@@ -20,7 +20,9 @@
                             DividerBrush="{DynamicResource AppBorderBrush}"
                             ByteMarkBrush="{DynamicResource AppAccentBrush}"
                             ByteMarkForeground="{DynamicResource AppWindowBackgroundBrush}"
-                            RowMarkBrush="{DynamicResource AppHoverBackgroundBrush}" />
+                            RowMarkBrush="{DynamicResource AppHoverBackgroundBrush}"
+                            SelectionBrush="{DynamicResource AppTextSelectionBrush}"
+                            CaretBrush="{DynamicResource AppTextBrush}" />
 
             <ScrollBar x:Name="VerticalScrollBar"
                        Grid.Column="1"
@@ -35,8 +37,8 @@
                        IsVisible="False"
                        Minimum="0" />
 
-            <!-- Status gutter, as the raw view's: what the byte under the pointer is on the left,
-                 where it is on the right. -->
+            <!-- Status gutter, as the raw view's: where the caret is, and how much is selected,
+                 in one place at the right. What the byte reads as is the side panel's job. -->
             <Border Grid.Row="2"
                     Grid.ColumnSpan="2"
                     BorderBrush="{DynamicResource AppBorderBrush}"
@@ -44,24 +46,22 @@
                     Background="{DynamicResource AppPanelBackgroundBrush}"
                     Padding="8,4"
                     MinHeight="24">
-                <Grid ColumnDefinitions="*,Auto,Auto">
-                    <TextBlock Grid.Column="0"
-                               Text="{Binding ByteValueText}"
+                <StackPanel Orientation="Horizontal"
+                            HorizontalAlignment="Right"
+                            Spacing="16"
+                            VerticalAlignment="Center">
+                    <TextBlock x:Name="CaretSelectionText"
+                               Text="{Binding CaretSelectionText}"
                                FontSize="11"
-                               FontFamily="{DynamicResource AppMonoFontFamily}"
-                               TextWrapping="NoWrap"
-                               TextTrimming="CharacterEllipsis"
+                               FontFamily="{DynamicResource AppContentFontFamily}"
+                               Foreground="{DynamicResource AppMutedTextBrush}"
                                VerticalAlignment="Center" />
-                    <Border Grid.Column="1"
-                            Width="1"
-                            Margin="12,1"
-                            Background="{DynamicResource AppBorderBrush}" />
-                    <TextBlock Grid.Column="2"
-                               Text="{Binding BytePositionText}"
+                    <TextBlock x:Name="CaretPositionText"
+                               Text="{Binding CaretPositionText}"
                                FontSize="11"
-                               FontFamily="{DynamicResource AppMonoFontFamily}"
+                               FontFamily="{DynamicResource AppContentFontFamily}"
                                VerticalAlignment="Center" />
-                </Grid>
+                </StackPanel>
             </Border>
         </Grid>
     </Border>

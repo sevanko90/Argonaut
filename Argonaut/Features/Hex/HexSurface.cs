@@ -1,8 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
+using Argonaut.Ui.Notifications;
 using Argonaut.Ui.Rows;
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Media;
 using Avalonia.Media.TextFormatting;
 using Avalonia.Utilities;
@@ -21,6 +25,13 @@ public interface IHexDocument
     /// returning how many there were: 16, fewer on the last row, 0 past the end or once the
     /// document has been let go.</summary>
     int ReadRow(long row, Span<byte> into);
+
+    /// <summary>The caret and selection, which the surface draws and moves.</summary>
+    HexCursor Cursor { get; }
+
+    /// <summary>The selected bytes, for a copy - false when nothing is selected or there is too
+    /// much (<see cref="HexCopy.MaxBytes"/>).</summary>
+    bool TryReadSelection(out byte[] bytes);
 }
 
 /// <summary>
@@ -37,6 +48,11 @@ public interface IHexDocument
 /// <see cref="ByteMarkForeground"/> - whatever the byte's own colour, it stays readable - over a
 /// faint band along its row, which leads the eye from the bytes to their characters. Layouts are
 /// kept for the rows on screen only.
+///
+/// The caret and the selection (<see cref="HexCursor"/>) are drawn in both panels at once: the
+/// selection behind the bytes, the caret as an outline around its byte - solid in the panel that
+/// has the keyboard, dashed in the other. A click or drag in either panel moves them and makes
+/// that panel the one the keys and a copy act in; the pointer's own mark carries on over both.
 /// </summary>
 public sealed class HexSurface : RowSurface
 {
@@ -72,6 +88,10 @@ public sealed class HexSurface : RowSurface
     public static readonly StyledProperty<IBrush?> RowMarkBrushProperty =
         AvaloniaProperty.Register<HexSurface, IBrush?>(nameof(RowMarkBrush));
 
+    /// <summary>The outline around the caret's byte.</summary>
+    public static readonly StyledProperty<IBrush?> CaretBrushProperty =
+        AvaloniaProperty.Register<HexSurface, IBrush?>(nameof(CaretBrush));
+
     /// <summary>Space either side of a panel's text.</summary>
     private const double PanelPadding = 14;
 
@@ -95,6 +115,12 @@ public sealed class HexSurface : RowSurface
     private char[] line = new char[HexRows.LineLength(HexRows.MinOffsetDigits)];
     private double scrollTop;
     private long? hovered;
+    private HexCursor? cursor;
+
+    // Which panel the keys and a copy act in, and the byte a drag started on (null when no
+    // drag is under way).
+    private bool keysInCharacters;
+    private long? dragFrom;
 
     // Geometry in the current font, measured when the document or font changes, never while
     // drawing: the width of a character, and how wide each panel is.
@@ -109,6 +135,8 @@ public sealed class HexSurface : RowSurface
     private Pen? headerPen;
     private Pen? dividerPen;
     private Pen? groupPen;
+    private Pen? caretPen;
+    private Pen? otherCaretPen;
 
     // Run properties per byte class, built for the current font and brushes and dropped with
     // the layouts when either changes.
@@ -128,13 +156,25 @@ public sealed class HexSurface : RowSurface
     static HexSurface()
     {
         AffectsRender<HexSurface>(OtherByteForegroundProperty, ZeroByteForegroundProperty, PanelBackgroundProperty, DividerBrushProperty,
-            ByteMarkBrushProperty, ByteMarkForegroundProperty, RowMarkBrushProperty, HeaderLineBrushProperty);
+            ByteMarkBrushProperty, ByteMarkForegroundProperty, RowMarkBrushProperty, HeaderLineBrushProperty,
+            CaretBrushProperty);
     }
 
     public HexSurface()
     {
+        Focusable = true;
         MeasureGeometry();
+        ContextMenu = BuildCopyMenu();
     }
+
+    public IBrush? CaretBrush
+    {
+        get => GetValue(CaretBrushProperty);
+        set => SetValue(CaretBrushProperty, value);
+    }
+
+    /// <summary>Whether the keys and a copy act in the character panel rather than the hex one.</summary>
+    public bool KeysInCharacters => this.keysInCharacters;
 
     /// <summary>Brush for bytes that are neither zero nor printable ASCII.</summary>
     public IBrush? OtherByteForeground
@@ -192,7 +232,21 @@ public sealed class HexSurface : RowSurface
         get => this.document;
         set
         {
+            if (this.cursor is { } previous)
+            {
+                previous.Moved -= OnCaretMoved;
+                previous.RevealRequested -= OnRevealRequested;
+            }
+
             this.document = value;
+            this.cursor = value?.Cursor;
+            if (this.cursor is { } next)
+            {
+                next.Moved += OnCaretMoved;
+                next.RevealRequested += OnRevealRequested;
+            }
+
+            this.dragFrom = null;
             this.offsetDigits = HexRows.OffsetDigits(value?.Length ?? 0);
             this.line = new char[HexRows.LineLength(this.offsetDigits)];
             this.scrollTop = 0;
@@ -201,6 +255,8 @@ public sealed class HexSurface : RowSurface
             MeasureGeometry();
             InvalidateVisual();
             NotifyScrollPosition();
+            ReportViewport();
+            TakeReveal();
         }
     }
 
@@ -220,11 +276,12 @@ public sealed class HexSurface : RowSurface
         return (laid.Hex, laid.Characters);
     }
 
-    /// <summary>The middle of the byte at <paramref name="column"/> on the first row on screen, in
-    /// the hex panel or the character panel - where a pointer would be over it, for tests.</summary>
-    internal Point CentreOfByte(int column, bool inCharacters)
+    /// <summary>The middle of the byte at <paramref name="column"/> on screen row
+    /// <paramref name="screenRow"/>, in the hex panel or the character panel - where a pointer
+    /// would be over it, for tests.</summary>
+    internal Point CentreOfByte(int column, bool inCharacters, int screenRow = 0)
     {
-        double y = RowsTop + RowHeight / 2;
+        double y = RowsTop + (screenRow + 0.5) * RowHeight;
         return inCharacters
             ? new Point(CharacterTextLeft + (column + 0.5) * this.charWidth, y)
             : new Point(HexTextLeft + (HexByteColumn(column) + 1) * this.charWidth, y);
@@ -277,9 +334,55 @@ public sealed class HexSurface : RowSurface
         }
 
         NotifyScrollPosition();
+        ReportViewport();
     }
 
-    protected override void OnViewportChanged() => SetVerticalOffset(this.scrollTop);
+    protected override void OnViewportChanged()
+    {
+        SetVerticalOffset(this.scrollTop);
+        TakeReveal();
+    }
+
+    /// <summary>Tells the cursor which rows are on screen, so a view switch after scrolling the
+    /// caret away lands where the user is looking.</summary>
+    private void ReportViewport()
+    {
+        if (this.cursor is not { } at)
+            return;
+
+        at.ViewportRows = RowsHeight > 0 && RowCount > 0
+            ? (TopRow, Math.Min(RowCount - 1, (long)((this.scrollTop + RowsHeight - 1) / RowHeight)))
+            : null;
+    }
+
+    private void OnCaretMoved(object? sender, EventArgs e) => InvalidateVisual();
+
+    private void OnRevealRequested(object? sender, EventArgs e) => TakeReveal();
+
+    /// <summary>Brings a revealed caret on screen, a third of the way down so what comes after it
+    /// shows too - once there is a size to scroll in; until then the reveal waits.</summary>
+    private void TakeReveal()
+    {
+        if (RowsHeight <= 0 || this.cursor is not { } at || !at.TakeReveal() || at.Caret is not { } caret)
+            return;
+
+        double top = HexRows.RowOf(caret.Byte) * RowHeight;
+        if (top < this.scrollTop || top + RowHeight > this.scrollTop + RowsHeight)
+            SetVerticalOffset(top - RowsHeight / 3);
+    }
+
+    /// <summary>Scrolls as little as keeps the caret's row on screen.</summary>
+    private void ScrollCaretIntoView()
+    {
+        if (this.cursor?.Caret is not { } caret)
+            return;
+
+        double top = HexRows.RowOf(caret.Byte) * RowHeight;
+        if (top < this.scrollTop)
+            SetVerticalOffset(top);
+        else if (top + RowHeight > this.scrollTop + RowsHeight)
+            SetVerticalOffset(top + RowHeight - RowsHeight);
+    }
 
     protected override void OnTextStyleChanged()
     {
@@ -305,6 +408,11 @@ public sealed class HexSurface : RowSurface
             this.groupPen = null;
             this.headerPen = null;
         }
+        else if (change.Property == CaretBrushProperty)
+        {
+            this.caretPen = null;
+            this.otherCaretPen = null;
+        }
     }
 
     // ---- pointer and keys ---------------------------------------------------------------
@@ -313,12 +421,73 @@ public sealed class HexSurface : RowSurface
     {
         base.OnPointerPressed(e);
         Focus();
+
+        var point = e.GetCurrentPoint(this);
+        if (this.cursor is not { } at || ByteAt(point.Position) is not { } hit)
+            return;
+
+        this.keysInCharacters = hit.InCharacters;
+        if (point.Properties.IsRightButtonPressed)
+        {
+            // A right-click inside the selection copies it; elsewhere it moves the caret first,
+            // as a click would.
+            if (at.Caret is not { } caret || hit.Offset < caret.Start || hit.Offset >= caret.End)
+                at.Place(hit.Offset);
+            InvalidateVisual();
+            return;
+        }
+
+        if (!point.Properties.IsLeftButtonPressed)
+            return;
+
+        if ((e.KeyModifiers & KeyModifiers.Shift) != 0)
+        {
+            at.ExtendTo(hit.Offset);
+        }
+        else
+        {
+            at.Place(hit.Offset);
+            this.dragFrom = hit.Offset;
+            e.Pointer.Capture(this);
+        }
+
+        InvalidateVisual();
+        e.Handled = true;
     }
 
     protected override void OnPointerMoved(PointerEventArgs e)
     {
         base.OnPointerMoved(e);
-        SetHovered(OffsetAt(e.GetPosition(this)));
+        var position = e.GetPosition(this);
+        SetHovered(OffsetAt(position));
+
+        if (this.dragFrom is { } from && this.cursor is { } at)
+        {
+            // Past the top or bottom, the rows come to the pointer a row at a time.
+            if (position.Y < RowsTop)
+                ScrollByPixels(-RowHeight);
+            else if (position.Y > Bounds.Height)
+                ScrollByPixels(RowHeight);
+
+            if (DragOffsetAt(position) is { } to)
+                at.Select(HexCaret.Spanning(from, to));
+        }
+    }
+
+    protected override void OnPointerReleased(PointerReleasedEventArgs e)
+    {
+        base.OnPointerReleased(e);
+        if (this.dragFrom is not null)
+        {
+            this.dragFrom = null;
+            e.Pointer.Capture(null);
+        }
+    }
+
+    protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e)
+    {
+        base.OnPointerCaptureLost(e);
+        this.dragFrom = null;
     }
 
     protected override void OnPointerExited(PointerEventArgs e)
@@ -327,12 +496,49 @@ public sealed class HexSurface : RowSurface
         SetHovered(null);
     }
 
+    protected override void OnGotFocus(FocusChangedEventArgs e)
+    {
+        base.OnGotFocus(e);
+        InvalidateVisual();
+    }
+
+    protected override void OnLostFocus(FocusChangedEventArgs e)
+    {
+        base.OnLostFocus(e);
+        InvalidateVisual();
+    }
+
     /// <summary>Raised when <see cref="HoveredOffset"/> changes - the pointer moved to another
     /// byte, off the bytes, or the view scrolled under it.</summary>
     public event EventHandler? HoveredOffsetChanged;
 
     /// <summary>Marks the byte at <paramref name="point"/>, as the pointer does - for tests.</summary>
     internal void HoverAt(Point point) => SetHovered(OffsetAt(point));
+
+    /// <summary>Clicks at <paramref name="point"/>: moves the caret there, or with
+    /// <paramref name="extend"/> takes the selection there - for tests.</summary>
+    internal void ClickAt(Point point, bool extend = false)
+    {
+        if (this.cursor is not { } at || ByteAt(point) is not { } hit)
+            return;
+
+        this.keysInCharacters = hit.InCharacters;
+        if (extend)
+            at.ExtendTo(hit.Offset);
+        else
+            at.Place(hit.Offset);
+    }
+
+    /// <summary>Drags from <paramref name="from"/> to <paramref name="to"/> - for tests.</summary>
+    internal void DragBetween(Point from, Point to)
+    {
+        if (this.cursor is not { } at || ByteAt(from) is not { } start)
+            return;
+
+        this.keysInCharacters = start.InCharacters;
+        if (DragOffsetAt(to) is { } end)
+            at.Select(HexCaret.Spanning(start.Offset, end));
+    }
 
     private void SetHovered(long? offset)
     {
@@ -344,9 +550,11 @@ public sealed class HexSurface : RowSurface
         HoveredOffsetChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    /// <summary>The byte under <paramref name="point"/> in either panel, or null over the gutter,
-    /// the header, the gap between the groups or past the end.</summary>
-    private long? OffsetAt(Point point)
+    private long? OffsetAt(Point point) => ByteAt(point)?.Offset;
+
+    /// <summary>The byte under <paramref name="point"/> and which panel it is in, or null over the
+    /// gutter, the header, the gap between the groups or past the end.</summary>
+    private (long Offset, bool InCharacters)? ByteAt(Point point)
     {
         if (this.document is null || point.Y < RowsTop || point.X < this.gutterWidth)
             return null;
@@ -355,15 +563,42 @@ public sealed class HexSurface : RowSurface
         if (ColumnAt(point.X) is not { } column)
             return null;
 
-        long offset = HexRows.StartOf(row) + column;
-        return offset < this.document.Length ? offset : null;
+        long offset = HexRows.StartOf(row) + column.Index;
+        return offset < this.document.Length ? (offset, column.InCharacters) : null;
     }
 
-    private int? ColumnAt(double x)
+    /// <summary>The byte a drag has reached: the nearest one to <paramref name="point"/> in the
+    /// panel the drag is in, so a pointer off the rows' ends or past the panel still selects up to
+    /// a byte.</summary>
+    private long? DragOffsetAt(Point point)
+    {
+        long length = this.document?.Length ?? 0;
+        if (length <= 0)
+            return null;
+
+        double y = Math.Clamp(point.Y, RowsTop, Math.Max(RowsTop, Bounds.Height - 1));
+        long row = (long)((y - RowsTop + this.scrollTop) / RowHeight);
+        int column = this.keysInCharacters
+            ? (int)Math.Floor((point.X - CharacterTextLeft) / this.charWidth)
+            : HexColumnNear(point.X);
+        column = Math.Clamp(column, 0, HexRows.BytesPerRow - 1);
+        return Math.Clamp(HexRows.StartOf(row) + column, 0, length - 1);
+    }
+
+    /// <summary>The hex panel's byte nearest <paramref name="x"/>, the gap between the groups
+    /// going to the byte before it.</summary>
+    private int HexColumnNear(double x)
+    {
+        int index = (int)Math.Floor((x - HexTextLeft) / this.charWidth);
+        int half = HexRows.BytesPerRow / 2 * 3;
+        return index <= half ? index / 3 : (index - half - 1) / 3 + HexRows.BytesPerRow / 2;
+    }
+
+    private (int Index, bool InCharacters)? ColumnAt(double x)
     {
         double inCharacters = (x - CharacterTextLeft) / this.charWidth;
         if (inCharacters >= 0 && inCharacters < HexRows.BytesPerRow)
-            return (int)inCharacters;
+            return ((int)inCharacters, true);
 
         // A byte's two digits and the space after them belong to it, so the pointer never falls
         // between bytes; only the gap between the groups and the panel's padding are no byte.
@@ -373,28 +608,132 @@ public sealed class HexSurface : RowSurface
 
         int half = HexRows.BytesPerRow / 2 * 3;
         if (index < half)
-            return index / 3;
+            return (index / 3, false);
 
-        return index == half ? null : (index - half - 1) / 3 + HexRows.BytesPerRow / 2;
+        return index == half ? null : ((index - half - 1) / 3 + HexRows.BytesPerRow / 2, false);
     }
+
+    /// <summary>Rows a Page Up or Down moves: a screen, less one row kept for context.</summary>
+    private int PageRows => Math.Max(1, (int)(RowsHeight / RowHeight) - 1);
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
-        bool toEnds = (e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Meta)) != 0;
-        double page = Math.Max(RowHeight, RowsHeight - RowHeight);
-        switch (e.Key)
+        bool command = (e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Meta)) != 0;
+        bool extend = (e.KeyModifiers & KeyModifiers.Shift) != 0;
+
+        HexMove? move = e.Key switch
         {
-            case Key.Up: ScrollByPixels(-RowHeight); break;
-            case Key.Down: ScrollByPixels(RowHeight); break;
-            case Key.PageUp: ScrollByPixels(-page); break;
-            case Key.PageDown: ScrollByPixels(page); break;
-            case Key.Home when toEnds: SetVerticalOffset(0); break;
-            case Key.End when toEnds: ScrollToEnd(); break;
-            default: return;
+            Key.Left => HexMove.Left,
+            Key.Right => HexMove.Right,
+            Key.Up => HexMove.Up,
+            Key.Down => HexMove.Down,
+            Key.PageUp => HexMove.PageUp,
+            Key.PageDown => HexMove.PageDown,
+            Key.Home => command ? HexMove.DocumentStart : HexMove.RowStart,
+            Key.End => command ? HexMove.DocumentEnd : HexMove.RowEnd,
+            _ => null,
+        };
+
+        if (move is { } step)
+        {
+            MoveCaret(step, extend);
+        }
+        else if (e.Key == Key.A && command)
+        {
+            this.cursor?.SelectAll();
+        }
+        else if (e.Key == Key.C && command)
+        {
+            _ = CopyAsync(this.keysInCharacters ? HexCopyForm.Text : HexCopyForm.Hex);
+        }
+        else if (e.Key == Key.Tab && !command)
+        {
+            // Between the panels, as a hex editor's Tab does; the caret stays on its byte.
+            this.keysInCharacters = !this.keysInCharacters;
+            InvalidateVisual();
+        }
+        else
+        {
+            return;
         }
 
         e.Handled = true;
+    }
+
+    /// <summary>Moves the caret as a key does and keeps it on screen - for tests too.</summary>
+    internal void MoveCaret(HexMove move, bool extend = false)
+    {
+        this.cursor?.Move(move, extend, PageRows);
+        ScrollCaretIntoView();
+    }
+
+    // ---- copy ---------------------------------------------------------------------------
+
+    private ContextMenu BuildCopyMenu()
+    {
+        MenuItem Item(string header, HexCopyForm form)
+        {
+            var item = new MenuItem { Header = header };
+            item.Click += (_, _) => _ = CopyAsync(form);
+            return item;
+        }
+
+        return new ContextMenu
+        {
+            Items =
+            {
+                Item("Copy as hex", HexCopyForm.Hex),
+                Item("Copy as text", HexCopyForm.Text),
+                Item("Copy bytes", HexCopyForm.Bytes),
+            },
+        };
+    }
+
+    /// <summary>The platform names for UTF-8 text, under which <see cref="HexCopyForm.Bytes"/>
+    /// puts the bytes as they are - what this app's own paste reads back unchanged, NULs and
+    /// all.</summary>
+    private static readonly string[] Utf8ClipboardFormats =
+    {
+        "public.utf8-plain-text",        // macOS
+        "text/plain;charset=utf-8",      // X11 / Wayland
+    };
+
+    /// <summary>
+    /// Copies the selection in <paramref name="form"/>. Refuses rather than truncates when it is
+    /// larger than <see cref="HexCopy.MaxBytes"/>.
+    /// </summary>
+    private async Task CopyAsync(HexCopyForm form)
+    {
+        if (this.document is not { } from || this.cursor?.Caret is not { IsEmpty: false } caret)
+            return;
+
+        if (!from.TryReadSelection(out byte[] bytes))
+        {
+            if (caret.Length > HexCopy.MaxBytes)
+                ToastService.Show($"Selection is too large to copy ({caret.Length / (1024 * 1024)} MB).");
+            return;
+        }
+
+        if (TopLevel.GetTopLevel(this)?.Clipboard is not { } clipboard)
+            return;
+
+        if (form == HexCopyForm.Bytes)
+        {
+            var item = new DataTransferItem();
+            foreach (string identifier in Utf8ClipboardFormats)
+                item.Set(DataFormat.CreateBytesPlatformFormat(identifier), bytes);
+            var transfer = new DataTransfer();
+            transfer.Add(item);
+            await clipboard.SetDataAsync(transfer);
+        }
+        else
+        {
+            await clipboard.SetTextAsync(form == HexCopyForm.Hex ? HexCopy.AsHex(bytes) : HexCopy.AsText(bytes));
+        }
+
+        string what = form switch { HexCopyForm.Hex => " as hex", HexCopyForm.Text => " as text", _ => string.Empty };
+        ToastService.Show($"Copied {bytes.Length:N0} {(bytes.Length == 1 ? "byte" : "bytes")}{what} to clipboard");
     }
 
     // ---- drawing ------------------------------------------------------------------------
@@ -418,6 +757,7 @@ public sealed class HexSurface : RowSurface
             using (context.PushClip(new Rect(0, RowsTop, width, RowsHeight)))
             {
                 DrawRowMark(context);
+                DrawSelection(context, first, last);
 
                 for (long row = first; row <= last; row++)
                 {
@@ -431,6 +771,7 @@ public sealed class HexSurface : RowSurface
                     }
                 }
 
+                DrawCaret(context, first, last);
                 DrawByteMark(context, typeface);
             }
         }
@@ -465,6 +806,54 @@ public sealed class HexSurface : RowSurface
         double top = RowsTop + HexRows.RowOf(offset) * RowHeight - this.scrollTop;
         double right = Math.Max(this.gutterWidth, CharacterPanelLeft + this.characterPanelWidth - PanOffset);
         context.FillRectangle(band, new Rect(0, top, right, RowHeight));
+    }
+
+    /// <summary>The selection behind the bytes on screen, in both panels: one band a row in each,
+    /// running across the gap between the groups.</summary>
+    private void DrawSelection(DrawingContext context, long first, long last)
+    {
+        if (this.cursor?.Caret is not { IsEmpty: false } caret || SelectionBrush is not { } fill)
+            return;
+
+        long from = Math.Max(first, HexRows.RowOf(caret.Start));
+        long to = Math.Min(last, HexRows.RowOf(caret.End - 1));
+        for (long row = from; row <= to; row++)
+        {
+            long rowStart = HexRows.StartOf(row);
+            int a = (int)(Math.Max(caret.Start, rowStart) - rowStart);
+            int b = (int)(Math.Min(caret.End, rowStart + HexRows.BytesPerRow) - rowStart);
+            double top = RowsTop + row * RowHeight - this.scrollTop;
+
+            double hexLeft = HexTextLeft + HexByteColumn(a) * this.charWidth - this.charWidth / 2;
+            double hexRight = HexTextLeft + (HexByteColumn(b - 1) + 2) * this.charWidth + this.charWidth / 2;
+            context.FillRectangle(fill, new Rect(hexLeft, top, hexRight - hexLeft, RowHeight));
+            context.FillRectangle(fill, new Rect(CharacterTextLeft + a * this.charWidth, top, (b - a) * this.charWidth, RowHeight));
+        }
+    }
+
+    /// <summary>The caret: an outline around its byte in both panels, solid in the panel the keys
+    /// act in while the view has focus, dashed otherwise.</summary>
+    private void DrawCaret(DrawingContext context, long first, long last)
+    {
+        if (this.cursor?.Caret is not { } caret || CaretBrush is not { } ink)
+            return;
+
+        long row = HexRows.RowOf(caret.Byte);
+        if (row < first || row > last)
+            return;
+
+        this.caretPen ??= new Pen(ink, 1.5);
+        this.otherCaretPen ??= new Pen(ink, 1, dashStyle: new DashStyle([2, 2], 0));
+
+        int column = (int)(caret.Byte - HexRows.StartOf(row));
+        double top = RowsTop + row * RowHeight - this.scrollTop + 1.5;
+        double height = RowHeight - 3;
+        var hexCell = new Rect(HexTextLeft + HexByteColumn(column) * this.charWidth - 3, top, 2 * this.charWidth + 6, height);
+        var characterCell = new Rect(CharacterTextLeft + column * this.charWidth - 1.5, top, this.charWidth + 3, height);
+
+        bool focused = IsFocused;
+        context.DrawRectangle(null, focused && !this.keysInCharacters ? this.caretPen : this.otherCaretPen, new RoundedRect(hexCell, 3));
+        context.DrawRectangle(null, focused && this.keysInCharacters ? this.caretPen : this.otherCaretPen, new RoundedRect(characterCell, 3));
     }
 
     /// <summary>

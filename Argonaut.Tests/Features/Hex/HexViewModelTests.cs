@@ -2,6 +2,7 @@ using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Detection;
 using Argonaut.Engine.Indexing;
 using Argonaut.Features.Hex;
+using Argonaut.Ui.Documents.Navigation;
 using Argonaut.Tests.Support;
 
 namespace Argonaut.Tests.Features.Hex;
@@ -55,26 +56,79 @@ public sealed class HexViewModelTests
     }
 
     [Fact]
-    public async Task TheStatusStrip_DescribesTheByte_AndWhereItIs()
+    public async Task TheStatusStrip_SaysWhereTheCaretIs_InDecimalAndHex_AndHowMuchIsSelected()
     {
-        using var origin = new MemoryByteOrigin([0x00, (byte)'A', 0xC3], "bytes");
+        using var origin = new MemoryByteOrigin(Counting(5000), "bytes");
+        using var hex = new HexViewModel();
+        await hex.LoadAsync(origin);
+        var changed = new List<string?>();
+        hex.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        Assert.Equal("Byte 0    0x00000000", hex.CaretPositionText);
+        Assert.Equal(string.Empty, hex.CaretSelectionText);
+
+        hex.Cursor.Place(1234);
+        Assert.Equal("Byte 1,234    0x000004D2", hex.CaretPositionText);
+        Assert.Contains(nameof(HexViewModel.CaretPositionText), changed);
+
+        // Taking a selection forward, the caret is on its last byte.
+        hex.Cursor.Move(HexMove.Right, extend: true, pageRows: 10);
+        hex.Cursor.Move(HexMove.Right, extend: true, pageRows: 10);
+        Assert.Equal("Byte 1,235    0x000004D3", hex.CaretPositionText);
+        Assert.Equal("2 bytes", hex.CaretSelectionText);
+    }
+
+    [Fact]
+    public async Task AnEmptyDocument_HasNoCaret()
+    {
+        using var origin = new MemoryByteOrigin([], "bytes");
         using var hex = new HexViewModel();
         await hex.LoadAsync(origin);
 
-        hex.ShowByte(1);
-        Assert.Equal("0x41 · 65 · 0100 0001 · U+0041 LATIN CAPITAL LETTER A", hex.ByteValueText);
-        Assert.Equal("Byte 1    0x00000001", hex.BytePositionText);
+        Assert.Null(hex.Cursor.Caret);
+        Assert.Equal(string.Empty, hex.CaretPositionText);
+        Assert.Null(hex.SelectedByteRange);
+    }
 
-        // A byte above 0x7F is no character on its own.
-        hex.ShowByte(2);
-        Assert.Equal("0xC3 · 195 · 1100 0011", hex.ByteValueText);
+    [Fact]
+    public async Task ARevealedRange_IsSelected_WithTheCaretAtItsStart_AndIsWhereTheUserIs()
+    {
+        using var origin = new MemoryByteOrigin(Counting(5000), "bytes");
+        using var hex = new HexViewModel();
+        await hex.LoadAsync(origin);
 
-        hex.ShowByte(null);
-        Assert.Equal(string.Empty, hex.ByteValueText);
-        Assert.Equal(string.Empty, hex.BytePositionText);
+        await hex.RevealByteRangeAsync(new ByteRange(100, 20));
 
-        hex.ShowByte(3);
-        Assert.Null(hex.ShownOffset);
+        Assert.Equal(new HexCaret(120, 100), hex.Cursor.Caret);
+        Assert.Equal(new ByteRange(100, 20), hex.SelectedByteRange);
+
+        await hex.RevealByteRangeAsync(ByteRange.At(7));
+        Assert.Equal(ByteRange.At(7), hex.SelectedByteRange);
+    }
+
+    [Fact]
+    public async Task TheSelection_IsReadForACopy_UpToTheLimit()
+    {
+        using var origin = new SplitOrigin(Counting(64), pieceSize: 5);
+        using var hex = new HexViewModel();
+        await hex.LoadAsync(origin);
+
+        Assert.False(hex.TryReadSelection(out _));
+
+        hex.Cursor.Select(new HexCaret(30, 10));
+        Assert.True(hex.TryReadSelection(out byte[] bytes));
+        Assert.Equal(Counting(30)[10..], bytes);
+    }
+
+    [Fact]
+    public async Task ASelectionLargerThanACopyTakes_IsRefused()
+    {
+        using var origin = new MemoryByteOrigin(new byte[HexCopy.MaxBytes + 1], "bytes");
+        using var hex = new HexViewModel();
+        await hex.LoadAsync(origin);
+
+        hex.Cursor.SelectAll();
+        Assert.False(hex.TryReadSelection(out _));
     }
 
     [Fact]

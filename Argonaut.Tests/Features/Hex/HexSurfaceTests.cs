@@ -1,3 +1,4 @@
+using Argonaut.Engine.Bytes;
 using Argonaut.Features.Hex;
 using Argonaut.Ui.Rows;
 using Avalonia;
@@ -37,6 +38,14 @@ public sealed class HexSurfaceTests
             for (int i = 0; i < count; i++)
                 into[i] = (byte)(start + i);
             return count;
+        }
+
+        public HexCursor Cursor => field ??= new HexCursor(() => Length);
+
+        public bool TryReadSelection(out byte[] bytes)
+        {
+            bytes = [];
+            return false;
         }
     }
 
@@ -235,7 +244,121 @@ public sealed class HexSurfaceTests
             bytes.AsSpan((int)start, count).CopyTo(into);
             return count;
         }
+
+        public HexCursor Cursor => field ??= new HexCursor(() => Length);
+
+        public bool TryReadSelection(out byte[] selected)
+        {
+            selected = Cursor.Caret is { IsEmpty: false } caret ? bytes[(int)caret.Start..(int)caret.End] : [];
+            return selected.Length > 0;
+        }
     }
+
+    [Fact]
+    public Task AClick_PutsTheCaretOnTheByte_InEitherPanel_AndPicksThePanelTheKeysActIn() => With(new FakeDocument(1000), (surface, _) =>
+    {
+        surface.ClickAt(surface.CentreOfByte(9, inCharacters: true, screenRow: 2));
+        Assert.Equal(HexCaret.At(41), surface.Document!.Cursor.Caret);
+        Assert.True(surface.KeysInCharacters);
+
+        surface.ClickAt(surface.CentreOfByte(3, inCharacters: false));
+        Assert.Equal(HexCaret.At(3), surface.Document!.Cursor.Caret);
+        Assert.False(surface.KeysInCharacters);
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task ADrag_SelectsBothEnds_EitherWay_AndAShiftClickExtends() => With(new FakeDocument(1000), (surface, _) =>
+    {
+        var cursor = surface.Document!.Cursor;
+        surface.DragBetween(surface.CentreOfByte(4, inCharacters: false), surface.CentreOfByte(2, inCharacters: false, screenRow: 1));
+        Assert.Equal((4L, 19L), (cursor.Caret!.Value.Start, cursor.Caret!.Value.End));
+
+        surface.DragBetween(surface.CentreOfByte(4, inCharacters: true, screenRow: 1), surface.CentreOfByte(1, inCharacters: true));
+        Assert.Equal((1L, 21L), (cursor.Caret!.Value.Start, cursor.Caret!.Value.End));
+
+        surface.ClickAt(surface.CentreOfByte(2, inCharacters: false));
+        surface.ClickAt(surface.CentreOfByte(5, inCharacters: true), extend: true);
+        Assert.Equal((2L, 6L), (cursor.Caret!.Value.Start, cursor.Caret!.Value.End));
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task ADragPastThePanel_SelectsToTheNearestByte() => With(new FakeDocument(1000), (surface, _) =>
+    {
+        var cursor = surface.Document!.Cursor;
+        var past = new Point(surface.CentreOfByte(15, inCharacters: false).X + 3, surface.CentreOfByte(0, inCharacters: false, screenRow: 1).Y);
+        surface.DragBetween(surface.CentreOfByte(0, inCharacters: false), past);
+
+        Assert.Equal((0L, 32L), (cursor.Caret!.Value.Start, cursor.Caret!.Value.End));
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task MovingTheCaretOffScreen_ScrollsJustEnoughToKeepIt() => With(new FakeDocument(1_000_000), (surface, window) =>
+    {
+        surface.MoveCaret(HexMove.PageDown);
+        surface.MoveCaret(HexMove.PageDown);
+        long caretRow = HexRows.RowOf(surface.Document!.Cursor.Caret!.Value.Byte);
+        Assert.True(caretRow > surface.TopRow && caretRow <= surface.TopRow + ScreenRows);
+
+        surface.MoveCaret(HexMove.DocumentEnd);
+        window.CaptureRenderedFrame();
+        Assert.True(surface.ShowsEnd);
+
+        surface.MoveCaret(HexMove.DocumentStart);
+        Assert.Equal(0, surface.TopRow);
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task TheViewport_IsReportedToTheCursor_AsItScrolls() => With(new FakeDocument(1_000_000), (surface, _) =>
+    {
+        var cursor = surface.Document!.Cursor;
+        Assert.Equal(0, cursor.ViewportRows!.Value.First);
+
+        surface.ScrollToRow(5000);
+        Assert.Equal(5000, cursor.ViewportRows!.Value.First);
+        Assert.Equal(ByteRange.At(5000 * 16), cursor.Position);
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task ARevealOffScreen_ScrollsTheCaretIntoView() => With(new FakeDocument(1_000_000), (surface, window) =>
+    {
+        surface.Document!.Cursor.Reveal(new ByteRange(500_000, 10));
+        window.CaptureRenderedFrame();
+
+        long row = HexRows.RowOf(500_000);
+        Assert.InRange(row, surface.TopRow, surface.TopRow + ScreenRows - 2);
+        Assert.Equal(new ByteRange(500_000, 10), surface.Document!.Cursor.Position);
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task ARevealBeforeTheViewHasASize_WaitsForIt() => With(new FakeDocument(0), (surface, window) =>
+    {
+        var document = new FakeDocument(1_000_000);
+        document.Cursor.Reveal(ByteRange.At(800_000));
+        surface.Document = document;
+        window.CaptureRenderedFrame();
+
+        Assert.InRange(HexRows.RowOf(800_000), surface.TopRow, surface.TopRow + ScreenRows - 2);
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task TheCaretAndSelection_DrawWhileScrolling_WithoutAVisualChangeInTheFrame() => With(new FakeDocument(1_000_000), (surface, window) =>
+    {
+        var cursor = surface.Document!.Cursor;
+        cursor.Select(new HexCaret(100, 4000));
+        surface.ScrollToRow(200);
+        window.CaptureRenderedFrame();
+        surface.MoveCaret(HexMove.Down, extend: true);
+        window.CaptureRenderedFrame();
+        Assert.Equal(4016, cursor.Caret!.Value.Offset);
+        return Task.CompletedTask;
+    });
 
     [Fact]
     public Task AnEmptyDocument_DrawsNothing() => With(new FakeDocument(0), (surface, window) =>

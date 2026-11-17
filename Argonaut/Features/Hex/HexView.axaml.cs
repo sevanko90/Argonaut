@@ -13,7 +13,6 @@ public partial class HexView : UserControl
     {
         InitializeComponent();
         scrollBars = new RowScrollBars(Surface, VerticalScrollBar, PanScrollBar);
-        Surface.HoveredOffsetChanged += (_, _) => (DataContext as HexViewModel)?.ShowByte(Surface.HoveredOffset);
         DetachedFromVisualTree += (_, _) => scrollBars.Dispose();
     }
 

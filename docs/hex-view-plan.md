@@ -5,7 +5,7 @@ binary response or file can be read rather than only saved or handed to another 
 second step of binary support (#51); the first (Binary, describing a binary document with Save as…
 and Open in default app) shipped in v2.3.2 and is folded into the hex view by step 2.
 
-Status: steps 1, 2 and 9 built on branch `hex-view` - a read-only, polished hex view that binary documents open in.
+Status: steps 1, 2, 3 and 9 built on branch `hex-view` - a read-only, polished hex view that binary documents open in.
 
 ## Decided
 
@@ -68,12 +68,19 @@ the 16 bytes in two groups of 8, and the character column.
 
 ### Selection, caret and copy
 
-- A byte caret and a selection, kept in step between the hex and character columns. Clicking in
-  either sets both, and arrow keys, Page Up/Down and Home/End move by byte, row and screen.
-- Copy as hex text (`89 50 4E 47`), as the character column, or as raw bytes to the clipboard.
+- A byte caret and a selection, kept in step between the hex and character columns, as two
+  boundaries between bytes (`HexCaret`): with nothing selected the caret is on a byte, and a
+  selection runs to the document's end at most. Clicking in either panel sets both and makes
+  that panel the one the keys and a copy act in (Tab swaps it); a drag or Shift-click selects
+  from byte to byte, both included. Arrow keys, Page Up/Down and Home/End move by byte, row and
+  screen, Cmd/Ctrl+Home/End to the ends, Shift extends. The caret is an outline round its byte
+  in both panels, solid in the active one; the selection is shaded behind both.
+- Cmd/Ctrl+C copies as the active panel shows it - hex text (`89 50 4E 47`) or the character
+  column - and the context menu offers both and the bytes themselves, which go on the clipboard
+  under the platform's UTF-8 text formats so this app's paste reads them back unchanged. A copy
+  over 16 MB is refused, not truncated.
 - The status strip shows where the caret is, as the raw view's does: the caret's position
-  (`Byte 1,234 · 0x4D2`: decimal in the document's line numbering, then the hex offset the
-  gutter shows) at the right, in one fixed place, with the
+  (`Byte 1,234    0x000004D2`: decimal, then the hex offset as the gutter shows it) at the right, in one fixed place, with the
   selection length beside it when something is selected. It follows the caret as it moves by
   click or key. What the byte *is* - hex, decimal, bits, ASCII name - is not on the strip; the
   side panel's Values tab shows that, and more (step 6b).
@@ -191,7 +198,7 @@ size, because decoding is whole-image in memory.
 2. [x] Hex replaces Binary: the toolbar takes over Binary's description and actions, detection's
    binary documents open in Hex, and `BinaryViewModel` and its view are removed. Tests: a detected
    binary document opens in Hex, and the toolbar's actions reach `IDocumentExportActions`.
-3. [ ] Caret, selection, keyboard movement, copy (hex, characters, bytes); `IByteRangeNavigable`.
+3. [x] Caret, selection, keyboard movement, copy (hex, characters, bytes); `IByteRangeNavigable`.
    Pointer tracking kept as a mode (see Selection, caret and copy), not replaced by the caret,
    and working during a mouse drag-select. Tests on the view model; a switch from Raw lands on
    the same bytes.
@@ -199,6 +206,9 @@ size, because decoding is whole-image in memory.
    Values tab brings them back in 6b) and shows the caret's position in decimal and hex, and the
    selection length,
    in a fixed place at the right. Tests: the position follows caret movement by key and click.
+   Built: `HexCursor` (boundaries, moves, viewport, pending reveal), `HexCopy`, the surface's
+   click/drag/shift-click, keys and copy menu. The caret and selection look is still to be chosen
+   from screenshots in both themes.
 4. [ ] Go to offset.
 5. [ ] `BytePatternMatcher` and the find bar's Hex mode. Tests: parsing (`0x` prefixes, spacing,
    odd digit counts rejected), matches across chunk boundaries (`ChunkOverlap`).

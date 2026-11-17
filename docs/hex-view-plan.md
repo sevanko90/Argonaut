@@ -275,8 +275,7 @@ size, because decoding is whole-image in memory.
    (chosen from screenshots over hatching, an underline and a glyph, and over red and green). Copy as text follows the column. The status strip names the
    character the caret's byte is in, on the left as the raw view's does ("U+00E9 LATIN SMALL
    LETTER E WITH ACUTE"), whichever way the column reads. Tests: a character crossing a row,
-   invalid and truncated sequences, the 3-byte look-back at a row start. Being tried on real
-   files before it is called done.
+   invalid and truncated sequences, the 3-byte look-back at a row start.
 9. [x] Visual polish, chosen from screenshots in both themes:
    - Three panels: a pinned offset gutter and the character panel on the panel tint, the bytes on
      the window background; the character panel and the header end where the data does.

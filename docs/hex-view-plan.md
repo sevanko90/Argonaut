@@ -212,16 +212,15 @@ mapped to exactly one byte:
 
 - The character is drawn once, at its lead byte's cell. Within a row it may spread over its own
   continuation cells (a wide CJK glyph or an emoji takes the room its 3-4 bytes give it).
-- When it crosses the row end, it is clipped at the row's last cell, and a continuation mark
-  shows it carries on.
-- Continuation bytes at the start of the next row show a muted continuation mark, not `.`, so they
-  read as part of the character above, not as unknown bytes.
+- A faint band in the text's colour runs behind all of a multi-byte character's cells, so its
+  continuation cells read as part of it, not as spaces.
+- When it crosses the row end, it is clipped at the row's last cell, and its band is left open at
+  that edge; its continuation bytes at the start of the next row carry a band open at the left,
+  so they read as part of the character above, not as unknown bytes.
 - To tell a row's leading continuation bytes apart, a row looks back at most 3 bytes before it
   starts. That keeps the geometry arithmetic and needs no scan.
 
-Invalid sequences show `.` as the ASCII column does. Measure this against real files before it is
-built: if clipped glyphs read badly, the alternative is to draw a crossing character on the row
-where it ends instead.
+Invalid sequences and controls show `.` as the ASCII column does.
 
 ### Image preview (separate, later)
 
@@ -270,8 +269,10 @@ size, because decoding is whole-image in memory.
    its own steps in docs/struct-decoder-plan.md. It needs step 3's selection and 6b's
    `ByteReading` and panel.
 8. [x] UTF-8 character column (`HexUtf8`), an ASCII / UTF-8 choice in the toolbar. Each cell is
-   drawn from a glyph cache; a character crossing the row's end is clipped there and its bytes on
-   the next row show a muted `·`. Copy as text follows the column. The status strip names the
+   drawn from a glyph cache; a character crossing the row's end is clipped there. A faint band in
+   the text's own colour runs behind every cell of a multi-byte character, so its other bytes'
+   cells read as part of it, not as spaces - open at the edge where a character crosses rows
+   (chosen from screenshots over hatching, an underline and a glyph, and over red and green). Copy as text follows the column. The status strip names the
    character the caret's byte is in, on the left as the raw view's does ("U+00E9 LATIN SMALL
    LETTER E WITH ACUTE"), whichever way the column reads. Tests: a character crossing a row,
    invalid and truncated sequences, the 3-byte look-back at a row start. Being tried on real

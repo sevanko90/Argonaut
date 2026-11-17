@@ -159,6 +159,7 @@ public sealed class HexSurface : RowSurface
     private Pen? groupPen;
     private Pen? caretPen;
     private IBrush? pointerFill;
+    private IBrush? characterBand;
     private Pen? pointerEdge;
 
     // The caret blinks between its solid mark and its outline while the view has focus, and
@@ -198,11 +199,7 @@ public sealed class HexSurface : RowSurface
         Text,
         Zero,
         Other,
-        CarriedOver,
     }
-
-    /// <summary>What a carried-over cell shows: a character begun on the row above.</summary>
-    private const string CarriedOverMark = "·";
 
     // "00".."0F" over the hex panel, laid out once and placed over each group.
     private readonly TextLayout?[] columnLabels = new TextLayout?[HexRows.BytesPerRow];
@@ -527,6 +524,7 @@ public sealed class HexSurface : RowSurface
         if (change.Property == ForegroundProperty || change.Property == GutterForegroundProperty
             || change.Property == OtherByteForegroundProperty || change.Property == ZeroByteForegroundProperty)
         {
+            this.characterBand = null;
             DropLayouts();
             MeasureGeometry();
             InvalidateVisual();
@@ -1227,11 +1225,50 @@ public sealed class HexSurface : RowSurface
         double left = CharacterCellLeft(0);
         using (context.PushClip(new Rect(left, top, CharacterCellLeft(HexRows.BytesPerRow) - left, RowHeight)))
         {
+            DrawCharacterBands(context, cells, top);
             for (int i = 0; i < cells.Length; i++)
             {
                 if (Utf8Glyph(cells[i], laid.Bytes[i], typeface, ink: null) is { } glyph)
                     glyph.Draw(context, new Point(CharacterCellLeft(i) + CharacterSpacing / 2, CentreInRow(glyph, top)));
             }
+        }
+    }
+
+    /// <summary>
+    /// A faint band behind every cell of a multi-byte character, its first byte's included, so its
+    /// other bytes' cells read as part of it rather than as spaces. A character begun on the row
+    /// above, or running on into the next, has its band open at that edge. The band is the text's
+    /// own colour, faint: the view's colours are kept for what they mean.
+    /// </summary>
+    private void DrawCharacterBands(DrawingContext context, HexCell[] cells, double top)
+    {
+        if ((Foreground as ISolidColorBrush)?.Color is not { } ink)
+            return;
+
+        this.characterBand ??= new SolidColorBrush(ink, 0.09);
+        double cellTop = top + 2;
+        double height = RowHeight - 4;
+
+        int carried = 0;
+        while (carried < cells.Length && cells[carried].Kind == HexCellKind.CarriedOver)
+            carried++;
+        if (carried > 0)
+            Band(0, carried - 1, openLeft: true, openRight: false);
+
+        for (int i = carried; i < cells.Length; i++)
+        {
+            if (cells[i].Kind != HexCellKind.Character || cells[i].Length < 2)
+                continue;
+
+            int end = i + cells[i].Length - 1;
+            Band(i, Math.Min(end, cells.Length - 1), openLeft: false, openRight: end >= cells.Length);
+        }
+
+        void Band(int first, int last, bool openLeft, bool openRight)
+        {
+            double left = CharacterCellLeft(first) + (openLeft ? -4 : 0.5);
+            double right = CharacterCellLeft(last + 1) + (openRight ? 4 : -0.5);
+            context.DrawRectangle(this.characterBand, null, new RoundedRect(new Rect(left, cellTop, right - left, height), 4));
         }
     }
 
@@ -1242,14 +1279,14 @@ public sealed class HexSurface : RowSurface
         (int character, CellInk kind) = cell.Kind switch
         {
             HexCellKind.Character => (cell.Character.Value, CellInk.Text),
-            HexCellKind.CarriedOver => ('·', CellInk.CarriedOver),
+            HexCellKind.CarriedOver => (-1, CellInk.Text),
             HexCellKind.Unreadable => ('.', HexRows.ClassOf(value) == HexByteClass.Zero ? CellInk.Zero : CellInk.Other),
             _ => (-1, CellInk.Text),
         };
         if (character < 0)
             return null;
 
-        string text = cell.Kind == HexCellKind.Character ? cell.Character.ToString() : cell.Kind == HexCellKind.CarriedOver ? CarriedOverMark : ".";
+        string text = cell.Kind == HexCellKind.Character ? cell.Character.ToString() : ".";
         if (ink is not null)
             return new TextLayout(text, typeface, FontSize, ink);
 
@@ -1263,7 +1300,6 @@ public sealed class HexSurface : RowSurface
         {
             CellInk.Zero => ZeroByteForeground ?? GutterForeground,
             CellInk.Other => OtherByteForeground,
-            CellInk.CarriedOver => ZeroByteForeground ?? GutterForeground,
             _ => null,
         } ?? Foreground ?? Brushes.Black;
         return this.utf8Glyphs[(character, kind)] = new TextLayout(text, typeface, FontSize, brush);

@@ -25,7 +25,12 @@ public sealed class ProcessSystemLauncher : ISystemLauncher
         {
             try
             {
-                Process.Start(new ProcessStartInfo("explorer.exe") { ArgumentList = { "/select," + path } })?.Dispose();
+                // Arguments, not ArgumentList: Explorer has its own command-line parser, and the
+                // quoting ArgumentList applies to a path with a space wraps the whole
+                // "/select,..." switch, which Explorer does not recognise - it then opens its
+                // default folder (Documents) instead. GetFullPath turns '/' into '\', which
+                // /select also needs.
+                Process.Start(new ProcessStartInfo("explorer.exe") { Arguments = ExplorerSelectArguments(Path.GetFullPath(path)) })?.Dispose();
             }
             catch
             {
@@ -52,6 +57,10 @@ public sealed class ProcessSystemLauncher : ISystemLauncher
         if (Path.GetDirectoryName(path) is { Length: > 0 } folder)
             Launch(folder);
     }
+
+    /// <summary>Explorer's switch to open a file's folder with it selected: the path quoted on its
+    /// own after the comma. A Windows path cannot contain a quote, so it needs no escaping.</summary>
+    internal static string ExplorerSelectArguments(string path) => "/select,\"" + path + "\"";
 
     public void OpenAddress(Uri address) => Launch(address.AbsoluteUri);
 

@@ -418,6 +418,37 @@ public sealed class HexSurface : RowSurface
 
     public override void ScrollToEnd() => SetVerticalOffset(MaxScrollTop);
 
+    /// <summary>
+    /// More of a streamed document has arrived: the last rows laid out may have been partial, or
+    /// read their characters without the bytes that now follow, so they are laid out again, and the
+    /// extent the scrollbar shows grows with the document. Called from the UI thread, outside
+    /// the render pass.
+    /// </summary>
+    public void ShowGrowth()
+    {
+        foreach (var (row, laid) in this.layouts)
+        {
+            // A partial row, and the row before it, whose characters could not look ahead.
+            if (laid.Count < HexRows.BytesPerRow)
+            {
+                this.leaving.Add(row);
+                if (row > 0 && this.layouts.ContainsKey(row - 1) && !this.leaving.Contains(row - 1))
+                    this.leaving.Add(row - 1);
+            }
+        }
+
+        foreach (long row in this.leaving)
+        {
+            this.layouts[row].Dispose();
+            this.layouts.Remove(row);
+        }
+
+        this.leaving.Clear();
+        ReportViewport();
+        NotifyScrollPosition();
+        InvalidateVisual();
+    }
+
     /// <summary>Puts row <paramref name="row"/> at the top, or as near as the end allows.</summary>
     public void ScrollToRow(long row) => SetVerticalOffset(row * RowHeight);
 

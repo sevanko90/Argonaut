@@ -5,7 +5,8 @@ binary response or file can be read rather than only saved or handed to another 
 second step of binary support (#51); the first (Binary, describing a binary document with Save as…
 and Open in default app) shipped in v2.3.2 and is folded into the hex view by step 2.
 
-Status: steps 1-4, 6, 8 and 9 built on branch `hex-view` - a read-only, polished hex view that binary documents open in.
+Status: built (steps 1-4, 6, 8, 9, 10). Find (5) and the structure decoder (7) are their own
+features, planned here and in docs/struct-decoder-plan.md.
 
 ## Decided
 
@@ -235,9 +236,9 @@ size, because decoding is whole-image in memory.
    status line. Tests: geometry (`long` rows, last partial row), a `GrowingByteSource` row count,
    a `SplitByteSource` row straddling a boundary, and a headless scroll-then-`CaptureRenderedFrame`
    test (as `RowSurfaceTests` does).
-   Also `--view hex` on the command line. Still to add: a growing document's new rows show on
-   the next scroll or redraw, but nothing redraws as it grows - it needs a growth tick like
-   `IndexGrowthMonitor` gives the indexed views.
+   Also `--view hex` on the command line. A streamed document follows its growth: a background
+   wait for its length to settle drives an `IndexGrowthMonitor`, which redraws the new rows,
+   the status line and the Values tab as bytes arrive.
 2. [x] Hex replaces Binary: the toolbar takes over Binary's description and actions, detection's
    binary documents open in Hex, and `BinaryViewModel` and its view are removed. Tests: a detected
    binary document opens in Hex, and the toolbar's actions reach `IDocumentExportActions`.
@@ -255,7 +256,7 @@ size, because decoding is whole-image in memory.
    pointer look chosen from screenshots in both themes.
 4. [x] Go to offset. Tests: parsing, the view model's go-to and its messages, the entry's keys,
    and Ctrl/Cmd+L reaching the window only when no view claims it.
-5. [ ] Find - **spec first** (see Find's open questions), then build. The sketch: a
+5. [ ] Find - its own feature, **spec first** (see Find's open questions), then build. The sketch: a
    `BytePatternMatcher` and the find bar's Hex mode. Tests: parsing (`0x` prefixes, spacing,
    odd digit counts rejected), matches across chunk boundaries (`ChunkOverlap`).
 6. [x] Grouping and the side panel, in two parts:
@@ -265,7 +266,7 @@ size, because decoding is whole-image in memory.
    - b. [x] `ByteReading` and the side panel with its Values tab: a 1-8 byte selection or the
      caret's group, any width, stepped from the panel, one byte order at a time. Tests: each reading in each order, a short last group, the panel
      following the caret and the grouping, the order and the panel remembered.
-7. [ ] The structure decoder and the side panel's Struct tab - a large feature of its own, with
+7. [ ] The structure decoder and the side panel's Struct tab - its own feature, with
    its own steps in docs/struct-decoder-plan.md. It needs step 3's selection and 6b's
    `ByteReading` and panel.
 8. [x] UTF-8 character column (`HexUtf8`), an ASCII / UTF-8 choice in the toolbar. Each cell is
@@ -288,7 +289,7 @@ size, because decoding is whole-image in memory.
    - Zero bytes fainter than the offsets, so they stand clear of black text in light theme.
    - A status strip, as the raw view's: the byte's hex, decimal, bits and ASCII name, and its
      position, following the pointer. Step 3 reduces it to the caret's position.
-10. [ ] Architecture doc, roadmap.
+10. [x] Architecture doc, roadmap.
 
 ## Not in this plan
 

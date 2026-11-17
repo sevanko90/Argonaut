@@ -131,10 +131,26 @@ public partial class HexView : UserControl
 
     private void OnGoToEntryLostFocus(object? sender, RoutedEventArgs e) => CloseGoToEntry();
 
+    private HexViewModel? shown;
+
     protected override void OnDataContextChanged(EventArgs e)
     {
         base.OnDataContextChanged(e);
-        Surface.Document = DataContext as HexViewModel;
+        if (this.shown is not null)
+            this.shown.Grew -= OnDocumentGrew;
+        this.shown = DataContext as HexViewModel;
+        if (this.shown is not null)
+            this.shown.Grew += OnDocumentGrew;
+
+        Surface.Document = this.shown;
+        scrollBars.Refresh();
+    }
+
+    /// <summary>More of a streamed document arrived: draw its new rows and let the scrollbar
+    /// reach them.</summary>
+    private void OnDocumentGrew(object? sender, EventArgs e)
+    {
+        Surface.ShowGrowth();
         scrollBars.Refresh();
     }
 }

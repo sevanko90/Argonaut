@@ -470,4 +470,20 @@ public sealed class HexSurfaceTests
         window.CaptureRenderedFrame();
         return Task.CompletedTask;
     });
+
+    [Fact]
+    public Task WhenAStreamedDocumentGrows_ItsPartialLastRowIsLaidOutAgain() => With(new FakeDocument(20), (surface, window) =>
+    {
+        var document = (FakeDocument)surface.Document!;
+        window.CaptureRenderedFrame();
+        Assert.Equal(4, surface.LaidOutCharacters(1).TextLines[0].Length);
+
+        document.Length = 100;
+        surface.ShowGrowth();
+        window.CaptureRenderedFrame();
+
+        Assert.Equal(16, surface.LaidOutCharacters(1).TextLines[0].Length);
+        Assert.Contains(6L, document.RowsRead);
+        return Task.CompletedTask;
+    });
 }

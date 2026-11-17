@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Detection;
@@ -30,6 +31,14 @@ public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDoc
     private IByteOrigin? origin;
     private IByteSource? source;
     private HexToolbarViewModel? toolbar;
+
+    // A streamed document grows after it opens: a background wait for its length to settle, and
+    // a monitor that refreshes what the view shows as the bytes arrive.
+    private static readonly TimeSpan GrowthInterval = TimeSpan.FromMilliseconds(500);
+    private CancellationTokenSource? settling;
+    private Task? settled;
+    private IndexGrowthMonitor? growthMonitor;
+    private long shownLength;
 
     public HexViewModel(IDocumentExportActions? actions = null, HexViewSettings? settings = null)
     {
@@ -233,6 +242,9 @@ public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDoc
         OnPropertyChanged(nameof(FilePath));
         OnPropertyChanged(nameof(StatusDetail));
         OnCaretMoved(this, EventArgs.Empty);
+        this.shownLength = this.source.AvailableLength;
+        if (!this.source.LengthSettled)
+            FollowGrowth(this.source);
         return Task.CompletedTask;
     }
 
@@ -254,8 +266,62 @@ public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDoc
 
     public bool CanHandleFileType(FileTypeDetector.FileKind fileType) => fileType == FileTypeDetector.FileKind.Hex;
 
+    /// <summary>Completes once a streamed document has settled and its last refresh has run - for
+    /// tests; null for a document that was whole when it opened.</summary>
+    internal Task? GrowthFollowed => this.growthMonitor?.FinalRefreshTask;
+
+    /// <summary>Raised on the UI thread when more of a streamed document has arrived, so the
+    /// view can draw the new rows.</summary>
+    public event EventHandler? Grew;
+
+    /// <summary>
+    /// Watches a streamed document grow: a background wait (<see cref="IByteSource.WaitForLength"/>
+    /// blocks by design, so it is never run on the UI thread) completes when the length settles,
+    /// and <see cref="IndexGrowthMonitor"/> refreshes on a tick until then and once after.
+    /// </summary>
+    private void FollowGrowth(IByteSource growing)
+    {
+        this.settling = new CancellationTokenSource();
+        var stopping = this.settling.Token;
+        this.settled = Task.Run(() => growing.WaitForLength(long.MaxValue, stopping), stopping);
+        this.growthMonitor = new IndexGrowthMonitor(GrowthInterval, this.settled, () => growing.LengthSettled, OnGrowthTick);
+    }
+
+    private void OnGrowthTick()
+    {
+        if (this.source is not { } bytes || bytes.AvailableLength == this.shownLength)
+            return;
+
+        this.shownLength = bytes.AvailableLength;
+        OnPropertyChanged(nameof(StatusDetail));
+        OnPropertyChanged(nameof(Length));
+        ReadValues();
+        OnPropertyChanged(nameof(CaretCharacterText));
+        Grew?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>Stops following growth - cancel, then join the wait - before letting the source
+    /// go, so nothing is still reading it once it is released.</summary>
     public void Dispose()
     {
+        this.growthMonitor?.Dispose();
+        this.growthMonitor = null;
+        if (this.settling is { } stop)
+        {
+            stop.Cancel();
+            try
+            {
+                this.settled?.Wait();
+            }
+            catch (AggregateException)
+            {
+                // Cancelled: the wait is over, which is all that is needed.
+            }
+
+            stop.Dispose();
+            this.settling = null;
+        }
+
         var held = this.source;
         this.source = null;
         held?.Release();

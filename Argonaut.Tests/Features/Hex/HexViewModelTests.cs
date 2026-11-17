@@ -209,4 +209,47 @@ public sealed class HexViewModelTests
         hex.Cursor.Place(3);
         Assert.Equal("0xFF not UTF-8", hex.CaretCharacterText);
     }
+
+    [Fact]
+    public async Task AStreamedDocument_ShowsWhatArrives_AndStopsFollowingWhenItSettles()
+    {
+        var source = new GrowingByteSource(Counting(100), initiallyAvailable: 20);
+        using var origin = new GrowingByteOrigin(source);
+        using var hex = new HexViewModel();
+        int grew = 0;
+        hex.Grew += (_, _) => grew++;
+        await hex.LoadAsync(origin);
+        Assert.Equal("Hex · 20 bytes", hex.StatusDetail);
+
+        source.Reveal(30);
+        source.Seal();
+        await hex.GrowthFollowed!;
+
+        Assert.Equal(100, hex.Length);
+        Assert.Equal("Hex · 100 bytes", hex.StatusDetail);
+        Assert.True(grew >= 1);
+    }
+
+    [Fact]
+    public async Task ADocumentWholeWhenItOpens_FollowsNothing()
+    {
+        using var origin = new MemoryByteOrigin(Counting(10), "bytes");
+        using var hex = new HexViewModel();
+        await hex.LoadAsync(origin);
+
+        Assert.Null(hex.GrowthFollowed);
+    }
+
+    [Fact]
+    public async Task ClosingWhileAStreamIsStillArriving_StopsWaitingForIt()
+    {
+        var source = new GrowingByteSource(Counting(100), initiallyAvailable: 20);
+        using var origin = new GrowingByteOrigin(source);
+        var hex = new HexViewModel();
+        await hex.LoadAsync(origin);
+
+        var closing = Task.Run(hex.Dispose);
+        Assert.Same(closing, await Task.WhenAny(closing, Task.Delay(TimeSpan.FromSeconds(5))));
+        Assert.Equal(0, hex.Length);
+    }
 }

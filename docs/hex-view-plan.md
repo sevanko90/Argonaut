@@ -258,7 +258,7 @@ size, because decoding is whole-image in memory.
 5. [ ] Find - **spec first** (see Find's open questions), then build. The sketch: a
    `BytePatternMatcher` and the find bar's Hex mode. Tests: parsing (`0x` prefixes, spacing,
    odd digit counts rejected), matches across chunk boundaries (`ChunkOverlap`).
-6. [ ] Grouping and the side panel, in two parts:
+6. [x] Grouping and the side panel, in two parts:
    - a. [x] The byte-size selector grouping the data column: cell widths, the header, caret,
      selection and pointer highlight by group. Tests: geometry at each size, a partial last
      group, a growing document's last row. Look chosen from screenshots (2 px inside groups).

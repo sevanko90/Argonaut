@@ -41,14 +41,28 @@ them). Keep this in sync when the ownership chain changes.
   row, every position arithmetic on the offset, rows as `long` - so there is no index and any size
   opens at once; `HexSurface` draws the rows on screen with `RowSurface`'s exact scroll model in
   three panels (a pinned offset gutter, the bytes, their text) under a pinned header, colouring
-  bytes by class and marking the byte under the pointer in both panels; the view's status strip
-  describes that byte and where it is. The toolbar names the format (from the signature) and media type and
-  offers Save as… and Open in default app through `IDocumentExportActions`; the shell's
-  `DocumentExport` implements them over `IOriginExporter` (`Engine/Saving`), which copies through
-  the origin on the background, and over `ISystemLauncher.OpenFile`. A document with no file of
-  its own is staged for opening under its suggested name in the app's `Opened` folder, cleared at
-  each start. The line-ending indicator is not shown in Hex. The remaining steps are in
-  [hex-view-plan.md](hex-view-plan.md).
+  bytes by class. Each byte value's digits are laid out once and placed by arithmetic, which is
+  what lets a grouping (1/2/4/8, display only, remembered in `HexViewSettings`) put 2 px between
+  a group's bytes. The text panel reads ASCII or UTF-8 (`HexUtf8`: each character at its first
+  byte's cell, a faint band behind a multi-byte character's cells, at most three bytes looked at
+  either side of a row, so no scan). The caret and selection are `HexCursor` - two boundaries
+  between bytes, moved by click, drag and key a group or a byte at a time - drawn as a solid
+  accent block in the panel the keys act in and an outline in the other; the pointer's mark is
+  softer. `HexViewModel` is `IByteRangeNavigable`, so a view switch keeps the selection; copy
+  (`HexCopy`) puts hex text, the text column or binary data (`Ui/Clipboard/ClipboardFormats`) on
+  the clipboard, and paste-to-open reads binary data first. The status strip names the caret's
+  character and its offset in decimal and hex; clicking the offset, or Ctrl/Cmd+L, opens a go-to
+  entry (`HexOffsetEntry`). The side panel's Values tab (`Features/Hex/Values`) reads a 1-8 byte
+  selection, else the caret's group, as the types its width holds, one byte order at a time;
+  the decoding is `ByteReading`, for the structure decoder to share. A streamed document follows
+  its growth through `IndexGrowthMonitor`, driven by a background wait for its length to settle.
+  The toolbar names the format (from the signature) and media type and offers Save as… and Open
+  in default app through `IDocumentExportActions`; the shell's `DocumentExport` implements them
+  over `IOriginExporter` (`Engine/Saving`), which copies through the origin on the background,
+  and over `ISystemLauncher.OpenFile`. A document with no file of its own is staged for opening
+  under its suggested name in the app's `Opened` folder, cleared at each start. The line-ending
+  indicator is not shown in Hex. Find in hex and the structure decoder are their own features:
+  [hex-view-plan.md](hex-view-plan.md), [struct-decoder-plan.md](struct-decoder-plan.md).
 - **Requests** (`Features/Requests`, `Engine/Http`). New request (empty state, toolbar,
   Ctrl/Cmd+L) opens the request pane. Ctrl/Cmd+L reaches the shell by bubbling, after the views:
   where the focused view has a go-to entry (the tree views' path bar, the hex view's offset) the

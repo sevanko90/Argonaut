@@ -240,8 +240,11 @@ The XML tree view is built (see "The XML tree" in architecture.md). What remains
   separately (see CLAUDE.md on `AvailableLength`). A compressed response states only its
   compressed size, so that works for uncompressed responses alone; compressed ones would need the
   file mapped in growing chunks. Only worth it for tens of MB over a slow connection.
-- **The hex view's next steps, then an image preview**, for binary responses and files: selection
-  and copy, go to offset, hex search, the value inspector - [hex-view-plan.md](hex-view-plan.md).
+- **Find in the hex view** - byte patterns as well as text; to be specced first, open questions in
+  [hex-view-plan.md](hex-view-plan.md) (Find).
+- **The structure decoder** - a pasted C/C++ or C# struct read over selected bytes as a tree, in the
+  hex view's side panel - [struct-decoder-plan.md](struct-decoder-plan.md).
+- **An image preview** for binary responses and files.
 - **HTML colouring in the raw view**, for HTML responses and error pages, which show as plain text.
 - **Ctrl+Shift+V to paste as a new document** while one is open. Plain Ctrl+V pastes only while
   nothing is open, so it can mean "paste into the document" in the raw editor.

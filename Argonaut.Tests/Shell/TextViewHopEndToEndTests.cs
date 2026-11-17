@@ -2,6 +2,7 @@ using System.Text;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Detection;
 using Argonaut.Engine.Settings;
+using Argonaut.Features.Hex;
 using Argonaut.Features.Json;
 using Argonaut.Features.Raw;
 using Argonaut.Shell;
@@ -47,6 +48,48 @@ public sealed class TextViewHopEndToEndTests
             // (JsonByteRangeNavigationTests).
             Assert.True(back.IndexingTask.IsCompletedSuccessfully);
             Assert.Equal(target, back.PendingReveal);
+        }
+        finally
+        {
+            await shell.CloseFileAsync();
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task SwitchToHexAndBack_CarriesTheSelection()
+    {
+        var sb = new StringBuilder();
+        for (int i = 0; i < 5000; i++)
+            sb.Append($"line {i}\n");
+        string text = sb.ToString();
+        string path = Path.Combine(Path.GetTempPath(), $"hop-{Guid.NewGuid():N}.txt");
+        File.WriteAllText(path, text);
+
+        // Switching back from Hex starts the shell's line-ending count, which close cancels but does
+        // not join; a fake keeps that background read of the file from racing the delete below on
+        // Windows.
+        var shell = new MainWindowViewModel(SettingsStore.InMemory(), TestSchemas.Catalog(), _ => Task.FromResult(true),
+            lineEndings: new FakeLineEndingDetector());
+        try
+        {
+            await shell.OpenPathAsync(path, FileTypeDetector.FileKind.Unidentified);
+            var raw = Assert.IsType<RawViewModel>(shell.CurrentDocument);
+            await raw.IndexingTask;
+
+            long target = text.IndexOf("line 4000", StringComparison.Ordinal);
+            await raw.RevealByteRangeAsync(new ByteRange(target, 9));
+
+            await shell.SwitchViewAsync(FileTypeDetector.FileKind.Hex);
+            var hex = Assert.IsType<HexViewModel>(shell.CurrentDocument);
+            Assert.Equal(new ByteRange(target, 9), hex.SelectedByteRange);
+            Assert.Equal(target, hex.Cursor.Caret!.Value.Byte);
+
+            hex.Cursor.Place(target + 2);
+            await shell.SwitchViewAsync(FileTypeDetector.FileKind.Unidentified);
+            var back = Assert.IsType<RawViewModel>(shell.CurrentDocument);
+            await back.IndexingTask;
+            Assert.Equal(ByteRange.At(target + 2), back.SelectedByteRange);
         }
         finally
         {

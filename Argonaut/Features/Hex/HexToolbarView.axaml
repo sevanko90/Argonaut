@@ -1,0 +1,84 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:hex="clr-namespace:Argonaut.Features.Hex"
+             xmlns:icons="clr-namespace:Argonaut.Ui.Icons"
+             xmlns:conv="clr-namespace:Argonaut.Ui.Converters"
+             x:Class="Argonaut.Features.Hex.HexToolbarView"
+             x:DataType="hex:HexToolbarViewModel">
+    <!-- What the bytes are, and where they can go: a copy, or the app the system uses for them. -->
+    <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+        <ToggleButton x:Name="SidePanelToggle"
+                      IsChecked="{Binding ShowsSidePanel, Mode=TwoWay}"
+                      Classes="tool icononly"
+                      ToolTip.Tip="Values: the bytes at the caret read as numbers, times and characters">
+            <icons:LucideIcon Data="{StaticResource Icon.SidePanel}" />
+        </ToggleButton>
+        <!-- How many bytes the hex panel draws together. Display only: the bytes stay in file
+             order, and reading them as numbers is the side panel's job. -->
+        <Button x:Name="GroupSizeButton"
+                Classes="tool"
+                ToolTip.Tip="Group bytes: how many the hex column draws together">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+                <icons:LucideIcon Data="{StaticResource Icon.Binary}" />
+                <TextBlock Classes="toolvalue" Text="{Binding GroupSizeText}" />
+                <icons:LucideIcon Classes="chevron" Data="{StaticResource Icon.ChevronDown}" />
+            </StackPanel>
+            <Button.Flyout>
+                <Flyout Placement="BottomEdgeAlignedLeft">
+                    <StackPanel Margin="12" Spacing="2" MinWidth="150">
+                        <TextBlock Classes="flyouthead" Text="Group bytes by" />
+                        <RadioButton GroupName="groupSize" Content="1 byte" FontSize="12"
+                                     IsChecked="{Binding GroupSizeIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=0}" />
+                        <RadioButton GroupName="groupSize" Content="2 bytes" FontSize="12"
+                                     IsChecked="{Binding GroupSizeIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=1}" />
+                        <RadioButton GroupName="groupSize" Content="4 bytes" FontSize="12"
+                                     IsChecked="{Binding GroupSizeIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=2}" />
+                        <RadioButton GroupName="groupSize" Content="8 bytes" FontSize="12"
+                                     IsChecked="{Binding GroupSizeIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=3}" />
+                    </StackPanel>
+                </Flyout>
+            </Button.Flyout>
+        </Button>
+        <!-- How the character column reads the bytes. -->
+        <Button x:Name="TextEncodingButton"
+                Classes="tool"
+                ToolTip.Tip="Text: how the character column reads the bytes">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+                <icons:LucideIcon Data="{StaticResource Icon.FullText}" />
+                <TextBlock Classes="toolvalue" Text="{Binding TextEncodingText}" />
+                <icons:LucideIcon Classes="chevron" Data="{StaticResource Icon.ChevronDown}" />
+            </StackPanel>
+            <Button.Flyout>
+                <Flyout Placement="BottomEdgeAlignedLeft">
+                    <StackPanel Margin="12" Spacing="2" MinWidth="170">
+                        <TextBlock Classes="flyouthead" Text="Read the text column as" />
+                        <RadioButton GroupName="textEncoding" Content="ASCII" FontSize="12"
+                                     IsChecked="{Binding TextEncodingIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=0}" />
+                        <RadioButton GroupName="textEncoding" Content="UTF-8" FontSize="12"
+                                     IsChecked="{Binding TextEncodingIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=1}" />
+                    </StackPanel>
+                </Flyout>
+            </Button.Flyout>
+        </Button>
+        <TextBlock Text="{Binding Description}"
+                   IsVisible="{Binding HasDescription}"
+                   FontSize="12"
+                   Foreground="{DynamicResource AppMutedTextBrush}"
+                   VerticalAlignment="Center"
+                   Margin="0,0,10,0" />
+        <Button Classes="tool" Click="OnSaveCopy" IsVisible="{Binding OffersActions}"
+                ToolTip.Tip="Save a copy of these bytes">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+                <icons:LucideIcon Data="{StaticResource Icon.Save}" />
+                <TextBlock Classes="toolvalue" Text="Save as…" />
+            </StackPanel>
+        </Button>
+        <Button Classes="tool" Click="OnOpenInDefaultApp" IsVisible="{Binding OffersActions}"
+                ToolTip.Tip="Open in the app your system uses for this kind of file">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+                <icons:LucideIcon Data="{StaticResource Icon.OpenLink}" />
+                <TextBlock Classes="toolvalue" Text="Open in default app" />
+            </StackPanel>
+        </Button>
+    </StackPanel>
+</UserControl>

@@ -117,12 +117,12 @@ public class LineEndingStatusTests : IDisposable
     }
 
     [Fact]
-    public async Task ABinaryDocument_IsNotCounted_UntilItIsShownAsText()
+    public async Task TheHexView_IsNotCounted_UntilItIsShownAsText()
     {
         var detector = new FakeLineEndingDetector();
         var vm = CreateViewModel(detector);
 
-        await vm.OpenPathAsync(WriteFile("logo.png"), FileTypeDetector.FileKind.Binary);
+        await vm.OpenPathAsync(WriteFile("logo.png"), FileTypeDetector.FileKind.Hex);
 
         Assert.Empty(detector.Asked);
         Assert.Null(vm.LineEndingLabel);

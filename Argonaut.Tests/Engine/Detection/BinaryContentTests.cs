@@ -8,7 +8,7 @@ namespace Argonaut.Tests.Engine.Detection;
 /// <summary>
 /// Telling binary from text: a decisive media type wins, an undecided one leaves it to the first
 /// bytes - a known signature, or a NUL outside UTF-16/32 - and detection routes binary documents
-/// to the binary view before any text rule runs.
+/// to the hex view before any text rule runs.
 /// </summary>
 public sealed class BinaryContentTests : IDisposable
 {
@@ -68,10 +68,10 @@ public sealed class BinaryContentTests : IDisposable
     }
 
     [Fact]
-    public void Detection_RoutesSniffedBinaryToTheBinaryView()
+    public void Detection_RoutesSniffedBinaryToTheHexView()
     {
         using var origin = new MemoryByteOrigin(Png, "logo");
-        Assert.Equal(FileTypeDetector.FileKind.Binary, FileTypeDetector.DetectFileType(origin));
+        Assert.Equal(FileTypeDetector.FileKind.Hex, FileTypeDetector.DetectFileType(origin));
     }
 
     [Fact]
@@ -85,14 +85,14 @@ public sealed class BinaryContentTests : IDisposable
     public void Detection_TrustsABinaryMediaType_OverTextLookingBytes()
     {
         using var origin = Response("""{"a":1}"""u8.ToArray(), "image/png");
-        Assert.Equal(FileTypeDetector.FileKind.Binary, FileTypeDetector.DetectFileType(origin));
+        Assert.Equal(FileTypeDetector.FileKind.Hex, FileTypeDetector.DetectFileType(origin));
     }
 
     [Fact]
     public void Detection_TrustsATextMediaType_OverAStrayNul()
     {
         using var origin = Response(Encoding.UTF8.GetBytes("{\"a\":\"x\0\"}"), "application/json");
-        Assert.NotEqual(FileTypeDetector.FileKind.Binary, FileTypeDetector.DetectFileType(origin));
+        Assert.NotEqual(FileTypeDetector.FileKind.Hex, FileTypeDetector.DetectFileType(origin));
     }
 
     [Fact]
@@ -102,14 +102,14 @@ public sealed class BinaryContentTests : IDisposable
         using var png = Response(Png, "application/octet-stream");
 
         Assert.Equal(FileTypeDetector.FileKind.Json, FileTypeDetector.DetectFileType(json));
-        Assert.Equal(FileTypeDetector.FileKind.Binary, FileTypeDetector.DetectFileType(png));
+        Assert.Equal(FileTypeDetector.FileKind.Hex, FileTypeDetector.DetectFileType(png));
     }
 
     [Fact]
-    public void ForcingTheBinaryView_IsAlwaysPlausible()
+    public void ForcingTheHexView_IsAlwaysPlausible()
     {
         using var origin = new MemoryByteOrigin("""{"a":1}"""u8.ToArray(), "pasted");
-        Assert.True(FileTypeDetector.IsPlausibleFor(FileTypeDetector.FileKind.Binary, origin, out _));
+        Assert.True(FileTypeDetector.IsPlausibleFor(FileTypeDetector.FileKind.Hex, origin, out _));
     }
 
     private HttpResponseOrigin Response(byte[] body, string mediaType)

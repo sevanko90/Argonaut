@@ -39,9 +39,10 @@ public static class FileTypeDetector
         /// </summary>
         Xml,
         /// <summary>
-        /// Binary data - nothing a text view can draw.
+        /// Any document's bytes as a hex dump - what binary data, which no text view can draw, is
+        /// detected as, and a view any document can be switched to.
         /// </summary>
-        Binary,
+        Hex,
     }
 
     private const int ChunkSize = 64 * 1024;
@@ -66,7 +67,7 @@ public static class FileTypeDetector
         var mmap = origin.Open();
         try
         {
-            return IsBinary(origin.MediaType, mmap) ? FileKind.Binary : Detect(mmap);
+            return IsBinary(origin.MediaType, mmap) ? FileKind.Hex : Detect(mmap);
         }
         finally
         {
@@ -153,8 +154,8 @@ public static class FileTypeDetector
 
         switch (kind)
         {
-            case FileKind.Binary:
-                // Describing bytes as bytes never fails.
+            case FileKind.Hex:
+                // Showing bytes as bytes never fails.
                 reason = "";
                 return true;
 

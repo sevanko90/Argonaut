@@ -253,12 +253,12 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
         this.lineNumbers = new LineNumberingPreference(settings.Get<LineNumberingSettings>());
         this.lineNumbers.PropertyChanged += (_, _) => OnPropertyChanged(nameof(NumberExcerptFromSource));
         // Saving a copy and opening elsewhere need a place to ask about, bytes to move and an app
-        // to hand them to; without all three the binary view offers neither.
-        var binaryActions = exporter is not null && pickCopyDestination is not null && launcher is not null
+        // to hand them to; without all three the hex view offers neither.
+        var exportActions = exporter is not null && pickCopyDestination is not null && launcher is not null
             ? new DocumentExport(exporter, pickCopyDestination, launcher, log ?? NullDiagnosticLog.Instance)
             : null;
         var views = documentLoader is null
-            ? new DocumentViewCatalog(settings, schemaCatalog, this.lineNumbers, recipes, launcher, settingsSealer: settingsSealer, binaryActions: binaryActions)
+            ? new DocumentViewCatalog(settings, schemaCatalog, this.lineNumbers, recipes, launcher, settingsSealer: settingsSealer, exportActions: exportActions)
             : null;
         this.documentLoader = documentLoader ?? views!.LoadAsync;
         this.hostedDocumentLoader = hostedDocumentLoader ?? (views is null ? null : views.LoadHostedAsync);
@@ -285,8 +285,16 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
     public IDocumentViewModel? CurrentDocument
     {
         get => currentDocument;
-        private set => SetField(ref currentDocument, value);
+        private set
+        {
+            if (SetField(ref currentDocument, value))
+                OnPropertyChanged(nameof(CanChooseContentFont));
+        }
     }
+
+    /// <summary>Whether the content font toggle does anything for what is shown: not in a view
+    /// that is always monospaced (<see cref="IDocumentViewModel.FollowsContentFont"/>).</summary>
+    public bool CanChooseContentFont => currentDocument?.FollowsContentFont ?? true;
 
     public string StatusText
     {
@@ -338,11 +346,11 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
     /// <summary>
     /// Counts the line endings of the input now adopted, unless they were already counted for this
     /// very origin. Only a single input has them; a comparison of two shows none, and neither does
-    /// a binary document, whose bytes have no lines - switching it to a text view counts them then.
+    /// the hex view, which shows bytes, not lines - switching to a text view counts them then.
     /// </summary>
     private void DetectLineEndingsOfInput()
     {
-        var origin = this.ownedOrigins.Count == 1 && currentKind != FileTypeDetector.FileKind.Binary ? this.ownedOrigins[0] : null;
+        var origin = this.ownedOrigins.Count == 1 && currentKind != FileTypeDetector.FileKind.Hex ? this.ownedOrigins[0] : null;
         if (ReferenceEquals(origin, this.lineEndingsOrigin))
             return;
 
@@ -1421,6 +1429,9 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
     /// <see cref="ContentFontMode"/> to swap the AppContentFontFamily resource and tooltip.</summary>
     public void ToggleContentFont()
     {
+        if (!CanChooseContentFont)
+            return;
+
         ContentFontMode = ContentFontMode == ContentFontMode.Monospace
             ? ContentFontMode.SansSerif
             : ContentFontMode.Monospace;

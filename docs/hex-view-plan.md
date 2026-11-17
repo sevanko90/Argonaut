@@ -16,6 +16,14 @@ Status: steps 1, 2 and 8 built on branch `hex-view` - a read-only, polished hex 
   `IDocumentExportActions` in `Features/Hex`, with `DocumentExport` implementing it.
 - **16 bytes per row, fixed.** It is what every hex tool shows, it keeps offsets easy to read, and
   it makes the row geometry pure arithmetic. Other widths (8/32) are a later option.
+- **The data column always shows bytes, in file order.** A byte-size selector (1, 2, 4, 8) only
+  groups them visually; it never turns them into numbers or reorders them. Interpreting bytes is
+  the side panel's job. The row stays 16 bytes, which every group size divides.
+- **A side panel replaces the value inspector.** It sits right of the character column, where
+  there is room to spare, and has tabs: **Values** reads the bytes at the selection start every
+  way they can be read - every size, both byte orders, all at once, with no selector - and
+  **Struct** is the structure decoder (docs/struct-decoder-plan.md). The two are not used at the
+  same time, so they share the space rather than splitting it.
 - **The character column is ASCII**: printable bytes (0x20-0x7E) as themselves, `.` for everything
   else. A UTF-8 column is a later option, held back by characters that cross a row boundary
   (below).
@@ -64,6 +72,10 @@ the 16 bytes in two groups of 8, and the character column.
   either sets both, and arrow keys, Page Up/Down and Home/End move by byte, row and screen.
 - Copy as hex text (`89 50 4E 47`), as the character column, or as raw bytes to the clipboard.
 - The status line shows the caret offset (hex and decimal) and the selection length.
+- Pointer tracking stays, as a mode beside caret tracking: the byte under the pointer keeps its
+  highlight and can drive the status strip while the caret exists. It keeps working while the
+  mouse drags out a selection for highlight and copy - the drag sets the selection, the pointer
+  highlight carries on over it.
 - `IByteRangeNavigable`: Hex reports its selection as a `ByteRange` and reveals one. Switching
   from Raw or JSON to Hex therefore lands on the same bytes, and "show in hex" works from the other
   views for free.
@@ -81,15 +93,59 @@ matcher, not a new scan: `BytePatternMatcher` takes a byte sequence parsed from 
 and "Hex" modes. Text mode uses `LiteralSearchMatcher` unchanged. `ISearchNavigator` reveals a
 match as a selected byte range.
 
-### Value inspector (later step)
+### Byte grouping
 
-For the bytes at the caret, show them read as int8/16/32/64 (signed and unsigned, little- and
-big-endian), float32/64, a UTF-8 character, and a Unix timestamp. It reads at most 8 bytes, so it
-is cheap however large the document.
+A byte-size selector in the toolbar - 1, 2, 4 or 8 - sets how the data column groups its bytes.
+It is display only: the side panel does not depend on it.
 
-It also offers **bits** as a view option: the same 1, 2, 4 or 8 bytes as 0/1 digits, grouped by
-byte (`0100 1001`) and following the inspector's endianness switch. That makes flags and packed
-fields readable without converting by hand.
+- Groups sit at offsets that are multiples of their size from the start of the document, so a
+  group's place is still arithmetic (`o / size`). Reading at an unaligned offset is what the
+  panel is for.
+- A group is its bytes drawn together with a gap after it: `01020304 05060708` at size 4,
+  `0102030405060708` at 8. The bytes stay in file order and keep their byte-class colours.
+- Every size has a fixed cell width, so a row's width is known before anything is drawn, the pan
+  scrollbar is sized when the size changes (outside the render pass), and the header labels each
+  group by its offset (`00 04 08 0C`). The dashed line between the two halves of a row stays.
+- The caret, the selection and the pointer highlight cover a whole group in the data column and
+  its bytes in the character column. Arrow keys move by group in the data column and by byte in
+  the character column.
+
+### Side panel
+
+A panel right of the character panel, filling the space the grid leaves, shown or hidden from
+the toolbar. Its width does not depend on what it shows, so the grid never shifts. Two tabs; the
+chosen one is remembered as a setting.
+
+#### Values
+
+Reads up to 8 bytes from the selection start (the caret when nothing is selected) - any offset,
+not only a group boundary - and lists every reading of them at once. No size or endianness
+selector: each reading has a little-endian and a big-endian column side by side, so nothing has
+to be switched to compare them.
+
+| Size | Readings (each little- and big-endian) |
+|------|----------|
+| 8-bit | uint8, int8, ASCII name (`NUL`, `LF`), UTF-8 character starting here (one column) |
+| 16-bit | uint16, int16, `Half` |
+| 32-bit | uint32, int32, `float`, Unix seconds |
+| 64-bit | uint64, int64, `double`, Unix seconds, Unix milliseconds |
+
+- A header row shows the 8 bytes being read, in file order in hex, so each reading can be traced
+  to its bytes.
+- **Bits** shows the same 8 bytes as 0/1 digits grouped by byte (`0100 1001`), in file order,
+  four bytes to a line.
+- Hovering a reading highlights the bytes it covers in the grid; clicking it copies its value.
+- Near the end of the document, a size with too few bytes left shows `-` rather than reading past
+  it; the smaller sizes still read.
+
+It reads at most 8 bytes with `CopyTo` into a `stackalloc` buffer and decodes with
+`BinaryPrimitives`, so it costs nothing however large the document. The decoding sits in
+`Features/Hex/Values` - `ByteReading` (bytes, size, order) to each reading - because the
+structure decoder uses the same code, so a struct field and the Values tab never disagree.
+
+#### Struct
+
+The structure decoder, planned in docs/struct-decoder-plan.md. This plan only reserves the tab.
 
 ### A UTF-8 character column (later option)
 
@@ -130,12 +186,22 @@ size, because decoding is whole-image in memory.
    binary documents open in Hex, and `BinaryViewModel` and its view are removed. Tests: a detected
    binary document opens in Hex, and the toolbar's actions reach `IDocumentExportActions`.
 3. [ ] Caret, selection, keyboard movement, copy (hex, characters, bytes); `IByteRangeNavigable`.
-   Tests on the view model; a switch from Raw lands on the same bytes.
+   Pointer tracking kept as a mode (see Selection, caret and copy), not replaced by the caret,
+   and working during a mouse drag-select. Tests on the view model; a switch from Raw lands on
+   the same bytes.
+   First, a fix to step 8's strip: each element (hex, decimal, bits, name, position) gets its own
+   fixed-width section that stays put. Today they flow one after another, so the bits shift as
+   the hex and name before them change width.
 4. [ ] Go to offset.
 5. [ ] `BytePatternMatcher` and the find bar's Hex mode. Tests: parsing (`0x` prefixes, spacing,
    odd digit counts rejected), matches across chunk boundaries (`ChunkOverlap`).
-6. [ ] Value inspector, with the bits option. Tests: each reading at both endiannesses, reads
-   near the end of the document (fewer than 8 bytes left).
+6. [ ] Grouping and the side panel, in two parts:
+   - a. The byte-size selector grouping the data column: cell widths, the header, caret,
+     selection and pointer highlight by group. Tests: geometry at each size, a partial last
+     group, a growing document's last row.
+   - b. `ByteReading` and the side panel with its Values tab (Struct reserved). Tests: each
+     reading at both endiannesses, an unaligned start, fewer than 8 bytes left (smaller sizes
+     still read), the panel follows the caret. Visual pass from screenshots in both themes.
 7. [ ] UTF-8 character column, if measuring says the boundary rule reads well. Tests: a character
    crossing a row, invalid and truncated sequences, the 3-byte look-back at a row start.
 8. [x] Visual polish, chosen from screenshots in both themes:
@@ -156,5 +222,6 @@ size, because decoding is whole-image in memory.
 
 - Editing bytes (overwrite or insert). The raw view's piece table could carry an overwrite mode
   later, but saving binary edits has to keep the save rules in CLAUDE.md, which is its own plan.
-- Structure templates (parsing a PNG's chunks, a ZIP's directory).
+- Structure templates (parsing a PNG's chunks, a ZIP's directory). Mapping a pasted C/C++ or C#
+  struct onto selected bytes is its own plan, docs/struct-decoder-plan.md, built on this one.
 - Comparing two binary documents.

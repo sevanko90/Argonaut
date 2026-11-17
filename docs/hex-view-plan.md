@@ -108,11 +108,33 @@ open. It is pure arithmetic, with no waiting. (Ctrl/Cmd+G stays find next.)
 
 ### Find
 
-`SearchSession` already scans bytes in chunks through an `ISearchMatcher`, so hex search is a new
-matcher, not a new scan: `BytePatternMatcher` takes a byte sequence parsed from the find term
-(`89 50 4E 47`, spaces optional) and matches exactly. In the hex view the find bar offers "Text"
-and "Hex" modes. Text mode uses `LiteralSearchMatcher` unchanged. `ISearchNavigator` reveals a
-match as a selected byte range.
+**To be specced before step 5 is built.** What is here is a sketch. Searching a hex view is
+mostly searching for bytes, not text, and that needs more thought than a second mode on the
+find bar.
+
+The sketch: `SearchSession` already scans bytes in chunks through an `ISearchMatcher`, so hex
+search is a new matcher, not a new scan. `BytePatternMatcher` takes a byte sequence parsed from
+the find term (`89 50 4E 47`, spaces optional) and matches exactly. In the hex view the find bar
+offers "Text" and "Hex" modes, Text using `LiteralSearchMatcher` unchanged. `ISearchNavigator`
+reveals a match as a selected byte range.
+
+Open questions for the spec:
+
+- **How the kind of search is chosen.** A Text/Hex switch, or read from the term (`0x` prefix,
+  pairs of hex digits). Which one the hex view starts in, and whether it is remembered.
+- **What a byte pattern can say.** Exact bytes only, or also wildcards (`89 ?? 4E`) and nibble
+  masks. Whether the term can be pasted straight from Copy as hex.
+- **Text in a binary file.** UTF-8 only, or also UTF-16 (little- and big-endian), which is how
+  Windows binaries hold their strings. Whether ASCII case-insensitivity applies.
+- **Searching for a value.** A number as the bytes some type would hold (`1234` as a little-endian
+  uint32, a float) - the Values tab's readings (step 6b) run backwards. Possibly its own step.
+- **Starting points.** Find from a selection (select bytes, Ctrl/Cmd+F fills the term), from the
+  caret forwards, and wrapping; whether a selection can limit the search to itself.
+- **Showing matches.** Every match highlighted in both panels and the current one marked, beside
+  the caret, the selection and the pointer's mark; a match running across rows; the count and
+  where the scan has reached, as the find bar shows it today.
+- **Cost.** Matches can be dense in binary data (a search for `00`), so how many are kept and
+  drawn has to have a limit, as the text views' search does.
 
 ### Byte grouping
 
@@ -221,7 +243,8 @@ size, because decoding is whole-image in memory.
    pointer look chosen from screenshots in both themes.
 4. [x] Go to offset. Tests: parsing, the view model's go-to and its messages, the entry's keys,
    and Ctrl/Cmd+L reaching the window only when no view claims it.
-5. [ ] `BytePatternMatcher` and the find bar's Hex mode. Tests: parsing (`0x` prefixes, spacing,
+5. [ ] Find - **spec first** (see Find's open questions), then build. The sketch: a
+   `BytePatternMatcher` and the find bar's Hex mode. Tests: parsing (`0x` prefixes, spacing,
    odd digit counts rejected), matches across chunk boundaries (`ChunkOverlap`).
 6. [ ] Grouping and the side panel, in two parts:
    - a. The byte-size selector grouping the data column: cell widths, the header, caret,

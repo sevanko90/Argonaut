@@ -14,6 +14,11 @@ public partial class HexView : UserControl
         InitializeComponent();
         scrollBars = new RowScrollBars(Surface, VerticalScrollBar, PanScrollBar);
         DetachedFromVisualTree += (_, _) => scrollBars.Dispose();
+
+        // The dump is the document, so it takes focus when the document is shown: the caret
+        // shows solid and the keys reach it, rather than focus landing on the window's chrome.
+        // Nothing else has been focused yet at load time, so this takes focus from nobody.
+        Loaded += (_, _) => Surface.Focus();
     }
 
     protected override void OnDataContextChanged(EventArgs e)

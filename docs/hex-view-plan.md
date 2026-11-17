@@ -5,7 +5,7 @@ binary response or file can be read rather than only saved or handed to another 
 second step of binary support (#51); the first (Binary, describing a binary document with Save as…
 and Open in default app) shipped in v2.3.2 and is folded into the hex view by step 2.
 
-Status: steps 1, 2 and 8 built on branch `hex-view` - a read-only, polished hex view that binary documents open in.
+Status: steps 1, 2 and 9 built on branch `hex-view` - a read-only, polished hex view that binary documents open in.
 
 ## Decided
 
@@ -71,11 +71,16 @@ the 16 bytes in two groups of 8, and the character column.
 - A byte caret and a selection, kept in step between the hex and character columns. Clicking in
   either sets both, and arrow keys, Page Up/Down and Home/End move by byte, row and screen.
 - Copy as hex text (`89 50 4E 47`), as the character column, or as raw bytes to the clipboard.
-- The status line shows the caret offset (hex and decimal) and the selection length.
+- The status strip shows where the caret is, as the raw view's does: the caret's position
+  (`Byte 1,234 · 0x4D2`: decimal in the document's line numbering, then the hex offset the
+  gutter shows) at the right, in one fixed place, with the
+  selection length beside it when something is selected. It follows the caret as it moves by
+  click or key. What the byte *is* - hex, decimal, bits, ASCII name - is not on the strip; the
+  side panel's Values tab shows that, and more (step 6b).
 - Pointer tracking stays, as a mode beside caret tracking: the byte under the pointer keeps its
-  highlight and can drive the status strip while the caret exists. It keeps working while the
-  mouse drags out a selection for highlight and copy - the drag sets the selection, the pointer
-  highlight carries on over it.
+  highlight in both panels. It keeps working while the mouse drags out a selection for highlight
+  and copy - the drag sets the selection, the pointer highlight carries on over it. The strip
+  follows the caret, not the pointer.
 - `IByteRangeNavigable`: Hex reports its selection as a `ByteRange` and reveals one. Switching
   from Raw or JSON to Hex therefore lands on the same bytes, and "show in hex" works from the other
   views for free.
@@ -145,7 +150,8 @@ structure decoder uses the same code, so a struct field and the Values tab never
 
 #### Struct
 
-The structure decoder, planned in docs/struct-decoder-plan.md. This plan only reserves the tab.
+The structure decoder, planned in docs/struct-decoder-plan.md and built as its own step (7). Until
+then the panel has the Values tab only.
 
 ### A UTF-8 character column (later option)
 
@@ -189,9 +195,10 @@ size, because decoding is whole-image in memory.
    Pointer tracking kept as a mode (see Selection, caret and copy), not replaced by the caret,
    and working during a mouse drag-select. Tests on the view model; a switch from Raw lands on
    the same bytes.
-   First, a fix to step 8's strip: each element (hex, decimal, bits, name, position) gets its own
-   fixed-width section that stays put. Today they flow one after another, so the bits shift as
-   the hex and name before them change width.
+   The status strip becomes the raw view's: it drops the byte's hex, decimal, bits and name (the
+   Values tab brings them back in 6b) and shows the caret's position in decimal and hex, and the
+   selection length,
+   in a fixed place at the right. Tests: the position follows caret movement by key and click.
 4. [ ] Go to offset.
 5. [ ] `BytePatternMatcher` and the find bar's Hex mode. Tests: parsing (`0x` prefixes, spacing,
    odd digit counts rejected), matches across chunk boundaries (`ChunkOverlap`).
@@ -199,12 +206,15 @@ size, because decoding is whole-image in memory.
    - a. The byte-size selector grouping the data column: cell widths, the header, caret,
      selection and pointer highlight by group. Tests: geometry at each size, a partial last
      group, a growing document's last row.
-   - b. `ByteReading` and the side panel with its Values tab (Struct reserved). Tests: each
-     reading at both endiannesses, an unaligned start, fewer than 8 bytes left (smaller sizes
-     still read), the panel follows the caret. Visual pass from screenshots in both themes.
-7. [ ] UTF-8 character column, if measuring says the boundary rule reads well. Tests: a character
+   - b. `ByteReading` and the side panel with its Values tab. Tests: each reading at both
+     endiannesses, an unaligned start, fewer than 8 bytes left (smaller sizes still read), the
+     panel follows the caret. Visual pass from screenshots in both themes.
+7. [ ] The structure decoder and the side panel's Struct tab - a large feature of its own, with
+   its own steps in docs/struct-decoder-plan.md. It needs step 3's selection and 6b's
+   `ByteReading` and panel.
+8. [ ] UTF-8 character column, if measuring says the boundary rule reads well. Tests: a character
    crossing a row, invalid and truncated sequences, the 3-byte look-back at a row start.
-8. [x] Visual polish, chosen from screenshots in both themes:
+9. [x] Visual polish, chosen from screenshots in both themes:
    - Three panels: a pinned offset gutter and the character panel on the panel tint, the bytes on
      the window background; the character panel and the header end where the data does.
    - A pinned header - "Offset", each byte's column, "Text" over the characters (it will hold
@@ -215,8 +225,8 @@ size, because decoding is whole-image in memory.
      band along its row. (Zebra striping and column bands were tried and dropped for this.)
    - Zero bytes fainter than the offsets, so they stand clear of black text in light theme.
    - A status strip, as the raw view's: the byte's hex, decimal, bits and ASCII name, and its
-     position. It follows the pointer until step 3 gives the view a caret to follow.
-9. [ ] Architecture doc, roadmap.
+     position, following the pointer. Step 3 reduces it to the caret's position.
+10. [ ] Architecture doc, roadmap.
 
 ## Not in this plan
 

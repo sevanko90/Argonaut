@@ -5,7 +5,7 @@ read as that struct, shown the way the JSON view shows a document: `name: value`
 structs and arrays expanding in place. ("Tree" below means that view - the JSON view is drawn by
 `Ui/Tree`'s `TreeSurface`, and this reuses it.) It is built
 on the hex view (docs/hex-view-plan.md) and needs its caret, selection and `ByteReading` (steps 3
-and 6) first.
+and 6b) first; it is that plan's step 7.
 
 Status: proposed, nothing built.
 

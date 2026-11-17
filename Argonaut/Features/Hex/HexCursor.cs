@@ -17,6 +17,18 @@ public readonly record struct HexCaret(long Anchor, long Offset)
     /// whichever way round - what a drag between two bytes selects.</summary>
     public static HexCaret Spanning(long from, long to) => to >= from ? new(from, to + 1) : new(from + 1, to);
 
+    /// <summary>From the group holding byte <paramref name="from"/> to the group holding byte
+    /// <paramref name="to"/>, both whole - what a drag across grouped bytes selects. A selection
+    /// that runs past the end is kept inside it when it is set.</summary>
+    public static HexCaret SpanningGroups(long from, long to, int groupSize)
+    {
+        long fromStart = HexRows.GroupStart(from, groupSize);
+        long toStart = HexRows.GroupStart(to, groupSize);
+        return toStart >= fromStart
+            ? new(fromStart, toStart + groupSize)
+            : new(fromStart + groupSize, toStart);
+    }
+
     public long Start => Math.Min(Anchor, Offset);
 
     public long End => Math.Max(Anchor, Offset);
@@ -99,13 +111,15 @@ public sealed class HexCursor(Func<long> length)
     public void Place(long offset) => Select(HexCaret.At(offset));
 
     /// <summary>Takes the selection from where it is anchored to byte <paramref name="offset"/>,
-    /// that byte included - a shift-click.</summary>
-    public void ExtendTo(long offset)
+    /// that byte included - a shift-click. With <paramref name="groupSize"/> it takes the byte's
+    /// whole group.</summary>
+    public void ExtendTo(long offset, int groupSize = 1)
     {
         if (Caret is not { } caret)
             return;
 
-        Select(offset >= caret.Anchor ? new HexCaret(caret.Anchor, offset + 1) : new HexCaret(caret.Anchor, offset));
+        long start = HexRows.GroupStart(offset, groupSize);
+        Select(offset >= caret.Anchor ? new HexCaret(caret.Anchor, start + groupSize) : new HexCaret(caret.Anchor, start));
     }
 
     public void SelectAll()
@@ -137,32 +151,36 @@ public sealed class HexCursor(Func<long> length)
     /// <summary>
     /// Moves the caret by <paramref name="move"/>, a page being <paramref name="pageRows"/> rows.
     /// With <paramref name="extend"/> the anchor stays and the selection grows or shrinks to the
-    /// new place; without it the selection goes and the caret lands on a byte.
+    /// new place; without it the selection goes and the caret lands on a byte. With a
+    /// <paramref name="groupSize"/> it steps a group at a time and lands on a group's first byte,
+    /// as the hex panel moves when its bytes are grouped.
     /// </summary>
-    public void Move(HexMove move, bool extend, int pageRows)
+    public void Move(HexMove move, bool extend, int pageRows, int groupSize = 1)
     {
         if (Caret is not { } caret)
             return;
 
         long end = length();
-        long from = extend ? caret.Offset : caret.Byte;
+        long lastPlace = extend ? end : HexRows.GroupStart(end - 1, groupSize);
+        long from = extend ? caret.Offset : HexRows.GroupStart(caret.Byte, groupSize);
         long rowStart = HexRows.StartOf(HexRows.RowOf(from));
         long page = (long)Math.Max(1, pageRows) * HexRows.BytesPerRow;
         long to = move switch
         {
-            HexMove.Left => from - 1,
-            HexMove.Right => from + 1,
+            // Extending steps from a boundary to the next one a group away.
+            HexMove.Left => extend ? HexRows.GroupStart(from - 1, groupSize) : from - groupSize,
+            HexMove.Right => extend ? HexRows.GroupStart(from, groupSize) + groupSize : from + groupSize,
             HexMove.Up => from - HexRows.BytesPerRow,
             HexMove.Down => from + HexRows.BytesPerRow,
             HexMove.PageUp => from - page,
             HexMove.PageDown => from + page,
             HexMove.RowStart => rowStart,
 
-            // Extending takes the selection to the end of the row, its last byte included; a
-            // caret alone lands on that byte.
-            HexMove.RowEnd => rowStart + (extend ? HexRows.BytesPerRow : HexRows.BytesPerRow - 1),
+            // Extending takes the selection to the end of the row, its last group included; a
+            // caret alone lands on that group.
+            HexMove.RowEnd => rowStart + (extend ? HexRows.BytesPerRow : HexRows.BytesPerRow - groupSize),
             HexMove.DocumentStart => 0,
-            HexMove.DocumentEnd => extend ? end : end - 1,
+            HexMove.DocumentEnd => lastPlace,
             _ => from,
         };
 
@@ -170,8 +188,8 @@ public sealed class HexCursor(Func<long> length)
         // to an end - except a page, which goes as far as it can, as an editor's does.
         if (to < 0)
             to = move is HexMove.Up ? from : 0;
-        else if (to > (extend ? end : end - 1))
-            to = move is HexMove.Down ? from : extend ? end : end - 1;
+        else if (to > lastPlace)
+            to = move is HexMove.Down ? from : lastPlace;
 
         Select(extend ? new HexCaret(caret.Anchor, to) : HexCaret.At(to));
     }

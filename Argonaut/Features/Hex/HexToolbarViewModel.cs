@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Argonaut.Engine.Bytes;
@@ -10,10 +11,48 @@ namespace Argonaut.Features.Hex;
 /// image, <c>image/png</c>), and the two things worth doing with bytes the app only shows - saving
 /// a copy and opening them in another app.
 /// </summary>
-public sealed class HexToolbarViewModel(IByteOrigin origin, string? format, IDocumentExportActions? actions) : ObservableObject
+public sealed class HexToolbarViewModel : ObservableObject
 {
+    private readonly IByteOrigin origin;
+    private readonly IDocumentExportActions? actions;
+    private readonly HexViewModel? document;
+
+    public HexToolbarViewModel(IByteOrigin origin, string? format, IDocumentExportActions? actions, HexViewModel? document = null)
+    {
+        this.origin = origin;
+        this.actions = actions;
+        this.document = document;
+        Description = Describe(format, origin.MediaType);
+        if (document is not null)
+        {
+            document.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(HexViewModel.GroupSize))
+                {
+                    OnPropertyChanged(nameof(GroupSizeIndex));
+                    OnPropertyChanged(nameof(GroupSizeText));
+                }
+            };
+        }
+    }
+
     /// <summary>"PNG image · image/png", either part alone, or null when neither is known.</summary>
-    public string? Description { get; } = Describe(format, origin.MediaType);
+    public string? Description { get; }
+
+    /// <summary>The grouping as an index into <see cref="HexRows.GroupSizes"/>, for the
+    /// selector's radio buttons.</summary>
+    public int GroupSizeIndex
+    {
+        get => Array.IndexOf(HexRows.GroupSizes, this.document?.GroupSize ?? 1);
+        set
+        {
+            if (this.document is not null && value >= 0 && value < HexRows.GroupSizes.Length)
+                this.document.GroupSize = HexRows.GroupSizes[value];
+        }
+    }
+
+    /// <summary>"1 byte", "4 bytes": what the selector's button says.</summary>
+    public string GroupSizeText => (this.document?.GroupSize ?? 1) is 1 ? "1 byte" : $"{this.document!.GroupSize} bytes";
 
     public bool HasDescription => Description is not null;
 

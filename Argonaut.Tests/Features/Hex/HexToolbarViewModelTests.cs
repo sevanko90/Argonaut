@@ -103,4 +103,35 @@ public sealed class HexToolbarViewModelTests
 
         public void Dispose() => inner.Dispose();
     }
+
+    [Fact]
+    public async Task TheGroupingSelector_SetsTheDocumentsGrouping_AndRemembersIt()
+    {
+        using var origin = new MemoryByteOrigin(Png, "logo");
+        var settings = new HexViewSettings();
+        var hex = new HexViewModel(null, settings);
+        await hex.LoadAsync(origin);
+        var toolbar = Assert.IsType<HexToolbarViewModel>(hex.Toolbar);
+        var changed = new List<string?>();
+        toolbar.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        Assert.Equal(0, toolbar.GroupSizeIndex);
+        Assert.Equal("1 byte", toolbar.GroupSizeText);
+
+        toolbar.GroupSizeIndex = 2;
+
+        Assert.Equal(4, hex.GroupSize);
+        Assert.Equal(4, settings.GroupSize);
+        Assert.Equal("4 bytes", toolbar.GroupSizeText);
+        Assert.Contains(nameof(HexToolbarViewModel.GroupSizeText), changed);
+    }
+
+    [Fact]
+    public void ARememberedGroupingThatIsNoSize_ReadsAsBytesOneByOne()
+    {
+        var settings = System.Text.Json.JsonSerializer.Deserialize("""{ "groupSize": 3 }""", HexViewSettings.JsonTypeInfo)!;
+        Assert.Equal(1, settings.GroupSize);
+        Assert.Equal(1, System.Text.Json.JsonSerializer.Deserialize("{}", HexViewSettings.JsonTypeInfo)!.GroupSize);
+        Assert.Equal(8, System.Text.Json.JsonSerializer.Deserialize("""{ "GroupSize": 8 }""", HexViewSettings.JsonTypeInfo)!.GroupSize);
+    }
 }

@@ -2,10 +2,37 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:hex="clr-namespace:Argonaut.Features.Hex"
              xmlns:icons="clr-namespace:Argonaut.Ui.Icons"
+             xmlns:conv="clr-namespace:Argonaut.Ui.Converters"
              x:Class="Argonaut.Features.Hex.HexToolbarView"
              x:DataType="hex:HexToolbarViewModel">
     <!-- What the bytes are, and where they can go: a copy, or the app the system uses for them. -->
     <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+        <!-- How many bytes the hex panel draws together. Display only: the bytes stay in file
+             order, and reading them as numbers is the side panel's job. -->
+        <Button x:Name="GroupSizeButton"
+                Classes="tool"
+                ToolTip.Tip="Group bytes: how many the hex column draws together">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+                <icons:LucideIcon Data="{StaticResource Icon.Binary}" />
+                <TextBlock Classes="toolvalue" Text="{Binding GroupSizeText}" />
+                <icons:LucideIcon Classes="chevron" Data="{StaticResource Icon.ChevronDown}" />
+            </StackPanel>
+            <Button.Flyout>
+                <Flyout Placement="BottomEdgeAlignedLeft">
+                    <StackPanel Margin="12" Spacing="2" MinWidth="150">
+                        <TextBlock Classes="flyouthead" Text="Group bytes by" />
+                        <RadioButton GroupName="groupSize" Content="1 byte" FontSize="12"
+                                     IsChecked="{Binding GroupSizeIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=0}" />
+                        <RadioButton GroupName="groupSize" Content="2 bytes" FontSize="12"
+                                     IsChecked="{Binding GroupSizeIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=1}" />
+                        <RadioButton GroupName="groupSize" Content="4 bytes" FontSize="12"
+                                     IsChecked="{Binding GroupSizeIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=2}" />
+                        <RadioButton GroupName="groupSize" Content="8 bytes" FontSize="12"
+                                     IsChecked="{Binding GroupSizeIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=3}" />
+                    </StackPanel>
+                </Flyout>
+            </Button.Flyout>
+        </Button>
         <TextBlock Text="{Binding Description}"
                    IsVisible="{Binding HasDescription}"
                    FontSize="12"

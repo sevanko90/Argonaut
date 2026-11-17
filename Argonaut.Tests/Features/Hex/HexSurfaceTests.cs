@@ -143,13 +143,12 @@ public sealed class HexSurfaceTests
         surface.OtherByteForeground = other;
         surface.Document = new BytesDocument([0x00, (byte)'A', 0xFF, (byte)'B', 0x00]);
 
-        var (hex, characters) = surface.LaidOutRow(0);
+        var characters = surface.LaidOutCharacters(0);
 
-        Assert.Same(muted, BrushAt(hex, 0));
-        Assert.Same(text, BrushAt(hex, 3));
-        Assert.Same(other, BrushAt(hex, 6));
-        Assert.Same(text, BrushAt(hex, 9));
-        Assert.Same(muted, BrushAt(hex, 12));
+        Assert.Same(muted, BrushAt(surface.LaidOutByte(0x00), 0));
+        Assert.Same(text, BrushAt(surface.LaidOutByte((byte)'A'), 0));
+        Assert.Same(other, BrushAt(surface.LaidOutByte(0xFF), 0));
+        Assert.Equal("FF", surface.LaidOutByte(0xFF).TextLines[0].TextRuns.Single().Text.ToString());
         Assert.Same(muted, BrushAt(characters, 0));
         Assert.Same(text, BrushAt(characters, 1));
         Assert.Same(other, BrushAt(characters, 2));
@@ -166,10 +165,8 @@ public sealed class HexSurfaceTests
         surface.ZeroByteForeground = zero;
         surface.Document = new BytesDocument([0x00, (byte)'A']);
 
-        var (hex, characters) = surface.LaidOutRow(0);
-
-        Assert.Same(zero, BrushAt(hex, 0));
-        Assert.Same(zero, BrushAt(characters, 0));
+        Assert.Same(zero, BrushAt(surface.LaidOutByte(0x00), 0));
+        Assert.Same(zero, BrushAt(surface.LaidOutCharacters(0), 0));
         return Task.CompletedTask;
     });
 
@@ -366,6 +363,87 @@ public sealed class HexSurfaceTests
         window.CaptureRenderedFrame();
         Assert.Equal(0, surface.CachedLayoutCount);
         Assert.Equal(0, surface.ScrollFraction);
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task Grouped_AClickInTheHexPanel_TakesTheGroup_AndInTheCharacters_TheByte() => With(new FakeDocument(1000), (surface, _) =>
+    {
+        surface.GroupSize = 4;
+        surface.ClickAt(surface.CentreOfByte(6, inCharacters: false));
+        Assert.Equal(HexCaret.At(4), surface.Document!.Cursor.Caret);
+
+        surface.ClickAt(surface.CentreOfByte(6, inCharacters: true));
+        Assert.Equal(HexCaret.At(6), surface.Document!.Cursor.Caret);
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task Grouped_EveryByteIsStillUnderThePointer_InBothPanels() => With(new FakeDocument(1000), (surface, _) =>
+    {
+        foreach (int size in HexRows.GroupSizes)
+        {
+            surface.GroupSize = size;
+            for (int column = 0; column < HexRows.BytesPerRow; column++)
+            {
+                surface.HoverAt(surface.CentreOfByte(column, inCharacters: false));
+                Assert.Equal(column, surface.HoveredOffset);
+            }
+        }
+
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task Grouped_ADragTakesWholeGroups() => With(new FakeDocument(1000), (surface, _) =>
+    {
+        surface.GroupSize = 8;
+        surface.DragBetween(surface.CentreOfByte(3, inCharacters: false), surface.CentreOfByte(9, inCharacters: false, screenRow: 1));
+        Assert.Equal((0L, 32L), (surface.Document!.Cursor.Caret!.Value.Start, surface.Document!.Cursor.Caret!.Value.End));
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task ChangingTheGrouping_LaysTheRowsOutAgain_AndDrawsAPartialLastGroup() => With(new FakeDocument(1_000_003), (surface, window) =>
+    {
+        surface.ScrollToEnd();
+        window.CaptureRenderedFrame();
+        var cursor = surface.Document!.Cursor;
+        cursor.Place(1_000_001);
+
+        surface.GroupSize = 4;
+        surface.HoverAt(surface.CentreOfByte(0, inCharacters: false));
+        window.CaptureRenderedFrame();
+
+        // The panel narrows to the grouped text, plus a gap between each group's bytes.
+        double groupedWidth = surface.HexPanelWidth;
+        surface.GroupSize = 1;
+        Assert.True(groupedWidth < surface.HexPanelWidth);
+        surface.GroupSize = 4;
+
+        // Not one of the sizes: the surface keeps to bytes one by one.
+        surface.GroupSize = 3;
+        Assert.Equal(1, surface.GroupSize);
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task Grouped_AGrowingDocumentsLastGroup_FillsInAsItArrives() => With(new FakeDocument(18), (surface, window) =>
+    {
+        var document = (FakeDocument)surface.Document!;
+        surface.GroupSize = 4;
+        document.Cursor.Move(HexMove.DocumentEnd, extend: false, pageRows: 5, groupSize: 4);
+        Assert.Equal(HexCaret.At(16), document.Cursor.Caret);
+        surface.HoverAt(surface.CentreOfByte(1, inCharacters: false, screenRow: 1));
+        window.CaptureRenderedFrame();
+
+        document.Length = 23;
+        surface.InvalidateVisual();
+        window.CaptureRenderedFrame();
+        document.Cursor.Move(HexMove.DocumentEnd, extend: false, pageRows: 5, groupSize: 4);
+        Assert.Equal(HexCaret.At(20), document.Cursor.Caret);
+        surface.HoverAt(surface.CentreOfByte(6, inCharacters: false, screenRow: 1));
+        Assert.Equal(22, surface.HoveredOffset);
         return Task.CompletedTask;
     });
 }

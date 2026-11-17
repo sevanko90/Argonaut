@@ -93,6 +93,11 @@ public sealed class HexSurface : RowSurface
     public static readonly StyledProperty<IBrush?> RowMarkBrushProperty =
         AvaloniaProperty.Register<HexSurface, IBrush?>(nameof(RowMarkBrush));
 
+    /// <summary>How many bytes the hex panel draws together (<see cref="HexRows.GroupSizes"/>).
+    /// Display only: the bytes stay in file order.</summary>
+    public static readonly StyledProperty<int> GroupSizeProperty =
+        AvaloniaProperty.Register<HexSurface, int>(nameof(GroupSize), 1, coerce: (_, size) => HexRows.IsGroupSize(size) ? size : 1);
+
     /// <summary>Space either side of a panel's text.</summary>
     private const double PanelPadding = 14;
 
@@ -108,9 +113,8 @@ public sealed class HexSurface : RowSurface
 
     private const double RowsTop = HeaderHeight + HeaderGap;
 
-    /// <summary>The hex text's width in characters: three a byte and one more between the groups,
-    /// less the trailing space.</summary>
-    private const int HexTextChars = HexRows.BytesPerRow * 3;
+    /// <summary>The hex text's width in characters at the current grouping.</summary>
+    private int HexTextChars => HexRows.HexWidth(GroupSize);
 
     /// <summary>Extra room between the character panel's characters, so a mark around one
     /// clears its neighbours; each glyph sits in the middle of its widened cell.</summary>
@@ -138,7 +142,6 @@ public sealed class HexSurface : RowSurface
     private double hexPanelWidth;
     private double characterPanelWidth;
 
-    private TextLayout? hexHeader;
     private TextLayout? characterHeader;
     private TextLayout? offsetHeader;
     private Pen? headerPen;
@@ -158,15 +161,24 @@ public sealed class HexSurface : RowSurface
     private TextRunProperties? zeroRun;
     private TextRunProperties? otherRun;
 
-    private sealed record RowLayouts(TextLayout Offset, TextLayout Hex, TextLayout Characters) : IDisposable
+    /// <summary>A row on screen: its offset and characters laid out, and its bytes, which the
+    /// hex panel draws one by one from <see cref="byteGlyphs"/>.</summary>
+    private sealed record RowLayouts(TextLayout Offset, TextLayout Characters, byte[] Bytes, int Count) : IDisposable
     {
         public void Dispose()
         {
             Offset.Dispose();
-            Hex.Dispose();
             Characters.Dispose();
         }
     }
+
+    // A byte's two hex digits, laid out once for each value in its class's colour, and placed
+    // wherever the grouping puts it - so a row's hex costs no text of its own, and the gaps
+    // between a group's bytes are arithmetic.
+    private readonly TextLayout?[] byteGlyphs = new TextLayout?[256];
+
+    // "00".."0F" over the hex panel, laid out once and placed over each group.
+    private readonly TextLayout?[] columnLabels = new TextLayout?[HexRows.BytesPerRow];
 
     static HexSurface()
     {
@@ -227,6 +239,12 @@ public sealed class HexSurface : RowSurface
         set => SetValue(ByteMarkForegroundProperty, value);
     }
 
+    public int GroupSize
+    {
+        get => GetValue(GroupSizeProperty);
+        set => SetValue(GroupSizeProperty, value);
+    }
+
     public IBrush? RowMarkBrush
     {
         get => GetValue(RowMarkBrushProperty);
@@ -277,12 +295,14 @@ public sealed class HexSurface : RowSurface
     /// <summary>Layouts held, for tests: a screen's worth at most.</summary>
     internal int CachedLayoutCount => this.layouts.Count;
 
-    /// <summary>Row <paramref name="row"/>'s hex and character text as drawn, for tests.</summary>
-    internal (TextLayout Hex, TextLayout Characters) LaidOutRow(long row)
-    {
-        var laid = LayoutFor(row, new Typeface(FontFamily));
-        return (laid.Hex, laid.Characters);
-    }
+    /// <summary>Row <paramref name="row"/>'s character text as drawn, for tests.</summary>
+    internal TextLayout LaidOutCharacters(long row) => LayoutFor(row, new Typeface(FontFamily)).Characters;
+
+    /// <summary>The digits drawn for a byte of <paramref name="value"/>, for tests.</summary>
+    internal TextLayout LaidOutByte(byte value) => ByteGlyphs(value, new Typeface(FontFamily));
+
+    /// <summary>The hex panel's width, for tests.</summary>
+    internal double HexPanelWidth => this.hexPanelWidth;
 
     /// <summary>The middle of the byte at <paramref name="column"/> on screen row
     /// <paramref name="screenRow"/>, in the hex panel or the character panel - where a pointer
@@ -292,7 +312,7 @@ public sealed class HexSurface : RowSurface
         double y = RowsTop + (screenRow + 0.5) * RowHeight;
         return inCharacters
             ? new Point(CharacterCellLeft(column) + CharacterCell / 2, y)
-            : new Point(HexTextLeft + (HexByteColumn(column) + 1) * this.charWidth, y);
+            : new Point(HexByteX(column) + this.charWidth, y);
     }
 
     private long RowCount => HexRows.RowCount(this.document?.Length ?? 0);
@@ -317,7 +337,35 @@ public sealed class HexSurface : RowSurface
     private double CharacterCellLeft(int column) => CharacterTextLeft + column * CharacterCell;
 
     /// <summary>Where byte <paramref name="column"/>'s digits start in the hex panel's text.</summary>
-    private static int HexByteColumn(int column) => HexRows.HexPosition(0, column) - HexRows.HexColumn(0);
+    private int HexByteColumn(int column) => HexRows.HexPosition(0, column, GroupSize) - HexRows.HexColumn(0);
+
+    /// <summary>Extra room between the bytes inside a group, so each byte's digits stay apart
+    /// without the full space a group ends with.</summary>
+    private const double ByteGap = 2;
+
+    /// <summary>How many of the gaps inside groups come before byte <paramref name="column"/>.</summary>
+    private int InnerGapsBefore(int column) => column - column / GroupSize;
+
+    /// <summary>Where byte <paramref name="column"/>'s digits start on screen: its place in the
+    /// row's text, and the gaps inside groups before it.</summary>
+    private double HexByteX(int column) => HexTextLeft + HexByteColumn(column) * this.charWidth + InnerGapsBefore(column) * ByteGap;
+
+    /// <summary>How many bytes one step moves in a panel: a group in the hex panel, a byte in the
+    /// character panel.</summary>
+    private int StepIn(bool inCharacters) => inCharacters ? 1 : GroupSize;
+
+    /// <summary>The columns of row <paramref name="row"/> a mark on <paramref name="column"/>
+    /// covers: its group, cut off where the document ends, or the byte alone.</summary>
+    private (int First, int Last) MarkSpan(long row, int column, bool wholeGroup)
+    {
+        if (!wholeGroup || GroupSize == 1)
+            return (column, column);
+
+        int first = column - column % GroupSize;
+        long available = (this.document?.Length ?? 0) - HexRows.StartOf(row);
+        int last = (int)Math.Min(first + GroupSize - 1, Math.Max(first, available - 1));
+        return (first, last);
+    }
 
     public override double ScrollFraction => ExtentHeight <= 0 ? 0 : this.scrollTop / ExtentHeight;
 
@@ -419,6 +467,16 @@ public sealed class HexSurface : RowSurface
     {
         base.OnPropertyChanged(change);
 
+        if (change.Property == GroupSizeProperty)
+        {
+            // Every row's text and the panel's width change with the grouping; a property set
+            // from the toolbar, never while drawing, so the pan scrollbar can be resized here.
+            DropLayouts();
+            MeasureGeometry();
+            InvalidateVisual();
+            return;
+        }
+
         // A layout bakes its brushes in, so a theme change re-lays the rows on screen.
         if (change.Property == ForegroundProperty || change.Property == GutterForegroundProperty
             || change.Property == OtherByteForegroundProperty || change.Property == ZeroByteForegroundProperty)
@@ -458,7 +516,7 @@ public sealed class HexSurface : RowSurface
             // A right-click inside the selection copies it; elsewhere it moves the caret first,
             // as a click would.
             if (at.Caret is not { } caret || hit.Offset < caret.Start || hit.Offset >= caret.End)
-                at.Place(hit.Offset);
+                at.Place(HexRows.GroupStart(hit.Offset, StepIn(hit.InCharacters)));
             InvalidateVisual();
             return;
         }
@@ -468,11 +526,11 @@ public sealed class HexSurface : RowSurface
 
         if ((e.KeyModifiers & KeyModifiers.Shift) != 0)
         {
-            at.ExtendTo(hit.Offset);
+            at.ExtendTo(hit.Offset, StepIn(hit.InCharacters));
         }
         else
         {
-            at.Place(hit.Offset);
+            at.Place(HexRows.GroupStart(hit.Offset, StepIn(hit.InCharacters)));
             this.dragFrom = hit.Offset;
             e.Pointer.Capture(this);
         }
@@ -496,7 +554,7 @@ public sealed class HexSurface : RowSurface
                 ScrollByPixels(RowHeight);
 
             if (DragOffsetAt(position) is { } to)
-                at.Select(HexCaret.Spanning(from, to));
+                at.Select(HexCaret.SpanningGroups(from, to, StepIn(this.keysInCharacters)));
         }
     }
 
@@ -559,9 +617,9 @@ public sealed class HexSurface : RowSurface
 
         this.keysInCharacters = hit.InCharacters;
         if (extend)
-            at.ExtendTo(hit.Offset);
+            at.ExtendTo(hit.Offset, StepIn(hit.InCharacters));
         else
-            at.Place(hit.Offset);
+            at.Place(HexRows.GroupStart(hit.Offset, StepIn(hit.InCharacters)));
     }
 
     /// <summary>Drags from <paramref name="from"/> to <paramref name="to"/> - for tests.</summary>
@@ -572,7 +630,7 @@ public sealed class HexSurface : RowSurface
 
         this.keysInCharacters = start.InCharacters;
         if (DragOffsetAt(to) is { } end)
-            at.Select(HexCaret.Spanning(start.Offset, end));
+            at.Select(HexCaret.SpanningGroups(start.Offset, end, StepIn(start.InCharacters)));
     }
 
     private void SetHovered(long? offset)
@@ -620,13 +678,14 @@ public sealed class HexSurface : RowSurface
         return Math.Clamp(HexRows.StartOf(row) + column, 0, length - 1);
     }
 
-    /// <summary>The hex panel's byte nearest <paramref name="x"/>, the gap between the groups
-    /// going to the byte before it.</summary>
+    /// <summary>The hex panel's byte nearest <paramref name="x"/>: the last whose digits start at
+    /// or before it, so a gap goes to the byte before it.</summary>
     private int HexColumnNear(double x)
     {
-        int index = (int)Math.Floor((x - HexTextLeft) / this.charWidth);
-        int half = HexRows.BytesPerRow / 2 * 3;
-        return index <= half ? index / 3 : (index - half - 1) / 3 + HexRows.BytesPerRow / 2;
+        int column = 0;
+        while (column < HexRows.BytesPerRow - 1 && HexByteX(column + 1) <= x)
+            column++;
+        return column;
     }
 
     private (int Index, bool InCharacters)? ColumnAt(double x)
@@ -636,16 +695,17 @@ public sealed class HexSurface : RowSurface
             return ((int)inCharacters, true);
 
         // A byte's two digits and the space after them belong to it, so the pointer never falls
-        // between bytes; only the gap between the groups and the panel's padding are no byte.
-        int index = (int)Math.Floor((x - HexTextLeft) / this.charWidth);
-        if (index < 0 || index >= HexTextChars)
+        // between bytes or groups; only the extra space between the halves and the panel's
+        // padding are no byte.
+        if (x < HexByteX(0))
             return null;
 
-        int half = HexRows.BytesPerRow / 2 * 3;
-        if (index < half)
-            return (index / 3, false);
-
-        return index == half ? null : ((index - half - 1) / 3 + HexRows.BytesPerRow / 2, false);
+        int column = HexColumnNear(x);
+        double start = HexByteX(column);
+        double end = column < HexRows.BytesPerRow - 1
+            ? Math.Min(start + 3 * this.charWidth, HexByteX(column + 1))
+            : start + 2 * this.charWidth;
+        return x < end ? (column, false) : null;
     }
 
     /// <summary>Rows a Page Up or Down moves: a screen, less one row kept for context.</summary>
@@ -699,7 +759,7 @@ public sealed class HexSurface : RowSurface
     /// <summary>Moves the caret as a key does and keeps it on screen - for tests too.</summary>
     internal void MoveCaret(HexMove move, bool extend = false)
     {
-        this.cursor?.Move(move, extend, PageRows);
+        this.cursor?.Move(move, extend, PageRows, StepIn(this.keysInCharacters));
         ScrollCaretIntoView();
     }
 
@@ -795,7 +855,12 @@ public sealed class HexSurface : RowSurface
                     laid.Offset.Draw(context, new Point(PanelPadding, CentreInRow(laid.Offset, top)));
                     using (context.PushClip(new Rect(this.gutterWidth, top, Math.Max(0, width - this.gutterWidth), RowHeight)))
                     {
-                        laid.Hex.Draw(context, new Point(HexTextLeft, CentreInRow(laid.Hex, top)));
+                        for (int i = 0; i < laid.Count; i++)
+                        {
+                            var digits = ByteGlyphs(laid.Bytes[i], typeface);
+                            digits.Draw(context, new Point(HexByteX(i), CentreInRow(digits, top)));
+                        }
+
                         laid.Characters.Draw(context, new Point(CharacterTextLeft + CharacterSpacing / 2, CentreInRow(laid.Characters, top)));
                     }
                 }
@@ -852,31 +917,37 @@ public sealed class HexSurface : RowSurface
             int b = (int)(Math.Min(caret.End, rowStart + HexRows.BytesPerRow) - rowStart);
             double top = RowsTop + row * RowHeight - this.scrollTop;
 
-            double hexLeft = HexTextLeft + HexByteColumn(a) * this.charWidth - this.charWidth / 2;
-            double hexRight = HexTextLeft + (HexByteColumn(b - 1) + 2) * this.charWidth + this.charWidth / 2;
+            double hexLeft = HexByteX(a) - this.charWidth / 2;
+            double hexRight = HexByteX(b - 1) + 2.5 * this.charWidth;
             context.FillRectangle(fill, new Rect(hexLeft, top, hexRight - hexLeft, RowHeight));
             context.FillRectangle(fill, new Rect(CharacterCellLeft(a), top, (b - a) * CharacterCell, RowHeight));
         }
     }
 
-    /// <summary>The cell a mark is drawn in around byte <paramref name="column"/> of a row whose
-    /// top is <paramref name="top"/>, in the hex panel or the character panel.</summary>
-    private Rect MarkCell(int column, double top, bool inCharacters)
+    /// <summary>The cell a mark is drawn in around columns <paramref name="first"/> to
+    /// <paramref name="last"/> of a row whose top is <paramref name="top"/>, in the hex panel or
+    /// the character panel.</summary>
+    private Rect MarkCell((int First, int Last) span, double top, bool inCharacters)
     {
         double cellTop = top + 2;
         double height = RowHeight - 4;
         if (inCharacters)
-            return new Rect(CharacterCellLeft(column) - 0.5, cellTop, CharacterCell + 1, height);
+        {
+            double left = CharacterCellLeft(span.First) - 0.5;
+            return new Rect(left, cellTop, CharacterCellLeft(span.Last + 1) + 0.5 - left, height);
+        }
 
-        double hexX = HexTextLeft + HexByteColumn(column) * this.charWidth;
-        return new Rect(hexX - 4, cellTop, 2 * this.charWidth + 8, height);
+        double hexLeft = HexByteX(span.First) - 4;
+        double hexRight = HexByteX(span.Last) + 2 * this.charWidth + 4;
+        return new Rect(hexLeft, cellTop, hexRight - hexLeft, height);
     }
 
     /// <summary>
-    /// The caret, in both panels. In the panel the keys act in it is a solid block with the byte
+    /// The caret, in both panels. In the panel the keys act in it is a solid block with its bytes
     /// drawn again on it in <see cref="ByteMarkForeground"/> - readable over any byte's colour -
     /// blinking to its outline while the view has focus; in the other panel, and in both while the
-    /// view does not have focus, it is the outline alone.
+    /// view does not have focus, it is the outline alone. In the hex panel it covers the caret's
+    /// group; in the character panel its byte while the keys move by byte there, else the group's.
     /// </summary>
     private void DrawCaret(DrawingContext context, long first, long last, Typeface typeface)
     {
@@ -894,17 +965,17 @@ public sealed class HexSurface : RowSurface
         bool solid = IsFocused && !this.caretBlinkOff;
         foreach (bool inCharacters in (ReadOnlySpan<bool>)[false, true])
         {
-            var cell = MarkCell(column, top, inCharacters);
+            var span = MarkSpan(row, column, wholeGroup: !(inCharacters && this.keysInCharacters));
             if (solid && inCharacters == this.keysInCharacters)
-                DrawSolidMark(context, typeface, row, column, top, inCharacters, accent);
+                DrawSolidMark(context, typeface, row, span, top, inCharacters, accent);
             else
-                context.DrawRectangle(null, this.caretPen, new RoundedRect(cell.Deflate(0.75), 4));
+                context.DrawRectangle(null, this.caretPen, new RoundedRect(MarkCell(span, top, inCharacters).Deflate(0.75), 4));
         }
     }
 
-    /// <summary>The byte under the pointer, marked in both panels behind its text: a pale block
-    /// of the accent with a faint edge - softer than the caret, which stays the focus, and the
-    /// byte keeps its own colour.</summary>
+    /// <summary>The byte under the pointer, marked in both panels behind its text - its group, when
+    /// bytes are grouped: a pale block of the accent with a faint edge, softer than the caret,
+    /// which stays the focus, and the bytes keep their own colours.</summary>
     private void DrawPointerMark(DrawingContext context)
     {
         if (this.hovered is not { } offset || ByteMarkBrush is not ISolidColorBrush accent)
@@ -914,31 +985,53 @@ public sealed class HexSurface : RowSurface
         this.pointerEdge ??= new Pen(new SolidColorBrush(accent.Color, 0.55), 1);
 
         long row = HexRows.RowOf(offset);
-        int column = (int)(offset - HexRows.StartOf(row));
+        var span = MarkSpan(row, (int)(offset - HexRows.StartOf(row)), wholeGroup: true);
         double top = RowsTop + row * RowHeight - this.scrollTop;
         foreach (bool inCharacters in (ReadOnlySpan<bool>)[false, true])
-            context.DrawRectangle(this.pointerFill, this.pointerEdge, new RoundedRect(MarkCell(column, top, inCharacters).Deflate(0.5), 4));
+            context.DrawRectangle(this.pointerFill, this.pointerEdge, new RoundedRect(MarkCell(span, top, inCharacters).Deflate(0.5), 4));
     }
 
-    /// <summary>A solid block behind byte <paramref name="column"/> of row <paramref name="row"/>
-    /// in one panel, with the byte drawn again on it in <see cref="ByteMarkForeground"/>.</summary>
-    private void DrawSolidMark(DrawingContext context, Typeface typeface, long row, int column, double top, bool inCharacters, IBrush block)
+    /// <summary>A solid block behind <paramref name="span"/> of row <paramref name="row"/> in one
+    /// panel, with its bytes drawn again on it in <see cref="ByteMarkForeground"/>.</summary>
+    private void DrawSolidMark(DrawingContext context, Typeface typeface, long row, (int First, int Last) span, double top, bool inCharacters, IBrush block)
     {
         Span<byte> bytes = stackalloc byte[HexRows.BytesPerRow];
-        if (this.document is null || this.document.ReadRow(row, bytes) <= column)
+        if (this.document is null || this.document.ReadRow(row, bytes) <= span.Last)
             return;
 
-        byte value = bytes[column];
-        var cell = MarkCell(column, top, inCharacters);
-        context.DrawRectangle(block, null, new RoundedRect(cell, 4));
+        context.DrawRectangle(block, null, new RoundedRect(MarkCell(span, top, inCharacters), 4));
+
+        // A group's bytes are drawn together, as the row draws them; characters keep the
+        // panel's spacing.
+        int count = span.Last - span.First + 1;
+        Span<char> text = stackalloc char[count * 2];
+        for (int i = 0; i < count; i++)
+        {
+            byte value = bytes[span.First + i];
+            if (inCharacters)
+            {
+                text[i] = HexRows.ClassOf(value) == HexByteClass.Printable ? (char)value : '.';
+            }
+            else
+            {
+                text[i * 2] = "0123456789ABCDEF"[value >> 4];
+                text[i * 2 + 1] = "0123456789ABCDEF"[value & 0xF];
+            }
+        }
 
         var ink = ByteMarkForeground ?? Background ?? Brushes.White;
-        string text = inCharacters
-            ? HexRows.ClassOf(value) == HexByteClass.Printable ? ((char)value).ToString() : "."
-            : value.ToString("X2");
-        using var layout = new TextLayout(text, typeface, FontSize, ink);
-        double x = inCharacters ? CharacterCellLeft(column) + CharacterSpacing / 2 : HexTextLeft + HexByteColumn(column) * this.charWidth;
-        layout.Draw(context, new Point(x, CentreInRow(layout, top)));
+        if (inCharacters)
+        {
+            using var layout = new TextLayout(new string(text[..count]), typeface, FontSize, ink, letterSpacing: CharacterSpacing);
+            layout.Draw(context, new Point(CharacterCellLeft(span.First) + CharacterSpacing / 2, CentreInRow(layout, top)));
+            return;
+        }
+
+        for (int i = 0; i < count; i++)
+        {
+            using var digits = new TextLayout(new string(text.Slice(i * 2, 2)), typeface, FontSize, ink);
+            digits.Draw(context, new Point(HexByteX(span.First + i), CentreInRow(digits, top)));
+        }
     }
 
     /// <summary>Where the data ends on screen: the right edge of the character panel.</summary>
@@ -955,14 +1048,21 @@ public sealed class HexSurface : RowSurface
         if (PanelBackground is { } panel)
             context.FillRectangle(panel, new Rect(0, 0, right, HeaderHeight));
 
-        if (this.hexHeader is null || this.characterHeader is null || this.offsetHeader is null)
+        if (this.characterHeader is null || this.offsetHeader is null)
             return;
 
-        double y = (HeaderHeight - this.hexHeader.Height) / 2;
+        double y = (HeaderHeight - this.offsetHeader.Height) / 2;
         this.offsetHeader.Draw(context, new Point(PanelPadding, y));
         using (context.PushClip(new Rect(this.gutterWidth, 0, Math.Max(0, right - this.gutterWidth), HeaderHeight)))
         {
-            this.hexHeader.Draw(context, new Point(HexTextLeft, y));
+            // Each group is labelled by its offset in the row: 00 01 02 .. one by one, 00 04 08
+            // 0C in fours.
+            for (int i = 0; i < HexRows.BytesPerRow; i += GroupSize)
+            {
+                if (this.columnLabels[i] is { } label)
+                    label.Draw(context, new Point(HexByteX(i), y));
+            }
+
             this.characterHeader.Draw(context, new Point(CharacterTextLeft + CharacterSpacing / 2, y));
         }
 
@@ -985,7 +1085,7 @@ public sealed class HexSurface : RowSurface
             // The two groups of eight, split faintly through the rows.
             if (this.groupPen is { } group)
             {
-                double gap = HexTextLeft + (HexByteColumn(HexRows.BytesPerRow / 2) - 1) * this.charWidth + this.charWidth / 2;
+                double gap = HexByteX(HexRows.BytesPerRow / 2) - this.charWidth / 2;
                 context.DrawLine(group, new Point(gap, RowsTop), new Point(gap, height - 4));
             }
         }
@@ -997,26 +1097,41 @@ public sealed class HexSurface : RowSurface
             return cached;
 
         int count = this.document!.ReadRow(row, this.rowBytes);
-        HexRows.Format(this.rowBytes.AsSpan(0, count), HexRows.StartOf(row), this.offsetDigits, this.line);
+        HexRows.Format(this.rowBytes.AsSpan(0, count), HexRows.StartOf(row), this.offsetDigits, this.line, GroupSize);
 
         var foreground = Foreground ?? Brushes.Black;
-        int hexColumn = HexRows.HexColumn(this.offsetDigits);
-        int characterColumn = HexRows.CharacterColumn(this.offsetDigits);
+        int characterColumn = HexRows.CharacterColumn(this.offsetDigits, GroupSize);
         var laid = new RowLayouts(
             new TextLayout(new string(this.line, 0, this.offsetDigits), typeface, FontSize, GutterForeground ?? foreground),
-            new TextLayout(new string(this.line, hexColumn, HexTextChars), typeface, FontSize, foreground,
-                TextAlignment.Left, TextWrapping.NoWrap, textStyleOverrides: StylesFor(count, typeface, hex: true)),
             new TextLayout(new string(this.line, characterColumn, count), typeface, FontSize, foreground,
                 TextAlignment.Left, TextWrapping.NoWrap, letterSpacing: CharacterSpacing,
-                textStyleOverrides: StylesFor(count, typeface, hex: false)));
+                textStyleOverrides: CharacterStyles(count, typeface)),
+            this.rowBytes[..count],
+            count);
         this.layouts[row] = laid;
         return laid;
     }
 
-    /// <summary>The coloured spans of one panel's text for a row of <paramref name="count"/> bytes:
-    /// each byte that is not printable ASCII in its class's colour, in order of position, which a
+    /// <summary>A byte's two hex digits in its class's colour, laid out the first time that value
+    /// is drawn.</summary>
+    private TextLayout ByteGlyphs(byte value, Typeface typeface)
+    {
+        if (this.byteGlyphs[value] is { } laid)
+            return laid;
+
+        var brush = HexRows.ClassOf(value) switch
+        {
+            HexByteClass.Zero => ZeroByteForeground ?? GutterForeground,
+            HexByteClass.Other => OtherByteForeground,
+            _ => null,
+        } ?? Foreground ?? Brushes.Black;
+        return this.byteGlyphs[value] = new TextLayout(value.ToString("X2"), typeface, FontSize, brush);
+    }
+
+    /// <summary>The coloured spans of a row's characters for <paramref name="count"/> bytes: each
+    /// byte that is not printable ASCII in its class's colour, in order of position, which a
     /// layout requires. Printable bytes take the layout's own foreground.</summary>
-    private List<ValueSpan<TextRunProperties>> StylesFor(int count, Typeface typeface, bool hex)
+    private List<ValueSpan<TextRunProperties>> CharacterStyles(int count, Typeface typeface)
     {
         this.zeroRun ??= Run(typeface, ZeroByteForeground ?? GutterForeground);
         this.otherRun ??= Run(typeface, OtherByteForeground);
@@ -1033,7 +1148,7 @@ public sealed class HexSurface : RowSurface
             };
 
             if (run is not null)
-                styles.Add(hex ? new(HexByteColumn(i), 2, run) : new(i, 1, run));
+                styles.Add(new(i, 1, run));
         }
 
         return styles;
@@ -1052,25 +1167,21 @@ public sealed class HexSurface : RowSurface
             this.charWidth = sample.WidthIncludingTrailingWhitespace / 64;
 
         this.gutterWidth = PanelPadding + this.offsetDigits * this.charWidth + PanelPadding;
-        this.hexPanelWidth = PanelPadding + (HexTextChars) * this.charWidth + PanelPadding;
+        this.hexPanelWidth = PanelPadding + HexTextChars * this.charWidth + InnerGapsBefore(HexRows.BytesPerRow - 1) * ByteGap + PanelPadding;
         this.characterPanelWidth = CharacterPanelPadding + HexRows.BytesPerRow * (this.charWidth + CharacterSpacing) + CharacterPanelPadding;
-
-        var header = new char[HexTextChars];
-        Array.Fill(header, ' ');
-        for (int i = 0; i < HexRows.BytesPerRow; i++)
-        {
-            header[HexByteColumn(i)] = '0';
-            header[HexByteColumn(i) + 1] = "0123456789ABCDEF"[i];
-        }
 
         // Semibold, which a monospaced font draws at the same advance, so the labels stay over
         // their columns.
         var labels = new Typeface(FontFamily, FontStyle.Normal, FontWeight.SemiBold);
         var muted = GutterForeground ?? Foreground ?? Brushes.Gray;
-        this.hexHeader?.Dispose();
         this.characterHeader?.Dispose();
         this.offsetHeader?.Dispose();
-        this.hexHeader = new TextLayout(new string(header), labels, FontSize, muted);
+        for (int i = 0; i < HexRows.BytesPerRow; i++)
+        {
+            this.columnLabels[i]?.Dispose();
+            this.columnLabels[i] = new TextLayout(i.ToString("X2"), labels, FontSize, muted);
+        }
+
         this.characterHeader = new TextLayout("Text", labels, FontSize, muted);
         this.offsetHeader = new TextLayout("Offset", labels, FontSize, muted);
 
@@ -1096,6 +1207,12 @@ public sealed class HexSurface : RowSurface
 
     private void DropLayouts()
     {
+        for (int i = 0; i < this.byteGlyphs.Length; i++)
+        {
+            this.byteGlyphs[i]?.Dispose();
+            this.byteGlyphs[i] = null;
+        }
+
         foreach (var laid in this.layouts.Values)
             laid.Dispose();
         this.layouts.Clear();

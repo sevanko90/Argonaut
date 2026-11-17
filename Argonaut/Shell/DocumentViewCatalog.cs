@@ -80,6 +80,7 @@ public sealed class DocumentViewCatalog
         var xmlView = settings.Get<XmlViewSettings>();
         var schemaBindings = new SchemaBindings(settings.Get<SchemaBindingsBlock>(), settingsSealer);
         var rawView = settings.Get<RawViewSettings>();
+        var hexView = settings.Get<HexViewSettings>();
 
         registrations =
         [
@@ -88,7 +89,7 @@ public sealed class DocumentViewCatalog
             (() => new XmlViewModel(xmlView, launcher), (vm, _, o, r) => ((XmlViewModel)vm).LoadAsync(o, r)),
             (() => new CsvViewModel(lineNumbers), (vm, k, o, r) => ((CsvViewModel)vm).LoadAsync(o, k == FileTypeDetector.FileKind.Tsv ? (byte)'\t' : (byte)',', r)),
             (() => new RawViewModel(rawView, lineNumbers: lineNumbers, recipes: recipes, launcher: launcher), (vm, _, o, r) => ((RawViewModel)vm).LoadAsync(o, r)),
-            (() => new HexViewModel(exportActions), (vm, _, o, _) => ((HexViewModel)vm).LoadAsync(o)),
+            (() => new HexViewModel(exportActions, hexView), (vm, _, o, _) => ((HexViewModel)vm).LoadAsync(o)),
         ];
         kindToRegistration = BuildMap();
     }

@@ -25,13 +25,15 @@ namespace Argonaut.Features.Hex;
 public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDocument, IByteRangeNavigable
 {
     private readonly IDocumentExportActions? actions;
+    private readonly HexViewSettings settings;
     private IByteOrigin? origin;
     private IByteSource? source;
     private HexToolbarViewModel? toolbar;
 
-    public HexViewModel(IDocumentExportActions? actions = null)
+    public HexViewModel(IDocumentExportActions? actions = null, HexViewSettings? settings = null)
     {
         this.actions = actions;
+        this.settings = settings ?? new HexViewSettings();
         Cursor = new HexCursor(() => Length);
         Cursor.Moved += OnCaretMoved;
     }
@@ -52,6 +54,21 @@ public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDoc
     public Task IndexingTask => Task.CompletedTask;
 
     public long Length => this.source?.AvailableLength ?? 0;
+
+    /// <summary>How many bytes the hex panel draws together - display only, remembered for every
+    /// hex view.</summary>
+    public int GroupSize
+    {
+        get => this.settings.GroupSize;
+        set
+        {
+            if (value == this.settings.GroupSize)
+                return;
+
+            this.settings.GroupSize = value;
+            OnPropertyChanged();
+        }
+    }
 
     /// <summary>The caret and selection, moved by the surface and by reveals.</summary>
     public HexCursor Cursor { get; }
@@ -124,7 +141,7 @@ public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDoc
         this.origin = document;
         this.source = document.Open();
         var start = this.source.GetContiguousSpan(0, (int)Math.Min(this.source.AvailableLength, BinaryContent.SniffLength));
-        this.toolbar = new HexToolbarViewModel(document, BinaryContent.FormatOf(start), this.actions);
+        this.toolbar = new HexToolbarViewModel(document, BinaryContent.FormatOf(start), this.actions, this);
         OnPropertyChanged(nameof(Toolbar));
         OnPropertyChanged(nameof(FilePath));
         OnPropertyChanged(nameof(StatusDetail));

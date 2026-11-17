@@ -62,4 +62,45 @@ public sealed class HexRowsTests
     [InlineData(0xC3, HexByteClass.Other)]
     public void ABytesClass_IsZeroPrintableOrOther(byte value, HexByteClass expected)
         => Assert.Equal(expected, HexRows.ClassOf(value));
+
+    [Theory]
+    [InlineData(1, "00000000  00 01 02 03 04 05 06 07  08 09 0A 0B 0C 0D 0E 0F  ................")]
+    [InlineData(2, "00000000  0001 0203 0405 0607  0809 0A0B 0C0D 0E0F  ................")]
+    [InlineData(4, "00000000  00010203 04050607  08090A0B 0C0D0E0F  ................")]
+    [InlineData(8, "00000000  0001020304050607  08090A0B0C0D0E0F  ................")]
+    public void GroupedBytes_StayInFileOrder_WithASpaceAfterEachGroup(int groupSize, string expected)
+    {
+        byte[] bytes = Enumerable.Range(0, 16).Select(i => (byte)i).ToArray();
+        var line = new char[HexRows.LineLength(8)];
+
+        int length = HexRows.Format(bytes, 0, 8, line, groupSize);
+
+        Assert.Equal(expected, new string(line, 0, length));
+        Assert.Equal(HexRows.LineLength(8, groupSize), length);
+    }
+
+    [Theory]
+    [InlineData(1, 48)]
+    [InlineData(2, 40)]
+    [InlineData(4, 36)]
+    [InlineData(8, 34)]
+    public void EachGrouping_HasAFixedWidth(int groupSize, int width) => Assert.Equal(width, HexRows.HexWidth(groupSize));
+
+    [Fact]
+    public void APartialLastGroup_KeepsItsCharactersUnderTheColumnAbove()
+    {
+        var line = new char[HexRows.LineLength(8)];
+
+        int length = HexRows.Format("abcdef"u8, 0x30, 8, line, 4);
+
+        Assert.Equal("00000030  61626364 6566" + new string(' ', 25) + "abcdef", new string(line, 0, length));
+    }
+
+    [Theory]
+    [InlineData(13, 4, 12)]
+    [InlineData(12, 4, 12)]
+    [InlineData(7, 8, 0)]
+    [InlineData(7, 1, 7)]
+    public void AGroup_StartsAtAMultipleOfItsSize(long offset, int groupSize, long start)
+        => Assert.Equal(start, HexRows.GroupStart(offset, groupSize));
 }

@@ -175,4 +175,61 @@ public sealed class HexCursorTests
         cursor.Move(HexMove.DocumentEnd, false, 5);
         Assert.Equal(HexCaret.At(79), cursor.Caret);
     }
+
+    [Theory]
+    [InlineData(HexMove.Left, 96)]
+    [InlineData(HexMove.Right, 104)]
+    [InlineData(HexMove.Up, 84)]
+    [InlineData(HexMove.Down, 116)]
+    [InlineData(HexMove.RowStart, 96)]
+    [InlineData(HexMove.RowEnd, 108)]
+    public void GroupedMoves_StepAGroup_AndLandOnItsFirstByte(HexMove move, long expected)
+    {
+        var cursor = At(102);
+        cursor.Move(move, extend: false, pageRows: 5, groupSize: 4);
+        Assert.Equal(HexCaret.At(expected), cursor.Caret);
+    }
+
+    [Fact]
+    public void GroupedExtending_StepsFromBoundaryToBoundary()
+    {
+        var cursor = At(100);
+        cursor.Move(HexMove.Right, extend: true, pageRows: 5, groupSize: 4);
+        Assert.Equal(new HexCaret(100, 104), cursor.Caret);
+        cursor.Move(HexMove.Right, extend: true, pageRows: 5, groupSize: 4);
+        Assert.Equal(new HexCaret(100, 108), cursor.Caret);
+        cursor.Move(HexMove.Left, extend: true, pageRows: 5, groupSize: 4);
+        Assert.Equal(new HexCaret(100, 104), cursor.Caret);
+    }
+
+    [Fact]
+    public void AGroupedCaret_StopsOnThePartialLastGroup()
+    {
+        var cursor = At(0, length: 10);
+        cursor.Move(HexMove.DocumentEnd, extend: false, pageRows: 5, groupSize: 4);
+        Assert.Equal(HexCaret.At(8), cursor.Caret);
+        cursor.Move(HexMove.Right, extend: false, pageRows: 5, groupSize: 4);
+        Assert.Equal(HexCaret.At(8), cursor.Caret);
+
+        cursor.Move(HexMove.Right, extend: true, pageRows: 5, groupSize: 4);
+        Assert.Equal(new HexCaret(8, 10), cursor.Caret);
+    }
+
+    [Fact]
+    public void SpanningGroups_TakesBothWholeGroups_WhicheverWayRound()
+    {
+        Assert.Equal(new HexCaret(4, 16), HexCaret.SpanningGroups(5, 13, 4));
+        Assert.Equal(new HexCaret(16, 4), HexCaret.SpanningGroups(13, 5, 4));
+        Assert.Equal(new HexCaret(8, 12), HexCaret.SpanningGroups(9, 10, 4));
+    }
+
+    [Fact]
+    public void AGroupedShiftClick_TakesTheClickedGroup()
+    {
+        var cursor = At(8);
+        cursor.ExtendTo(13, groupSize: 4);
+        Assert.Equal(new HexCaret(8, 16), cursor.Caret);
+        cursor.ExtendTo(2, groupSize: 4);
+        Assert.Equal(new HexCaret(8, 0), cursor.Caret);
+    }
 }

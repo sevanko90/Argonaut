@@ -144,14 +144,21 @@ It is display only: the side panel does not depend on it.
 - Groups sit at offsets that are multiples of their size from the start of the document, so a
   group's place is still arithmetic (`o / size`). Reading at an unaligned offset is what the
   panel is for.
-- A group is its bytes drawn together with a gap after it: `01020304 05060708` at size 4,
-  `0102030405060708` at 8. The bytes stay in file order and keep their byte-class colours.
+- A group is its bytes drawn together with a space after it: `01020304 05060708` at size 4,
+  `0102030405060708` at 8. Inside a group the bytes stand 2 px apart, so each byte's digits stay
+  readable without a full space; at 8 that adds 28 px to a row, which is still narrower than an
+  ungrouped one. The bytes stay in file order and keep their byte-class colours. Each byte's
+  digits are laid out once per value (256 at most) and placed by arithmetic, so a row draws no
+  text of its own for its hex.
 - Every size has a fixed cell width, so a row's width is known before anything is drawn, the pan
   scrollbar is sized when the size changes (outside the render pass), and the header labels each
   group by its offset (`00 04 08 0C`). The dashed line between the two halves of a row stays.
 - The caret, the selection and the pointer highlight cover a whole group in the data column and
-  its bytes in the character column. Arrow keys move by group in the data column and by byte in
-  the character column.
+  its bytes in the character column - the caret its own byte there, while the keys move by byte
+  in that panel. A click, drag or shift-click in the data column takes whole groups. Arrow keys
+  move by group in the data column and by byte in the character column. A short last group is
+  drawn and marked as far as the document goes.
+- The size is remembered (`HexViewSettings`, key `hex`), for every hex view.
 
 ### Side panel
 
@@ -247,9 +254,9 @@ size, because decoding is whole-image in memory.
    `BytePatternMatcher` and the find bar's Hex mode. Tests: parsing (`0x` prefixes, spacing,
    odd digit counts rejected), matches across chunk boundaries (`ChunkOverlap`).
 6. [ ] Grouping and the side panel, in two parts:
-   - a. The byte-size selector grouping the data column: cell widths, the header, caret,
+   - a. [x] The byte-size selector grouping the data column: cell widths, the header, caret,
      selection and pointer highlight by group. Tests: geometry at each size, a partial last
-     group, a growing document's last row.
+     group, a growing document's last row. Look chosen from screenshots (2 px inside groups).
    - b. `ByteReading` and the side panel with its Values tab. Tests: each reading at both
      endiannesses, an unaligned start, fewer than 8 bytes left (smaller sizes still read), the
      panel follows the caret. Visual pass from screenshots in both themes.

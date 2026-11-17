@@ -37,7 +37,8 @@
                             ByteMarkBrush="{DynamicResource AppAccentBrush}"
                             ByteMarkForeground="{DynamicResource AppWindowBackgroundBrush}"
                             RowMarkBrush="{DynamicResource AppHoverBackgroundBrush}"
-                            SelectionBrush="{DynamicResource AppTextSelectionBrush}" />
+                            SelectionBrush="{DynamicResource AppTextSelectionBrush}"
+                            GroupSize="{Binding GroupSize}" />
 
             <ScrollBar x:Name="VerticalScrollBar"
                        Grid.Column="1"

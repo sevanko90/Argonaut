@@ -3,6 +3,8 @@ using Argonaut.Features.Hex;
 using Argonaut.Tests.Support;
 using Avalonia.Controls;
 using Avalonia.Headless;
+using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 
@@ -41,6 +43,123 @@ public sealed class HexViewTests
                 window.Close();
             }
 
+            return true;
+        }, CancellationToken.None);
+    }
+
+    private static readonly RawInputModifiers Command = OperatingSystem.IsMacOS() ? RawInputModifiers.Meta : RawInputModifiers.Control;
+
+    /// <summary>A shown hex view over 5000 counting bytes, inside a window whose own bubbling
+    /// Ctrl/Cmd+L handler stands in for the shell's new request.</summary>
+    private static Task WithView(Func<Window, HexView, HexViewModel, Func<int>, Task> body)
+    {
+        var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(HexViewTests).Assembly);
+        return session.Dispatch(async () =>
+        {
+            using var origin = new MemoryByteOrigin(Enumerable.Range(0, 5000).Select(i => (byte)i).ToArray(), "bytes");
+            using var hex = new HexViewModel();
+            await hex.LoadAsync(origin);
+
+            var view = new HexView { DataContext = hex };
+            var window = new Window { Width = 800, Height = 400, Content = view };
+            int newRequests = 0;
+            window.AddHandler(InputElement.KeyDownEvent, (_, e) =>
+            {
+                if (e.Key == Key.L)
+                    newRequests++;
+            }, RoutingStrategies.Bubble);
+
+            try
+            {
+                window.Show();
+                await Task.Delay(30);
+                Dispatcher.UIThread.RunJobs();
+                await body(window, view, hex, () => newRequests);
+            }
+            finally
+            {
+                window.Close();
+            }
+
+            return true;
+        }, CancellationToken.None);
+    }
+
+    private static TextBox Entry(HexView view) => view.GetVisualDescendants().OfType<TextBox>().Single(t => t.Name == "GoToEntry");
+
+    private static HexSurface Surface(HexView view) => view.GetVisualDescendants().OfType<HexSurface>().Single();
+
+    [Fact]
+    public Task CommandL_OpensTheGoToEntry_AtTheCaret_AndTheWindowNeverSeesIt() => WithView((window, view, hex, newRequests) =>
+    {
+        hex.Cursor.Place(0x4D2);
+        window.KeyPress(Key.L, Command, PhysicalKey.L, string.Empty);
+        Dispatcher.UIThread.RunJobs();
+
+        var entry = Entry(view);
+        Assert.True(entry.IsVisible);
+        Assert.True(entry.IsFocused);
+        Assert.Equal("0x4D2", entry.Text);
+        Assert.Equal(0, newRequests());
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task Enter_GoesThere_AndGivesFocusBackToTheDump() => WithView((window, view, hex, _) =>
+    {
+        window.KeyPress(Key.L, Command, PhysicalKey.L, string.Empty);
+        Dispatcher.UIThread.RunJobs();
+        Entry(view).Text = "4000";
+        window.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, string.Empty);
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(HexCaret.At(4000), hex.Cursor.Caret);
+        Assert.False(Entry(view).IsVisible);
+        Assert.True(Surface(view).IsFocused);
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task AnEntryThatIsNoOffset_StaysOpen_AndEscapeLetsItGo() => WithView((window, view, hex, _) =>
+    {
+        window.KeyPress(Key.L, Command, PhysicalKey.L, string.Empty);
+        Dispatcher.UIThread.RunJobs();
+        Entry(view).Text = "9999999";
+        window.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, string.Empty);
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.True(Entry(view).IsVisible);
+        Assert.Equal(HexCaret.At(0), hex.Cursor.Caret);
+
+        window.KeyPress(Key.Escape, RawInputModifiers.None, PhysicalKey.Escape, string.Empty);
+        Dispatcher.UIThread.RunJobs();
+        Assert.False(Entry(view).IsVisible);
+        Assert.True(Surface(view).IsFocused);
+        return Task.CompletedTask;
+    });
+
+    /// <summary>The shell's new request bubbles, relying on a focused text box - the find bar's,
+    /// the request pane's - leaving Ctrl/Cmd+L unhandled.</summary>
+    [Fact]
+    public Task AFocusedTextBox_LetsCommandLThrough_ToTheWindow()
+    {
+        var session = HeadlessUnitTestSession.GetOrStartForAssembly(typeof(HexViewTests).Assembly);
+        return session.Dispatch(async () =>
+        {
+            var box = new TextBox();
+            var window = new Window { Content = box };
+            int reached = 0;
+            window.AddHandler(InputElement.KeyDownEvent, (_, e) => reached += e.Key == Key.L ? 1 : 0, RoutingStrategies.Bubble);
+            window.Show();
+            await Task.Delay(30);
+            Dispatcher.UIThread.RunJobs();
+            box.Focus();
+            Dispatcher.UIThread.RunJobs();
+
+            window.KeyPress(Key.L, Command, PhysicalKey.L, string.Empty);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(1, reached);
+            window.Close();
             return true;
         }, CancellationToken.None);
     }

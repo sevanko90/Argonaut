@@ -132,6 +132,36 @@ public sealed class HexViewModelTests
     }
 
     [Fact]
+    public async Task GoToOffset_PutsTheCaretThere_FromAnEntryThatStartsAtTheCaret()
+    {
+        using var origin = new MemoryByteOrigin(Counting(5000), "bytes");
+        using var hex = new HexViewModel();
+        await hex.LoadAsync(origin);
+        hex.Cursor.Place(0x4D2);
+        Assert.Equal("0x4D2", hex.GoToStartText);
+
+        Assert.Null(hex.GoToOffset("0x100"));
+        Assert.Equal(HexCaret.At(0x100), hex.Cursor.Caret);
+        Assert.True(hex.Cursor.TakeReveal());
+
+        Assert.Null(hex.GoToOffset("+16"));
+        Assert.Equal(HexCaret.At(0x110), hex.Cursor.Caret);
+    }
+
+    [Fact]
+    public async Task GoToOffset_SaysWhatIsWrong_AndLeavesTheCaret()
+    {
+        using var origin = new MemoryByteOrigin(Counting(5000), "bytes");
+        using var hex = new HexViewModel();
+        await hex.LoadAsync(origin);
+        hex.Cursor.Place(7);
+
+        Assert.Equal("Not an offset. Type a decimal number, or hex like 0x1F40.", hex.GoToOffset("zz"));
+        Assert.Equal("0x1388 is past the end. The last byte is 0x1387 (4,999).", hex.GoToOffset("5000"));
+        Assert.Equal(HexCaret.At(7), hex.Cursor.Caret);
+    }
+
+    [Fact]
     public async Task OnceLetGo_RowsReadEmpty()
     {
         using var origin = new MemoryByteOrigin(Counting(32), "bytes");

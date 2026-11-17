@@ -77,6 +77,30 @@ public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDoc
         return Task.CompletedTask;
     }
 
+    /// <summary>What the go-to entry opens with: the caret's offset in hex, as the gutter shows
+    /// it, so going somewhere near is an edit rather than a retype.</summary>
+    public string GoToStartText => $"0x{Cursor.Caret?.Byte ?? 0:X}";
+
+    /// <summary>
+    /// Puts the caret on the offset <paramref name="entry"/> names (<see cref="HexOffsetEntry"/>)
+    /// and brings it on screen. Pure arithmetic, so nothing is waited for.
+    /// </summary>
+    /// <returns>Null when it went there; otherwise what is wrong with the entry, to show.</returns>
+    public string? GoToOffset(string? entry)
+    {
+        if (!HexOffsetEntry.TryParse(entry, Cursor.Caret?.Byte ?? 0, out long offset))
+            return "Not an offset. Type a decimal number, or hex like 0x1F40.";
+
+        long length = Length;
+        if (offset >= length)
+            return length == 0
+                ? "The document is empty."
+                : $"0x{offset:X} is past the end. The last byte is 0x{length - 1:X} ({length - 1:N0}).";
+
+        Cursor.Reveal(ByteRange.At(offset));
+        return null;
+    }
+
     /// <summary>The selected bytes, for a copy - false when nothing is selected or the selection
     /// is larger than <see cref="HexCopy.MaxBytes"/>.</summary>
     public bool TryReadSelection(out byte[] bytes)

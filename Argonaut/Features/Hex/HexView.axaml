@@ -3,6 +3,22 @@
              xmlns:hex="clr-namespace:Argonaut.Features.Hex"
              x:Class="Argonaut.Features.Hex.HexView"
              x:DataType="hex:HexViewModel">
+    <UserControl.Styles>
+        <!-- The caret's position reads as status text, and shows it can be clicked on hover. -->
+        <Style Selector="Button.position">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+        </Style>
+        <Style Selector="Button.position:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource AppAccentBrush}" />
+            <Setter Property="TextBlock.TextDecorations" Value="Underline" />
+        </Style>
+    </UserControl.Styles>
     <Border Background="{DynamicResource AppWindowBackgroundBrush}" ClipToBounds="True">
         <Grid RowDefinitions="*,Auto,Auto" ColumnDefinitions="*,Auto">
             <!-- Draws the rows on screen itself; RowScrollBars drives the two bars, as for every
@@ -55,11 +71,31 @@
                                FontFamily="{DynamicResource AppContentFontFamily}"
                                Foreground="{DynamicResource AppMutedTextBrush}"
                                VerticalAlignment="Center" />
-                    <TextBlock x:Name="CaretPositionText"
-                               Text="{Binding CaretPositionText}"
-                               FontSize="11"
-                               FontFamily="{DynamicResource AppContentFontFamily}"
-                               VerticalAlignment="Center" />
+                    <!-- Where the caret is, and where to go: clicking it, or Ctrl/Cmd+L, swaps it
+                         for an entry holding the caret's offset. -->
+                    <Panel VerticalAlignment="Center">
+                        <Button x:Name="CaretPositionButton"
+                                Classes="position"
+                                Click="OnCaretPositionClick"
+                                ToolTip.Tip="Go to offset (Ctrl+L / Cmd+L)">
+                            <TextBlock x:Name="CaretPositionText"
+                                       Text="{Binding CaretPositionText}"
+                                       FontSize="11"
+                                       FontFamily="{DynamicResource AppContentFontFamily}" />
+                        </Button>
+                        <TextBox x:Name="GoToEntry"
+                                 IsVisible="False"
+                                 Width="170"
+                                 MinHeight="20"
+                                 Height="20"
+                                 Padding="6,1"
+                                 FontSize="11"
+                                 VerticalAlignment="Center"
+                                 FontFamily="{DynamicResource AppContentFontFamily}"
+                                 PlaceholderText="Offset: 8000 or 0x1F40"
+                                 KeyDown="OnGoToEntryKeyDown"
+                                 LostFocus="OnGoToEntryLostFocus" />
+                    </Panel>
                 </StackPanel>
             </Border>
         </Grid>

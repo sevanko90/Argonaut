@@ -180,6 +180,7 @@ public partial class MainWindow : Window
         AddHandler(DragDrop.DragOverEvent, OnDragOver);
         AddHandler(DragDrop.DropEvent, OnDrop);
         AddHandler(KeyDownEvent, OnGlobalKeyDown, Avalonia.Interactivity.RoutingStrategies.Tunnel);
+        AddHandler(KeyDownEvent, OnUnclaimedKeyDown, Avalonia.Interactivity.RoutingStrategies.Bubble);
 
         _ = CheckForUpdatesOnStartupAsync();
     }
@@ -423,6 +424,23 @@ public partial class MainWindow : Window
     /// </summary>
     internal static bool TakesTypedText(IInputElement? focused) => focused is TextBox;
 
+    /// <summary>
+    /// Window-wide shortcuts a view may claim first. These bubble rather than tunnel, so they only
+    /// reach the window when nothing under it handled the key: Ctrl/Cmd+L is a view's go-to
+    /// entry where it has one (a path bar, the hex view's offset), and a new request elsewhere.
+    /// </summary>
+    private void OnUnclaimedKeyDown(object? sender, KeyEventArgs e)
+    {
+        bool cmdOrCtrl = (e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Meta)) != 0;
+
+        // A new request, as a browser's address bar is reached: with a document open it asks first.
+        if (e.Key == Key.L && cmdOrCtrl)
+        {
+            _ = viewModel.NewRequestAsync();
+            e.Handled = true;
+        }
+    }
+
     private void OnGlobalKeyDown(object? sender, KeyEventArgs e)
     {
         bool cmdOrCtrl = (e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Meta)) != 0;
@@ -446,14 +464,6 @@ public partial class MainWindow : Window
                 e.Handled = true;
             }
 
-            return;
-        }
-
-        // A new request, as a browser's address bar is reached: with a document open it asks first.
-        if (e.Key == Key.L && cmdOrCtrl)
-        {
-            _ = viewModel.NewRequestAsync();
-            e.Handled = true;
             return;
         }
 

@@ -5,7 +5,7 @@ binary response or file can be read rather than only saved or handed to another 
 second step of binary support (#51); the first (Binary, describing a binary document with Save as…
 and Open in default app) shipped in v2.3.2 and is folded into the hex view by step 2.
 
-Status: steps 1, 2, 3 and 9 built on branch `hex-view` - a read-only, polished hex view that binary documents open in.
+Status: steps 1-4 and 9 built on branch `hex-view` - a read-only, polished hex view that binary documents open in.
 
 ## Decided
 
@@ -98,8 +98,13 @@ the 16 bytes in two groups of 8, and the character column.
 
 ### Go to offset
 
-Ctrl/Cmd+G takes an offset in hex (`0x1F40`) or decimal and reveals it. It is pure arithmetic,
-with no waiting.
+Clicking the caret's position in the status strip, or Ctrl/Cmd+L (the tree views' go-to key; the
+shell's new request bubbles, so a view's entry claims the key first), swaps the position for
+an entry holding the caret's offset in hex, all selected. It takes decimal (`8000`), hex (`0x1F40`,
+`1F40h`, or any digits with a hex letter), `+`/`-` steps from the caret, and ignores spaces, `_`
+and `,` (`HexOffsetEntry`). Enter puts the caret on that byte, selecting nothing, a third of the
+way down the screen; an entry that is no offset, or one past the end, says why in a toast and stays
+open. It is pure arithmetic, with no waiting. (Ctrl/Cmd+G stays find next.)
 
 ### Find
 
@@ -214,7 +219,8 @@ size, because decoding is whole-image in memory.
    click/drag/shift-click, keys and copy menu; Copy bytes puts binary data on the clipboard
    (`public.data` / `application/octet-stream`), which paste-to-open reads first. Caret and
    pointer look chosen from screenshots in both themes.
-4. [ ] Go to offset.
+4. [x] Go to offset. Tests: parsing, the view model's go-to and its messages, the entry's keys,
+   and Ctrl/Cmd+L reaching the window only when no view claims it.
 5. [ ] `BytePatternMatcher` and the find bar's Hex mode. Tests: parsing (`0x` prefixes, spacing,
    odd digit counts rejected), matches across chunk boundaries (`ChunkOverlap`).
 6. [ ] Grouping and the side panel, in two parts:

@@ -50,7 +50,9 @@ them). Keep this in sync when the ownership chain changes.
   each start. The line-ending indicator is not shown in Hex. The remaining steps are in
   [hex-view-plan.md](hex-view-plan.md).
 - **Requests** (`Features/Requests`, `Engine/Http`). New request (empty state, toolbar,
-  Ctrl/Cmd+L) opens the request pane - `RequestEditorViewModel` - docked above the document area.
+  Ctrl/Cmd+L) opens the request pane. Ctrl/Cmd+L reaches the shell by bubbling, after the views:
+  where the focused view has a go-to entry (the tree views' path bar, the hex view's offset) the
+  key opens that instead. The pane is `RequestEditorViewModel`, docked above the document area.
   The shell owns it while the input is a request and implements its `IRequestSender`: Send builds
   an `HttpRequestSpec` (GET or POST, the URL, a POST body from a hosted raw editor), downloads the
   response off the UI thread with `ResponseDownloader` over the injected `IHttpFetcher` (one

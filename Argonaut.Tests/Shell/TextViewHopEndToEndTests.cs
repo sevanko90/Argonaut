@@ -66,7 +66,11 @@ public sealed class TextViewHopEndToEndTests
         string path = Path.Combine(Path.GetTempPath(), $"hop-{Guid.NewGuid():N}.txt");
         File.WriteAllText(path, text);
 
-        var shell = new MainWindowViewModel(SettingsStore.InMemory(), TestSchemas.Catalog(), _ => Task.FromResult(true));
+        // Switching back from Hex starts the shell's line-ending count, which close cancels but does
+        // not join; a fake keeps that background read of the file from racing the delete below on
+        // Windows.
+        var shell = new MainWindowViewModel(SettingsStore.InMemory(), TestSchemas.Catalog(), _ => Task.FromResult(true),
+            lineEndings: new FakeLineEndingDetector());
         try
         {
             await shell.OpenPathAsync(path, FileTypeDetector.FileKind.Unidentified);

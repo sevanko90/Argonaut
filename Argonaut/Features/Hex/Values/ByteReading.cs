@@ -50,6 +50,35 @@ public static class ByteReading
     public static double Double(ReadOnlySpan<byte> bytes, ByteOrder order)
         => order == ByteOrder.Little ? BinaryPrimitives.ReadDoubleLittleEndian(bytes) : BinaryPrimitives.ReadDoubleBigEndian(bytes);
 
+    /// <summary>
+    /// An unsigned integer of any width from 1 to 8 bytes - a 24-bit length, a 40-bit counter -
+    /// read in <paramref name="order"/>.
+    /// </summary>
+    public static ulong UIntN(ReadOnlySpan<byte> bytes, ByteOrder order)
+    {
+        ulong value = 0;
+        for (int i = 0; i < bytes.Length; i++)
+            value = (value << 8) | bytes[order == ByteOrder.Big ? i : bytes.Length - 1 - i];
+        return value;
+    }
+
+    /// <summary>A two's-complement integer of any width from 1 to 8 bytes, its top bit the sign.</summary>
+    public static long IntN(ReadOnlySpan<byte> bytes, ByteOrder order)
+    {
+        int unused = 64 - bytes.Length * 8;
+        return (long)(UIntN(bytes, order) << unused) >> unused;
+    }
+
+    /// <summary>The bytes as UTF-8 text, or null when they are not whole, valid UTF-8 - a
+    /// character cut off at either end included.</summary>
+    public static string? Utf8Text(ReadOnlySpan<byte> bytes)
+    {
+        if (bytes.IsEmpty || !System.Text.Unicode.Utf8.IsValid(bytes))
+            return null;
+
+        return Encoding.UTF8.GetString(bytes);
+    }
+
     /// <summary>An integer as plain digits - what a copy puts on the clipboard.</summary>
     public static string Integer<T>(T value) where T : IFormattable => value.ToString(null, CultureInfo.InvariantCulture);
 

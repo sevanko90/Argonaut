@@ -14,16 +14,18 @@ namespace Argonaut.Features.Hex.Values;
 public sealed record HexValueRow(string Name, int ByteCount, string Value);
 
 /// <summary>
-/// The side panel's Values tab: the caret's group read as the types that size can hold - a byte
-/// as an unsigned and signed number and as a character, two, four or eight bytes as integers,
-/// floating point and, at four and eight, a Unix time. The grouping is what says how wide the
-/// value is, so the bytes read are the ones the caret marks in the dump, and choosing another
-/// width regroups the dump to match.
+/// The side panel's Values tab: the bytes being read - a selection of one to eight bytes, else the
+/// caret's group - read as the types that width can hold: integers of any width, floating point
+/// at two, four and eight, Unix times at four and eight, a byte's character, and longer runs as
+/// UTF-8 text. What is read is what the dump marks, so its source is never in doubt; the width
+/// can be stepped from the panel, which selects that many bytes from where the reading starts.
 ///
 /// One byte order at a time, a switch starting at this machine's and remembered: once it suits a
-/// file it rarely changes. Reading a group costs nothing however large the document is.
+/// file it rarely changes. Reading eight bytes costs nothing however large the document is.
 /// </summary>
-public sealed class HexValuesViewModel(ByteOrder order = ByteOrder.Little, Action<ByteOrder>? remember = null) : ObservableObject
+/// <param name="select">Selects <c>length</c> bytes from <c>start</c> in the dump - how the
+/// panel's width steps take effect.</param>
+public sealed class HexValuesViewModel(ByteOrder order = ByteOrder.Little, Action<ByteOrder>? remember = null, Action<long, int>? select = null) : ObservableObject
 {
     /// <summary>The most bytes a reading looks at: the widest group, which is also as far as a
     /// UTF-8 character can run.</summary>
@@ -44,6 +46,27 @@ public sealed class HexValuesViewModel(ByteOrder order = ByteOrder.Little, Actio
 
     /// <summary>What is being read: "32-bit".</summary>
     public string SizeText => $"{this.size * 8}-bit";
+
+    /// <summary>How many bytes are read.</summary>
+    public int Size => this.size;
+
+    public bool CanWiden => HasBytes && this.size < MaxBytes;
+
+    public bool CanNarrow => HasBytes && this.size > 1;
+
+    /// <summary>Reads one byte more, selecting it in the dump.</summary>
+    public void Widen()
+    {
+        if (CanWiden)
+            select?.Invoke(this.start, this.size + 1);
+    }
+
+    /// <summary>Reads one byte fewer, selecting what is left in the dump.</summary>
+    public void Narrow()
+    {
+        if (CanNarrow)
+            select?.Invoke(this.start, this.size - 1);
+    }
 
     /// <summary>Where the group starts, in hex as the gutter shows it.</summary>
     public string OffsetText { get; private set; } = string.Empty;
@@ -119,10 +142,10 @@ public sealed class HexValuesViewModel(ByteOrder order = ByteOrder.Little, Actio
     }
 
     /// <summary>
-    /// Reads the group of <paramref name="groupSize"/> bytes at <paramref name="offset"/>.
-    /// <paramref name="bytes"/> starts there and may run on past the group (up to
-    /// <see cref="MaxBytes"/>), so a UTF-8 character can be read to its end; fewer than the group
-    /// near the end of the document.
+    /// Reads <paramref name="groupSize"/> bytes at <paramref name="offset"/> - a selection's, or the
+    /// caret's group. <paramref name="bytes"/> starts there and may run on past them (up to
+    /// <see cref="MaxBytes"/>), so a one-byte read can finish its UTF-8 character; fewer than
+    /// asked for near the end of the document.
     /// </summary>
     public void Show(long offset, ReadOnlySpan<byte> bytes, int groupSize, int offsetDigits)
     {
@@ -140,6 +163,9 @@ public sealed class HexValuesViewModel(ByteOrder order = ByteOrder.Little, Actio
         HighlightedRange = null;
         OnPropertyChanged(nameof(HasBytes));
         OnPropertyChanged(nameof(SizeText));
+        OnPropertyChanged(nameof(Size));
+        OnPropertyChanged(nameof(CanWiden));
+        OnPropertyChanged(nameof(CanNarrow));
         OnPropertyChanged(nameof(OffsetText));
         OnPropertyChanged(nameof(BytesText));
         OnPropertyChanged(nameof(Rows));
@@ -151,9 +177,9 @@ public sealed class HexValuesViewModel(ByteOrder order = ByteOrder.Little, Actio
         => HighlightedRange = row is null || !HasBytes ? null : new ByteRange(this.start, Math.Min(row.ByteCount, this.available));
 
     /// <summary>
-    /// The readings of a group of <paramref name="size"/> bytes at the start of
-    /// <paramref name="bytes"/>, in <paramref name="order"/>. A group cut short by the end of the
-    /// document reads as <c>-</c>, except a lone byte, which is always whole.
+    /// The readings of <paramref name="size"/> bytes at the start of <paramref name="bytes"/>, in
+    /// <paramref name="order"/>. Bytes cut short by the end of the document read as <c>-</c>,
+    /// except a lone byte, which is always whole.
     /// </summary>
     public static IReadOnlyList<HexValueRow> Read(ReadOnlySpan<byte> bytes, int size, ByteOrder order)
     {
@@ -170,33 +196,34 @@ public sealed class HexValuesViewModel(ByteOrder order = ByteOrder.Little, Actio
             ];
         }
 
-        (string Name, Reading Read)[] readings = size switch
+        int bits = size * 8;
+        var readings = new List<(string Name, Reading Read)>(6)
         {
-            2 =>
-            [
-                ("uint16", (b, o) => ByteReading.Integer(ByteReading.UInt16(b, o))),
-                ("int16", (b, o) => ByteReading.Integer(ByteReading.Int16(b, o))),
-                ("half", (b, o) => ByteReading.Float(ByteReading.Half(b, o))),
-            ],
-            4 =>
-            [
-                ("uint32", (b, o) => ByteReading.Integer(ByteReading.UInt32(b, o))),
-                ("int32", (b, o) => ByteReading.Integer(ByteReading.Int32(b, o))),
-                ("float", (b, o) => ByteReading.Float(ByteReading.Single(b, o))),
-                ("Unix s", (b, o) => ByteReading.UnixSeconds(ByteReading.UInt32(b, o)) ?? Missing),
-            ],
-            _ =>
-            [
-                ("uint64", (b, o) => ByteReading.Integer(ByteReading.UInt64(b, o))),
-                ("int64", (b, o) => ByteReading.Integer(ByteReading.Int64(b, o))),
-                ("double", (b, o) => ByteReading.Float(ByteReading.Double(b, o))),
-                ("Unix s", (b, o) => ByteReading.UnixSeconds(ByteReading.Int64(b, o)) ?? Missing),
-                ("Unix ms", (b, o) => ByteReading.UnixMilliseconds(ByteReading.Int64(b, o)) ?? Missing),
-            ],
+            ($"uint{bits}", (b, o) => ByteReading.Integer(ByteReading.UIntN(b, o))),
+            ($"int{bits}", (b, o) => ByteReading.Integer(ByteReading.IntN(b, o))),
         };
 
+        // Floating point and times only come in the widths their formats define.
+        switch (size)
+        {
+            case 2:
+                readings.Add(("half", (b, o) => ByteReading.Float(ByteReading.Half(b, o))));
+                break;
+            case 4:
+                readings.Add(("float", (b, o) => ByteReading.Float(ByteReading.Single(b, o))));
+                readings.Add(("Unix s", (b, o) => ByteReading.UnixSeconds(ByteReading.UInt32(b, o)) ?? Missing));
+                break;
+            case 8:
+                readings.Add(("double", (b, o) => ByteReading.Float(ByteReading.Double(b, o))));
+                readings.Add(("Unix s", (b, o) => ByteReading.UnixSeconds(ByteReading.Int64(b, o)) ?? Missing));
+                readings.Add(("Unix ms", (b, o) => ByteReading.UnixMilliseconds(ByteReading.Int64(b, o)) ?? Missing));
+                break;
+        }
+
+        readings.Add(("UTF-8", (b, _) => ByteReading.Utf8Text(b) ?? Missing));
+
         bool whole = bytes.Length >= size;
-        var rows = new List<HexValueRow>(readings.Length);
+        var rows = new List<HexValueRow>(readings.Count);
         foreach (var (name, read) in readings)
             rows.Add(new(name, size, whole ? read(bytes[..size], order) : Missing));
         return rows;

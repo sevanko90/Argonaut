@@ -167,29 +167,31 @@ chosen one is remembered as a setting.
 
 #### Values
 
-Reads the caret's group - the group a selection starts in, when there is one - as the types its
-size can hold. The grouping says how wide the value is, so the bytes read are the ones the caret
-marks in the dump, and choosing another width regroups the dump to match. Showing every size at
-once was tried and dropped: most of its readings were noise, and nothing in the dump showed which
-bytes they came from.
+Reads a selection of one to eight bytes - any length, 3 included - or, with nothing selected (or
+more than eight), the caret's group. What is read is what the dump marks, so its source is never
+in doubt. A `-  24-bit  +` stepper in the header changes the width a byte at a time by selecting
+that many bytes from where the reading starts, so a wider read from a one-byte grouping is a click.
+Showing every size at once was tried and dropped: most of its readings were noise, and nothing in
+the dump showed which bytes they came from.
 
-| Group | Readings |
+| Width | Readings |
 |-------|----------|
-| 1 byte | uint8, int8, ASCII name (`NUL`, `LF`), UTF-8 character starting here |
-| 2 bytes | uint16, int16, `Half` |
-| 4 bytes | uint32, int32, `float`, Unix seconds |
-| 8 bytes | uint64, int64, `double`, Unix seconds, Unix milliseconds |
+| 1 byte | uint8, int8, ASCII name (`NUL`, `LF`), the UTF-8 character starting here |
+| 2 bytes | uint16, int16, `Half`, UTF-8 text |
+| 3, 5, 6, 7 bytes | uintN, intN (`uint24`), UTF-8 text |
+| 4 bytes | uint32, int32, `float`, Unix seconds, UTF-8 text |
+| 8 bytes | uint64, int64, `double`, Unix seconds, Unix milliseconds, UTF-8 text |
 
 - **One byte order at a time**: LE / BE chips in the panel's header, starting at this machine's
   order and remembered (`HexViewSettings.ValuesByteOrder`). Once an order suits a file it rarely
   changes, so the other does not need the room beside it. A reset icon beside them goes back to
   this machine's order, its tooltip naming which that is, and is greyed out when it is in use.
-- The header says what is read and where: "Values", the width ("32-bit"), the order, and the
-  group's offset. Below it, the group's bytes in file order.
-- **Bits** shows the group's bytes as 0/1 digits grouped by byte (`0100 1001`), four to a line.
+- The header says what is read and where: "Values", the width with its stepper, the order, and
+  the offset. Below it, the bytes read, in file order.
+- **Bits** shows the bytes read as 0/1 digits grouped by byte (`0100 1001`), four to a line.
 - Hovering a reading marks the bytes it covers in the dump (a UTF-8 character can run past a
   one-byte group); clicking it copies its value.
-- A last group cut short by the end of the document reads as `-`; a lone byte is always whole.
+- Bytes cut short by the end of the document read as `-`; a lone byte is always whole.
 - The panel is 340 px wide whatever it shows, so the dump never shifts; it is shown or hidden
   from the toolbar, and that is remembered.
 
@@ -262,8 +264,8 @@ size, because decoding is whole-image in memory.
    - a. [x] The byte-size selector grouping the data column: cell widths, the header, caret,
      selection and pointer highlight by group. Tests: geometry at each size, a partial last
      group, a growing document's last row. Look chosen from screenshots (2 px inside groups).
-   - b. [x] `ByteReading` and the side panel with its Values tab, following the caret's group,
-     one byte order at a time. Tests: each reading in each order, a short last group, the panel
+   - b. [x] `ByteReading` and the side panel with its Values tab: a 1-8 byte selection or the
+     caret's group, any width, stepped from the panel, one byte order at a time. Tests: each reading in each order, a short last group, the panel
      following the caret and the grouping, the order and the panel remembered. Under trial: the
      user is trying the interaction before it is called done.
 7. [ ] The structure decoder and the side panel's Struct tab - a large feature of its own, with

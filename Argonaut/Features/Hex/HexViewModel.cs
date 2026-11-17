@@ -35,9 +35,12 @@ public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDoc
     {
         this.actions = actions;
         this.settings = settings ?? new HexViewSettings();
-        Values = new HexValuesViewModel(this.settings.ValuesByteOrder, order => this.settings.ValuesByteOrder = order);
         Cursor = new HexCursor(() => Length);
         Cursor.Moved += OnCaretMoved;
+        Values = new HexValuesViewModel(
+            this.settings.ValuesByteOrder,
+            order => this.settings.ValuesByteOrder = order,
+            (start, length) => Cursor.Select(new HexCaret(start, start + length)));
     }
 
     public IByteOrigin? Origin => this.origin;
@@ -157,9 +160,9 @@ public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDoc
         ReadValues();
     }
 
-    /// <summary>Reads the caret's group - the group a selection starts in, when there is one -
-    /// for the Values tab, with a few bytes past it for a UTF-8 character to finish: at most
-    /// eight, into a stack buffer.</summary>
+    /// <summary>Reads what the Values tab shows - a selection of one to eight bytes, else the
+    /// caret's group (the group a longer selection starts in) - with any bytes past it, up to
+    /// eight, for a UTF-8 character to finish; into a stack buffer.</summary>
     private void ReadValues()
     {
         Span<byte> bytes = stackalloc byte[HexValuesViewModel.MaxBytes];
@@ -169,9 +172,11 @@ public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDoc
             return;
         }
 
-        long start = HexRows.GroupStart(caret.IsEmpty ? caret.Byte : caret.Start, GroupSize);
+        bool selected = caret.Length is > 0 and <= HexValuesViewModel.MaxBytes;
+        long start = selected ? caret.Start : HexRows.GroupStart(caret.IsEmpty ? caret.Byte : caret.Start, GroupSize);
+        int width = selected ? (int)caret.Length : GroupSize;
         int count = from.CopyTo(start, bytes[..(int)Math.Clamp(from.AvailableLength - start, 0, bytes.Length)]);
-        Values.Show(start, bytes[..count], GroupSize, HexRows.OffsetDigits(Length));
+        Values.Show(start, bytes[..count], width, HexRows.OffsetDigits(Length));
     }
 
     public Task LoadAsync(IByteOrigin document)

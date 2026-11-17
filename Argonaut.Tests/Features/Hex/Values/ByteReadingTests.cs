@@ -20,6 +20,27 @@ public sealed class ByteReadingTests
     }
 
     [Fact]
+    public void AnyWidthIntegers_ReadInEitherOrder_AndSignExtend()
+    {
+        Assert.Equal(0x030201ul, ByteReading.UIntN([0x01, 0x02, 0x03], ByteOrder.Little));
+        Assert.Equal(0x010203ul, ByteReading.UIntN([0x01, 0x02, 0x03], ByteOrder.Big));
+        Assert.Equal(-1L, ByteReading.IntN([0xFF, 0xFF, 0xFF], ByteOrder.Little));
+        Assert.Equal(0x7FFFFFL, ByteReading.IntN([0x7F, 0xFF, 0xFF], ByteOrder.Big));
+        Assert.Equal(-2L, ByteReading.IntN([0xFE], ByteOrder.Big));
+        Assert.Equal(ByteReading.Int64(Bytes, ByteOrder.Big), ByteReading.IntN(Bytes, ByteOrder.Big));
+        Assert.Equal(ByteReading.UInt32(Bytes, ByteOrder.Little), ByteReading.UIntN(Bytes.AsSpan(0, 4), ByteOrder.Little));
+    }
+
+    [Fact]
+    public void Utf8Text_IsOnlyWholeValidUtf8()
+    {
+        Assert.Equal("é!", ByteReading.Utf8Text([0xC3, 0xA9, 0x21]));
+        Assert.Null(ByteReading.Utf8Text([0xA9, 0x21]));
+        Assert.Null(ByteReading.Utf8Text([0x21, 0xC3]));
+        Assert.Null(ByteReading.Utf8Text([]));
+    }
+
+    [Fact]
     public void FloatingPoint_ReadsAtItsOwnPrecision()
     {
         Assert.Equal("1", ByteReading.Float(ByteReading.Single([0x00, 0x00, 0x80, 0x3F], ByteOrder.Little)));

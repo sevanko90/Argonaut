@@ -149,14 +149,31 @@
                                        FontFamily="{DynamicResource AppMonoFontFamily}"
                                        FontWeight="SemiBold"
                                        Foreground="{DynamicResource AppMutedTextBrush}" />
-                            <!-- How wide the value read is: the grouping's size. -->
-                            <TextBlock Grid.Column="1"
-                                       Text="{Binding SizeText}"
-                                       Margin="8,0,0,0"
-                                       VerticalAlignment="Center"
-                                       FontSize="12"
-                                       FontFamily="{DynamicResource AppMonoFontFamily}"
-                                       Foreground="{DynamicResource AppMutedTextBrush}" />
+                            <!-- How wide the value read is - a selection's length, else the
+                                 grouping's size - stepped a byte at a time, which selects that
+                                 many bytes from where the reading starts. -->
+                            <StackPanel Grid.Column="1"
+                                        Orientation="Horizontal"
+                                        Margin="6,0,0,0"
+                                        VerticalAlignment="Center">
+                                <Button Classes="orderreset"
+                                        Click="OnNarrowValues"
+                                        IsEnabled="{Binding CanNarrow}"
+                                        ToolTip.Tip="Read one byte fewer">
+                                    <icons:LucideIcon Data="{StaticResource Icon.Remove}" Size="11" />
+                                </Button>
+                                <TextBlock Text="{Binding SizeText}"
+                                           VerticalAlignment="Center"
+                                           FontSize="12"
+                                           FontFamily="{DynamicResource AppMonoFontFamily}"
+                                           Foreground="{DynamicResource AppMutedTextBrush}" />
+                                <Button Classes="orderreset"
+                                        Click="OnWidenValues"
+                                        IsEnabled="{Binding CanWiden}"
+                                        ToolTip.Tip="Read one byte more, selecting it">
+                                    <icons:LucideIcon Data="{StaticResource Icon.Add}" Size="11" />
+                                </Button>
+                            </StackPanel>
                             <!-- The byte order the readings use: one at a time, this machine's
                                  until another is chosen, and remembered; the reset goes back to
                                  this machine's. -->

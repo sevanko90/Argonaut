@@ -41,6 +41,10 @@ public partial class HexView : UserControl
         }
     }
 
+    private void OnWidenValues(object? sender, RoutedEventArgs e) => (DataContext as HexViewModel)?.Values.Widen();
+
+    private void OnNarrowValues(object? sender, RoutedEventArgs e) => (DataContext as HexViewModel)?.Values.Narrow();
+
     private void OnUseSystemOrder(object? sender, RoutedEventArgs e)
     {
         if (DataContext is HexViewModel vm)

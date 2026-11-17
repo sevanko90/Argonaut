@@ -134,4 +134,21 @@ public sealed class HexToolbarViewModelTests
         Assert.Equal(1, System.Text.Json.JsonSerializer.Deserialize("{}", HexViewSettings.JsonTypeInfo)!.GroupSize);
         Assert.Equal(8, System.Text.Json.JsonSerializer.Deserialize("""{ "GroupSize": 8 }""", HexViewSettings.JsonTypeInfo)!.GroupSize);
     }
+
+    [Fact]
+    public async Task TheTextSelector_ReadsUtf8_AndRemembersIt()
+    {
+        using var origin = new MemoryByteOrigin(Png, "logo");
+        var settings = new HexViewSettings();
+        var hex = new HexViewModel(null, settings);
+        await hex.LoadAsync(origin);
+        var toolbar = Assert.IsType<HexToolbarViewModel>(hex.Toolbar);
+
+        Assert.Equal("ASCII", toolbar.TextEncodingText);
+        toolbar.TextEncodingIndex = 1;
+
+        Assert.True(hex.ReadsUtf8);
+        Assert.True(settings.ReadsUtf8);
+        Assert.Equal("UTF-8", toolbar.TextEncodingText);
+    }
 }

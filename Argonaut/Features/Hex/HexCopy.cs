@@ -8,7 +8,8 @@ public enum HexCopyForm
     /// <summary>The bytes as hex digits, a space between each: <c>89 50 4E 47</c>.</summary>
     Hex,
 
-    /// <summary>The character column as drawn: printable ASCII as itself, <c>.</c> for the rest.</summary>
+    /// <summary>The character column as drawn: printable ASCII as itself, or UTF-8 characters
+    /// when the column reads UTF-8, and <c>.</c> for the rest.</summary>
     Text,
 
     /// <summary>The bytes themselves.</summary>

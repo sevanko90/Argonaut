@@ -5,7 +5,7 @@ binary response or file can be read rather than only saved or handed to another 
 second step of binary support (#51); the first (Binary, describing a binary document with Save as…
 and Open in default app) shipped in v2.3.2 and is folded into the hex view by step 2.
 
-Status: steps 1-4, 6 and 9 built on branch `hex-view` - a read-only, polished hex view that binary documents open in.
+Status: steps 1-4, 6, 8 and 9 built on branch `hex-view` - a read-only, polished hex view that binary documents open in.
 
 ## Decided
 
@@ -23,9 +23,8 @@ Status: steps 1-4, 6 and 9 built on branch `hex-view` - a read-only, polished he
   has tabs: **Values** reads the caret's group as the types its size can hold, in one byte order
   chosen by a switch, and **Struct** is the structure decoder (docs/struct-decoder-plan.md). The
   two are not used at the same time, so they share the space rather than splitting it.
-- **The character column is ASCII**: printable bytes (0x20-0x7E) as themselves, `.` for everything
-  else. A UTF-8 column is a later option, held back by characters that cross a row boundary
-  (below).
+- **The character column reads ASCII or UTF-8**, chosen from the toolbar and remembered. ASCII:
+  printable bytes (0x20-0x7E) as themselves, `.` for everything else. UTF-8: see below.
 
 ## Design
 
@@ -205,7 +204,7 @@ field and the Values tab never disagree.
 The structure decoder, planned in docs/struct-decoder-plan.md and built as its own step (7). Until
 then the panel has the Values tab only.
 
-### A UTF-8 character column (later option)
+### A UTF-8 character column
 
 The hard part is a character whose bytes cross a row boundary: its lead byte ends one row and its
 continuation bytes start the next, so no single row can draw it whole. One rule keeps every cell
@@ -270,8 +269,13 @@ size, because decoding is whole-image in memory.
 7. [ ] The structure decoder and the side panel's Struct tab - a large feature of its own, with
    its own steps in docs/struct-decoder-plan.md. It needs step 3's selection and 6b's
    `ByteReading` and panel.
-8. [ ] UTF-8 character column, if measuring says the boundary rule reads well. Tests: a character
-   crossing a row, invalid and truncated sequences, the 3-byte look-back at a row start.
+8. [x] UTF-8 character column (`HexUtf8`), an ASCII / UTF-8 choice in the toolbar. Each cell is
+   drawn from a glyph cache; a character crossing the row's end is clipped there and its bytes on
+   the next row show a muted `·`. Copy as text follows the column. The status strip names the
+   character the caret's byte is in, on the left as the raw view's does ("U+00E9 LATIN SMALL
+   LETTER E WITH ACUTE"), whichever way the column reads. Tests: a character crossing a row,
+   invalid and truncated sequences, the 3-byte look-back at a row start. Being tried on real
+   files before it is called done.
 9. [x] Visual polish, chosen from screenshots in both themes:
    - Three panels: a pinned offset gutter and the character panel on the panel tint, the bytes on
      the window background; the character panel and the header end where the data does.

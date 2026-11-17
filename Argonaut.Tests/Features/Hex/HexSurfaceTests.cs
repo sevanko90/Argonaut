@@ -446,4 +446,28 @@ public sealed class HexSurfaceTests
         Assert.Equal(22, surface.HoveredOffset);
         return Task.CompletedTask;
     });
+
+    [Fact]
+    public Task ReadingUtf8_DrawsCharactersAcrossRows_WithoutAVisualChangeInTheFrame() => With(new FakeDocument(0), (surface, window) =>
+    {
+        // A euro sign whose first byte ends the first row, and an emoji inside the second.
+        byte[] bytes = new byte[40];
+        Array.Fill(bytes, (byte)'a');
+        bytes[15] = 0xE2; bytes[16] = 0x82; bytes[17] = 0xAC;
+        bytes[20] = 0xF0; bytes[21] = 0x9F; bytes[22] = 0x98; bytes[23] = 0x80;
+        var document = new BytesDocument(bytes);
+        surface.Document = document;
+        surface.ReadsUtf8 = true;
+        document.Cursor.Place(16);
+        surface.Focus();
+        window.CaptureRenderedFrame();
+
+        surface.ClickAt(surface.CentreOfByte(5, inCharacters: true, screenRow: 1));
+        window.CaptureRenderedFrame();
+        Assert.Equal(HexCaret.At(21), document.Cursor.Caret);
+
+        surface.ReadsUtf8 = false;
+        window.CaptureRenderedFrame();
+        return Task.CompletedTask;
+    });
 }

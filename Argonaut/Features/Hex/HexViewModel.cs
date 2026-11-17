@@ -76,6 +76,21 @@ public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDoc
         }
     }
 
+    /// <summary>Whether the character column reads UTF-8 rather than ASCII - remembered for every
+    /// hex view.</summary>
+    public bool ReadsUtf8
+    {
+        get => this.settings.ReadsUtf8;
+        set
+        {
+            if (value == this.settings.ReadsUtf8)
+                return;
+
+            this.settings.ReadsUtf8 = value;
+            OnPropertyChanged();
+        }
+    }
+
     /// <summary>Whether the side panel is shown - remembered for every hex view.</summary>
     public bool ShowsSidePanel
     {
@@ -102,6 +117,34 @@ public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDoc
         => Cursor.Caret is { } caret
             ? $"Byte {caret.Byte:N0}    0x{caret.Byte.ToString("X").PadLeft(HexRows.OffsetDigits(Length), '0')}"
             : string.Empty;
+
+    /// <summary>
+    /// The character the caret's byte belongs to, as the raw view names one: "U+00E9 LATIN SMALL
+    /// LETTER E WITH ACUTE" - read as UTF-8 whichever way the character column reads, looking up
+    /// to three bytes back for the character's start. A byte that is part of no whole character
+    /// says so.
+    /// </summary>
+    public string CaretCharacterText
+    {
+        get
+        {
+            if (this.source is not { } from || Cursor.Caret is not { } caret)
+                return string.Empty;
+
+            long at = caret.Byte;
+            long start = Math.Max(0, at - HexUtf8.Reach);
+            Span<byte> window = stackalloc byte[HexUtf8.Reach * 2 + 1];
+            int read = from.CopyTo(start, window[..(int)Math.Clamp(from.AvailableLength - start, 0, window.Length)]);
+            int index = (int)(at - start);
+            if (index >= read)
+                return string.Empty;
+
+            if (HexUtf8.CharacterAt(window[..read], index) is not { } character)
+                return $"0x{window[index]:X2} not UTF-8";
+
+            return $"U+{character.Value:X4} {UnicodeNames.NameOf(character.Value) ?? "unnamed"}";
+        }
+    }
 
     /// <summary>The selection's size, empty when nothing is selected.</summary>
     public string CaretSelectionText
@@ -157,6 +200,7 @@ public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDoc
     {
         OnPropertyChanged(nameof(CaretPositionText));
         OnPropertyChanged(nameof(CaretSelectionText));
+        OnPropertyChanged(nameof(CaretCharacterText));
         ReadValues();
     }
 

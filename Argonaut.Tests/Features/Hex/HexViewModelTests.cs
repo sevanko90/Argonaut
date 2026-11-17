@@ -192,4 +192,21 @@ public sealed class HexViewModelTests
         {
         }
     }
+
+    [Fact]
+    public async Task TheStatusStrip_NamesTheCharacterTheCaretIsIn()
+    {
+        using var origin = new MemoryByteOrigin([(byte)'A', 0xC3, 0xA9, 0xFF], "bytes");
+        using var hex = new HexViewModel();
+        await hex.LoadAsync(origin);
+
+        Assert.Equal("U+0041 LATIN CAPITAL LETTER A", hex.CaretCharacterText);
+
+        // Either byte of the é names it.
+        hex.Cursor.Place(2);
+        Assert.Equal("U+00E9 LATIN SMALL LETTER E WITH ACUTE", hex.CaretCharacterText);
+
+        hex.Cursor.Place(3);
+        Assert.Equal("0xFF not UTF-8", hex.CaretCharacterText);
+    }
 }

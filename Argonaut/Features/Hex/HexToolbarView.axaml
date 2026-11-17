@@ -39,6 +39,27 @@
                 </Flyout>
             </Button.Flyout>
         </Button>
+        <!-- How the character column reads the bytes. -->
+        <Button x:Name="TextEncodingButton"
+                Classes="tool"
+                ToolTip.Tip="Text: how the character column reads the bytes">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+                <icons:LucideIcon Data="{StaticResource Icon.FullText}" />
+                <TextBlock Classes="toolvalue" Text="{Binding TextEncodingText}" />
+                <icons:LucideIcon Classes="chevron" Data="{StaticResource Icon.ChevronDown}" />
+            </StackPanel>
+            <Button.Flyout>
+                <Flyout Placement="BottomEdgeAlignedLeft">
+                    <StackPanel Margin="12" Spacing="2" MinWidth="170">
+                        <TextBlock Classes="flyouthead" Text="Read the text column as" />
+                        <RadioButton GroupName="textEncoding" Content="ASCII" FontSize="12"
+                                     IsChecked="{Binding TextEncodingIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=0}" />
+                        <RadioButton GroupName="textEncoding" Content="UTF-8" FontSize="12"
+                                     IsChecked="{Binding TextEncodingIndex, Converter={x:Static conv:IntEqualsConverter.Instance}, ConverterParameter=1}" />
+                    </StackPanel>
+                </Flyout>
+            </Button.Flyout>
+        </Button>
         <TextBlock Text="{Binding Description}"
                    IsVisible="{Binding HasDescription}"
                    FontSize="12"

@@ -36,6 +36,11 @@ public sealed class HexToolbarViewModel : ObservableObject
                 {
                     OnPropertyChanged(nameof(ShowsSidePanel));
                 }
+                else if (e.PropertyName == nameof(HexViewModel.ReadsUtf8))
+                {
+                    OnPropertyChanged(nameof(TextEncodingIndex));
+                    OnPropertyChanged(nameof(TextEncodingText));
+                }
             };
         }
     }
@@ -65,6 +70,20 @@ public sealed class HexToolbarViewModel : ObservableObject
                 this.document.ShowsSidePanel = value;
         }
     }
+
+    /// <summary>How the character column reads its bytes, for the selector's radio buttons:
+    /// 0 ASCII, 1 UTF-8.</summary>
+    public int TextEncodingIndex
+    {
+        get => this.document?.ReadsUtf8 == true ? 1 : 0;
+        set
+        {
+            if (this.document is not null && value is 0 or 1)
+                this.document.ReadsUtf8 = value == 1;
+        }
+    }
+
+    public string TextEncodingText => this.document?.ReadsUtf8 == true ? "UTF-8" : "ASCII";
 
     /// <summary>"1 byte", "4 bytes": what the selector's button says.</summary>
     public string GroupSizeText => (this.document?.GroupSize ?? 1) is 1 ? "1 byte" : $"{this.document!.GroupSize} bytes";

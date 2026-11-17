@@ -103,6 +103,11 @@ public sealed class HexSurface : RowSurface
     public static readonly StyledProperty<ByteRange?> HighlightRangeProperty =
         AvaloniaProperty.Register<HexSurface, ByteRange?>(nameof(HighlightRange));
 
+    /// <summary>Whether the character panel reads its bytes as UTF-8 (<see cref="HexUtf8"/>)
+    /// rather than as ASCII.</summary>
+    public static readonly StyledProperty<bool> ReadsUtf8Property =
+        AvaloniaProperty.Register<HexSurface, bool>(nameof(ReadsUtf8));
+
     /// <summary>Space either side of a panel's text.</summary>
     private const double PanelPadding = 14;
 
@@ -168,7 +173,7 @@ public sealed class HexSurface : RowSurface
 
     /// <summary>A row on screen: its offset and characters laid out, and its bytes, which the
     /// hex panel draws one by one from <see cref="byteGlyphs"/>.</summary>
-    private sealed record RowLayouts(TextLayout Offset, TextLayout Characters, byte[] Bytes, int Count) : IDisposable
+    private sealed record RowLayouts(TextLayout Offset, TextLayout Characters, byte[] Bytes, int Count, HexCell[]? Cells) : IDisposable
     {
         public void Dispose()
         {
@@ -181,6 +186,23 @@ public sealed class HexSurface : RowSurface
     // wherever the grouping puts it - so a row's hex costs no text of its own, and the gaps
     // between a group's bytes are arithmetic.
     private readonly TextLayout?[] byteGlyphs = new TextLayout?[256];
+
+    // A UTF-8 cell's glyph in its colour, laid out the first time it is drawn; dropped when it
+    // grows past a screen's worth of distinct characters many times over.
+    private readonly Dictionary<(int Character, CellInk Ink), TextLayout> utf8Glyphs = new();
+    private const int MaxUtf8Glyphs = 4096;
+
+    /// <summary>The colours a UTF-8 cell can take.</summary>
+    private enum CellInk : byte
+    {
+        Text,
+        Zero,
+        Other,
+        CarriedOver,
+    }
+
+    /// <summary>What a carried-over cell shows: a character begun on the row above.</summary>
+    private const string CarriedOverMark = "·";
 
     // "00".."0F" over the hex panel, laid out once and placed over each group.
     private readonly TextLayout?[] columnLabels = new TextLayout?[HexRows.BytesPerRow];
@@ -248,6 +270,12 @@ public sealed class HexSurface : RowSurface
     {
         get => GetValue(HighlightRangeProperty);
         set => SetValue(HighlightRangeProperty, value);
+    }
+
+    public bool ReadsUtf8
+    {
+        get => GetValue(ReadsUtf8Property);
+        set => SetValue(ReadsUtf8Property, value);
     }
 
     public int GroupSize
@@ -477,6 +505,13 @@ public sealed class HexSurface : RowSurface
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
+
+        if (change.Property == ReadsUtf8Property)
+        {
+            DropLayouts();
+            InvalidateVisual();
+            return;
+        }
 
         if (change.Property == GroupSizeProperty)
         {
@@ -828,7 +863,7 @@ public sealed class HexSurface : RowSurface
         }
         else
         {
-            await clipboard.SetTextAsync(form == HexCopyForm.Hex ? HexCopy.AsHex(bytes) : HexCopy.AsText(bytes));
+            await clipboard.SetTextAsync(form == HexCopyForm.Hex ? HexCopy.AsHex(bytes) : ReadsUtf8 ? HexUtf8.AsText(bytes) : HexCopy.AsText(bytes));
         }
 
         string what = form switch { HexCopyForm.Hex => " as hex", HexCopyForm.Text => " as text", _ => string.Empty };
@@ -873,7 +908,10 @@ public sealed class HexSurface : RowSurface
                             digits.Draw(context, new Point(HexByteX(i), CentreInRow(digits, top)));
                         }
 
-                        laid.Characters.Draw(context, new Point(CharacterTextLeft + CharacterSpacing / 2, CentreInRow(laid.Characters, top)));
+                        if (laid.Cells is { } cells)
+                            DrawUtf8Cells(context, laid, cells, top, typeface);
+                        else
+                            laid.Characters.Draw(context, new Point(CharacterTextLeft + CharacterSpacing / 2, CentreInRow(laid.Characters, top)));
                     }
                 }
 
@@ -1055,6 +1093,17 @@ public sealed class HexSurface : RowSurface
         }
 
         var ink = ByteMarkForeground ?? Background ?? Brushes.White;
+        if (inCharacters && ReadsUtf8 && this.layouts.TryGetValue(row, out var laid) && laid.Cells is { } cells)
+        {
+            for (int i = span.First; i <= span.Last && i < cells.Length; i++)
+            {
+                using var glyph = Utf8Glyph(cells[i], bytes[i], typeface, ink);
+                glyph?.Draw(context, new Point(CharacterCellLeft(i) + CharacterSpacing / 2, CentreInRow(glyph, top)));
+            }
+
+            return;
+        }
+
         if (inCharacters)
         {
             using var layout = new TextLayout(new string(text[..count]), typeface, FontSize, ink, letterSpacing: CharacterSpacing);
@@ -1142,9 +1191,89 @@ public sealed class HexSurface : RowSurface
                 TextAlignment.Left, TextWrapping.NoWrap, letterSpacing: CharacterSpacing,
                 textStyleOverrides: CharacterStyles(count, typeface)),
             this.rowBytes[..count],
-            count);
+            count,
+            ReadsUtf8 ? Utf8Cells(row, count) : null);
         this.layouts[row] = laid;
         return laid;
+    }
+
+    /// <summary>Row <paramref name="row"/>'s cells read as UTF-8, looking up to
+    /// <see cref="HexUtf8.Reach"/> bytes into the rows either side for characters that cross.</summary>
+    private HexCell[] Utf8Cells(long row, int count)
+    {
+        Span<byte> neighbour = stackalloc byte[HexRows.BytesPerRow];
+        Span<byte> window = stackalloc byte[HexUtf8.Reach + HexRows.BytesPerRow + HexUtf8.Reach];
+        int before = 0;
+        if (row > 0)
+        {
+            int previous = this.document!.ReadRow(row - 1, neighbour);
+            before = Math.Min(HexUtf8.Reach, previous);
+            neighbour.Slice(previous - before, before).CopyTo(window);
+        }
+
+        this.rowBytes.AsSpan(0, count).CopyTo(window[before..]);
+        int after = count == HexRows.BytesPerRow ? Math.Min(HexUtf8.Reach, this.document!.ReadRow(row + 1, neighbour)) : 0;
+        neighbour[..after].CopyTo(window[(before + count)..]);
+
+        var cells = new HexCell[count];
+        HexUtf8.ReadRow(window[..(before + count + after)], before, count, cells);
+        return cells;
+    }
+
+    /// <summary>A row's character panel read as UTF-8, cell by cell: each character at its first
+    /// byte's cell, spreading over its other bytes', clipped where the row ends.</summary>
+    private void DrawUtf8Cells(DrawingContext context, RowLayouts laid, HexCell[] cells, double top, Typeface typeface)
+    {
+        double left = CharacterCellLeft(0);
+        using (context.PushClip(new Rect(left, top, CharacterCellLeft(HexRows.BytesPerRow) - left, RowHeight)))
+        {
+            for (int i = 0; i < cells.Length; i++)
+            {
+                if (Utf8Glyph(cells[i], laid.Bytes[i], typeface, ink: null) is { } glyph)
+                    glyph.Draw(context, new Point(CharacterCellLeft(i) + CharacterSpacing / 2, CentreInRow(glyph, top)));
+            }
+        }
+    }
+
+    /// <summary>What a UTF-8 cell draws, in its colour or in <paramref name="ink"/>; null for a
+    /// cell its character's first byte draws over. Laid out once per character and colour.</summary>
+    private TextLayout? Utf8Glyph(HexCell cell, byte value, Typeface typeface, IBrush? ink)
+    {
+        (int character, CellInk kind) = cell.Kind switch
+        {
+            HexCellKind.Character => (cell.Character.Value, CellInk.Text),
+            HexCellKind.CarriedOver => ('·', CellInk.CarriedOver),
+            HexCellKind.Unreadable => ('.', HexRows.ClassOf(value) == HexByteClass.Zero ? CellInk.Zero : CellInk.Other),
+            _ => (-1, CellInk.Text),
+        };
+        if (character < 0)
+            return null;
+
+        string text = cell.Kind == HexCellKind.Character ? cell.Character.ToString() : cell.Kind == HexCellKind.CarriedOver ? CarriedOverMark : ".";
+        if (ink is not null)
+            return new TextLayout(text, typeface, FontSize, ink);
+
+        if (this.utf8Glyphs.TryGetValue((character, kind), out var laid))
+            return laid;
+
+        if (this.utf8Glyphs.Count >= MaxUtf8Glyphs)
+            DropUtf8Glyphs();
+
+        var brush = kind switch
+        {
+            CellInk.Zero => ZeroByteForeground ?? GutterForeground,
+            CellInk.Other => OtherByteForeground,
+            CellInk.CarriedOver => ZeroByteForeground ?? GutterForeground,
+            _ => null,
+        } ?? Foreground ?? Brushes.Black;
+        return this.utf8Glyphs[(character, kind)] = new TextLayout(text, typeface, FontSize, brush);
+    }
+
+    private void DropUtf8Glyphs()
+    {
+        foreach (var glyph in this.utf8Glyphs.Values)
+            glyph.Dispose();
+        this.utf8Glyphs.Clear();
     }
 
     /// <summary>A byte's two hex digits in its class's colour, laid out the first time that value
@@ -1242,6 +1371,7 @@ public sealed class HexSurface : RowSurface
 
     private void DropLayouts()
     {
+        DropUtf8Glyphs();
         for (int i = 0; i < this.byteGlyphs.Length; i++)
         {
             this.byteGlyphs[i]?.Dispose();

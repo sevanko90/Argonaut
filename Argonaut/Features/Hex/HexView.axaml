@@ -71,6 +71,9 @@
         </Style>
         <Style Selector="Button.orderreset">
             <Setter Property="MinHeight" Value="0" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalAlignment" Value="Center" />
             <Setter Property="Height" Value="18" />
             <Setter Property="Padding" Value="4,0" />
             <Setter Property="CornerRadius" Value="4" />
@@ -110,6 +113,7 @@
                             RowMarkBrush="{DynamicResource AppHoverBackgroundBrush}"
                             SelectionBrush="{DynamicResource AppTextSelectionBrush}"
                             GroupSize="{Binding GroupSize}"
+                            ReadsUtf8="{Binding ReadsUtf8}"
                             HighlightRange="{Binding Values.HighlightedRange}" />
 
             <ScrollBar x:Name="VerticalScrollBar"
@@ -260,8 +264,9 @@
                 </DockPanel>
             </Border>
 
-            <!-- Status gutter, as the raw view's: where the caret is, and how much is selected,
-                 in one place at the right. What the byte reads as is the side panel's job. -->
+            <!-- Status gutter, as the raw view's: the character the caret is in on the left, and
+                 where the caret is and how much is selected on the right, each in one place.
+                 What the bytes read as is the side panel's job. -->
             <Border Grid.Row="2"
                     Grid.ColumnSpan="3"
                     BorderBrush="{DynamicResource AppBorderBrush}"
@@ -269,8 +274,21 @@
                     Background="{DynamicResource AppPanelBackgroundBrush}"
                     Padding="8,4"
                     MinHeight="24">
-                <StackPanel Orientation="Horizontal"
-                            HorizontalAlignment="Right"
+                <Grid ColumnDefinitions="*,Auto,Auto">
+                <TextBlock Grid.Column="0"
+                           x:Name="CaretCharacterText"
+                           Text="{Binding CaretCharacterText}"
+                           FontSize="11"
+                           FontFamily="{DynamicResource AppContentFontFamily}"
+                           TextWrapping="NoWrap"
+                           TextTrimming="CharacterEllipsis"
+                           VerticalAlignment="Center" />
+                <Border Grid.Column="1"
+                        Width="1"
+                        Margin="12,1"
+                        Background="{DynamicResource AppBorderBrush}" />
+                <StackPanel Grid.Column="2"
+                            Orientation="Horizontal"
                             Spacing="16"
                             VerticalAlignment="Center">
                     <TextBlock x:Name="CaretSelectionText"
@@ -305,6 +323,7 @@
                                  LostFocus="OnGoToEntryLostFocus" />
                     </Panel>
                 </StackPanel>
+                </Grid>
             </Border>
         </Grid>
     </Border>

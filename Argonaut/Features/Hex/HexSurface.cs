@@ -96,6 +96,10 @@ public sealed class HexSurface : RowSurface
     /// <summary>Space either side of a panel's text.</summary>
     private const double PanelPadding = 14;
 
+    /// <summary>Space either side of the character panel's text - less than the other panels',
+    /// as its widened cells already leave room at each end.</summary>
+    private const double CharacterPanelPadding = 8;
+
     private const double HeaderHeight = RowHeight + 2;
 
     /// <summary>Space between the header's line and the first row, so the header reads as a
@@ -304,7 +308,7 @@ public sealed class HexSurface : RowSurface
 
     private double HexTextLeft => this.gutterWidth + PanelPadding - PanOffset;
 
-    private double CharacterTextLeft => CharacterPanelLeft + PanelPadding - PanOffset;
+    private double CharacterTextLeft => CharacterPanelLeft + CharacterPanelPadding - PanOffset;
 
     /// <summary>One character's cell in the character panel: its advance and the spacing.</summary>
     private double CharacterCell => this.charWidth + CharacterSpacing;
@@ -1049,7 +1053,7 @@ public sealed class HexSurface : RowSurface
 
         this.gutterWidth = PanelPadding + this.offsetDigits * this.charWidth + PanelPadding;
         this.hexPanelWidth = PanelPadding + (HexTextChars) * this.charWidth + PanelPadding;
-        this.characterPanelWidth = PanelPadding + HexRows.BytesPerRow * (this.charWidth + CharacterSpacing) + PanelPadding;
+        this.characterPanelWidth = CharacterPanelPadding + HexRows.BytesPerRow * (this.charWidth + CharacterSpacing) + CharacterPanelPadding;
 
         var header = new char[HexTextChars];
         Array.Fill(header, ' ');

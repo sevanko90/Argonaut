@@ -1,8 +1,10 @@
 using System;
+using Argonaut.Features.Hex.Values;
 using Argonaut.Ui.Notifications;
 using Argonaut.Ui.Rows;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 
 namespace Argonaut.Features.Hex;
@@ -37,6 +39,35 @@ public partial class HexView : UserControl
             OpenGoToEntry();
             e.Handled = true;
         }
+    }
+
+    private void OnUseSystemOrder(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is HexViewModel vm)
+            vm.Values.UseSystemOrder();
+    }
+
+    private void OnValueRowEntered(object? sender, PointerEventArgs e)
+    {
+        if (sender is Control { DataContext: HexValueRow row } && DataContext is HexViewModel vm)
+            vm.Values.Highlight(row);
+    }
+
+    private void OnValueRowExited(object? sender, PointerEventArgs e)
+    {
+        if (DataContext is HexViewModel vm)
+            vm.Values.Highlight(null);
+    }
+
+    /// <summary>Copies the value clicked, as it reads - a reading there are too few bytes for has
+    /// nothing to copy.</summary>
+    private async void OnValueTapped(object? sender, TappedEventArgs e)
+    {
+        if (sender is not TextBlock { Text: { Length: > 0 } value } || value == "-" || TopLevel.GetTopLevel(this)?.Clipboard is not { } clipboard)
+            return;
+
+        await clipboard.SetTextAsync(value);
+        ToastService.Show($"Copied {value}");
     }
 
     private void OnCaretPositionClick(object? sender, RoutedEventArgs e) => OpenGoToEntry();

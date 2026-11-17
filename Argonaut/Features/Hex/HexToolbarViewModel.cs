@@ -32,6 +32,10 @@ public sealed class HexToolbarViewModel : ObservableObject
                     OnPropertyChanged(nameof(GroupSizeIndex));
                     OnPropertyChanged(nameof(GroupSizeText));
                 }
+                else if (e.PropertyName == nameof(HexViewModel.ShowsSidePanel))
+                {
+                    OnPropertyChanged(nameof(ShowsSidePanel));
+                }
             };
         }
     }
@@ -48,6 +52,17 @@ public sealed class HexToolbarViewModel : ObservableObject
         {
             if (this.document is not null && value >= 0 && value < HexRows.GroupSizes.Length)
                 this.document.GroupSize = HexRows.GroupSizes[value];
+        }
+    }
+
+    /// <summary>Whether the side panel is shown, for the toolbar's toggle.</summary>
+    public bool ShowsSidePanel
+    {
+        get => this.document?.ShowsSidePanel ?? false;
+        set
+        {
+            if (this.document is not null)
+                this.document.ShowsSidePanel = value;
         }
     }
 

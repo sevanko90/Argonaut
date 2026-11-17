@@ -1,6 +1,8 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:hex="clr-namespace:Argonaut.Features.Hex"
+             xmlns:values="clr-namespace:Argonaut.Features.Hex.Values"
+             xmlns:icons="clr-namespace:Argonaut.Ui.Icons"
              x:Class="Argonaut.Features.Hex.HexView"
              x:DataType="hex:HexViewModel">
     <UserControl.Styles>
@@ -18,9 +20,78 @@
             <Setter Property="Foreground" Value="{DynamicResource AppAccentBrush}" />
             <Setter Property="TextBlock.TextDecorations" Value="Underline" />
         </Style>
+        <!-- The Values tab: muted labels, values in the dump's monospaced face. -->
+        <Style Selector="TextBlock.valuehead">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Foreground" Value="{DynamicResource AppMutedTextBrush}" />
+        </Style>
+        <Style Selector="TextBlock.valuename">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Foreground" Value="{DynamicResource AppMutedTextBrush}" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style Selector="TextBlock.value">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontFamily" Value="{DynamicResource AppMonoFontFamily}" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="0,0,8,0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="ToolTip.Tip" Value="{Binding $self.Text}" />
+        </Style>
+        <Style Selector="Border.valuerow">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="Padding" Value="0,3" />
+        </Style>
+        <Style Selector="Border.valuerow:pointerover">
+            <Setter Property="Background" Value="{DynamicResource AppHoverBackgroundBrush}" />
+        </Style>
+        <!-- The byte order switch: two small chips in the panel's header, the chosen one in
+             the accent. -->
+        <Style Selector="ToggleButton.order">
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="FontFamily" Value="{DynamicResource AppMonoFontFamily}" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Height" Value="18" />
+            <Setter Property="Padding" Value="6,0" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Foreground" Value="{DynamicResource AppMutedTextBrush}" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style Selector="ToggleButton.order:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource AppHoverBackgroundBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+        </Style>
+        <Style Selector="ToggleButton.order:checked /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource AppAccentBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource AppWindowBackgroundBrush}" />
+        </Style>
+        <Style Selector="Button.orderreset">
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Height" Value="18" />
+            <Setter Property="Padding" Value="4,0" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Foreground" Value="{DynamicResource AppMutedTextBrush}" />
+        </Style>
+        <Style Selector="Button.orderreset:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource AppHoverBackgroundBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+        </Style>
+        <Style Selector="Button.orderreset:disabled /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Opacity" Value="0.35" />
+        </Style>
+        <Style Selector="TextBlock.value:pointerover">
+            <Setter Property="Foreground" Value="{DynamicResource AppAccentBrush}" />
+        </Style>
     </UserControl.Styles>
     <Border Background="{DynamicResource AppWindowBackgroundBrush}" ClipToBounds="True">
-        <Grid RowDefinitions="*,Auto,Auto" ColumnDefinitions="*,Auto">
+        <Grid RowDefinitions="*,Auto,Auto" ColumnDefinitions="*,Auto,Auto">
             <!-- Draws the rows on screen itself; RowScrollBars drives the two bars, as for every
                  self-drawn view. -->
             <hex:HexSurface x:Name="Surface"
@@ -38,7 +109,8 @@
                             ByteMarkForeground="{DynamicResource AppWindowBackgroundBrush}"
                             RowMarkBrush="{DynamicResource AppHoverBackgroundBrush}"
                             SelectionBrush="{DynamicResource AppTextSelectionBrush}"
-                            GroupSize="{Binding GroupSize}" />
+                            GroupSize="{Binding GroupSize}"
+                            HighlightRange="{Binding Values.HighlightedRange}" />
 
             <ScrollBar x:Name="VerticalScrollBar"
                        Grid.Column="1"
@@ -53,10 +125,128 @@
                        IsVisible="False"
                        Minimum="0" />
 
+            <!-- The side panel: what the bytes at the selection start read as. A fixed width, so
+                 the dump never shifts as the readings change. -->
+            <Border Grid.Column="2"
+                    Grid.RowSpan="2"
+                    Width="340"
+                    IsVisible="{Binding ShowsSidePanel}"
+                    BorderBrush="{DynamicResource AppBorderBrush}"
+                    BorderThickness="1,0,0,0"
+                    Background="{DynamicResource AppPanelBackgroundBrush}">
+                <DockPanel DataContext="{Binding Values}" x:DataType="values:HexValuesViewModel">
+                    <!-- A header as the dump's: the tab's name, and where the bytes are read from. -->
+                    <Border DockPanel.Dock="Top"
+                            Height="24"
+                            Padding="14,0"
+                            Background="{DynamicResource AppChipBrush}"
+                            BorderBrush="{DynamicResource AppSubtleIconBrush}"
+                            BorderThickness="0,0,0,1">
+                        <Grid ColumnDefinitions="Auto,Auto,*,Auto" VerticalAlignment="Center">
+                            <TextBlock Text="Values"
+                                       VerticalAlignment="Center"
+                                       FontSize="{DynamicResource AppContentFontSize}"
+                                       FontFamily="{DynamicResource AppMonoFontFamily}"
+                                       FontWeight="SemiBold"
+                                       Foreground="{DynamicResource AppMutedTextBrush}" />
+                            <!-- How wide the value read is: the grouping's size. -->
+                            <TextBlock Grid.Column="1"
+                                       Text="{Binding SizeText}"
+                                       Margin="8,0,0,0"
+                                       VerticalAlignment="Center"
+                                       FontSize="12"
+                                       FontFamily="{DynamicResource AppMonoFontFamily}"
+                                       Foreground="{DynamicResource AppMutedTextBrush}" />
+                            <!-- The byte order the readings use: one at a time, this machine's
+                                 until another is chosen, and remembered; the reset goes back to
+                                 this machine's. -->
+                            <StackPanel Grid.Column="2"
+                                        Orientation="Horizontal"
+                                        Spacing="2"
+                                        Margin="12,0,0,0"
+                                        VerticalAlignment="Center">
+                                <ToggleButton Classes="order"
+                                              Content="LE"
+                                              IsChecked="{Binding IsLittleEndian, Mode=TwoWay}"
+                                              ToolTip.Tip="Little-endian: least significant byte first" />
+                                <ToggleButton Classes="order"
+                                              Content="BE"
+                                              IsChecked="{Binding IsBigEndian, Mode=TwoWay}"
+                                              ToolTip.Tip="Big-endian: most significant byte first" />
+                                <Button Classes="orderreset"
+                                        Click="OnUseSystemOrder"
+                                        IsEnabled="{Binding !IsSystemOrder}"
+                                        ToolTip.Tip="{x:Static values:HexValuesViewModel.SystemOrderText}"
+                                        ToolTip.ShowOnDisabled="True">
+                                    <icons:LucideIcon Data="{StaticResource Icon.Reset}" Size="12" />
+                                </Button>
+                            </StackPanel>
+                            <TextBlock Grid.Column="3"
+                                       VerticalAlignment="Center"
+                                       Text="{Binding OffsetText}"
+                                       FontSize="12"
+                                       FontFamily="{DynamicResource AppMonoFontFamily}"
+                                       Foreground="{DynamicResource AppMutedTextBrush}" />
+                        </Grid>
+                    </Border>
+
+                    <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel Margin="14,10,14,14" Spacing="12">
+                            <TextBlock Text="No bytes here."
+                                       IsVisible="{Binding !HasBytes}"
+                                       FontSize="12"
+                                       Foreground="{DynamicResource AppMutedTextBrush}" />
+
+                            <!-- The bytes read, so each reading can be traced to them. -->
+                            <TextBlock Text="{Binding BytesText}"
+                                       IsVisible="{Binding HasBytes}"
+                                       FontSize="12"
+                                       FontFamily="{DynamicResource AppMonoFontFamily}" />
+
+                            <StackPanel IsVisible="{Binding HasBytes}" Spacing="0">
+                                <ItemsControl x:Name="ValueRows" ItemsSource="{Binding Rows}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="values:HexValueRow">
+                                            <!-- Hovering a reading marks its bytes in the dump;
+                                                 clicking a value copies it. -->
+                                            <Border Classes="valuerow"
+                                                    PointerEntered="OnValueRowEntered"
+                                                    PointerExited="OnValueRowExited">
+                                                <Grid ColumnDefinitions="64,*">
+                                                    <TextBlock Text="{Binding Name}" Classes="valuename" />
+                                                    <TextBlock Grid.Column="1"
+                                                               Text="{Binding Value}"
+                                                               Classes="value"
+                                                               Tapped="OnValueTapped" />
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+
+                            <!-- The same bytes as bits, grouped by byte, in file order. -->
+                            <StackPanel IsVisible="{Binding HasBytes}" Spacing="2">
+                                <TextBlock Text="Bits" Classes="valuehead" Margin="0,0,0,2" />
+                                <ItemsControl ItemsSource="{Binding BitsLines}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="x:String">
+                                            <TextBlock Text="{Binding}"
+                                                       FontSize="12"
+                                                       FontFamily="{DynamicResource AppMonoFontFamily}" />
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </StackPanel>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+
             <!-- Status gutter, as the raw view's: where the caret is, and how much is selected,
                  in one place at the right. What the byte reads as is the side panel's job. -->
             <Border Grid.Row="2"
-                    Grid.ColumnSpan="2"
+                    Grid.ColumnSpan="3"
                     BorderBrush="{DynamicResource AppBorderBrush}"
                     BorderThickness="0,1,0,0"
                     Background="{DynamicResource AppPanelBackgroundBrush}"

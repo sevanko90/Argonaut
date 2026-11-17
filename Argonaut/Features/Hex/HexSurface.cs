@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using Argonaut.Engine.Bytes;
 using Argonaut.Ui.Clipboard;
 using Argonaut.Ui.Notifications;
 using Argonaut.Ui.Rows;
@@ -98,6 +99,10 @@ public sealed class HexSurface : RowSurface
     public static readonly StyledProperty<int> GroupSizeProperty =
         AvaloniaProperty.Register<HexSurface, int>(nameof(GroupSize), 1, coerce: (_, size) => HexRows.IsGroupSize(size) ? size : 1);
 
+    /// <summary>Bytes marked as a hovered reading in the side panel covers them, in both panels.</summary>
+    public static readonly StyledProperty<ByteRange?> HighlightRangeProperty =
+        AvaloniaProperty.Register<HexSurface, ByteRange?>(nameof(HighlightRange));
+
     /// <summary>Space either side of a panel's text.</summary>
     private const double PanelPadding = 14;
 
@@ -183,7 +188,7 @@ public sealed class HexSurface : RowSurface
     static HexSurface()
     {
         AffectsRender<HexSurface>(OtherByteForegroundProperty, ZeroByteForegroundProperty, PanelBackgroundProperty, DividerBrushProperty,
-            ByteMarkBrushProperty, ByteMarkForegroundProperty, RowMarkBrushProperty, HeaderLineBrushProperty);
+            ByteMarkBrushProperty, ByteMarkForegroundProperty, RowMarkBrushProperty, HeaderLineBrushProperty, HighlightRangeProperty);
     }
 
     public HexSurface()
@@ -237,6 +242,12 @@ public sealed class HexSurface : RowSurface
     {
         get => GetValue(ByteMarkForegroundProperty);
         set => SetValue(ByteMarkForegroundProperty, value);
+    }
+
+    public ByteRange? HighlightRange
+    {
+        get => GetValue(HighlightRangeProperty);
+        set => SetValue(HighlightRangeProperty, value);
     }
 
     public int GroupSize
@@ -847,6 +858,7 @@ public sealed class HexSurface : RowSurface
                 DrawRowMark(context);
                 DrawSelection(context, first, last);
                 DrawPointerMark(context);
+                DrawHighlight(context, first, last);
 
                 for (long row = first; row <= last; row++)
                 {
@@ -989,6 +1001,29 @@ public sealed class HexSurface : RowSurface
         double top = RowsTop + row * RowHeight - this.scrollTop;
         foreach (bool inCharacters in (ReadOnlySpan<bool>)[false, true])
             context.DrawRectangle(this.pointerFill, this.pointerEdge, new RoundedRect(MarkCell(span, top, inCharacters).Deflate(0.5), 4));
+    }
+
+    /// <summary>The bytes a hovered reading covers, marked as the pointer's byte is, row by row in
+    /// both panels: a reading near a row's end runs on into the next.</summary>
+    private void DrawHighlight(DrawingContext context, long first, long last)
+    {
+        if (HighlightRange is not { Length: > 0 } range || ByteMarkBrush is not ISolidColorBrush accent)
+            return;
+
+        this.pointerFill ??= new SolidColorBrush(accent.Color, 0.16);
+        this.pointerEdge ??= new Pen(new SolidColorBrush(accent.Color, 0.55), 1);
+
+        long from = Math.Max(first, HexRows.RowOf(range.Offset));
+        long to = Math.Min(last, HexRows.RowOf(range.End - 1));
+        for (long row = from; row <= to; row++)
+        {
+            long rowStart = HexRows.StartOf(row);
+            int a = (int)(Math.Max(range.Offset, rowStart) - rowStart);
+            int b = (int)(Math.Min(range.End, rowStart + HexRows.BytesPerRow) - rowStart) - 1;
+            double top = RowsTop + row * RowHeight - this.scrollTop;
+            foreach (bool inCharacters in (ReadOnlySpan<bool>)[false, true])
+                context.DrawRectangle(this.pointerFill, this.pointerEdge, new RoundedRect(MarkCell((a, b), top, inCharacters).Deflate(0.5), 4));
+        }
     }
 
     /// <summary>A solid block behind <paramref name="span"/> of row <paramref name="row"/> in one

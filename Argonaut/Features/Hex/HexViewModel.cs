@@ -4,6 +4,7 @@ using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Detection;
 using Argonaut.Engine.Indexing;
 using Argonaut.Engine.Text;
+using Argonaut.Features.Hex.Values;
 using Argonaut.Ui.Documents;
 using Argonaut.Ui.Documents.Navigation;
 using Argonaut.Ui.Find;
@@ -34,6 +35,7 @@ public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDoc
     {
         this.actions = actions;
         this.settings = settings ?? new HexViewSettings();
+        Values = new HexValuesViewModel(this.settings.ValuesByteOrder, order => this.settings.ValuesByteOrder = order);
         Cursor = new HexCursor(() => Length);
         Cursor.Moved += OnCaretMoved;
     }
@@ -67,8 +69,26 @@ public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDoc
 
             this.settings.GroupSize = value;
             OnPropertyChanged();
+            ReadValues();
         }
     }
+
+    /// <summary>Whether the side panel is shown - remembered for every hex view.</summary>
+    public bool ShowsSidePanel
+    {
+        get => this.settings.ShowsSidePanel;
+        set
+        {
+            if (value == this.settings.ShowsSidePanel)
+                return;
+
+            this.settings.ShowsSidePanel = value;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>The side panel's Values tab, reading the bytes at the selection start.</summary>
+    public HexValuesViewModel Values { get; }
 
     /// <summary>The caret and selection, moved by the surface and by reveals.</summary>
     public HexCursor Cursor { get; }
@@ -134,6 +154,24 @@ public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDoc
     {
         OnPropertyChanged(nameof(CaretPositionText));
         OnPropertyChanged(nameof(CaretSelectionText));
+        ReadValues();
+    }
+
+    /// <summary>Reads the caret's group - the group a selection starts in, when there is one -
+    /// for the Values tab, with a few bytes past it for a UTF-8 character to finish: at most
+    /// eight, into a stack buffer.</summary>
+    private void ReadValues()
+    {
+        Span<byte> bytes = stackalloc byte[HexValuesViewModel.MaxBytes];
+        if (this.source is not { } from || Cursor.Caret is not { } caret)
+        {
+            Values.Show(0, [], GroupSize, HexRows.MinOffsetDigits);
+            return;
+        }
+
+        long start = HexRows.GroupStart(caret.IsEmpty ? caret.Byte : caret.Start, GroupSize);
+        int count = from.CopyTo(start, bytes[..(int)Math.Clamp(from.AvailableLength - start, 0, bytes.Length)]);
+        Values.Show(start, bytes[..count], GroupSize, HexRows.OffsetDigits(Length));
     }
 
     public Task LoadAsync(IByteOrigin document)

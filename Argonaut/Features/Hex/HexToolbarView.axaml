@@ -7,6 +7,12 @@
              x:DataType="hex:HexToolbarViewModel">
     <!-- What the bytes are, and where they can go: a copy, or the app the system uses for them. -->
     <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+        <ToggleButton x:Name="SidePanelToggle"
+                      IsChecked="{Binding ShowsSidePanel, Mode=TwoWay}"
+                      Classes="tool icononly"
+                      ToolTip.Tip="Values: the bytes at the caret read as numbers, times and characters">
+            <icons:LucideIcon Data="{StaticResource Icon.SidePanel}" />
+        </ToggleButton>
         <!-- How many bytes the hex panel draws together. Display only: the bytes stay in file
              order, and reading them as numbers is the side panel's job. -->
         <Button x:Name="GroupSizeButton"

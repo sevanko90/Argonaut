@@ -1,6 +1,8 @@
+using System;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using Argonaut.Engine.Settings;
+using Argonaut.Features.Hex.Values;
 
 namespace Argonaut.Features.Hex;
 
@@ -18,6 +20,13 @@ public sealed class HexViewSettings : ISettingsBlock<HexViewSettings>
         get;
         set => field = HexRows.IsGroupSize(value) ? value : 1;
     } = 1;
+
+    /// <summary>Whether the side panel - the Values tab - is shown beside the dump.</summary>
+    public bool ShowsSidePanel { get; set; } = true;
+
+    /// <summary>The byte order the Values tab reads in: this machine's until one is chosen.</summary>
+    [JsonConverter(typeof(JsonStringEnumConverter<ByteOrder>))]
+    public ByteOrder ValuesByteOrder { get; set; } = HexValuesViewModel.SystemOrder;
 }
 
 [JsonSerializable(typeof(HexViewSettings))]

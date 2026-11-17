@@ -19,11 +19,10 @@ Status: steps 1-4 and 9 built on branch `hex-view` - a read-only, polished hex v
 - **The data column always shows bytes, in file order.** A byte-size selector (1, 2, 4, 8) only
   groups them visually; it never turns them into numbers or reorders them. Interpreting bytes is
   the side panel's job. The row stays 16 bytes, which every group size divides.
-- **A side panel replaces the value inspector.** It sits right of the character column, where
-  there is room to spare, and has tabs: **Values** reads the bytes at the selection start every
-  way they can be read - every size, both byte orders, all at once, with no selector - and
-  **Struct** is the structure decoder (docs/struct-decoder-plan.md). The two are not used at the
-  same time, so they share the space rather than splitting it.
+- **A side panel replaces the value inspector.** It sits right of the dump, a fixed width, and
+  has tabs: **Values** reads the caret's group as the types its size can hold, in one byte order
+  chosen by a switch, and **Struct** is the structure decoder (docs/struct-decoder-plan.md). The
+  two are not used at the same time, so they share the space rather than splitting it.
 - **The character column is ASCII**: printable bytes (0x20-0x7E) as themselves, `.` for everything
   else. A UTF-8 column is a later option, held back by characters that cross a row boundary
   (below).
@@ -168,30 +167,36 @@ chosen one is remembered as a setting.
 
 #### Values
 
-Reads up to 8 bytes from the selection start (the caret when nothing is selected) - any offset,
-not only a group boundary - and lists every reading of them at once. No size or endianness
-selector: each reading has a little-endian and a big-endian column side by side, so nothing has
-to be switched to compare them.
+Reads the caret's group - the group a selection starts in, when there is one - as the types its
+size can hold. The grouping says how wide the value is, so the bytes read are the ones the caret
+marks in the dump, and choosing another width regroups the dump to match. Showing every size at
+once was tried and dropped: most of its readings were noise, and nothing in the dump showed which
+bytes they came from.
 
-| Size | Readings (each little- and big-endian) |
-|------|----------|
-| 8-bit | uint8, int8, ASCII name (`NUL`, `LF`), UTF-8 character starting here (one column) |
-| 16-bit | uint16, int16, `Half` |
-| 32-bit | uint32, int32, `float`, Unix seconds |
-| 64-bit | uint64, int64, `double`, Unix seconds, Unix milliseconds |
+| Group | Readings |
+|-------|----------|
+| 1 byte | uint8, int8, ASCII name (`NUL`, `LF`), UTF-8 character starting here |
+| 2 bytes | uint16, int16, `Half` |
+| 4 bytes | uint32, int32, `float`, Unix seconds |
+| 8 bytes | uint64, int64, `double`, Unix seconds, Unix milliseconds |
 
-- A header row shows the 8 bytes being read, in file order in hex, so each reading can be traced
-  to its bytes.
-- **Bits** shows the same 8 bytes as 0/1 digits grouped by byte (`0100 1001`), in file order,
-  four bytes to a line.
-- Hovering a reading highlights the bytes it covers in the grid; clicking it copies its value.
-- Near the end of the document, a size with too few bytes left shows `-` rather than reading past
-  it; the smaller sizes still read.
+- **One byte order at a time**: LE / BE chips in the panel's header, starting at this machine's
+  order and remembered (`HexViewSettings.ValuesByteOrder`). Once an order suits a file it rarely
+  changes, so the other does not need the room beside it. A reset icon beside them goes back to
+  this machine's order, its tooltip naming which that is, and is greyed out when it is in use.
+- The header says what is read and where: "Values", the width ("32-bit"), the order, and the
+  group's offset. Below it, the group's bytes in file order.
+- **Bits** shows the group's bytes as 0/1 digits grouped by byte (`0100 1001`), four to a line.
+- Hovering a reading marks the bytes it covers in the dump (a UTF-8 character can run past a
+  one-byte group); clicking it copies its value.
+- A last group cut short by the end of the document reads as `-`; a lone byte is always whole.
+- The panel is 340 px wide whatever it shows, so the dump never shifts; it is shown or hidden
+  from the toolbar, and that is remembered.
 
 It reads at most 8 bytes with `CopyTo` into a `stackalloc` buffer and decodes with
 `BinaryPrimitives`, so it costs nothing however large the document. The decoding sits in
-`Features/Hex/Values` - `ByteReading` (bytes, size, order) to each reading - because the
-structure decoder uses the same code, so a struct field and the Values tab never disagree.
+`Features/Hex/Values/ByteReading` because the structure decoder uses the same code, so a struct
+field and the Values tab never disagree.
 
 #### Struct
 
@@ -257,9 +262,10 @@ size, because decoding is whole-image in memory.
    - a. [x] The byte-size selector grouping the data column: cell widths, the header, caret,
      selection and pointer highlight by group. Tests: geometry at each size, a partial last
      group, a growing document's last row. Look chosen from screenshots (2 px inside groups).
-   - b. `ByteReading` and the side panel with its Values tab. Tests: each reading at both
-     endiannesses, an unaligned start, fewer than 8 bytes left (smaller sizes still read), the
-     panel follows the caret. Visual pass from screenshots in both themes.
+   - b. [x] `ByteReading` and the side panel with its Values tab, following the caret's group,
+     one byte order at a time. Tests: each reading in each order, a short last group, the panel
+     following the caret and the grouping, the order and the panel remembered. Under trial: the
+     user is trying the interaction before it is called done.
 7. [ ] The structure decoder and the side panel's Struct tab - a large feature of its own, with
    its own steps in docs/struct-decoder-plan.md. It needs step 3's selection and 6b's
    `ByteReading` and panel.

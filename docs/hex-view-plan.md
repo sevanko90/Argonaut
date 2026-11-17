@@ -5,7 +5,7 @@ binary response or file can be read rather than only saved or handed to another 
 second step of binary support (#51); the first (Binary, describing a binary document with Save as…
 and Open in default app) shipped in v2.3.2 and is folded into the hex view by step 2.
 
-Status: steps 1-4 and 9 built on branch `hex-view` - a read-only, polished hex view that binary documents open in.
+Status: steps 1-4, 6 and 9 built on branch `hex-view` - a read-only, polished hex view that binary documents open in.
 
 ## Decided
 
@@ -266,8 +266,7 @@ size, because decoding is whole-image in memory.
      group, a growing document's last row. Look chosen from screenshots (2 px inside groups).
    - b. [x] `ByteReading` and the side panel with its Values tab: a 1-8 byte selection or the
      caret's group, any width, stepped from the panel, one byte order at a time. Tests: each reading in each order, a short last group, the panel
-     following the caret and the grouping, the order and the panel remembered. Under trial: the
-     user is trying the interaction before it is called done.
+     following the caret and the grouping, the order and the panel remembered.
 7. [ ] The structure decoder and the side panel's Struct tab - a large feature of its own, with
    its own steps in docs/struct-decoder-plan.md. It needs step 3's selection and 6b's
    `ByteReading` and panel.

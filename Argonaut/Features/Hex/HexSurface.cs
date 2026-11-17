@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using Argonaut.Ui.Clipboard;
 using Argonaut.Ui.Notifications;
 using Argonaut.Ui.Rows;
 using Avalonia;
@@ -9,6 +10,7 @@ using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Media;
 using Avalonia.Media.TextFormatting;
+using Avalonia.Threading;
 using Avalonia.Utilities;
 
 namespace Argonaut.Features.Hex;
@@ -43,16 +45,18 @@ public interface IHexDocument
 ///
 /// The offset gutter and the character panel sit on <see cref="PanelBackground"/>, the bytes on the
 /// surface's own. Bytes are coloured by class: zero faint (most of a binary file's padding),
-/// printable ASCII as text, everything else in <see cref="OtherByteForeground"/>. The byte under
-/// the pointer is marked in both panels as a solid block with the byte redrawn on it in
-/// <see cref="ByteMarkForeground"/> - whatever the byte's own colour, it stays readable - over a
-/// faint band along its row, which leads the eye from the bytes to their characters. Layouts are
-/// kept for the rows on screen only.
+/// printable ASCII as text, everything else in <see cref="OtherByteForeground"/>. The character
+/// panel spaces its characters a little wider than the font does, so a mark round one clears its
+/// neighbours. Layouts are kept for the rows on screen only.
 ///
 /// The caret and the selection (<see cref="HexCursor"/>) are drawn in both panels at once: the
-/// selection behind the bytes, the caret as an outline around its byte - solid in the panel that
-/// has the keyboard, dashed in the other. A click or drag in either panel moves them and makes
-/// that panel the one the keys and a copy act in; the pointer's own mark carries on over both.
+/// selection behind the bytes, the caret in <see cref="ByteMarkBrush"/> - a solid block with the
+/// byte redrawn on it in <see cref="ByteMarkForeground"/>, readable over any byte's colour, in the
+/// panel the keys act in, blinking to its outline while the view has focus; the outline alone in
+/// the other panel. A click or drag in either panel moves them and makes that panel the one the
+/// keys and a copy act in. The byte under the pointer is marked softer, so the caret stays the
+/// focus: a pale block of the same accent with a faint edge, behind its text, over a faint band
+/// along its row.
 /// </summary>
 public sealed class HexSurface : RowSurface
 {
@@ -76,21 +80,18 @@ public sealed class HexSurface : RowSurface
     public static readonly StyledProperty<IBrush?> HeaderLineBrushProperty =
         AvaloniaProperty.Register<HexSurface, IBrush?>(nameof(HeaderLineBrush));
 
-    /// <summary>The solid block behind the byte under the pointer, in both panels.</summary>
+    /// <summary>The accent the caret and the pointer's mark are drawn in: the caret solid, the
+    /// pointer's mark a pale tint of it.</summary>
     public static readonly StyledProperty<IBrush?> ByteMarkBrushProperty =
         AvaloniaProperty.Register<HexSurface, IBrush?>(nameof(ByteMarkBrush));
 
-    /// <summary>The marked byte's text, drawn again on its block.</summary>
+    /// <summary>The caret's byte, drawn again on its solid block.</summary>
     public static readonly StyledProperty<IBrush?> ByteMarkForegroundProperty =
         AvaloniaProperty.Register<HexSurface, IBrush?>(nameof(ByteMarkForeground));
 
     /// <summary>The faint band along the row under the pointer.</summary>
     public static readonly StyledProperty<IBrush?> RowMarkBrushProperty =
         AvaloniaProperty.Register<HexSurface, IBrush?>(nameof(RowMarkBrush));
-
-    /// <summary>The outline around the caret's byte.</summary>
-    public static readonly StyledProperty<IBrush?> CaretBrushProperty =
-        AvaloniaProperty.Register<HexSurface, IBrush?>(nameof(CaretBrush));
 
     /// <summary>Space either side of a panel's text.</summary>
     private const double PanelPadding = 14;
@@ -106,6 +107,10 @@ public sealed class HexSurface : RowSurface
     /// <summary>The hex text's width in characters: three a byte and one more between the groups,
     /// less the trailing space.</summary>
     private const int HexTextChars = HexRows.BytesPerRow * 3;
+
+    /// <summary>Extra room between the character panel's characters, so a mark around one
+    /// clears its neighbours; each glyph sits in the middle of its widened cell.</summary>
+    private const double CharacterSpacing = 2;
 
     private readonly Dictionary<long, RowLayouts> layouts = new();
     private readonly List<long> leaving = new();
@@ -136,7 +141,13 @@ public sealed class HexSurface : RowSurface
     private Pen? dividerPen;
     private Pen? groupPen;
     private Pen? caretPen;
-    private Pen? otherCaretPen;
+    private IBrush? pointerFill;
+    private Pen? pointerEdge;
+
+    // The caret blinks between its solid mark and its outline while the view has focus, and
+    // shows solid the moment it moves.
+    private DispatcherTimer? caretBlink;
+    private bool caretBlinkOff;
 
     // Run properties per byte class, built for the current font and brushes and dropped with
     // the layouts when either changes.
@@ -156,8 +167,7 @@ public sealed class HexSurface : RowSurface
     static HexSurface()
     {
         AffectsRender<HexSurface>(OtherByteForegroundProperty, ZeroByteForegroundProperty, PanelBackgroundProperty, DividerBrushProperty,
-            ByteMarkBrushProperty, ByteMarkForegroundProperty, RowMarkBrushProperty, HeaderLineBrushProperty,
-            CaretBrushProperty);
+            ByteMarkBrushProperty, ByteMarkForegroundProperty, RowMarkBrushProperty, HeaderLineBrushProperty);
     }
 
     public HexSurface()
@@ -165,12 +175,6 @@ public sealed class HexSurface : RowSurface
         Focusable = true;
         MeasureGeometry();
         ContextMenu = BuildCopyMenu();
-    }
-
-    public IBrush? CaretBrush
-    {
-        get => GetValue(CaretBrushProperty);
-        set => SetValue(CaretBrushProperty, value);
     }
 
     /// <summary>Whether the keys and a copy act in the character panel rather than the hex one.</summary>
@@ -283,7 +287,7 @@ public sealed class HexSurface : RowSurface
     {
         double y = RowsTop + (screenRow + 0.5) * RowHeight;
         return inCharacters
-            ? new Point(CharacterTextLeft + (column + 0.5) * this.charWidth, y)
+            ? new Point(CharacterCellLeft(column) + CharacterCell / 2, y)
             : new Point(HexTextLeft + (HexByteColumn(column) + 1) * this.charWidth, y);
     }
 
@@ -301,6 +305,12 @@ public sealed class HexSurface : RowSurface
     private double HexTextLeft => this.gutterWidth + PanelPadding - PanOffset;
 
     private double CharacterTextLeft => CharacterPanelLeft + PanelPadding - PanOffset;
+
+    /// <summary>One character's cell in the character panel: its advance and the spacing.</summary>
+    private double CharacterCell => this.charWidth + CharacterSpacing;
+
+    /// <summary>Where column <paramref name="column"/>'s cell starts in the character panel.</summary>
+    private double CharacterCellLeft(int column) => CharacterTextLeft + column * CharacterCell;
 
     /// <summary>Where byte <paramref name="column"/>'s digits start in the hex panel's text.</summary>
     private static int HexByteColumn(int column) => HexRows.HexPosition(0, column) - HexRows.HexColumn(0);
@@ -355,7 +365,18 @@ public sealed class HexSurface : RowSurface
             : null;
     }
 
-    private void OnCaretMoved(object? sender, EventArgs e) => InvalidateVisual();
+    private void OnCaretMoved(object? sender, EventArgs e)
+    {
+        // A caret that has just moved shows solid, and starts its blink again from there.
+        this.caretBlinkOff = false;
+        if (this.caretBlink is { IsEnabled: true } blink)
+        {
+            blink.Stop();
+            blink.Start();
+        }
+
+        InvalidateVisual();
+    }
 
     private void OnRevealRequested(object? sender, EventArgs e) => TakeReveal();
 
@@ -408,10 +429,11 @@ public sealed class HexSurface : RowSurface
             this.groupPen = null;
             this.headerPen = null;
         }
-        else if (change.Property == CaretBrushProperty)
+        else if (change.Property == ByteMarkBrushProperty)
         {
             this.caretPen = null;
-            this.otherCaretPen = null;
+            this.pointerFill = null;
+            this.pointerEdge = null;
         }
     }
 
@@ -499,12 +521,21 @@ public sealed class HexSurface : RowSurface
     protected override void OnGotFocus(FocusChangedEventArgs e)
     {
         base.OnGotFocus(e);
+        this.caretBlinkOff = false;
+        this.caretBlink ??= new DispatcherTimer(TimeSpan.FromMilliseconds(530), DispatcherPriority.Background, (_, _) =>
+        {
+            this.caretBlinkOff = !this.caretBlinkOff;
+            InvalidateVisual();
+        });
+        this.caretBlink.Start();
         InvalidateVisual();
     }
 
     protected override void OnLostFocus(FocusChangedEventArgs e)
     {
         base.OnLostFocus(e);
+        this.caretBlink?.Stop();
+        this.caretBlinkOff = false;
         InvalidateVisual();
     }
 
@@ -579,7 +610,7 @@ public sealed class HexSurface : RowSurface
         double y = Math.Clamp(point.Y, RowsTop, Math.Max(RowsTop, Bounds.Height - 1));
         long row = (long)((y - RowsTop + this.scrollTop) / RowHeight);
         int column = this.keysInCharacters
-            ? (int)Math.Floor((point.X - CharacterTextLeft) / this.charWidth)
+            ? (int)Math.Floor((point.X - CharacterTextLeft) / CharacterCell)
             : HexColumnNear(point.X);
         column = Math.Clamp(column, 0, HexRows.BytesPerRow - 1);
         return Math.Clamp(HexRows.StartOf(row) + column, 0, length - 1);
@@ -596,7 +627,7 @@ public sealed class HexSurface : RowSurface
 
     private (int Index, bool InCharacters)? ColumnAt(double x)
     {
-        double inCharacters = (x - CharacterTextLeft) / this.charWidth;
+        double inCharacters = (x - CharacterTextLeft) / CharacterCell;
         if (inCharacters >= 0 && inCharacters < HexRows.BytesPerRow)
             return ((int)inCharacters, true);
 
@@ -690,15 +721,6 @@ public sealed class HexSurface : RowSurface
         };
     }
 
-    /// <summary>The platform names for UTF-8 text, under which <see cref="HexCopyForm.Bytes"/>
-    /// puts the bytes as they are - what this app's own paste reads back unchanged, NULs and
-    /// all.</summary>
-    private static readonly string[] Utf8ClipboardFormats =
-    {
-        "public.utf8-plain-text",        // macOS
-        "text/plain;charset=utf-8",      // X11 / Wayland
-    };
-
     /// <summary>
     /// Copies the selection in <paramref name="form"/>. Refuses rather than truncates when it is
     /// larger than <see cref="HexCopy.MaxBytes"/>.
@@ -721,7 +743,9 @@ public sealed class HexSurface : RowSurface
         if (form == HexCopyForm.Bytes)
         {
             var item = new DataTransferItem();
-            foreach (string identifier in Utf8ClipboardFormats)
+            // As binary data, not text: what a hex editor takes, and what this app's own paste
+            // opens again byte for byte.
+            foreach (string identifier in ClipboardFormats.Binary)
                 item.Set(DataFormat.CreateBytesPlatformFormat(identifier), bytes);
             var transfer = new DataTransfer();
             transfer.Add(item);
@@ -758,6 +782,7 @@ public sealed class HexSurface : RowSurface
             {
                 DrawRowMark(context);
                 DrawSelection(context, first, last);
+                DrawPointerMark(context);
 
                 for (long row = first; row <= last; row++)
                 {
@@ -767,12 +792,11 @@ public sealed class HexSurface : RowSurface
                     using (context.PushClip(new Rect(this.gutterWidth, top, Math.Max(0, width - this.gutterWidth), RowHeight)))
                     {
                         laid.Hex.Draw(context, new Point(HexTextLeft, CentreInRow(laid.Hex, top)));
-                        laid.Characters.Draw(context, new Point(CharacterTextLeft, CentreInRow(laid.Characters, top)));
+                        laid.Characters.Draw(context, new Point(CharacterTextLeft + CharacterSpacing / 2, CentreInRow(laid.Characters, top)));
                     }
                 }
 
-                DrawCaret(context, first, last);
-                DrawByteMark(context, typeface);
+                DrawCaret(context, first, last, typeface);
             }
         }
 
@@ -827,65 +851,90 @@ public sealed class HexSurface : RowSurface
             double hexLeft = HexTextLeft + HexByteColumn(a) * this.charWidth - this.charWidth / 2;
             double hexRight = HexTextLeft + (HexByteColumn(b - 1) + 2) * this.charWidth + this.charWidth / 2;
             context.FillRectangle(fill, new Rect(hexLeft, top, hexRight - hexLeft, RowHeight));
-            context.FillRectangle(fill, new Rect(CharacterTextLeft + a * this.charWidth, top, (b - a) * this.charWidth, RowHeight));
+            context.FillRectangle(fill, new Rect(CharacterCellLeft(a), top, (b - a) * CharacterCell, RowHeight));
         }
     }
 
-    /// <summary>The caret: an outline around its byte in both panels, solid in the panel the keys
-    /// act in while the view has focus, dashed otherwise.</summary>
-    private void DrawCaret(DrawingContext context, long first, long last)
+    /// <summary>The cell a mark is drawn in around byte <paramref name="column"/> of a row whose
+    /// top is <paramref name="top"/>, in the hex panel or the character panel.</summary>
+    private Rect MarkCell(int column, double top, bool inCharacters)
     {
-        if (this.cursor?.Caret is not { } caret || CaretBrush is not { } ink)
+        double cellTop = top + 2;
+        double height = RowHeight - 4;
+        if (inCharacters)
+            return new Rect(CharacterCellLeft(column) - 0.5, cellTop, CharacterCell + 1, height);
+
+        double hexX = HexTextLeft + HexByteColumn(column) * this.charWidth;
+        return new Rect(hexX - 4, cellTop, 2 * this.charWidth + 8, height);
+    }
+
+    /// <summary>
+    /// The caret, in both panels. In the panel the keys act in it is a solid block with the byte
+    /// drawn again on it in <see cref="ByteMarkForeground"/> - readable over any byte's colour -
+    /// blinking to its outline while the view has focus; in the other panel, and in both while the
+    /// view does not have focus, it is the outline alone.
+    /// </summary>
+    private void DrawCaret(DrawingContext context, long first, long last, Typeface typeface)
+    {
+        if (this.cursor?.Caret is not { } caret || ByteMarkBrush is not { } accent)
             return;
 
         long row = HexRows.RowOf(caret.Byte);
         if (row < first || row > last)
             return;
 
-        this.caretPen ??= new Pen(ink, 1.5);
-        this.otherCaretPen ??= new Pen(ink, 1, dashStyle: new DashStyle([2, 2], 0));
-
+        this.caretPen ??= new Pen(accent, 1.5);
         int column = (int)(caret.Byte - HexRows.StartOf(row));
-        double top = RowsTop + row * RowHeight - this.scrollTop + 1.5;
-        double height = RowHeight - 3;
-        var hexCell = new Rect(HexTextLeft + HexByteColumn(column) * this.charWidth - 3, top, 2 * this.charWidth + 6, height);
-        var characterCell = new Rect(CharacterTextLeft + column * this.charWidth - 1.5, top, this.charWidth + 3, height);
+        double top = RowsTop + row * RowHeight - this.scrollTop;
 
-        bool focused = IsFocused;
-        context.DrawRectangle(null, focused && !this.keysInCharacters ? this.caretPen : this.otherCaretPen, new RoundedRect(hexCell, 3));
-        context.DrawRectangle(null, focused && this.keysInCharacters ? this.caretPen : this.otherCaretPen, new RoundedRect(characterCell, 3));
+        bool solid = IsFocused && !this.caretBlinkOff;
+        foreach (bool inCharacters in (ReadOnlySpan<bool>)[false, true])
+        {
+            var cell = MarkCell(column, top, inCharacters);
+            if (solid && inCharacters == this.keysInCharacters)
+                DrawSolidMark(context, typeface, row, column, top, inCharacters, accent);
+            else
+                context.DrawRectangle(null, this.caretPen, new RoundedRect(cell.Deflate(0.75), 4));
+        }
     }
 
-    /// <summary>
-    /// The byte under the pointer, marked in both panels as a solid block with the byte drawn
-    /// again on top in <see cref="ByteMarkForeground"/>: a block any lighter would leave purple or
-    /// white text unreadable, so the text is redrawn rather than seen through it.
-    /// </summary>
-    private void DrawByteMark(DrawingContext context, Typeface typeface)
+    /// <summary>The byte under the pointer, marked in both panels behind its text: a pale block
+    /// of the accent with a faint edge - softer than the caret, which stays the focus, and the
+    /// byte keeps its own colour.</summary>
+    private void DrawPointerMark(DrawingContext context)
     {
-        if (this.hovered is not { } offset || ByteMarkBrush is not { } block || this.document is null)
+        if (this.hovered is not { } offset || ByteMarkBrush is not ISolidColorBrush accent)
             return;
+
+        this.pointerFill ??= new SolidColorBrush(accent.Color, 0.16);
+        this.pointerEdge ??= new Pen(new SolidColorBrush(accent.Color, 0.55), 1);
 
         long row = HexRows.RowOf(offset);
         int column = (int)(offset - HexRows.StartOf(row));
+        double top = RowsTop + row * RowHeight - this.scrollTop;
+        foreach (bool inCharacters in (ReadOnlySpan<bool>)[false, true])
+            context.DrawRectangle(this.pointerFill, this.pointerEdge, new RoundedRect(MarkCell(column, top, inCharacters).Deflate(0.5), 4));
+    }
+
+    /// <summary>A solid block behind byte <paramref name="column"/> of row <paramref name="row"/>
+    /// in one panel, with the byte drawn again on it in <see cref="ByteMarkForeground"/>.</summary>
+    private void DrawSolidMark(DrawingContext context, Typeface typeface, long row, int column, double top, bool inCharacters, IBrush block)
+    {
         Span<byte> bytes = stackalloc byte[HexRows.BytesPerRow];
-        if (this.document.ReadRow(row, bytes) <= column)
+        if (this.document is null || this.document.ReadRow(row, bytes) <= column)
             return;
 
         byte value = bytes[column];
-        double top = RowsTop + row * RowHeight - this.scrollTop;
-        double hexX = HexTextLeft + HexByteColumn(column) * this.charWidth;
-        double characterX = CharacterTextLeft + column * this.charWidth;
-        var cellTop = top + 2;
-        double cellHeight = RowHeight - 4;
-        context.DrawRectangle(block, null, new RoundedRect(new Rect(hexX - 4, cellTop, 2 * this.charWidth + 8, cellHeight), 4));
-        context.DrawRectangle(block, null, new RoundedRect(new Rect(characterX - 2, cellTop, this.charWidth + 4, cellHeight), 4));
+        var cell = MarkCell(column, top, inCharacters);
+        context.DrawRectangle(block, null, new RoundedRect(cell, 4));
 
         var ink = ByteMarkForeground ?? Background ?? Brushes.White;
-        using var digits = new TextLayout(value.ToString("X2"), typeface, FontSize, ink);
-        using var character = new TextLayout(HexRows.ClassOf(value) == HexByteClass.Printable ? ((char)value).ToString() : ".", typeface, FontSize, ink);
-        digits.Draw(context, new Point(hexX, CentreInRow(digits, top)));
-        character.Draw(context, new Point(characterX, CentreInRow(character, top)));
+        string text = inCharacters
+            ? HexRows.ClassOf(value) == HexByteClass.Printable ? ((char)value).ToString() : "."
+            : value.ToString("X2");
+        using var layout = new TextLayout(text, typeface, FontSize, ink);
+        double x = inCharacters ? CharacterCellLeft(column) + CharacterSpacing / 2 : HexTextLeft + HexByteColumn(column) * this.charWidth;
+        layout.Draw(context, new Point(x, CentreInRow(layout, top)));
     }
 
     /// <summary>Where the data ends on screen: the right edge of the character panel.</summary>
@@ -910,7 +959,7 @@ public sealed class HexSurface : RowSurface
         using (context.PushClip(new Rect(this.gutterWidth, 0, Math.Max(0, right - this.gutterWidth), HeaderHeight)))
         {
             this.hexHeader.Draw(context, new Point(HexTextLeft, y));
-            this.characterHeader.Draw(context, new Point(CharacterTextLeft, y));
+            this.characterHeader.Draw(context, new Point(CharacterTextLeft + CharacterSpacing / 2, y));
         }
 
         if (this.headerPen is { } line)
@@ -954,7 +1003,8 @@ public sealed class HexSurface : RowSurface
             new TextLayout(new string(this.line, hexColumn, HexTextChars), typeface, FontSize, foreground,
                 TextAlignment.Left, TextWrapping.NoWrap, textStyleOverrides: StylesFor(count, typeface, hex: true)),
             new TextLayout(new string(this.line, characterColumn, count), typeface, FontSize, foreground,
-                TextAlignment.Left, TextWrapping.NoWrap, textStyleOverrides: StylesFor(count, typeface, hex: false)));
+                TextAlignment.Left, TextWrapping.NoWrap, letterSpacing: CharacterSpacing,
+                textStyleOverrides: StylesFor(count, typeface, hex: false)));
         this.layouts[row] = laid;
         return laid;
     }
@@ -999,7 +1049,7 @@ public sealed class HexSurface : RowSurface
 
         this.gutterWidth = PanelPadding + this.offsetDigits * this.charWidth + PanelPadding;
         this.hexPanelWidth = PanelPadding + (HexTextChars) * this.charWidth + PanelPadding;
-        this.characterPanelWidth = PanelPadding + HexRows.BytesPerRow * this.charWidth + PanelPadding;
+        this.characterPanelWidth = PanelPadding + HexRows.BytesPerRow * (this.charWidth + CharacterSpacing) + PanelPadding;
 
         var header = new char[HexTextChars];
         Array.Fill(header, ' ');

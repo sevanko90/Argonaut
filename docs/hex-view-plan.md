@@ -73,15 +73,19 @@ the 16 bytes in two groups of 8, and the character column.
   selection runs to the document's end at most. Clicking in either panel sets both and makes
   that panel the one the keys and a copy act in (Tab swaps it); a drag or Shift-click selects
   from byte to byte, both included. Arrow keys, Page Up/Down and Home/End move by byte, row and
-  screen, Cmd/Ctrl+Home/End to the ends, Shift extends. The caret is an outline round its byte
-  in both panels, solid in the active one; the selection is shaded behind both.
+  screen, Cmd/Ctrl+Home/End to the ends, Shift extends. The selection is shaded behind both
+  panels. The caret is the accent's solid block with the byte redrawn on it in the active panel
+  (readable over any byte colour), blinking to its outline while the view has focus, and the
+  outline alone in the other panel. The pointer's mark is softer - a pale accent block with a
+  faint edge, behind the text - so the caret stays the focus. The character panel spaces its
+  characters 2 px wider than the font, so a mark clears its neighbours.
 - Cmd/Ctrl+C copies as the active panel shows it - hex text (`89 50 4E 47`) or the character
   column - and the context menu offers both and the bytes themselves, which go on the clipboard
-  under the platform's UTF-8 text formats so this app's paste reads them back unchanged. A copy
-  over 16 MB is refused, not truncated.
+  as binary data (`public.data` on macOS, `application/octet-stream` elsewhere); pasting them
+  into the app opens them again byte for byte. A copy over 16 MB is refused, not truncated.
 - The status strip shows where the caret is, as the raw view's does: the caret's position
-  (`Byte 1,234    0x000004D2`: decimal, then the hex offset as the gutter shows it) at the right, in one fixed place, with the
-  selection length beside it when something is selected. It follows the caret as it moves by
+  (`Byte 1,234    0x000004D2`: decimal, then the hex offset as the gutter shows it) at the
+  right, in one fixed place, with the selection length beside it when something is selected. It follows the caret as it moves by
   click or key. What the byte *is* - hex, decimal, bits, ASCII name - is not on the strip; the
   side panel's Values tab shows that, and more (step 6b).
 - Pointer tracking stays, as a mode beside caret tracking: the byte under the pointer keeps its
@@ -207,8 +211,9 @@ size, because decoding is whole-image in memory.
    selection length,
    in a fixed place at the right. Tests: the position follows caret movement by key and click.
    Built: `HexCursor` (boundaries, moves, viewport, pending reveal), `HexCopy`, the surface's
-   click/drag/shift-click, keys and copy menu. The caret and selection look is still to be chosen
-   from screenshots in both themes.
+   click/drag/shift-click, keys and copy menu; Copy bytes puts binary data on the clipboard
+   (`public.data` / `application/octet-stream`), which paste-to-open reads first. Caret and
+   pointer look chosen from screenshots in both themes.
 4. [ ] Go to offset.
 5. [ ] `BytePatternMatcher` and the find bar's Hex mode. Tests: parsing (`0x` prefixes, spacing,
    odd digit counts rejected), matches across chunk boundaries (`ChunkOverlap`).
@@ -230,9 +235,9 @@ size, because decoding is whole-image in memory.
    - A pinned header - "Offset", each byte's column, "Text" over the characters (it will hold
      more than ASCII one day) - set apart by its height, a line and a gap before the rows.
    - A faint dashed line between the two groups of eight.
-   - The byte under the pointer: a solid accent block in both panels with the byte redrawn on it
-     in the background colour, which keeps purple and white bytes readable; under it, a faint
-     band along its row. (Zebra striping and column bands were tried and dropped for this.)
+   - The byte under the pointer: a mark in both panels over a faint band along its row. (Zebra
+     striping and column bands were tried and dropped for this.) Step 3 gave its solid accent
+     block to the caret and the pointer a softer mark.
    - Zero bytes fainter than the offsets, so they stand clear of black text in light theme.
    - A status strip, as the raw view's: the byte's hex, decimal, bits and ASCII name, and its
      position, following the pointer. Step 3 reduces it to the caret's position.

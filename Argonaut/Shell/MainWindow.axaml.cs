@@ -24,6 +24,7 @@ using Argonaut.Shell.Dialogs;
 using Argonaut.Shell.Launching;
 using Argonaut.Ui.Launching;
 using Argonaut.Shell.Updates;
+using Argonaut.Ui.Clipboard;
 using Argonaut.Ui.Documents.Navigation;
 using Argonaut.Ui.Notifications;
 using Argonaut.Ui.Progress;
@@ -184,24 +185,8 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Platform formats that hand text over as UTF-8 bytes, in preference order. Taking one of
-    /// these skips a whole representation: Avalonia's TryGetTextAsync yields a
-    /// <see cref="string"/>, so a paste would arrive as UTF-16 (two bytes per ASCII character,
-    /// on the large object heap at any size worth worrying about) and then be transcoded to the
-    /// UTF-8 the indexers read. Asking for the bytes directly does neither.
-    ///
-    /// macOS requires a Uniform Type Identifier; X11 and Wayland use mime types. Windows has no
-    /// standard UTF-8 clipboard format, so it falls through to the string path - which is why
-    /// this is a preference rather than a requirement.
-    /// </summary>
-    private static readonly string[] Utf8ClipboardFormats =
-    {
-        "public.utf8-plain-text",        // macOS
-        "text/plain;charset=utf-8",      // X11 / Wayland
-    };
-
-    /// <summary>
-    /// The clipboard's text as UTF-8 bytes, or null when there is none (or no clipboard at all).
+    /// The clipboard's bytes - binary data, or its text as UTF-8 - or null when there is none (or
+    /// no clipboard at all).
     /// Passed to the view model as a delegate so it stays free of Avalonia's TopLevel, and so
     /// tests can supply clipboard contents without one.
     ///
@@ -225,9 +210,12 @@ public partial class MainWindow : Window
 
         try
         {
-            // Formats can be inspected without fetching anything, so preferring a UTF-8 format
-            // costs nothing when the clipboard does not offer one.
-            foreach (var identifier in Utf8ClipboardFormats)
+            // Formats can be inspected without fetching anything, so preferring a byte format
+            // costs nothing when the clipboard does not offer one. Binary data first - bytes
+            // copied from the hex view open again exactly - then text as UTF-8, which skips the
+            // UTF-16 string a text read builds (two bytes an ASCII character, on the large object
+            // heap at any size worth worrying about) and its transcoding back.
+            foreach (var identifier in ClipboardFormats.Binary.Concat(ClipboardFormats.Utf8Text))
             {
                 var format = DataFormat.CreateBytesPlatformFormat(identifier);
                 if (!transfer.Contains(format))

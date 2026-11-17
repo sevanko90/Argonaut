@@ -20,6 +20,7 @@ using Argonaut.Features.Raw.Editing;
 using Argonaut.Features.Raw.Highlighting;
 using Argonaut.Features.Raw.Hints;
 using Argonaut.Features.Raw.Rows;
+using Argonaut.Ui.Clipboard;
 using Argonaut.Ui.Find;
 using Argonaut.Ui.Notifications;
 using Argonaut.Ui.Rows;
@@ -1653,16 +1654,6 @@ public class RawTextSurface : RowSurface
     }
 
     /// <summary>
-    /// Clipboard formats that hand over UTF-8 bytes directly, preferred over text so a paste
-    /// into a raw document is the bytes that were copied. Mirrors MainWindow's paste-to-open.
-    /// </summary>
-    private static readonly string[] Utf8ClipboardFormats =
-    {
-        "public.utf8-plain-text",        // macOS
-        "text/plain;charset=utf-8",      // X11 / Wayland
-    };
-
-    /// <summary>
     /// Pastes the clipboard at the caret. Its line breaks take the document's convention, as in any
     /// editor (<see cref="RawViewModel.Paste"/>); nothing is re-encoded, so the bytes otherwise go
     /// in as they were copied.
@@ -1687,7 +1678,7 @@ public class RawTextSurface : RowSurface
 
         try
         {
-            foreach (string identifier in Utf8ClipboardFormats)
+            foreach (string identifier in ClipboardFormats.Utf8Text)
             {
                 var format = DataFormat.CreateBytesPlatformFormat(identifier);
                 if (transfer.Contains(format) && await transfer.TryGetValueAsync(format) is { Length: > 0 } utf8)

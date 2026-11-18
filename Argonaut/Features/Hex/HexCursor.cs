@@ -177,35 +177,35 @@ public sealed class HexCursor(Func<long> length)
 
     /// <summary>
     /// Moves the caret by <paramref name="move"/>, a page being <paramref name="pageRows"/> rows.
-    /// With <paramref name="extend"/> the anchor stays and the selection grows or shrinks to the
-    /// new place; without it the selection goes and the caret lands on a byte. With a
-    /// <paramref name="groupSize"/> it steps a group at a time and lands on a group's first byte,
-    /// as the hex panel moves when its bytes are grouped.
     ///
-    /// While a width is kept, a plain move takes the whole selection, a group at a time - or, with
-    /// <paramref name="byWidth"/>, its own width at a time, to step through a run of values.
+    /// A plain move takes a block of bytes along - the caret's group, a group wide, or a kept
+    /// width's selection - stepping a group at a time (with <paramref name="byWidth"/>, a kept width
+    /// steps its own width, to walk a run of values). The caret alone lands on a group's first
+    /// byte, as the hex panel moves when its bytes are grouped; near the end a block stops where it
+    /// still fits.
+    ///
+    /// With <paramref name="extend"/> the anchor stays and the selection grows or shrinks to the
+    /// new place, from one group boundary to the next.
     /// </summary>
     public void Move(HexMove move, bool extend, int pageRows, int groupSize = 1, bool byWidth = false)
     {
         if (Caret is not { } caret)
             return;
 
-        if (!extend && KeptWidth is { } width)
-        {
-            MoveKeepingWidth(caret.Start, move, width, pageRows, byWidth ? width : groupSize);
-            return;
-        }
-
         long end = length();
-        long lastPlace = extend ? end : HexRows.GroupStart(end - 1, groupSize);
-        long from = extend ? caret.Offset : HexRows.GroupStart(caret.Byte, groupSize);
+        int? kept = extend ? null : KeptWidth;
+        int width = kept ?? groupSize;
+        int step = kept is { } keptWidth && byWidth ? keptWidth : groupSize;
+
+        long from = extend ? caret.Offset : kept is null ? HexRows.GroupStart(caret.Byte, groupSize) : caret.Start;
+        long lastPlace = extend ? end : kept is null ? HexRows.GroupStart(end - 1, groupSize) : Math.Max(0, end - width);
         long rowStart = HexRows.StartOf(HexRows.RowOf(from));
         long page = (long)Math.Max(1, pageRows) * HexRows.BytesPerRow;
         long to = move switch
         {
             // Extending steps from a boundary to the next one a group away.
-            HexMove.Left => extend ? HexRows.GroupStart(from - 1, groupSize) : from - groupSize,
-            HexMove.Right => extend ? HexRows.GroupStart(from, groupSize) + groupSize : from + groupSize,
+            HexMove.Left => extend ? HexRows.GroupStart(from - 1, groupSize) : from - step,
+            HexMove.Right => extend ? HexRows.GroupStart(from, groupSize) + groupSize : from + step,
             HexMove.Up => from - HexRows.BytesPerRow,
             HexMove.Down => from + HexRows.BytesPerRow,
             HexMove.PageUp => from - page,
@@ -213,8 +213,8 @@ public sealed class HexCursor(Func<long> length)
             HexMove.RowStart => rowStart,
 
             // Extending takes the selection to the end of the row, its last group included; a
-            // caret alone lands on that group.
-            HexMove.RowEnd => rowStart + (extend ? HexRows.BytesPerRow : HexRows.BytesPerRow - groupSize),
+            // block lands where it ends the row.
+            HexMove.RowEnd => extend ? rowStart + HexRows.BytesPerRow : Math.Max(rowStart, rowStart + HexRows.BytesPerRow - width),
             HexMove.DocumentStart => 0,
             HexMove.DocumentEnd => lastPlace,
             _ => from,
@@ -227,40 +227,7 @@ public sealed class HexCursor(Func<long> length)
         else if (to > lastPlace)
             to = move is HexMove.Down ? from : lastPlace;
 
-        Select(extend ? new HexCaret(caret.Anchor, to) : HexCaret.At(to));
-    }
-
-    /// <summary>Moves a selection of <paramref name="width"/> bytes starting at
-    /// <paramref name="from"/>, keeping its width, by <paramref name="step"/> bytes left or right.
-    /// It never runs past the end, so near it the selection stops where it still fits.</summary>
-    private void MoveKeepingWidth(long from, HexMove move, int width, int pageRows, int step)
-    {
-        long lastStart = Math.Max(0, length() - width);
-        long rowStart = HexRows.StartOf(HexRows.RowOf(from));
-        long page = (long)Math.Max(1, pageRows) * HexRows.BytesPerRow;
-        long to = move switch
-        {
-            HexMove.Left => from - step,
-            HexMove.Right => from + step,
-            HexMove.Up => from - HexRows.BytesPerRow,
-            HexMove.Down => from + HexRows.BytesPerRow,
-            HexMove.PageUp => from - page,
-            HexMove.PageDown => from + page,
-            HexMove.RowStart => rowStart,
-            HexMove.RowEnd => Math.Max(rowStart, rowStart + HexRows.BytesPerRow - width),
-            HexMove.DocumentStart => 0,
-            HexMove.DocumentEnd => lastStart,
-            _ => from,
-        };
-
-        // As a caret does: a row step that would leave the document stays put, anything else
-        // goes as far as it can.
-        if (to < 0)
-            to = move is HexMove.Up ? from : 0;
-        else if (to > lastStart)
-            to = move is HexMove.Down ? from : lastStart;
-
-        Select(Kept(to, width));
+        Select(extend ? new HexCaret(caret.Anchor, to) : kept is null ? HexCaret.At(to) : Kept(to, width));
     }
 
     /// <summary>Selects <paramref name="range"/> with the caret at its start - where a jump in

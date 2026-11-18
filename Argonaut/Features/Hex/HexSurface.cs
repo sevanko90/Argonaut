@@ -593,7 +593,7 @@ public sealed class HexSurface : RowSurface
             // A right-click inside the selection copies it; elsewhere it moves the caret first,
             // as a click would.
             if (at.Caret is not { } caret || hit.Offset < caret.Start || hit.Offset >= caret.End)
-                at.Place(HexRows.GroupStart(hit.Offset, StepIn(hit.InCharacters)));
+                at.Place(ClickStart(hit));
             InvalidateVisual();
             return;
         }
@@ -601,27 +601,52 @@ public sealed class HexSurface : RowSurface
         if (!point.Properties.IsLeftButtonPressed)
             return;
 
-        if ((e.KeyModifiers & KeyModifiers.Shift) != 0)
-        {
-            at.ExtendTo(hit.Offset, StepIn(hit.InCharacters));
-        }
-        else
-        {
-            // A double-click lets a kept width go - the caret alone, on the byte clicked - and,
-            // like a click, can still be dragged from.
-            long start = HexRows.GroupStart(hit.Offset, StepIn(hit.InCharacters));
-            if (e.ClickCount == 2)
-                at.Select(HexCaret.At(start));
-            else
-                at.Place(start);
-            this.dragFrom = hit.Offset;
-            this.dragging = false;
+        bool extend = (e.KeyModifiers & KeyModifiers.Shift) != 0;
+        PressAt(at, hit, extend, e.ClickCount);
+        if (!extend)
             e.Pointer.Capture(this);
-        }
 
         InvalidateVisual();
         e.Handled = true;
     }
+
+    /// <summary>
+    /// What a left press on <paramref name="hit"/> does - the real pointer and the tests alike. A
+    /// Shift-press takes the selection there; a press puts the caret there, keeping a kept width;
+    /// a double-press lets the width go - the caret alone. Either of those can then be dragged from.
+    /// </summary>
+    private void PressAt(HexCursor at, (long Offset, bool InCharacters) hit, bool extend, int clickCount)
+    {
+        this.keysInCharacters = hit.InCharacters;
+        if (extend)
+        {
+            at.ExtendTo(hit.Offset, StepIn(hit.InCharacters));
+            return;
+        }
+
+        if (clickCount == 2)
+            at.Select(HexCaret.At(ClickStart(hit)));
+        else
+            at.Place(ClickStart(hit));
+        this.dragFrom = hit.Offset;
+        this.dragging = false;
+    }
+
+    /// <summary>Takes a press's selection to <paramref name="to"/> - whole groups in the hex
+    /// panel - once the pointer has left the byte it was pressed on: a hand that shifts within
+    /// that byte keeps the width the press selected.</summary>
+    private void DragTo(HexCursor at, long from, long to)
+    {
+        if (!this.dragging && to == from)
+            return;
+
+        this.dragging = true;
+        at.Select(HexCaret.SpanningGroups(from, to, StepIn(this.keysInCharacters)));
+    }
+
+    /// <summary>Where a press on <paramref name="hit"/> puts the caret: the first byte of its
+    /// group in the hex panel, the byte itself in the character panel.</summary>
+    private long ClickStart((long Offset, bool InCharacters) hit) => HexRows.GroupStart(hit.Offset, StepIn(hit.InCharacters));
 
     protected override void OnPointerMoved(PointerEventArgs e)
     {
@@ -637,13 +662,8 @@ public sealed class HexSurface : RowSurface
             else if (position.Y > Bounds.Height)
                 ScrollByPixels(RowHeight);
 
-            // A press only becomes a drag once the pointer leaves its byte: a hand that shifts
-            // within the byte it clicked keeps the width the click selected.
-            if (DragOffsetAt(position) is { } to && (this.dragging || to != from))
-            {
-                this.dragging = true;
-                at.Select(HexCaret.SpanningGroups(from, to, StepIn(this.keysInCharacters)));
-            }
+            if (DragOffsetAt(position) is { } to)
+                DragTo(at, from, to);
         }
     }
 
@@ -700,29 +720,28 @@ public sealed class HexSurface : RowSurface
     /// <summary>Marks the byte at <paramref name="point"/>, as the pointer does - for tests.</summary>
     internal void HoverAt(Point point) => SetHovered(ByteAt(point));
 
-    /// <summary>Clicks at <paramref name="point"/>: moves the caret there, or with
-    /// <paramref name="extend"/> takes the selection there - for tests.</summary>
+    /// <summary>Clicks at <paramref name="point"/> as the pointer does: moves the caret there, or
+    /// with <paramref name="extend"/> takes the selection there - for tests.</summary>
     internal void ClickAt(Point point, bool extend = false)
     {
-        if (this.cursor is not { } at || ByteAt(point) is not { } hit)
-            return;
-
-        this.keysInCharacters = hit.InCharacters;
-        if (extend)
-            at.ExtendTo(hit.Offset, StepIn(hit.InCharacters));
-        else
-            at.Place(HexRows.GroupStart(hit.Offset, StepIn(hit.InCharacters)));
+        if (this.cursor is { } at && ByteAt(point) is { } hit)
+        {
+            PressAt(at, hit, extend, clickCount: 1);
+            this.dragFrom = null;
+        }
     }
 
-    /// <summary>Drags from <paramref name="from"/> to <paramref name="to"/> - for tests.</summary>
+    /// <summary>Presses at <paramref name="from"/> and drags to <paramref name="to"/> as the
+    /// pointer does - for tests.</summary>
     internal void DragBetween(Point from, Point to)
     {
         if (this.cursor is not { } at || ByteAt(from) is not { } start)
             return;
 
-        this.keysInCharacters = start.InCharacters;
+        PressAt(at, start, extend: false, clickCount: 1);
         if (DragOffsetAt(to) is { } end)
-            at.Select(HexCaret.SpanningGroups(start.Offset, end, StepIn(start.InCharacters)));
+            DragTo(at, start.Offset, end);
+        this.dragFrom = null;
     }
 
     private void SetHovered((long Offset, bool InCharacters)? hit)
@@ -1099,7 +1118,7 @@ public sealed class HexSurface : RowSurface
         if (this.cursor is { KeptWidth: { } width, Caret: { } caret } && this.document is { } document
             && this.dragFrom is null && (offset < caret.Start || offset >= caret.End))
         {
-            long start = HexRows.GroupStart(offset, StepIn(this.hoveredInCharacters));
+            long start = ClickStart((offset, this.hoveredInCharacters));
             DrawRangeMark(context, first, last, new ByteRange(start, Math.Min(width, document.Length - start)));
             return;
         }

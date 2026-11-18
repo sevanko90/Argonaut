@@ -13,9 +13,8 @@ internal static class AppDataPaths
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Argonaut");
 
 #if DEBUG
-    /// <summary>A Debug build's own settings, so it never writes the released build's. Its sealed
-    /// blocks use a different key (see <c>SettingsSealers</c>), and sharing one file would have
-    /// each build overwrite the other's saved sources with a blob the other cannot open.</summary>
+    /// <summary>A Debug build's own settings, so a dev run never writes the released build's
+    /// saved sources or preferences.</summary>
     public static string SettingsFile => Path.Combine(Root, "settings.debug.json");
 
     /// <summary>What a Debug build's settings start from on its first run.</summary>
@@ -50,9 +49,8 @@ internal static class AppDataPaths
     /// another app can open it - cleared at each start (<see cref="Saving.OriginExporter.Sweep"/>).</summary>
     public static string OpenedDirectory => Path.Combine(Root, "Opened");
 
-    /// <summary>Where Linux, and a Debug build on macOS, keeps the key that seals settings blocks -
-    /// see <see cref="FileSealingKeyStore"/>. Unused by a released macOS build (the Keychain) and on
-    /// Windows (DPAPI).</summary>
+    /// <summary>Where macOS and Linux keep the key that seals settings blocks - see
+    /// <see cref="FileSealingKeyStore"/>. Unused on Windows (DPAPI).</summary>
     public static string SealingKeyFile => Path.Combine(Root, "sealing.key");
 
     public static string DebugLogFile => Path.Combine(Root, "debug.log");

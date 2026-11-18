@@ -1,13 +1,11 @@
 using System.Text;
+using Argonaut.Engine.Settings;
 using Argonaut.Shell.Sealing;
+using Argonaut.Tests.Support;
 
 namespace Argonaut.Tests.Shell.Sealing;
 
-/// <summary>
-/// The platform sealers against the real OS. DPAPI runs on every Windows run. The Keychain test
-/// only runs when <c>ARGONAUT_KEYCHAIN_TESTS=1</c>: a CI runner's login keychain may be locked,
-/// and an unsigned test host can be shown an access prompt nobody is there to answer.
-/// </summary>
+/// <summary>The platform sealers against the real OS: DPAPI on Windows, the key file elsewhere.</summary>
 public sealed class SettingsSealersTests
 {
     private static readonly byte[] Content = Encoding.UTF8.GetBytes("""{"location":"https://example.com/?key=SECRET"}""");
@@ -27,24 +25,52 @@ public sealed class SettingsSealersTests
     }
 
     [Fact]
-    public void Keychain_KeepsOneKey_AcrossStores()
+    public void OffWindows_TheKeyFileSeals_AndANewSealerOpensIt()
     {
-        if (!OperatingSystem.IsMacOS() || Environment.GetEnvironmentVariable("ARGONAUT_KEYCHAIN_TESTS") != "1")
+        if (OperatingSystem.IsWindows())
             return;
 
-        string account = "test-" + Guid.NewGuid().ToString("N");
-        var store = new KeychainSealingKeyStore(KeychainSealingKeyStore.DefaultService, account);
+        string folder = Path.Combine(Path.GetTempPath(), "argonaut-sealers-" + Guid.NewGuid().ToString("N"));
+        string keyFile = Path.Combine(folder, "sealing.key");
         try
         {
-            Assert.Null(store.LoadKey());
-            byte[] key = [.. Enumerable.Range(0, 32).Select(i => (byte)(i * 7))];
-            Assert.True(store.SaveKey(key));
+            string sealedText = SettingsSealers.ForThisPlatform(keyFile).Seal(Content)!;
 
-            Assert.Equal(key, new KeychainSealingKeyStore(KeychainSealingKeyStore.DefaultService, account).LoadKey());
+            Assert.StartsWith(AesGcmSettingsSealer.Prefix, sealedText);
+            Assert.DoesNotContain("SECRET", sealedText);
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(keyFile));
+            Assert.Equal(Content, SettingsSealers.ForThisPlatform(keyFile).Open(sealedText));
         }
         finally
         {
-            store.Delete();
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void OffWindows_ABlockSealedUnderAKeyThatIsGone_OpensAsNothing_AndSealingCarriesOn()
+    {
+        if (OperatingSystem.IsWindows())
+            return;
+
+        // A 2.3.1-2.4.0 macOS install sealed under a Keychain key this build cannot read.
+        string folder = Path.Combine(Path.GetTempPath(), "argonaut-sealers-" + Guid.NewGuid().ToString("N"));
+        string keyFile = Path.Combine(folder, "sealing.key");
+        try
+        {
+            var lostKey = new MemorySealingKeyStore();
+            string orphaned = new AesGcmSettingsSealer(lostKey).Seal(Content)!;
+
+            var sealer = SettingsSealers.ForThisPlatform(keyFile);
+            Assert.Null(sealer.Open(orphaned));
+
+            string resealed = sealer.Seal(Content)!;
+            Assert.Equal(Content, SettingsSealers.ForThisPlatform(keyFile).Open(resealed));
+        }
+        finally
+        {
+            if (Directory.Exists(folder))
+                Directory.Delete(folder, recursive: true);
         }
     }
 }

@@ -2,7 +2,7 @@ using Argonaut.Engine.Settings;
 
 namespace Argonaut.Tests.Support;
 
-/// <summary>A sealing key kept in memory, so sealer tests never touch the Keychain, DPAPI or the
+/// <summary>A sealing key kept in memory, so sealer tests never touch DPAPI or the
 /// config folder. <see cref="RefuseSaves"/> plays a store that cannot keep a key.</summary>
 internal sealed class MemorySealingKeyStore : ISealingKeyStore
 {

@@ -88,10 +88,10 @@ them). Keep this in sync when the ownership chain changes.
   a document with a locator touches its entry; reopening goes back through the entry's locator.
   The list lives in one settings block holding a single string sealed by the injected
   `ISettingsSealer` (`SettingsSealers.ForThisPlatform`: DPAPI on Windows, AES-GCM with the key in
-  the macOS data-protection Keychain - access by entitlement, so it never prompts - or a
-  user-only key file on Linux and in a macOS Debug build, which has no entitlement and would
-  otherwise raise the login Keychain's prompt on every rebuild; a Debug build therefore keeps its
-  own `settings.debug.json`, seeded from `settings.json` on its first run), so neither paths nor
+  a user-only `sealing.key` file in the config folder on macOS and Linux - not the Keychain, whose
+  data-protection flavour needs a restricted entitlement that vpk would also give the updater,
+  which macOS then kills at launch; a Debug build keeps its own `settings.debug.json`, seeded from
+  `settings.json` on its first run), so neither paths nor
   URLs are readable from
   `settings.json`; a block that will not open is an empty list.
 - **The shell owns the origins for the open input** (`ownedOrigins`, one per input, two when

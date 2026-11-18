@@ -20,8 +20,8 @@ public interface ISettingsSealer
     byte[]? Open(string sealedText);
 }
 
-/// <summary>Where <see cref="AesGcmSettingsSealer"/>'s key lives: the macOS Keychain, or a
-/// user-only file on Linux.</summary>
+/// <summary>Where <see cref="AesGcmSettingsSealer"/>'s key lives: a user-only file on macOS and
+/// Linux, or memory in tests.</summary>
 public interface ISealingKeyStore
 {
     /// <summary>The stored key, or null when there is none or it cannot be read.</summary>

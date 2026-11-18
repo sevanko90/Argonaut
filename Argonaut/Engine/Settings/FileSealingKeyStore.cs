@@ -4,9 +4,9 @@ using System.IO;
 namespace Argonaut.Engine.Settings;
 
 /// <summary>
-/// A sealing key in a file only its owner can read - the Linux store, where no secret service can
-/// be assumed. The path comes from the composition root (the config folder), so the key survives a
-/// reinstall the way the settings do.
+/// A sealing key in a file only its owner can read - the store on macOS and Linux (see
+/// <c>SettingsSealers</c>). The path comes from the composition root (the config folder), so the
+/// key survives a reinstall the way the settings do.
 /// </summary>
 public sealed class FileSealingKeyStore(string path) : ISealingKeyStore
 {

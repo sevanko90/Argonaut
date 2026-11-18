@@ -1,0 +1,82 @@
+site_name: Argonaut
+site_description: A fast desktop viewer for big data files - JSON, NDJSON, XML, CSV, text and binary - that opens multi-gigabyte files at once.
+site_url: https://sevanko90.github.io/Argonaut/
+repo_url: https://github.com/sevanko90/Argonaut
+repo_name: sevanko90/Argonaut
+edit_uri: edit/main/website/docs/
+copyright: Argonaut is free and open source under the MIT License.
+
+docs_dir: docs
+site_dir: build
+
+theme:
+  name: material
+  logo: assets/logo.svg
+  favicon: assets/favicon.png
+  font:
+    text: Inter
+    code: JetBrains Mono
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - navigation.indexes
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - toc.follow
+
+extra_css:
+  - stylesheets/extra.css
+
+nav:
+  - Home: index.md
+  - Download: download.md
+  - Guide:
+      - Opening data: guide/opening.md
+      - Search: guide/search.md
+      - Command line: guide/command-line.md
+  - Views:
+      - JSON: views/json.md
+      - NDJSON and JSONL: views/ndjson.md
+      - XML: views/xml.md
+      - CSV and TSV: views/csv.md
+      - Text: views/text.md
+      - Hex: views/hex.md
+  - Features:
+      - Value hints: features/hints.md
+      - JSON Schema: features/schema.md
+      - Semantic JSON diff: features/diff.md
+      - Text transforms: features/transforms.md
+  - Under the hood: under-the-hood.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - def_list
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.keys
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg

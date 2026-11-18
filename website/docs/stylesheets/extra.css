@@ -1,0 +1,139 @@
+/* Argonaut's colours: the icon's navy and gold, and the app's own accent blue. */
+:root {
+  --argo-navy: #0f3352;
+  --argo-navy-deep: #0a2338;
+  --argo-gold: #f9dd8a;
+  --argo-gold-deep: #e9b949;
+  --argo-blue: #2563eb;
+}
+
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color: var(--argo-navy);
+  --md-primary-fg-color--light: #1c4d75;
+  --md-primary-fg-color--dark: var(--argo-navy-deep);
+  --md-accent-fg-color: var(--argo-blue);
+  --md-typeset-a-color: var(--argo-blue);
+}
+
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: var(--argo-navy-deep);
+  --md-primary-fg-color--light: #1c4d75;
+  --md-primary-fg-color--dark: #06182a;
+  --md-accent-fg-color: #6aa6ff;
+  --md-typeset-a-color: #6aa6ff;
+  --md-default-bg-color: #0d1117;
+}
+
+/* ---- landing page ---------------------------------------------------------------- */
+
+.argo-hero {
+  margin: -1.2rem -0.8rem 2.5rem;
+  padding: 3.5rem 1.5rem 3rem;
+  text-align: center;
+  color: #fff;
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(249, 221, 138, 0.18), transparent 60%),
+    linear-gradient(180deg, #1c4d75 0%, var(--argo-navy-deep) 100%);
+  border-radius: 0 0 1rem 1rem;
+}
+
+.argo-hero img.argo-logo {
+  width: 7rem;
+  height: 7rem;
+  border-radius: 1.5rem;
+  filter: drop-shadow(0 0.6rem 1.4rem rgba(0, 0, 0, 0.35));
+}
+
+.md-typeset .argo-hero h1 {
+  margin: 1rem 0 0.6rem;
+  color: #fff;
+  font-weight: 700;
+  font-size: 2.4rem;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+.md-typeset .argo-hero h1 .argo-gold {
+  color: var(--argo-gold);
+}
+
+.argo-hero .argo-tagline {
+  max-width: 38rem;
+  margin: 0 auto 1.8rem;
+  font-size: 1.05rem;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.86);
+}
+
+.md-typeset .argo-hero .md-button {
+  margin: 0.3rem;
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.55);
+}
+
+.md-typeset .argo-hero .md-button--primary {
+  color: var(--argo-navy-deep);
+  background-color: var(--argo-gold);
+  border-color: var(--argo-gold);
+}
+
+.md-typeset .argo-hero .md-button:hover {
+  color: var(--argo-navy-deep);
+  background-color: var(--argo-gold-deep);
+  border-color: var(--argo-gold-deep);
+}
+
+.argo-hero .argo-platforms {
+  display: block;
+  margin-top: 1.2rem;
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.md-typeset .argo-section-title {
+  margin-top: 2.5rem;
+  text-align: center;
+}
+
+.md-typeset .argo-lead {
+  max-width: 40rem;
+  margin: 0 auto 1.5rem;
+  text-align: center;
+  color: var(--md-default-fg-color--light);
+}
+
+/* The numbers strip: what a gigabyte of file costs in memory. */
+.argo-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 1rem;
+  margin: 1.5rem 0 0.5rem;
+}
+
+.argo-stat {
+  padding: 1rem;
+  text-align: center;
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 0.6rem;
+}
+
+.argo-stat strong {
+  display: block;
+  font-size: 1.6rem;
+  color: var(--md-typeset-a-color);
+}
+
+.argo-stat span {
+  font-size: 0.75rem;
+  color: var(--md-default-fg-color--light);
+}
+
+.md-typeset .grid.cards > ul > li {
+  border-radius: 0.6rem;
+}
+
+@media screen and (max-width: 44.9375em) {
+  .md-typeset .argo-hero h1 {
+    font-size: 1.8rem;
+  }
+}

@@ -107,3 +107,6 @@ Desktop.ini
 # BenchmarkDotNet
 ############################
 BenchmarkDotNet.Artifacts/
+
+# Website build output (MkDocs)
+website/build/

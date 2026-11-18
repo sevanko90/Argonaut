@@ -3,9 +3,17 @@ name: Test
 # The test suite on the two platforms the app ships to and that behave differently underneath it:
 # Windows cannot replace a file while a mapping of it is open (saves), and macOS and Windows round
 # a mapping's capacity differently (MMapFile). A pass on one says little about the other.
+#
+# A pull request that only changes the website or Markdown docs skips the suite: nothing it touches
+# is built into the app. If this check is ever made required, move the filter inside the job
+# instead - a workflow skipped by its paths never reports, and a required check would wait forever.
 on:
   pull_request:
     branches: [main]
+    paths-ignore:
+      - 'website/**'
+      - '**.md'
+      - '.github/workflows/website.yml'
   workflow_dispatch:
 
 permissions:

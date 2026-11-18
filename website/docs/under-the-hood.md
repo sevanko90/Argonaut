@@ -31,8 +31,9 @@ framework, so one C# codebase runs natively on Windows, macOS and Linux. The vie
 rows rather than using stock list controls, which is what lets them scroll through billions of
 rows smoothly. Updates are delivered by [Velopack](https://velopack.io/).
 
-And Claude. The author says what to build, how, and what good looks like; every line of the code
-was written by an AI agent.
+... And Claude! Let's not forget the agent that did the work. I'll take the credit for telling it
+what to do, and how to do it, and knowing what good looks like. But I'm not going to lie, I didn't
+type a single line of this app myself. We really are living in the future.
 
 ## Open source
 

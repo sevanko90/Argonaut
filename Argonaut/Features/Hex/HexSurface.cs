@@ -1075,7 +1075,9 @@ public sealed class HexSurface : RowSurface
         bool solid = IsFocused && !this.caretBlinkOff;
         foreach (bool inCharacters in (ReadOnlySpan<bool>)[false, true])
         {
-            var span = MarkSpan(row, column, wholeGroup: !(inCharacters && this.keysInCharacters));
+            // A caret alone marks its group; with a selection it marks only its own byte, so the
+            // mark never runs past what is selected.
+            var span = MarkSpan(row, column, wholeGroup: caret.IsEmpty && !(inCharacters && this.keysInCharacters));
             if (solid && inCharacters == this.keysInCharacters)
                 DrawSolidMark(context, typeface, row, span, top, inCharacters, accent);
             else
@@ -1092,7 +1094,10 @@ public sealed class HexSurface : RowSurface
         if (this.hovered is not { } offset || ByteMarkBrush is not ISolidColorBrush accent)
             return;
 
-        if (this.cursor?.KeptWidth is { } width && this.document is { } document)
+        // A kept width's preview only away from the selection and never mid-drag: over the
+        // selection's own bytes it would read as the selection running on past its end.
+        if (this.cursor is { KeptWidth: { } width, Caret: { } caret } && this.document is { } document
+            && this.dragFrom is null && (offset < caret.Start || offset >= caret.End))
         {
             long start = HexRows.GroupStart(offset, StepIn(this.hoveredInCharacters));
             DrawRangeMark(context, first, last, new ByteRange(start, Math.Min(width, document.Length - start)));

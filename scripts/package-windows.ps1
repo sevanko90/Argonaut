@@ -34,10 +34,17 @@ if ([string]::IsNullOrEmpty($RawVersion)) {
     }
 }
 
+# vpk must match the Velopack package in Argonaut.csproj: it supplies the updater the app's own
+# Velopack code launches. A machine holding another version is moved to this one, not trusted.
+$VpkVersion = "1.2.161"
 $env:PATH = "$env:PATH;$env:USERPROFILE\.dotnet\tools"
-if (-not (Get-Command vpk -ErrorAction SilentlyContinue)) {
-    Write-Host "Installing vpk CLI..."
-    dotnet tool install --global vpk --version 1.2.0
+$installedVpk = (dotnet tool list --global | Where-Object { $_ -match '^vpk\s' } | ForEach-Object { ($_ -split '\s+')[1] })
+if (-not $installedVpk) {
+    Write-Host "Installing vpk $VpkVersion..."
+    dotnet tool install --global vpk --version $VpkVersion
+} elseif ($installedVpk -ne $VpkVersion) {
+    Write-Host "Moving vpk from $installedVpk to $VpkVersion..."
+    dotnet tool update --global vpk --version $VpkVersion --allow-downgrade
 }
 
 Write-Host "Publishing $AppName for $Rid ($Configuration)..."

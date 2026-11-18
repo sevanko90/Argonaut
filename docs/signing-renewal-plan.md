@@ -6,7 +6,10 @@
 
 The macOS release signs with `MACOS_CERT_P12` / `MACOS_CERT_PASSWORD` - the Developer ID
 Application certificate and its private key. Certificates last 5 years. The app claims no
-restricted entitlement, so there is no provisioning profile to reissue alongside it.
+restricted entitlement, so there is no provisioning profile to reissue alongside it. A Mac App
+Store build would need a profile, but a Mac App Store one under its own distribution certificate
+(see `store-distribution-comparison.md`), so this script would gain that leg alongside the store
+build rather than keep the Developer ID profile in case.
 
 Doing that by hand means Keychain Access, the developer portal, downloads and base64. The App
 Store Connect API covers it, so one script can rotate both secrets in one step.

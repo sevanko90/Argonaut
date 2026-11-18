@@ -72,7 +72,14 @@ the 16 bytes in two groups of 8, and the character column.
   selection runs to the document's end at most. Clicking in either panel sets both and makes
   that panel the one the keys and a copy act in (Tab swaps it); a drag or Shift-click selects
   from byte to byte, both included. Arrow keys, Page Up/Down and Home/End move by byte, row and
-  screen, Cmd/Ctrl+Home/End to the ends, Shift extends. The selection is shaded behind both
+  screen, Cmd/Ctrl+Home/End to the ends, Shift extends.
+- A selection of one to eight bytes - what Values reads - keeps its width (`HexCursor.KeptWidth`):
+  a click or a plain move selects that many bytes at the new place, so a value can be read at
+  place after place. Arrows step it a group at a time (a byte when ungrouped, to hunt for a
+  value); Option/Alt+arrow steps it its own width (to walk a run of values). The pointer's mark
+  shows what a click would select. A drag, Shift or the Values width steps set a new width; Esc
+  drops it back to a caret. A press only becomes a drag once the pointer leaves its byte.
+- The selection is shaded behind both
   panels. The caret is the accent's solid block with the byte redrawn on it in the active panel
   (readable over any byte colour), blinking to its outline while the view has focus, and the
   outline alone in the other panel. The pointer's mark is softer - a pale accent block with a

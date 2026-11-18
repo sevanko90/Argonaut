@@ -232,4 +232,106 @@ public sealed class HexCursorTests
         cursor.ExtendTo(2, groupSize: 4);
         Assert.Equal(new HexCaret(8, 0), cursor.Caret);
     }
+
+    private static HexCursor Holding(long start, int width, long length = 1000)
+    {
+        var cursor = Over(length);
+        cursor.Select(new HexCaret(start, start + width));
+        return cursor;
+    }
+
+    [Fact]
+    public void AClick_KeepsTheSelectionsWidth_WhileItIsOneToEightBytes()
+    {
+        var cursor = Holding(100, 3);
+        Assert.Equal(3, cursor.KeptWidth);
+
+        cursor.Place(200);
+        Assert.Equal(new HexCaret(200, 203), cursor.Caret);
+
+        cursor.Select(new HexCaret(0, 9));
+        Assert.Null(cursor.KeptWidth);
+        cursor.Place(200);
+        Assert.Equal(HexCaret.At(200), cursor.Caret);
+    }
+
+    [Fact]
+    public void ABackwardSelection_KeepsItsWidth_ForwardFromTheClick()
+    {
+        var cursor = Over(1000);
+        cursor.Select(new HexCaret(104, 100));
+        cursor.Place(10);
+        Assert.Equal(new HexCaret(10, 14), cursor.Caret);
+    }
+
+    [Theory]
+    [InlineData(HexMove.Left, false, 99)]
+    [InlineData(HexMove.Right, false, 101)]
+    [InlineData(HexMove.Left, true, 97)]
+    [InlineData(HexMove.Right, true, 103)]
+    [InlineData(HexMove.Up, false, 84)]
+    [InlineData(HexMove.Down, false, 116)]
+    [InlineData(HexMove.PageDown, false, 180)]
+    [InlineData(HexMove.RowStart, false, 96)]
+    [InlineData(HexMove.RowEnd, false, 109)]
+    [InlineData(HexMove.DocumentStart, false, 0)]
+    [InlineData(HexMove.DocumentEnd, false, 997)]
+    public void APlainMove_TakesAKeptWidthAlong_AGroupAtATime_OrItsOwnWidth(HexMove move, bool byWidth, long expectedStart)
+    {
+        var cursor = Holding(100, 3);
+        cursor.Move(move, extend: false, pageRows: 5, groupSize: 1, byWidth: byWidth);
+        Assert.Equal(new HexCaret(expectedStart, expectedStart + 3), cursor.Caret);
+    }
+
+    [Fact]
+    public void AKeptWidth_StepsByTheGroup_WhenBytesAreGrouped()
+    {
+        var cursor = Holding(100, 2);
+        cursor.Move(HexMove.Right, false, 5, groupSize: 4);
+        Assert.Equal(new HexCaret(104, 106), cursor.Caret);
+    }
+
+    [Fact]
+    public void AKeptWidth_StopsWhereItStillFits_AtTheEnd()
+    {
+        var cursor = Holding(994, 4, length: 1000);
+        cursor.Move(HexMove.Right, false, 5, byWidth: true);
+        Assert.Equal(new HexCaret(996, 1000), cursor.Caret);
+        cursor.Move(HexMove.Down, false, 5);
+        Assert.Equal(new HexCaret(996, 1000), cursor.Caret);
+
+        cursor.Place(999);
+        Assert.Equal(new HexCaret(999, 1000), cursor.Caret);
+    }
+
+    [Fact]
+    public void AShiftMove_StillGrowsTheSelection_AndSetsANewWidth()
+    {
+        var cursor = Holding(100, 2);
+        cursor.Move(HexMove.Right, extend: true, pageRows: 5);
+        Assert.Equal(new HexCaret(100, 103), cursor.Caret);
+        Assert.Equal(3, cursor.KeptWidth);
+    }
+
+    [Fact]
+    public void AKeptWidth_RunsForward_TheCaretOnItsLastByte()
+    {
+        var cursor = Holding(100, 4);
+        cursor.Place(40);
+        Assert.Equal(43, cursor.Caret!.Value.Byte);
+        cursor.Move(HexMove.Right, false, 5);
+        Assert.Equal(44, cursor.Caret!.Value.Byte);
+    }
+
+    [Fact]
+    public void Clear_DropsTheWidth_LeavingTheCaretWhereTheSelectionStarted()
+    {
+        var cursor = Holding(100, 4);
+        cursor.Clear();
+        Assert.Equal(HexCaret.At(100), cursor.Caret);
+        Assert.Null(cursor.KeptWidth);
+
+        cursor.Place(300);
+        Assert.Equal(HexCaret.At(300), cursor.Caret);
+    }
 }

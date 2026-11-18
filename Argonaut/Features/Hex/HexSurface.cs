@@ -138,12 +138,14 @@ public sealed class HexSurface : RowSurface
     private char[] line = new char[HexRows.LineLength(HexRows.MinOffsetDigits)];
     private double scrollTop;
     private long? hovered;
+    private bool hoveredInCharacters;
     private HexCursor? cursor;
 
     // Which panel the keys and a copy act in, and the byte a drag started on (null when no
     // drag is under way).
     private bool keysInCharacters;
     private long? dragFrom;
+    private bool dragging;
 
     // Geometry in the current font, measured when the document or font changes, never while
     // drawing: the width of a character, and how wide each panel is.
@@ -605,8 +607,15 @@ public sealed class HexSurface : RowSurface
         }
         else
         {
-            at.Place(HexRows.GroupStart(hit.Offset, StepIn(hit.InCharacters)));
+            // A double-click lets a kept width go - the caret alone, on the byte clicked - and,
+            // like a click, can still be dragged from.
+            long start = HexRows.GroupStart(hit.Offset, StepIn(hit.InCharacters));
+            if (e.ClickCount == 2)
+                at.Select(HexCaret.At(start));
+            else
+                at.Place(start);
             this.dragFrom = hit.Offset;
+            this.dragging = false;
             e.Pointer.Capture(this);
         }
 
@@ -618,7 +627,7 @@ public sealed class HexSurface : RowSurface
     {
         base.OnPointerMoved(e);
         var position = e.GetPosition(this);
-        SetHovered(OffsetAt(position));
+        SetHovered(ByteAt(position));
 
         if (this.dragFrom is { } from && this.cursor is { } at)
         {
@@ -628,8 +637,13 @@ public sealed class HexSurface : RowSurface
             else if (position.Y > Bounds.Height)
                 ScrollByPixels(RowHeight);
 
-            if (DragOffsetAt(position) is { } to)
+            // A press only becomes a drag once the pointer leaves its byte: a hand that shifts
+            // within the byte it clicked keeps the width the click selected.
+            if (DragOffsetAt(position) is { } to && (this.dragging || to != from))
+            {
+                this.dragging = true;
                 at.Select(HexCaret.SpanningGroups(from, to, StepIn(this.keysInCharacters)));
+            }
         }
     }
 
@@ -676,12 +690,15 @@ public sealed class HexSurface : RowSurface
         InvalidateVisual();
     }
 
+    /// <summary>Escape clears a selection, so it is claimed while there is one.</summary>
+    public override bool ClaimsEscape => this.cursor?.Caret is { IsEmpty: false };
+
     /// <summary>Raised when <see cref="HoveredOffset"/> changes - the pointer moved to another
     /// byte, off the bytes, or the view scrolled under it.</summary>
     public event EventHandler? HoveredOffsetChanged;
 
     /// <summary>Marks the byte at <paramref name="point"/>, as the pointer does - for tests.</summary>
-    internal void HoverAt(Point point) => SetHovered(OffsetAt(point));
+    internal void HoverAt(Point point) => SetHovered(ByteAt(point));
 
     /// <summary>Clicks at <paramref name="point"/>: moves the caret there, or with
     /// <paramref name="extend"/> takes the selection there - for tests.</summary>
@@ -708,14 +725,20 @@ public sealed class HexSurface : RowSurface
             at.Select(HexCaret.SpanningGroups(start.Offset, end, StepIn(start.InCharacters)));
     }
 
-    private void SetHovered(long? offset)
+    private void SetHovered((long Offset, bool InCharacters)? hit)
     {
-        if (offset == this.hovered)
+        long? offset = hit?.Offset;
+        bool inCharacters = hit?.InCharacters ?? false;
+        if (offset == this.hovered && inCharacters == this.hoveredInCharacters)
             return;
 
+        // The panel only changes what a kept width's mark covers; the byte is what is reported.
+        bool moved = offset != this.hovered;
         this.hovered = offset;
+        this.hoveredInCharacters = inCharacters;
         InvalidateVisual();
-        HoveredOffsetChanged?.Invoke(this, EventArgs.Empty);
+        if (moved)
+            HoveredOffsetChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private long? OffsetAt(Point point) => ByteAt(point)?.Offset;
@@ -792,6 +815,9 @@ public sealed class HexSurface : RowSurface
         bool command = (e.KeyModifiers & (KeyModifiers.Control | KeyModifiers.Meta)) != 0;
         bool extend = (e.KeyModifiers & KeyModifiers.Shift) != 0;
 
+        // Option on a Mac, Alt elsewhere: steps a kept width a whole width at a time.
+        bool byWidth = (e.KeyModifiers & KeyModifiers.Alt) != 0;
+
         HexMove? move = e.Key switch
         {
             Key.Left => HexMove.Left,
@@ -807,7 +833,11 @@ public sealed class HexSurface : RowSurface
 
         if (move is { } step)
         {
-            MoveCaret(step, extend);
+            MoveCaret(step, extend, byWidth);
+        }
+        else if (e.Key == Key.Escape && this.cursor?.Caret is { IsEmpty: false })
+        {
+            this.cursor.Clear();
         }
         else if (e.Key == Key.A && command)
         {
@@ -832,9 +862,9 @@ public sealed class HexSurface : RowSurface
     }
 
     /// <summary>Moves the caret as a key does and keeps it on screen - for tests too.</summary>
-    internal void MoveCaret(HexMove move, bool extend = false)
+    internal void MoveCaret(HexMove move, bool extend = false, bool byWidth = false)
     {
-        this.cursor?.Move(move, extend, PageRows, StepIn(this.keysInCharacters));
+        this.cursor?.Move(move, extend, PageRows, StepIn(this.keysInCharacters), byWidth);
         ScrollCaretIntoView();
     }
 
@@ -921,8 +951,9 @@ public sealed class HexSurface : RowSurface
             {
                 DrawRowMark(context);
                 DrawSelection(context, first, last);
-                DrawPointerMark(context);
-                DrawHighlight(context, first, last);
+                DrawPointerMark(context, first, last);
+                if (HighlightRange is { } highlighted)
+                    DrawRangeMark(context, first, last, highlighted);
 
                 for (long row = first; row <= last; row++)
                 {
@@ -1054,11 +1085,19 @@ public sealed class HexSurface : RowSurface
 
     /// <summary>The byte under the pointer, marked in both panels behind its text - its group, when
     /// bytes are grouped: a pale block of the accent with a faint edge, softer than the caret,
-    /// which stays the focus, and the bytes keep their own colours.</summary>
-    private void DrawPointerMark(DrawingContext context)
+    /// which stays the focus, and the bytes keep their own colours. While a width is kept it marks
+    /// what a click there would select.</summary>
+    private void DrawPointerMark(DrawingContext context, long first, long last)
     {
         if (this.hovered is not { } offset || ByteMarkBrush is not ISolidColorBrush accent)
             return;
+
+        if (this.cursor?.KeptWidth is { } width && this.document is { } document)
+        {
+            long start = HexRows.GroupStart(offset, StepIn(this.hoveredInCharacters));
+            DrawRangeMark(context, first, last, new ByteRange(start, Math.Min(width, document.Length - start)));
+            return;
+        }
 
         this.pointerFill ??= new SolidColorBrush(accent.Color, 0.16);
         this.pointerEdge ??= new Pen(new SolidColorBrush(accent.Color, 0.55), 1);
@@ -1070,11 +1109,12 @@ public sealed class HexSurface : RowSurface
             context.DrawRectangle(this.pointerFill, this.pointerEdge, new RoundedRect(MarkCell(span, top, inCharacters).Deflate(0.5), 4));
     }
 
-    /// <summary>The bytes a hovered reading covers, marked as the pointer's byte is, row by row in
-    /// both panels: a reading near a row's end runs on into the next.</summary>
-    private void DrawHighlight(DrawingContext context, long first, long last)
+    /// <summary>Marks <paramref name="range"/> as the pointer's byte is, row by row in both panels:
+    /// a range near a row's end runs on into the next. A hovered reading's bytes, or what a click
+    /// would select while a width is kept.</summary>
+    private void DrawRangeMark(DrawingContext context, long first, long last, ByteRange range)
     {
-        if (HighlightRange is not { Length: > 0 } range || ByteMarkBrush is not ISolidColorBrush accent)
+        if (range.Length <= 0 || ByteMarkBrush is not ISolidColorBrush accent)
             return;
 
         this.pointerFill ??= new SolidColorBrush(accent.Color, 0.16);

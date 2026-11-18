@@ -374,6 +374,11 @@ public abstract class RowSurface : Control
     /// <summary>One click of the pan scrollbar's arrows, in pixels.</summary>
     public virtual double PanStep => RowHeight;
 
+    /// <summary>Whether Escape means something here right now - a selection to let go of. The
+    /// window's own Escape (clearing the search) sees the key first, and leaves it to a focused
+    /// surface that claims it.</summary>
+    public virtual bool ClaimsEscape => false;
+
     protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
     {
         base.OnPointerWheelChanged(e);

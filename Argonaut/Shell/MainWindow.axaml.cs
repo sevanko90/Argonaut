@@ -512,6 +512,11 @@ public partial class MainWindow : Window
                 return;
             }
 
+            // The nearer thing to let go of goes first: a focused surface's selection, which
+            // the surface clears itself.
+            if (FocusManager?.GetFocusedElement() is Ui.Rows.RowSurface { ClaimsEscape: true })
+                return;
+
             CloseFindBar();
             e.Handled = true;
             return;

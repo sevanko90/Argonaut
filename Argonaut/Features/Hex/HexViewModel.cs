@@ -225,9 +225,10 @@ public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDoc
             return;
         }
 
-        bool selected = caret.Length is > 0 and <= HexValuesViewModel.MaxBytes;
-        long start = selected ? caret.Start : HexRows.GroupStart(caret.IsEmpty ? caret.Byte : caret.Start, GroupSize);
-        int width = selected ? (int)caret.Length : GroupSize;
+        // The selection a click keeps the width of is the one read; else the caret's group.
+        int? kept = Cursor.KeptWidth;
+        long start = kept is null ? HexRows.GroupStart(caret.IsEmpty ? caret.Byte : caret.Start, GroupSize) : caret.Start;
+        int width = kept ?? GroupSize;
         int count = from.CopyTo(start, bytes[..(int)Math.Clamp(from.AvailableLength - start, 0, bytes.Length)]);
         Values.Show(start, bytes[..count], width, HexRows.OffsetDigits(Length));
     }

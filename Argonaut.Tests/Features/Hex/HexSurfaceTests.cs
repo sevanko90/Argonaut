@@ -4,6 +4,7 @@ using Argonaut.Ui.Rows;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless;
+using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Media.TextFormatting;
 using Avalonia.Threading;
@@ -277,6 +278,60 @@ public sealed class HexSurfaceTests
         surface.ClickAt(surface.CentreOfByte(2, inCharacters: false));
         surface.ClickAt(surface.CentreOfByte(5, inCharacters: true), extend: true);
         Assert.Equal((2L, 6L), (cursor.Caret!.Value.Start, cursor.Caret!.Value.End));
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task AClickAfterASmallSelection_SelectsTheSameWidthThere_AndEscapeClearsIt() => With(new FakeDocument(1000), (surface, window) =>
+    {
+        var cursor = surface.Document!.Cursor;
+        surface.DragBetween(surface.CentreOfByte(4, inCharacters: false), surface.CentreOfByte(6, inCharacters: false));
+        surface.ClickAt(surface.CentreOfByte(9, inCharacters: false, screenRow: 1));
+        Assert.Equal(new HexCaret(25, 28), cursor.Caret);
+
+        surface.Focus();
+        window.KeyPress(Key.Right, RawInputModifiers.Alt, PhysicalKey.ArrowRight, string.Empty);
+        Assert.Equal(new HexCaret(28, 31), cursor.Caret);
+
+        // The window's own Escape (clearing the search) sees the key first and steps aside for this.
+        Assert.True(surface.ClaimsEscape);
+        window.KeyPress(Key.Escape, RawInputModifiers.None, PhysicalKey.Escape, string.Empty);
+        Assert.Equal(HexCaret.At(28), cursor.Caret);
+        Assert.False(surface.ClaimsEscape);
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task APressThatShiftsWithinItsByte_KeepsTheWidth_ButADragToAnotherSetsANewOne() => With(new FakeDocument(1000), (surface, window) =>
+    {
+        var cursor = surface.Document!.Cursor;
+        cursor.Select(new HexCaret(0, 4));
+
+        var at = surface.CentreOfByte(9, inCharacters: false);
+        window.MouseDown(at, MouseButton.Left);
+        window.MouseMove(at + new Vector(1, 1));
+        window.MouseUp(at + new Vector(1, 1), MouseButton.Left);
+        Assert.Equal(new HexCaret(9, 13), cursor.Caret);
+
+        window.MouseDown(at, MouseButton.Left);
+        window.MouseMove(surface.CentreOfByte(10, inCharacters: false));
+        window.MouseUp(surface.CentreOfByte(10, inCharacters: false), MouseButton.Left);
+        Assert.Equal(new HexCaret(9, 11), cursor.Caret);
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task ADoubleClick_LetsAKeptWidthGo() => With(new FakeDocument(1000), (surface, window) =>
+    {
+        var cursor = surface.Document!.Cursor;
+        cursor.Select(new HexCaret(0, 4));
+
+        var at = surface.CentreOfByte(9, inCharacters: false);
+        window.MouseDown(at, MouseButton.Left);
+        window.MouseUp(at, MouseButton.Left);
+        window.MouseDown(at, MouseButton.Left);
+        window.MouseUp(at, MouseButton.Left);
+        Assert.Equal(HexCaret.At(9), cursor.Caret);
         return Task.CompletedTask;
     });
 

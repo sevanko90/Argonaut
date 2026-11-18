@@ -174,8 +174,10 @@ public class JsonArrayTableEntryPointTests
     [Fact]
     public async Task LargeStillIndexingArray_ResolvesItsExactRange()
     {
-        // While the file is still being indexed the index has no end for the array yet; the
-        // tree finds it from the bytes instead, and the range must still be exact.
+        // While the document is still being indexed the index has no end for the array yet; the
+        // tree finds it from the bytes instead, and the range must still be exact. Every byte has
+        // arrived but the source is not settled, so the scan waits for more and cannot finish
+        // until the test seals it - however fast the machine.
         var sb = new StringBuilder("[");
         for (int i = 0; i < 200_000; i++)
         {
@@ -185,7 +187,8 @@ public class JsonArrayTableEntryPointTests
         }
         sb.Append(']');
 
-        string path = WriteTempJson(sb.ToString());
+        byte[] json = Encoding.UTF8.GetBytes(sb.ToString());
+        var growing = new GrowingByteSource(json, initiallyAvailable: json.Length);
         var vm = new JsonViewModel(new JsonViewSettings(), new SchemaBindings(), TestSchemas.Catalog());
         ArrayTableRequest? captured = null;
         void Capture(ArrayTableRequest r) => captured = r;
@@ -193,19 +196,19 @@ public class JsonArrayTableEntryPointTests
         ArrayTableService.Requested += Capture;
         try
         {
-            await vm.LoadAsync(path);
+            await vm.LoadAsync(new GrowingByteOrigin(growing));
             Assert.False(vm.IndexingTask.IsCompleted); // sanity: the scan is genuinely still running
 
             vm.RequestArrayTable(0);
 
             Assert.NotNull(captured);
-            Assert.Equal(new FileInfo(path).Length, captured!.Value.Length);
+            Assert.Equal(json.Length, captured!.Value.Length);
         }
         finally
         {
             ArrayTableService.Requested -= Capture;
+            growing.Seal();
             vm.Dispose();
-            File.Delete(path);
         }
     }
 

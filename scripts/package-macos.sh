@@ -3,16 +3,13 @@ set -euo pipefail
 
 # Publishes Argonaut and packs it into a Velopack release for macOS: a portable .app bundle,
 # a signed installer .pkg, and a .nupkg update payload (see docs/velopack-auto-update-plan.md).
-# The .app is assembled here (Info.plist, icon, provisioning profile) and handed to `vpk pack`,
-# which adds its updater, signs and notarises it: vpk can build a bundle itself, but has no way
-# to put a provisioning profile in one.
+# The .app is assembled here (Info.plist, icon) and handed to `vpk pack`, which adds its updater
+# (UpdateMac), signs and notarises it.
 #
-# The profile is what lets the app use the data-protection Keychain (see
-# KeychainSealingKeyStore): its keychain-access-groups entitlement is restricted, and macOS kills
-# at launch an app that claims it without a matching embedded profile. So the entitlements are
-# only added when ARGONAUT_PROVISION_PROFILE names the profile - the release workflow decodes it
-# from a secret; a local run without it builds an app that falls back to the login Keychain. A
-# tagged release refuses to pack without it.
+# vpk signs every binary in the bundle with the one entitlements file, UpdateMac included, so the
+# file must hold only entitlements a bare helper may claim. A restricted one (keychain-access-groups,
+# application-identifier) needs a provisioning profile, and macOS kills UpdateMac at launch without
+# one - updates then quit the app and never apply. The check after packing guards against that.
 #
 # Usage: scripts/package-macos.sh [osx-arm64|osx-x64] [version]
 #   version must be a clean SemVer (e.g. 1.4.0, no leading 'v') when packing for release;
@@ -73,27 +70,6 @@ cp "$ROOT_DIR/Argonaut/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 cp "$ROOT_DIR/Argonaut/Assets/Icon/Argonaut.icns" "$APP_BUNDLE/Contents/Resources/Argonaut.icns"
 
 ENTITLEMENTS="$ROOT_DIR/Argonaut/entitlements.entitlements"
-if [ -n "${ARGONAUT_PROVISION_PROFILE:-}" ]; then
-    echo "Embedding provisioning profile and the Keychain entitlements..."
-    cp "$ARGONAUT_PROVISION_PROFILE" "$APP_BUNDLE/Contents/embedded.provisionprofile"
-    ENTITLEMENTS="$APP_STAGE_DIR/entitlements.entitlements"
-    cp "$ROOT_DIR/Argonaut/entitlements.entitlements" "$ENTITLEMENTS"
-    # The entitlement must match the profile's App ID exactly, so it is read from the profile
-    # rather than built from CFBundleIdentifier - the portal may have registered it in other case.
-    APP_IDENTIFIER="$(security cms -D -i "$ARGONAUT_PROVISION_PROFILE" \
-        | plutil -extract Entitlements.com\\.apple\\.application-identifier raw -o - -)"
-    /usr/libexec/PlistBuddy \
-        -c "Add :com.apple.application-identifier string $APP_IDENTIFIER" \
-        -c "Add :com.apple.developer.team-identifier string $TEAM_ID" \
-        -c "Add :keychain-access-groups array" \
-        -c "Add :keychain-access-groups:0 string $APP_IDENTIFIER" \
-        "$ENTITLEMENTS"
-elif [ -n "$RAW_VERSION" ]; then
-    echo "error: a release must embed the provisioning profile - set ARGONAUT_PROVISION_PROFILE." >&2
-    exit 1
-else
-    echo "No ARGONAUT_PROVISION_PROFILE: packing without the Keychain entitlements."
-fi
 
 echo "Packing Velopack release $PACK_VERSION for $RID..."
 rm -rf "$VELOPACK_OUT_DIR"
@@ -116,5 +92,19 @@ vpk --legacyConsole pack \
 echo "Extracting portable .app to $DIST_DIR/$APP_NAME.app..."
 rm -rf "$DIST_DIR/$APP_NAME.app"
 ditto -x -k "$VELOPACK_OUT_DIR/$APP_NAME-osx-Portable.zip" "$DIST_DIR"
+
+# The updater must be able to start: macOS SIGKILLs (exit 137) a binary whose entitlements need a
+# profile it does not have, before it runs a line - which is how every update from 2.3.1 to 2.4.0
+# failed silently. Fail the pack instead of shipping that.
+echo "Checking the packed updater launches..."
+set +e
+"$DIST_DIR/$APP_NAME.app/Contents/MacOS/UpdateMac" --help >/dev/null 2>&1
+UPDATER_EXIT=$?
+set -e
+if [ "$UPDATER_EXIT" -ge 128 ]; then
+    echo "error: the packed UpdateMac was killed at launch (exit $UPDATER_EXIT) - check its entitlements:" >&2
+    codesign -d --entitlements - "$DIST_DIR/$APP_NAME.app/Contents/MacOS/UpdateMac" >&2 || true
+    exit 1
+fi
 
 echo "Done: $VELOPACK_OUT_DIR (installer, .nupkg, release feed) and $DIST_DIR/$APP_NAME.app"

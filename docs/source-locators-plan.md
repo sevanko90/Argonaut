@@ -24,13 +24,13 @@ remember its schema.
 - **URLs are kept whole, and the saved store is encrypted.** The saved sources and the schema
   bindings are written to `settings.json` as one sealed (AES-GCM) blob each, so neither a URL's
   query keys nor a file path is readable from the file. The key is generated on first use and
-  kept by the OS, outside the app's own folders, so it survives a reinstall:
-  - **macOS:** a generic-password item in the user's login Keychain.
+  kept outside the settings file, so it survives a reinstall:
   - **Windows:** DPAPI (`ProtectedData`, current-user scope) - no key to store at all; the
     profile is the key.
-  - **Linux:** a key file readable only by the user (`0600`) in the config folder - no secret
-    service is assumed.
-  If the key is missing or the blob does not open (a new machine, a deleted Keychain item), the
+  - **macOS and Linux:** a key file readable only by the user (`0600`) in the config folder. On
+    macOS the Keychain is not used: the data-protection Keychain needs a restricted entitlement,
+    which vpk also gives the updater (killed at launch for it), and the login Keychain prompts.
+  If the key is missing or the blob does not open (a new machine, a deleted key file), the
   list starts empty - never an error.
 - **Entries are renamable.** A new entry is named from its locator (the file name; a URL's last
   path segment and host), and the user can rename it from its row.
@@ -92,10 +92,8 @@ sealed record HttpLocator(Uri Url) : SourceLocator      // added with the HTTP s
 
 `ISettingsSealer` - `string? Seal(ReadOnlySpan<byte>)` / `byte[]? Open(string)` - chosen in the
 composition root by `SettingsSealers.ForThisPlatform`: `DpapiSettingsSealer` on Windows, and
-`AesGcmSettingsSealer` over an `ISealingKeyStore` elsewhere (`KeychainSealingKeyStore` on macOS,
-`FileSealingKeyStore` on Linux). A key that cannot be stored is never used - sealing returns
-null and the block is left as it was. The Keychain test runs only with
-`ARGONAUT_KEYCHAIN_TESTS=1`, since a CI runner's keychain may be locked. Tests use a fixed-key
+`AesGcmSettingsSealer` over an `ISealingKeyStore` elsewhere (`FileSealingKeyStore` on macOS and Linux). A key that cannot be stored is never used - sealing returns
+null and the block is left as it was. Tests use a fixed-key
 sealer. A sealed block is an ordinary settings block holding one sealed string, and the service that
 owns it opens it on first read and re-seals it on every change. The store gains a way to drop a
 key, so the old unsealed `recentFiles`, `favouriteFiles` and `schemaBindings` are removed from

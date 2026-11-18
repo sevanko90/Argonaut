@@ -19,6 +19,7 @@ public class DependentReadContextTests
         var uiContext = new QueuedContext();
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var applied = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var completed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Task<long>? reading = null;
         var thread = new Thread(() =>
@@ -42,6 +43,9 @@ public class DependentReadContextTests
                 });
                 // Model a UI-originated flow awaiting the reader separately.
                 _ = ApplyOnUiAsync(reading);
+                // Only now may the reader finish: had it finished first, the await above would
+                // have seen a completed task, run on synchronously and posted nothing.
+                applied.SetResult();
                 session.Dispose();
                 completed.SetResult();
             }
@@ -50,7 +54,7 @@ public class DependentReadContextTests
         thread.Start();
         try
         {
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await Task.WhenAll(entered.Task, applied.Task).WaitAsync(TimeSpan.FromSeconds(5));
             release.SetResult();
             await completed.Task.WaitAsync(TimeSpan.FromSeconds(5));
             Assert.True(reading!.IsCompletedSuccessfully);

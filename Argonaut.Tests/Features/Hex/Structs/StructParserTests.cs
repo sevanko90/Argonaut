@@ -92,15 +92,10 @@ public sealed class StructParserTests
     [InlineData("struct A { public char[20] Name; public int After; }")]
     [InlineData("struct A { public char[20] Name { get; set; } public int After; }")]
     [InlineData("struct A { public char Name[20]; public int After; }")]
-    public void ACSharpCharArrayWithALength_IsStoredInPlace_TwoBytesACharacter(string source)
+    public void ACSharpArrayLengthWrittenAsInC_IsReported_SayingHowCSharpWritesIt(string source)
     {
-        var definition = StructParser.Parse(source, StructLanguage.CSharp);
-        Assert.Empty(definition.Problems);
-
-        var laid = StructLayoutPass.Lay(definition, "A", StructTarget.Lp64).Struct!;
-        Assert.Equal(["Name", "After"], laid.Fields.Select(f => f.Name));
-        Assert.Equal(40, laid.Fields[0].Size);
-        Assert.Equal(40, laid.Fields[1].Offset);
+        var problem = Assert.Single(StructParser.Parse(source, StructLanguage.CSharp).Problems);
+        Assert.Contains("fixed char Name[20]", problem.Message);
     }
 
     [Fact]

@@ -192,7 +192,7 @@ internal sealed class CSharpStructParser(string source) : StructSourceParser(sou
             if (TryReadType(out var type, out bool isArray) && AtIdentifier)
             {
                 var name = Advance();
-                AddField(fields, type, isArray, name, attributes, []);
+                AddField(fields, type, isArray, name, attributes);
             }
 
             while (!AtEnd && Mark < close && !Current.Is(","))
@@ -339,7 +339,7 @@ internal sealed class CSharpStructParser(string source) : StructSourceParser(sou
 
         var start = Current;
         int problems = Problems.Count;
-        if (!TryReadType(out var type, out bool isArray, out var written))
+        if (!TryReadType(out var type, out bool isArray))
         {
             if (Problems.Count == problems)
                 Report("Expected a field.", start.Position);
@@ -378,17 +378,11 @@ internal sealed class CSharpStructParser(string source) : StructSourceParser(sou
                 return;
             }
 
-            // C's spelling, char Name[20], read as it is meant.
-            var lengths = new List<long>(written);
-            while (Current.Is("["))
+            if (Current.Is("["))
             {
-                if (!TryReadLength(out long length))
-                {
-                    SkipStatement();
-                    return;
-                }
-
-                lengths.Add(length);
+                Report(ArrayLengthNotCSharp, Current.Position);
+                SkipStatement();
+                return;
             }
 
             if (Current.Is("=>"))
@@ -400,12 +394,12 @@ internal sealed class CSharpStructParser(string source) : StructSourceParser(sou
             if (Current.Is("{"))
             {
                 if (IsAutoProperty())
-                    AddField(fields, type, isArray, name, attributes, lengths);
+                    AddField(fields, type, isArray, name, attributes);
                 SkipStatement();
                 return;
             }
 
-            AddField(fields, type, isArray, name, attributes, lengths);
+            AddField(fields, type, isArray, name, attributes);
             if (Accept("="))
                 SkipInitializer();
             if (Accept(","))
@@ -494,20 +488,11 @@ internal sealed class CSharpStructParser(string source) : StructSourceParser(sou
     /// <summary>Adds a field, applying what its <c>[MarshalAs]</c> says. A managed array or
     /// string is stored elsewhere, so without <c>ByValArray</c>/<c>ByValTStr</c> and a
     /// <c>SizeConst</c> it cannot be read from these bytes.</summary>
-    /// <param name="written">Lengths written in the declaration - <c>char[20] Name</c> or
-    /// <c>char Name[20]</c>, which C# does not allow but whose meaning is plain: an array stored in
-    /// place, as a fixed buffer is.</param>
-    private void AddField(List<FieldDeclaration> fields, TypeReference type, bool isArray, Lexeme name, List<Lexeme> attributes, IReadOnlyList<long> written)
+    private void AddField(List<FieldDeclaration> fields, TypeReference type, bool isArray, Lexeme name, List<Lexeme> attributes)
     {
         var marshal = ReadMarshalAs(attributes);
         var storage = FieldStorage.Natural;
         IReadOnlyList<long> lengths = [];
-
-        if (written.Count > 0 && !isArray && type.Name != "string")
-        {
-            fields.Add(new FieldDeclaration(name.Text, type, written, storage, name.Position) { ExplicitOffset = ReadFieldOffset(attributes) });
-            return;
-        }
 
         if (type.Name == "bool" && type.PointerDepth == 0 && !isArray)
         {
@@ -595,17 +580,16 @@ internal sealed class CSharpStructParser(string source) : StructSourceParser(sou
         return new MarshalAs(unmanaged, sizeConst, attributes[at].Position);
     }
 
-    private bool TryReadType(out TypeReference type, out bool isArray) => TryReadType(out type, out isArray, out _);
+    /// <summary>A length where C/C++ writes one but C# does not: <c>char[20] Name</c> or
+    /// <c>char Name[20]</c>.</summary>
+    private const string ArrayLengthNotCSharp = "C# does not write an array length here - store the array in place with fixed char Name[20], or [MarshalAs(UnmanagedType.ByValArray, SizeConst = 20)] on a char[].";
 
-    /// <summary>Reads a type: a keyword or a (qualified) name, its pointers, and <c>[]</c> - or
-    /// <c>[20]</c>, a length C# does not allow there but whose meaning is plain, returned in
-    /// <paramref name="lengths"/>. <c>System.Int32</c> and the other framework names read as their
-    /// keywords.</summary>
-    private bool TryReadType(out TypeReference type, out bool isArray, out IReadOnlyList<long> lengths)
+    /// <summary>Reads a type: a keyword or a (qualified) name, its pointers, and <c>[]</c>.
+    /// <c>System.Int32</c> and the other framework names read as their keywords.</summary>
+    private bool TryReadType(out TypeReference type, out bool isArray)
     {
         type = new TypeReference(string.Empty);
         isArray = false;
-        lengths = [];
         if (!AtIdentifier)
             return false;
 
@@ -646,15 +630,8 @@ internal sealed class CSharpStructParser(string source) : StructSourceParser(sou
         }
         else if (Current.Is("["))
         {
-            var written = new List<long>();
-            while (Current.Is("["))
-            {
-                if (!TryReadLength(out long length))
-                    return false;
-                written.Add(length);
-            }
-
-            lengths = written;
+            Report(ArrayLengthNotCSharp, Current.Position);
+            return false;
         }
 
         type = new TypeReference(SystemNames.GetValueOrDefault(name, name), pointers);

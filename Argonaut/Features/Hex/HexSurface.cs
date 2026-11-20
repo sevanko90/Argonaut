@@ -411,6 +411,11 @@ public sealed class HexSurface : RowSurface
 
     public override bool ShowsEnd => this.scrollTop >= MaxScrollTop - 0.5;
 
+    /// <summary>How wide the dump is drawn - the gutter and both panels - which is as wide as it
+    /// is ever useful to make the surface. Changes with the font and the document, as
+    /// <see cref="RowSurface.WidestRowWidth"/> does, and is announced the same way.</summary>
+    public double ContentWidth => this.gutterWidth + WidestRowWidth;
+
     /// <summary>The panels pan; the gutter stays.</summary>
     public override double PanViewportWidth => Math.Max(0, Bounds.Width - this.gutterWidth);
 

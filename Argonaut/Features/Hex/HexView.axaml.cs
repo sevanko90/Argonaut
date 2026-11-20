@@ -20,6 +20,15 @@ public partial class HexView : UserControl
         scrollBars = new RowScrollBars(Surface, VerticalScrollBar, PanScrollBar);
         DetachedFromVisualTree += (_, _) => scrollBars.Dispose();
 
+        SizeChanged += (_, _) => FitSidePanel();
+        Surface.WidestRowWidthChanged += (_, _) => FitSidePanel();
+        VerticalScrollBar.PropertyChanged += (_, e) =>
+        {
+            if (e.Property == IsVisibleProperty || e.Property == BoundsProperty)
+                FitSidePanel();
+        };
+        FitSidePanel();
+
         // The dump is the document, so it takes focus when the document is shown: the caret
         // shows solid and the keys reach it, rather than focus landing on the window's chrome.
         // Nothing else has been focused yet at load time, so this takes focus from nobody.
@@ -29,6 +38,18 @@ public partial class HexView : UserControl
         // path bar. Tunnelling, so the surface's own keys never see it, and the window's new
         // request (which waits for keys nothing claimed) does not either.
         AddHandler(KeyDownEvent, OnViewKeyDown, RoutingStrategies.Tunnel);
+    }
+
+    /// <summary>The side panel's width when the window has no room to spare.</summary>
+    internal const double SidePanelMinWidth = 340;
+
+    /// <summary>Anchors the side panel to the dump: when the window is wider than both need, the
+    /// dump stays at its drawn width and the panel takes the rest; when it is narrower, the panel
+    /// keeps its minimum and the dump gives up the room, panning as before.</summary>
+    private void FitSidePanel()
+    {
+        double bar = VerticalScrollBar.IsVisible ? VerticalScrollBar.Bounds.Width : 0;
+        SidePanel.Width = Math.Max(SidePanelMinWidth, Bounds.Width - Surface.ContentWidth - bar);
     }
 
     private void OnViewKeyDown(object? sender, KeyEventArgs e)

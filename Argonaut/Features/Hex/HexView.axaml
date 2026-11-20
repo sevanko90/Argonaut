@@ -129,11 +129,13 @@
                        IsVisible="False"
                        Minimum="0" />
 
-            <!-- The side panel: what the bytes at the selection start read as. A fixed width, so
-                 the dump never shifts as the readings change. -->
-            <Border Grid.Column="2"
+            <!-- The side panel: what the bytes at the selection start read as. Sized from the
+                 window, never from the readings, so the dump never shifts as they change: it
+                 takes what the dump does not use, and keeps its minimum when the window is
+                 narrow (HexView.FitSidePanel). -->
+            <Border x:Name="SidePanel"
+                    Grid.Column="2"
                     Grid.RowSpan="2"
-                    Width="340"
                     IsVisible="{Binding ShowsSidePanel}"
                     BorderBrush="{DynamicResource AppBorderBrush}"
                     BorderThickness="1,0,0,0"

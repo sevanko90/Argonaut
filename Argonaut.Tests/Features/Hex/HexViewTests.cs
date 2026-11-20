@@ -89,6 +89,42 @@ public sealed class HexViewTests
 
     private static HexSurface Surface(HexView view) => view.GetVisualDescendants().OfType<HexSurface>().Single();
 
+    private static Border SidePanel(HexView view) => view.GetVisualDescendants().OfType<Border>().Single(b => b.Name == "SidePanel");
+
+    private static void Relayout(Window window, double width)
+    {
+        window.Width = width;
+        Dispatcher.UIThread.RunJobs();
+        window.UpdateLayout();
+        Dispatcher.UIThread.RunJobs();
+        window.UpdateLayout();
+    }
+
+    [Fact]
+    public Task AWideWindow_KeepsTheDumpAtItsDrawnWidth_AndTheSidePanelTakesTheRest() => WithView((window, view, _, _) =>
+    {
+        Relayout(window, 2000);
+
+        var surface = Surface(view);
+        var panel = SidePanel(view);
+        Assert.Equal(surface.ContentWidth, surface.Bounds.Width, 0.5);
+        Assert.True(panel.Bounds.Width > HexView.SidePanelMinWidth);
+        Assert.Equal(view.Bounds.Width, panel.Bounds.Right, 0.5);
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task ANarrowWindow_KeepsTheSidePanelsMinimum_AndTheDumpGivesUpTheRoom() => WithView((window, view, _, _) =>
+    {
+        Relayout(window, 2000);
+        Relayout(window, 700);
+
+        var surface = Surface(view);
+        Assert.Equal(HexView.SidePanelMinWidth, SidePanel(view).Bounds.Width, 0.5);
+        Assert.True(surface.Bounds.Width < surface.ContentWidth);
+        return Task.CompletedTask;
+    });
+
     [Fact]
     public Task CommandL_OpensTheGoToEntry_AtTheCaret_AndTheWindowNeverSeesIt() => WithView((window, view, hex, newRequests) =>
     {

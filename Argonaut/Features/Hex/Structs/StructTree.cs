@@ -18,7 +18,10 @@ namespace Argonaut.Features.Hex.Structs;
 /// mapping's bytes, as a document tree's is its document's.
 ///
 /// By default the struct and the structs in it are open, and arrays - which may be any length -
-/// closed. Single-threaded, on the UI thread, like the surface.
+/// closed. When the mapping moves - following the caret - only <see cref="Start"/> changes: the
+/// rows, their keys and what is open stay, so the surface keeps its place and lays the rows out
+/// again (<c>TreeSurface.InvalidateRows</c>) rather than starting over with a new tree.
+/// Single-threaded, on the UI thread, like the surface.
 /// </summary>
 public sealed class StructTree : ITreeRowSource
 {
@@ -35,22 +38,29 @@ public sealed class StructTree : ITreeRowSource
         Order = order;
         Target = target;
         Painter = new StructTreePainter(this);
+        OffsetGutter = new StructOffsetGutter(this);
+        Gutters = [OffsetGutter];
     }
 
     public StructNodes Nodes { get; }
 
     public IByteSource Bytes { get; }
 
-    /// <summary>Where the mapping starts in the document.</summary>
-    public long Start { get; }
+    /// <summary>Where the mapping starts in the document; moved as the caret moves.</summary>
+    public long Start { get; set; }
 
-    public ByteOrder Order { get; }
+    /// <summary>The byte order values are read in - the Values tab's, so changing it rereads the
+    /// rows but changes none of them.</summary>
+    public ByteOrder Order { get; set; }
 
     public StructTarget Target { get; }
 
     public ITreeRowPainter Painter { get; }
 
-    public IReadOnlyList<ITreeGutter> Gutters { get; } = Array.Empty<ITreeGutter>();
+    public IReadOnlyList<ITreeGutter> Gutters { get; }
+
+    /// <summary>The column of each row's offset in the struct.</summary>
+    public StructOffsetGutter OffsetGutter { get; }
 
     public event EventHandler? Grew;
 

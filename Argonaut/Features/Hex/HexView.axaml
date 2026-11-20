@@ -3,6 +3,8 @@
              xmlns:hex="clr-namespace:Argonaut.Features.Hex"
              xmlns:values="clr-namespace:Argonaut.Features.Hex.Values"
              xmlns:icons="clr-namespace:Argonaut.Ui.Icons"
+             xmlns:structs="clr-namespace:Argonaut.Features.Hex.Structs"
+             xmlns:tree="clr-namespace:Argonaut.Ui.Tree"
              x:Class="Argonaut.Features.Hex.HexView"
              x:DataType="hex:HexViewModel">
     <UserControl.Styles>
@@ -92,6 +94,44 @@
         <Style Selector="TextBlock.value:pointerover">
             <Setter Property="Foreground" Value="{DynamicResource AppAccentBrush}" />
         </Style>
+        <!-- The side panel's tabs: plain words, the one shown in the text colour and semibold,
+             the others muted until hovered. -->
+        <Style Selector="RadioButton.paneltab">
+            <Setter Property="FontSize" Value="{DynamicResource AppContentFontSize}" />
+            <Setter Property="FontFamily" Value="{DynamicResource AppMonoFontFamily}" />
+            <Setter Property="Foreground" Value="{DynamicResource AppMutedTextBrush}" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Padding" Value="6,0" />
+            <Setter Property="Template">
+                <ControlTemplate>
+                    <Border Background="Transparent" Padding="{TemplateBinding Padding}">
+                        <ContentPresenter Content="{TemplateBinding Content}"
+                                          VerticalAlignment="Center"
+                                          Foreground="{TemplateBinding Foreground}" />
+                    </Border>
+                </ControlTemplate>
+            </Setter>
+        </Style>
+        <Style Selector="RadioButton.paneltab:pointerover">
+            <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+        </Style>
+        <Style Selector="RadioButton.paneltab:checked">
+            <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style Selector="ToggleButton.pin">
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="Width" Value="28" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Foreground" Value="{DynamicResource AppMutedTextBrush}" />
+        </Style>
+        <Style Selector="ToggleButton.pin:checked /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource AppAccentBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource AppWindowBackgroundBrush}" />
+        </Style>
     </UserControl.Styles>
     <Border Background="{DynamicResource AppWindowBackgroundBrush}" ClipToBounds="True">
         <Grid RowDefinitions="*,Auto,Auto" ColumnDefinitions="*,Auto,Auto">
@@ -129,9 +169,10 @@
                        IsVisible="False"
                        Minimum="0" />
 
-            <!-- The side panel: what the bytes at the selection start read as. Sized from the
-                 window, never from the readings, so the dump never shifts as they change: it
-                 takes what the dump does not use, and keeps its minimum when the window is
+            <!-- The side panel: what the bytes at the caret read as - the standard readings on the
+                 Values tab, a pasted struct on the Struct tab, its definition on the Definition
+                 tab. Sized from the window, never from what it shows, so the dump never shifts:
+                 it takes what the dump does not use, and keeps its minimum when the window is
                  narrow (HexView.FitSidePanel). -->
             <Border x:Name="SidePanel"
                     Grid.Column="2"
@@ -140,54 +181,28 @@
                     BorderBrush="{DynamicResource AppBorderBrush}"
                     BorderThickness="1,0,0,0"
                     Background="{DynamicResource AppPanelBackgroundBrush}">
-                <DockPanel DataContext="{Binding Values}" x:DataType="values:HexValuesViewModel">
-                    <!-- A header as the dump's: the tab's name, and where the bytes are read from. -->
+                <DockPanel>
+                    <!-- A header as the dump's: the tabs, and the byte order every tab reads in -
+                         one at a time, this machine's until another is chosen, and remembered;
+                         the reset goes back to this machine's. -->
                     <Border DockPanel.Dock="Top"
                             Height="24"
-                            Padding="14,0"
+                            Padding="8,0"
                             Background="{DynamicResource AppChipBrush}"
                             BorderBrush="{DynamicResource AppSubtleIconBrush}"
                             BorderThickness="0,0,0,1">
-                        <Grid ColumnDefinitions="Auto,Auto,*,Auto" VerticalAlignment="Center">
-                            <TextBlock Text="Values"
-                                       VerticalAlignment="Center"
-                                       FontSize="{DynamicResource AppContentFontSize}"
-                                       FontFamily="{DynamicResource AppMonoFontFamily}"
-                                       FontWeight="SemiBold"
-                                       Foreground="{DynamicResource AppMutedTextBrush}" />
-                            <!-- How wide the value read is - a selection's length, else the
-                                 grouping's size - stepped a byte at a time, which selects that
-                                 many bytes from where the reading starts. -->
+                        <Grid ColumnDefinitions="*,Auto" VerticalAlignment="Stretch">
+                            <StackPanel Orientation="Horizontal" Spacing="2">
+                                <RadioButton Classes="paneltab" GroupName="HexPanelTabs" Content="Values" IsChecked="{Binding ShowsValuesTab}" />
+                                <RadioButton Classes="paneltab" GroupName="HexPanelTabs" Content="Definition" IsChecked="{Binding ShowsDefinitionTab}" />
+                                <RadioButton Classes="paneltab" GroupName="HexPanelTabs" Content="Struct" IsChecked="{Binding ShowsStructTab}" />
+                            </StackPanel>
                             <StackPanel Grid.Column="1"
                                         Orientation="Horizontal"
-                                        Margin="6,0,0,0"
-                                        VerticalAlignment="Center">
-                                <Button Classes="orderreset"
-                                        Click="OnNarrowValues"
-                                        IsEnabled="{Binding CanNarrow}"
-                                        ToolTip.Tip="Read one byte fewer">
-                                    <icons:LucideIcon Data="{StaticResource Icon.Remove}" Size="11" />
-                                </Button>
-                                <TextBlock Text="{Binding SizeText}"
-                                           VerticalAlignment="Center"
-                                           FontSize="12"
-                                           FontFamily="{DynamicResource AppMonoFontFamily}"
-                                           Foreground="{DynamicResource AppMutedTextBrush}" />
-                                <Button Classes="orderreset"
-                                        Click="OnWidenValues"
-                                        IsEnabled="{Binding CanWiden}"
-                                        ToolTip.Tip="Read one byte more, selecting it">
-                                    <icons:LucideIcon Data="{StaticResource Icon.Add}" Size="11" />
-                                </Button>
-                            </StackPanel>
-                            <!-- The byte order the readings use: one at a time, this machine's
-                                 until another is chosen, and remembered; the reset goes back to
-                                 this machine's. -->
-                            <StackPanel Grid.Column="2"
-                                        Orientation="Horizontal"
                                         Spacing="2"
-                                        Margin="12,0,0,0"
-                                        VerticalAlignment="Center">
+                                        VerticalAlignment="Center"
+                                        DataContext="{Binding Values}"
+                                        x:DataType="values:HexValuesViewModel">
                                 <ToggleButton Classes="order"
                                               Content="LE"
                                               IsChecked="{Binding IsLittleEndian, Mode=TwoWay}"
@@ -204,65 +219,215 @@
                                     <icons:LucideIcon Data="{StaticResource Icon.Reset}" Size="12" />
                                 </Button>
                             </StackPanel>
-                            <TextBlock Grid.Column="3"
-                                       VerticalAlignment="Center"
-                                       Text="{Binding OffsetText}"
-                                       FontSize="12"
-                                       FontFamily="{DynamicResource AppMonoFontFamily}"
-                                       Foreground="{DynamicResource AppMutedTextBrush}" />
                         </Grid>
                     </Border>
 
-                    <ScrollViewer HorizontalScrollBarVisibility="Disabled">
-                        <StackPanel Margin="14,10,14,14" Spacing="12">
-                            <TextBlock Text="No bytes here."
-                                       IsVisible="{Binding !HasBytes}"
-                                       FontSize="12"
-                                       Foreground="{DynamicResource AppMutedTextBrush}" />
+                    <Panel>
+                        <!-- Values: the selection start read every standard way. -->
+                        <DockPanel IsVisible="{Binding ShowsValuesTab}">
+                            <DockPanel DataContext="{Binding Values}" x:DataType="values:HexValuesViewModel">
+                                <!-- How wide the value read is - a selection's length, else the
+                                     grouping's size - stepped a byte at a time, which selects that
+                                     many bytes from where the reading starts; and where that is. -->
+                                <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*" Margin="14,8,14,0">
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Button Classes="orderreset"
+                                                Click="OnNarrowValues"
+                                                IsEnabled="{Binding CanNarrow}"
+                                                ToolTip.Tip="Read one byte fewer">
+                                            <icons:LucideIcon Data="{StaticResource Icon.Remove}" Size="11" />
+                                        </Button>
+                                        <TextBlock Text="{Binding SizeText}"
+                                                   VerticalAlignment="Center"
+                                                   FontSize="12"
+                                                   FontFamily="{DynamicResource AppMonoFontFamily}"
+                                                   Foreground="{DynamicResource AppMutedTextBrush}" />
+                                        <Button Classes="orderreset"
+                                                Click="OnWidenValues"
+                                                IsEnabled="{Binding CanWiden}"
+                                                ToolTip.Tip="Read one byte more, selecting it">
+                                            <icons:LucideIcon Data="{StaticResource Icon.Add}" Size="11" />
+                                        </Button>
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="1"
+                                               HorizontalAlignment="Right"
+                                               VerticalAlignment="Center"
+                                               Text="{Binding OffsetText}"
+                                               FontSize="12"
+                                               FontFamily="{DynamicResource AppMonoFontFamily}"
+                                               Foreground="{DynamicResource AppMutedTextBrush}" />
+                                </Grid>
 
-                            <!-- The bytes read, so each reading can be traced to them. -->
-                            <TextBlock Text="{Binding BytesText}"
-                                       IsVisible="{Binding HasBytes}"
-                                       FontSize="12"
-                                       FontFamily="{DynamicResource AppMonoFontFamily}" />
+                                <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                                    <StackPanel Margin="14,10,14,14" Spacing="12">
+                                        <TextBlock Text="No bytes here."
+                                                   IsVisible="{Binding !HasBytes}"
+                                                   FontSize="12"
+                                                   Foreground="{DynamicResource AppMutedTextBrush}" />
 
-                            <StackPanel IsVisible="{Binding HasBytes}" Spacing="0">
-                                <ItemsControl x:Name="ValueRows" ItemsSource="{Binding Rows}">
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate x:DataType="values:HexValueRow">
-                                            <!-- Hovering a reading marks its bytes in the dump;
-                                                 clicking a value copies it. -->
-                                            <Border Classes="valuerow"
-                                                    PointerEntered="OnValueRowEntered"
-                                                    PointerExited="OnValueRowExited">
-                                                <Grid ColumnDefinitions="64,*">
-                                                    <TextBlock Text="{Binding Name}" Classes="valuename" />
-                                                    <TextBlock Grid.Column="1"
-                                                               Text="{Binding Value}"
-                                                               Classes="value"
-                                                               Tapped="OnValueTapped" />
-                                                </Grid>
-                                            </Border>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
-                            </StackPanel>
+                                        <!-- The bytes read, so each reading can be traced to them. -->
+                                        <TextBlock Text="{Binding BytesText}"
+                                                   IsVisible="{Binding HasBytes}"
+                                                   FontSize="12"
+                                                   FontFamily="{DynamicResource AppMonoFontFamily}" />
 
-                            <!-- The same bytes as bits, grouped by byte, in file order. -->
-                            <StackPanel IsVisible="{Binding HasBytes}" Spacing="2">
-                                <TextBlock Text="Bits" Classes="valuehead" Margin="0,0,0,2" />
-                                <ItemsControl ItemsSource="{Binding BitsLines}">
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate x:DataType="x:String">
-                                            <TextBlock Text="{Binding}"
-                                                       FontSize="12"
-                                                       FontFamily="{DynamicResource AppMonoFontFamily}" />
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
-                            </StackPanel>
-                        </StackPanel>
-                    </ScrollViewer>
+                                        <StackPanel IsVisible="{Binding HasBytes}" Spacing="0">
+                                            <ItemsControl x:Name="ValueRows" ItemsSource="{Binding Rows}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate x:DataType="values:HexValueRow">
+                                                        <!-- Hovering a reading marks its bytes in the dump;
+                                                             clicking a value copies it. -->
+                                                        <Border Classes="valuerow"
+                                                                PointerEntered="OnValueRowEntered"
+                                                                PointerExited="OnValueRowExited">
+                                                            <Grid ColumnDefinitions="64,*">
+                                                                <TextBlock Text="{Binding Name}" Classes="valuename" />
+                                                                <TextBlock Grid.Column="1"
+                                                                           Text="{Binding Value}"
+                                                                           Classes="value"
+                                                                           Tapped="OnValueTapped" />
+                                                            </Grid>
+                                                        </Border>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+
+                                        <!-- The same bytes as bits, grouped by byte, in file order. -->
+                                        <StackPanel IsVisible="{Binding HasBytes}" Spacing="2">
+                                            <TextBlock Text="Bits" Classes="valuehead" Margin="0,0,0,2" />
+                                            <ItemsControl ItemsSource="{Binding BitsLines}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate x:DataType="x:String">
+                                                        <TextBlock Text="{Binding}"
+                                                                   FontSize="12"
+                                                                   FontFamily="{DynamicResource AppMonoFontFamily}" />
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </DockPanel>
+                        </DockPanel>
+
+                        <!-- Definition: the struct pasted, how it was read, and what could not be. -->
+                        <DockPanel IsVisible="{Binding ShowsDefinitionTab}">
+                            <DockPanel DataContext="{Binding Structs}" x:DataType="structs:StructDecoderViewModel" Margin="10,8,10,10">
+                                <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*" Margin="0,0,0,6">
+                                    <ComboBox ItemsSource="{Binding LanguageNames}"
+                                              SelectedIndex="{Binding SelectedLanguageIndex}"
+                                              MinHeight="24"
+                                              FontSize="12" />
+                                    <TextBlock Grid.Column="1"
+                                               Margin="10,0,0,0"
+                                               VerticalAlignment="Center"
+                                               Text="{Binding LanguageText}"
+                                               FontSize="11"
+                                               Foreground="{DynamicResource AppMutedTextBrush}" />
+                                </Grid>
+                                <ScrollViewer DockPanel.Dock="Bottom"
+                                              MaxHeight="120"
+                                              Margin="0,6,0,0"
+                                              IsVisible="{Binding HasProblems}">
+                                    <ItemsControl ItemsSource="{Binding Problems}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="x:String">
+                                                <SelectableTextBlock Text="{Binding}"
+                                                                     TextWrapping="Wrap"
+                                                                     FontSize="11"
+                                                                     Margin="0,1"
+                                                                     Foreground="{DynamicResource AppMutedTextBrush}" />
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                                <TextBox x:Name="DefinitionEditor"
+                                         Text="{Binding DefinitionText}"
+                                         AcceptsReturn="True"
+                                         AcceptsTab="True"
+                                         TextWrapping="NoWrap"
+                                         VerticalContentAlignment="Top"
+                                         FontSize="12"
+                                         FontFamily="{DynamicResource AppMonoFontFamily}"
+                                         PlaceholderText="Paste a C, C++ or C# struct" />
+                            </DockPanel>
+                        </DockPanel>
+
+                        <!-- Struct: the bytes at the caret read as the struct picked. -->
+                        <DockPanel IsVisible="{Binding ShowsStructTab}">
+                            <DockPanel DataContext="{Binding Structs}" x:DataType="structs:StructDecoderViewModel">
+                                <StackPanel DockPanel.Dock="Top" Margin="10,8,10,6" Spacing="4">
+                                    <Grid ColumnDefinitions="*,Auto,Auto" IsVisible="{Binding HasDefinition}">
+                                        <ComboBox ItemsSource="{Binding Types}"
+                                                  SelectedItem="{Binding SelectedType}"
+                                                  HorizontalAlignment="Stretch"
+                                                  MinHeight="24"
+                                                  FontSize="12"
+                                                  FontFamily="{DynamicResource AppMonoFontFamily}" />
+                                        <ComboBox Grid.Column="1"
+                                                  Margin="6,0,0,0"
+                                                  ItemsSource="{Binding Targets}"
+                                                  SelectedItem="{Binding Target}"
+                                                  IsVisible="{Binding ShowsTarget}"
+                                                  MinHeight="24"
+                                                  FontSize="12"
+                                                  ToolTip.Tip="What C leaves to the platform: the size of long, wchar_t and pointers, and how bitfields share storage">
+                                            <ComboBox.ItemTemplate>
+                                                <DataTemplate x:DataType="structs:StructTarget">
+                                                    <TextBlock Text="{Binding Name}" />
+                                                </DataTemplate>
+                                            </ComboBox.ItemTemplate>
+                                        </ComboBox>
+                                        <ToggleButton Grid.Column="2"
+                                                      Classes="pin"
+                                                      Margin="6,0,0,0"
+                                                      IsChecked="{Binding IsPinned}"
+                                                      ToolTip.Tip="Pin the struct where it is, so the caret can move inside it">
+                                            <icons:LucideIcon Data="{StaticResource Icon.Pin}" Size="13" />
+                                        </ToggleButton>
+                                    </Grid>
+                                    <TextBlock Text="{Binding SummaryText}"
+                                               FontSize="11"
+                                               FontFamily="{DynamicResource AppMonoFontFamily}"
+                                               Foreground="{DynamicResource AppMutedTextBrush}"
+                                               TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{Binding Message}"
+                                               IsVisible="{Binding HasMessage}"
+                                               TextWrapping="Wrap"
+                                               FontSize="12"
+                                               Foreground="{DynamicResource AppMutedTextBrush}" />
+                                </StackPanel>
+
+                                <DockPanel>
+                                    <ScrollBar x:Name="StructPanScrollBar"
+                                               DockPanel.Dock="Bottom"
+                                               Orientation="Horizontal"
+                                               AllowAutoHide="False"
+                                               IsVisible="False"
+                                               Minimum="0" />
+                                    <ScrollBar x:Name="StructVerticalScrollBar"
+                                               DockPanel.Dock="Right"
+                                               Orientation="Vertical"
+                                               IsVisible="False"
+                                               Minimum="0" />
+                                    <tree:TreeSurface x:Name="StructSurface"
+                                                      Background="{DynamicResource AppPanelBackgroundBrush}"
+                                                      FontFamily="{DynamicResource AppMonoFontFamily}"
+                                                      FontSize="12"
+                                                      Foreground="{DynamicResource AppTextBrush}"
+                                                      GutterForeground="{DynamicResource AppSubtleIconBrush}"
+                                                      SelectionBrush="{DynamicResource AppAccentSurfaceBrush}"
+                                                      ChipFontFamily="{DynamicResource AppSansFontFamily}"
+                                                      ChipBackground="{DynamicResource AppChipBrush}"
+                                                      ChipHoverBackground="{DynamicResource AppChipHoverBrush}"
+                                                      ExpanderBrush="{DynamicResource AppSubtleIconBrush}"
+                                                      ExpanderRowHoverBrush="{DynamicResource AppMutedTextBrush}"
+                                                      GuideBrush="{DynamicResource AppIndentGuideBrush}" />
+                                </DockPanel>
+                            </DockPanel>
+                        </DockPanel>
+                    </Panel>
                 </DockPanel>
             </Border>
 

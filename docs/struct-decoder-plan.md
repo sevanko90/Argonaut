@@ -196,8 +196,10 @@ many structs.
    enum names. Tests: a struct at an unaligned offset, an array of structs over a selection,
    fields past the end, both byte orders. A row's key is its place in the fully expanded tree
    (`StructNodes`), so positions are arithmetic; the scroll range is the mapping's bytes. The
-   offset gutters come with the tab (step 4): the surface caches a row's layout by its key, so a
-   tree whose mapping moves with the caret is replaced, not updated.
+   offset gutters come with the tab (step 4). When the mapping follows the caret only the tree's
+   start moves - rows, keys and expansion are the same - so the surface lays its rows out again
+   (`InvalidateRows`) and keeps its place; a new tree is made only when the rows change (another
+   type, target or byte order, or an array of another length).
 4. [ ] The side panel's tabs: Definition (editor, errors) and Struct (type picker, target, the
    pin, following the caret, arrays from a long selection), byte order shared with Values.
    Visual pass from screenshots in both themes.

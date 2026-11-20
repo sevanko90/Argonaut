@@ -5,6 +5,7 @@ using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Detection;
 using Argonaut.Engine.Indexing;
 using Argonaut.Engine.Text;
+using Argonaut.Features.Hex.Structs;
 using Argonaut.Features.Hex.Values;
 using Argonaut.Ui.Documents;
 using Argonaut.Ui.Documents.Navigation;
@@ -50,6 +51,12 @@ public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDoc
             this.settings.ValuesByteOrder,
             order => this.settings.ValuesByteOrder = order,
             (start, length) => Cursor.Select(new HexCaret(start, start + length)));
+        Structs = new StructDecoderViewModel(Values.Order);
+        Values.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(HexValuesViewModel.Order))
+                Structs.Order = Values.Order;
+        };
     }
 
     public IByteOrigin? Origin => this.origin;
@@ -114,8 +121,58 @@ public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDoc
         }
     }
 
+    /// <summary>The side panel's tab shown, remembered.</summary>
+    public HexPanelTab SidePanelTab
+    {
+        get => this.settings.SidePanelTab;
+        set
+        {
+            if (value == this.settings.SidePanelTab)
+                return;
+            this.settings.SidePanelTab = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(ShowsValuesTab));
+            OnPropertyChanged(nameof(ShowsDefinitionTab));
+            OnPropertyChanged(nameof(ShowsStructTab));
+        }
+    }
+
+    public bool ShowsValuesTab
+    {
+        get => SidePanelTab == HexPanelTab.Values;
+        set
+        {
+            if (value)
+                SidePanelTab = HexPanelTab.Values;
+        }
+    }
+
+    public bool ShowsDefinitionTab
+    {
+        get => SidePanelTab == HexPanelTab.Definition;
+        set
+        {
+            if (value)
+                SidePanelTab = HexPanelTab.Definition;
+        }
+    }
+
+    public bool ShowsStructTab
+    {
+        get => SidePanelTab == HexPanelTab.Struct;
+        set
+        {
+            if (value)
+                SidePanelTab = HexPanelTab.Struct;
+        }
+    }
+
     /// <summary>The side panel's Values tab, reading the bytes at the selection start.</summary>
     public HexValuesViewModel Values { get; }
+
+    /// <summary>The side panel's Definition and Struct tabs: a pasted struct, read from the
+    /// selection start.</summary>
+    public StructDecoderViewModel Structs { get; }
 
     /// <summary>The caret and selection, moved by the surface and by reveals.</summary>
     public HexCursor Cursor { get; }
@@ -211,6 +268,10 @@ public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDoc
         OnPropertyChanged(nameof(CaretSelectionText));
         OnPropertyChanged(nameof(CaretCharacterText));
         ReadValues();
+        if (Cursor.Caret is { } caret)
+            Structs.Follow(this.source, caret.IsEmpty ? caret.Byte : caret.Start, caret.Length);
+        else
+            Structs.Follow(this.source, 0, 0);
     }
 
     /// <summary>Reads what the Values tab shows - a selection of one to eight bytes, else the
@@ -297,6 +358,7 @@ public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDoc
         OnPropertyChanged(nameof(StatusDetail));
         OnPropertyChanged(nameof(Length));
         ReadValues();
+        Structs.Refresh();
         OnPropertyChanged(nameof(CaretCharacterText));
         Grew?.Invoke(this, EventArgs.Empty);
     }
@@ -323,6 +385,8 @@ public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDoc
             this.settling = null;
         }
 
+        // A surface showing the struct tree lets go before the bytes it reads are released.
+        Structs.Close();
         var held = this.source;
         this.source = null;
         held?.Release();

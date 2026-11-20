@@ -1,4 +1,6 @@
 using System;
+using System.ComponentModel;
+using Argonaut.Features.Hex.Structs;
 using Argonaut.Features.Hex.Values;
 using Argonaut.Ui.Notifications;
 using Argonaut.Ui.Rows;
@@ -6,6 +8,8 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
+using Avalonia.Media;
+using Avalonia.Media.TextFormatting;
 
 namespace Argonaut.Features.Hex;
 
@@ -13,12 +17,19 @@ namespace Argonaut.Features.Hex;
 public partial class HexView : UserControl
 {
     private readonly RowScrollBars scrollBars;
+    private readonly RowScrollBars structScrollBars;
 
     public HexView()
     {
         InitializeComponent();
         scrollBars = new RowScrollBars(Surface, VerticalScrollBar, PanScrollBar);
-        DetachedFromVisualTree += (_, _) => scrollBars.Dispose();
+        structScrollBars = new RowScrollBars(StructSurface, StructVerticalScrollBar, StructPanScrollBar);
+        DetachedFromVisualTree += (_, _) =>
+        {
+            scrollBars.Dispose();
+            structScrollBars.Dispose();
+        };
+        ActualThemeVariantChanged += (_, _) => StructTreePalette.Apply(StructSurface, this);
 
         SizeChanged += (_, _) => FitSidePanel();
         Surface.WidestRowWidthChanged += (_, _) => FitSidePanel();
@@ -158,13 +169,55 @@ public partial class HexView : UserControl
     {
         base.OnDataContextChanged(e);
         if (this.shown is not null)
+        {
             this.shown.Grew -= OnDocumentGrew;
+            this.shown.Structs.PropertyChanged -= OnStructsChanged;
+            this.shown.Structs.Moved -= OnStructMoved;
+        }
+
         this.shown = DataContext as HexViewModel;
         if (this.shown is not null)
+        {
             this.shown.Grew += OnDocumentGrew;
+            this.shown.Structs.PropertyChanged += OnStructsChanged;
+            this.shown.Structs.Moved += OnStructMoved;
+        }
 
         Surface.Document = this.shown;
         scrollBars.Refresh();
+        ShowStructTree();
+    }
+
+    private void OnStructsChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(StructDecoderViewModel.Tree))
+            ShowStructTree();
+    }
+
+    /// <summary>A new tree - another struct, target or array length - starts at the top.</summary>
+    private void ShowStructTree()
+    {
+        var tree = this.shown?.Structs.Tree;
+        if (tree is not null)
+            tree.OffsetGutter.CharacterWidth = MonoCharacterWidth();
+        StructSurface.Document = tree;
+        StructTreePalette.Apply(StructSurface, this);
+        structScrollBars.ResetPan();
+        structScrollBars.Refresh();
+    }
+
+    /// <summary>The same tree reading from elsewhere, or in another byte order: its rows are the
+    /// same, so the surface keeps its place and lays the rows out again.</summary>
+    private void OnStructMoved(object? sender, EventArgs e)
+    {
+        StructSurface.InvalidateRows();
+        structScrollBars.Refresh();
+    }
+
+    private double MonoCharacterWidth()
+    {
+        using var sample = new TextLayout(new string('0', 16), new Typeface(StructSurface.FontFamily), StructSurface.FontSize, Brushes.Black);
+        return sample.WidthIncludingTrailingWhitespace / 16;
     }
 
     /// <summary>More of a streamed document arrived: draw its new rows and let the scrollbar

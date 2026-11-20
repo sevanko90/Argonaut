@@ -85,6 +85,44 @@ public sealed class HexViewTests
         }, CancellationToken.None);
     }
 
+    [Fact]
+    public Task TheStructTab_DrawsTheTree_AndACaretMoveKeepsIt_ReadingFromTheNewPlace() => WithView((window, view, hex, _) =>
+    {
+        hex.Structs.DefinitionText = "struct Pair { uint8_t a; uint8_t b; };";
+        hex.SidePanelTab = HexPanelTab.Struct;
+        Dispatcher.UIThread.RunJobs();
+        window.UpdateLayout();
+
+        var surface = view.GetVisualDescendants().OfType<Argonaut.Ui.Tree.TreeSurface>().Single(s => s.Name == "StructSurface");
+        var tree = hex.Structs.Tree!;
+        Assert.Same(tree, surface.Document);
+        Assert.Equal(3, surface.RealizedRows.Count);
+
+        // Following the caret moves the same tree, drawn again without starting over.
+        hex.Cursor.Place(0x40);
+        Dispatcher.UIThread.RunJobs();
+        window.CaptureRenderedFrame();
+        Assert.Same(tree, surface.Document);
+        Assert.Equal(0x40, tree.Start);
+        Assert.Equal("64", tree.ValueOf(tree.Nodes.Child(tree.Nodes.Root, 0)).Text);
+
+        // A long selection is an array: a new tree.
+        hex.Cursor.Select(new HexCaret(0x40, 0x46));
+        Dispatcher.UIThread.RunJobs();
+        Assert.NotSame(tree, surface.Document);
+        Assert.Same(hex.Structs.Tree, surface.Document);
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task TheTabShown_IsRemembered() => WithView((_, _, hex, _) =>
+    {
+        hex.ShowsDefinitionTab = true;
+        Assert.Equal(HexPanelTab.Definition, hex.SidePanelTab);
+        Assert.False(hex.ShowsValuesTab);
+        return Task.CompletedTask;
+    });
+
     private static TextBox Entry(HexView view) => view.GetVisualDescendants().OfType<TextBox>().Single(t => t.Name == "GoToEntry");
 
     private static HexSurface Surface(HexView view) => view.GetVisualDescendants().OfType<HexSurface>().Single();

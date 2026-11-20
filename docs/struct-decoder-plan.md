@@ -200,9 +200,12 @@ many structs.
    start moves - rows, keys and expansion are the same - so the surface lays its rows out again
    (`InvalidateRows`) and keeps its place; a new tree is made only when the rows change (another
    type, target or byte order, or an array of another length).
-4. [ ] The side panel's tabs: Structures (editor, errors) and Struct (type picker, target, the
+4. [x] The side panel's tabs: Structures (editor, errors) and Struct (type picker, target, the
    pin, following the caret, arrays from a long selection), byte order shared with Values.
    Visual pass from screenshots in both themes.
+   Look chosen by the user: the pickers and pin on one line; a title bar above the tree (struct
+   name, then size, alignment and place); the root is not a row; rows in aligned name / type /
+   value columns; an offset column. A paste over the whole definition re-detects its language.
 5. [ ] The empty editor's Insert sample button (C# and C), and making the storage visible: size
    and offset on every row, padding rows, the struct's size and alignment, the per-type storage
    notes on hover. Tests: both samples lay out to 268 bytes with `Name` at 9; a

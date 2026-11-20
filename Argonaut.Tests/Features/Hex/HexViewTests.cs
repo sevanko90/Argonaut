@@ -96,7 +96,7 @@ public sealed class HexViewTests
         var surface = view.GetVisualDescendants().OfType<Argonaut.Ui.Tree.TreeSurface>().Single(s => s.Name == "StructSurface");
         var tree = hex.Structs.Tree!;
         Assert.Same(tree, surface.Document);
-        Assert.Equal(3, surface.RealizedRows.Count);
+        Assert.Equal(2, surface.RealizedRows.Count);
 
         // Following the caret moves the same tree, drawn again without starting over.
         hex.Cursor.Place(0x40);

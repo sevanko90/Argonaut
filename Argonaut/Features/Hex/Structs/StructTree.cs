@@ -17,8 +17,9 @@ namespace Argonaut.Features.Hex.Structs;
 /// and the row a key names never changes while the mapping does not. The scroll range is the
 /// mapping's bytes, as a document tree's is its document's.
 ///
-/// The root row - the struct, or the array of them - is always open; by default the structs in
-/// it are open too, and arrays - which may be any length - closed. When the mapping moves - following the caret - only <see cref="Start"/> changes: the
+/// The root - the struct, or the array of them - is not a row: the title bar above the tree names
+/// it, and its fields are the top rows. By default the structs in it are open, and arrays - which
+/// may be any length - closed. When the mapping moves - following the caret - only <see cref="Start"/> changes: the
 /// rows, their keys and what is open stay, so the surface keeps its place and lays the rows out
 /// again (<c>TreeSurface.InvalidateRows</c>) rather than starting over with a new tree.
 /// Single-threaded, on the UI thread, like the surface.
@@ -84,10 +85,6 @@ public sealed class StructTree : ITreeRowSource
             return expanded;
         return node.Kind == StructNodeKind.Root || (!node.Value.IsArray && node.Kind == StructNodeKind.Field);
     }
-
-    /// <summary>The root - the struct, or the array of them - is the title its fields hang
-    /// from: always open, as a struct's braces always are.</summary>
-    public bool IsAlwaysOpen(in TreeRow row) => row.Detail is StructNode { Kind: StructNodeKind.Root };
 
     public void Toggle(in TreeRow row)
     {
@@ -193,7 +190,9 @@ public sealed class StructTree : ITreeRowSource
 /// <summary>
 /// Walks a <see cref="StructTree"/>'s visible rows: a path from the root to the row it stands on,
 /// each step a child of the one before, so a move is a step along a parent's children or into or
-/// out of one.
+/// out of one. The root itself is never a row - the title bar above the tree names the struct,
+/// and it is always open - so the rows start at its fields (or, for an array, its elements), at
+/// depth 0.
 /// </summary>
 internal sealed class StructTreeCursor(StructTree tree) : ITreeRowCursor
 {
@@ -204,8 +203,8 @@ internal sealed class StructTreeCursor(StructTree tree) : ITreeRowCursor
         get
         {
             var node = this.path[^1];
-            long parent = this.path.Count > 1 ? this.path[^2].Position : -1;
-            return tree.RowOf(node, this.path.Count - 1, parent);
+            long parent = this.path.Count > 2 ? this.path[^2].Position : -1;
+            return tree.RowOf(node, this.path.Count - 2, parent);
         }
     }
 
@@ -213,8 +212,8 @@ internal sealed class StructTreeCursor(StructTree tree) : ITreeRowCursor
     {
         get
         {
-            for (int i = 0; i < this.path.Count - 1; i++)
-                yield return tree.RowOf(this.path[i], i, i > 0 ? this.path[i - 1].Position : -1);
+            for (int i = 1; i < this.path.Count - 1; i++)
+                yield return tree.RowOf(this.path[i], i - 1, i > 1 ? this.path[i - 1].Position : -1);
         }
     }
 
@@ -222,20 +221,27 @@ internal sealed class StructTreeCursor(StructTree tree) : ITreeRowCursor
 
     public bool MoveToStart()
     {
-        this.path = [Nodes.Root];
+        if (Nodes.ChildCount(Nodes.Root) == 0)
+            return false;
+
+        this.path = [Nodes.Root, Nodes.Child(Nodes.Root, 0)];
         return true;
     }
 
     public bool MoveToEnd()
     {
-        this.path = [Nodes.Root];
+        long count = Nodes.ChildCount(Nodes.Root);
+        if (count == 0)
+            return false;
+
+        this.path = [Nodes.Root, Nodes.Child(Nodes.Root, count - 1)];
         DescendToLast();
         return true;
     }
 
     public bool MoveNext()
     {
-        if (this.path.Count == 0)
+        if (this.path.Count < 2)
             return false;
 
         var node = this.path[^1];
@@ -266,6 +272,9 @@ internal sealed class StructTreeCursor(StructTree tree) : ITreeRowCursor
             return false;
 
         long ordinal = this.path[^1].Ordinal;
+        if (ordinal == 0 && this.path.Count == 2)
+            return false;
+
         this.path.RemoveAt(this.path.Count - 1);
         if (ordinal == 0)
             return true;
@@ -290,35 +299,39 @@ internal sealed class StructTreeCursor(StructTree tree) : ITreeRowCursor
 
     public bool SeekTo(long position)
     {
-        this.path = [Nodes.Root];
+        var root = Nodes.Root;
+        if (Nodes.ChildCount(root) == 0)
+            return false;
+        if (position <= root.Position)
+            return MoveToStart();
+        if (position >= root.Position + root.Rows)
+            return MoveToEnd();
+
+        this.path = [root, Nodes.ChildHolding(root, position)];
         while (true)
         {
             var node = this.path[^1];
             if (position <= node.Position || !tree.IsExpanded(node) || Nodes.ChildCount(node) == 0)
                 return true;
-            if (position >= node.Position + node.Rows)
-            {
-                if (this.path.Count == 1)
-                    DescendToLast();
-                return true;
-            }
-
             this.path.Add(Nodes.ChildHolding(node, position));
         }
     }
 
     /// <summary>Stands on the deepest visible row whose bytes hold <paramref name="offset"/>, from
-    /// the mapping's start.</summary>
+    /// the mapping's start; the first row when none does.</summary>
     public void SeekOffset(long offset)
     {
         this.path = [Nodes.Root];
         while (true)
         {
             var node = this.path[^1];
-            if (!tree.IsExpanded(node) || Nodes.ChildAtOffset(node, offset) is not { } child)
-                return;
+            if ((this.path.Count > 1 && !tree.IsExpanded(node)) || Nodes.ChildAtOffset(node, offset) is not { } child)
+                break;
             this.path.Add(child);
         }
+
+        if (this.path.Count < 2)
+            MoveToStart();
     }
 
     public ITreeRowCursor Clone() => new StructTreeCursor(tree) { path = [.. this.path] };
@@ -339,16 +352,8 @@ internal sealed class StructTreePainter(StructTree tree) : ITreeRowPainter
         if (row.Detail is not StructNode node)
             return;
 
-        var value = tree.ValueOf(node);
-        if (node.Kind == StructNodeKind.Root)
-        {
-            // The title the fields hang from, as a struct's name heads its braces.
-            runs.Add(new TreeRun(node.TypeColumn, TreeRunStyle.Name));
-            runs.Add(new TreeRun(new string(' ', Gap) + value.Text, TreeRunStyle.Hint));
-            return;
-        }
-
         var (labelWidth, typeWidth) = tree.Nodes.ColumnsOf(node.Parent);
+        var value = tree.ValueOf(node);
         bool padding = node.Kind == StructNodeKind.Padding;
 
         runs.Add(new TreeRun(node.DisplayLabel.PadRight(labelWidth + Gap), padding ? TreeRunStyle.Comment : TreeRunStyle.Name));

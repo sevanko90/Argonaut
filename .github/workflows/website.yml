@@ -2,7 +2,7 @@ name: Website
 
 # Builds the website and user docs (website/) with MkDocs Material and publishes them to GitHub
 # Pages. A pull request only builds - with --strict, so a broken link fails the check - and a
-# push to main builds and publishes.
+# push to main builds and publishes. A daily run republishes so the download count stays current.
 
 on:
   push:
@@ -11,6 +11,8 @@ on:
   pull_request:
     branches: [main]
     paths: ['website/**', '.github/workflows/website.yml']
+  schedule:
+    - cron: '17 4 * * *'
   workflow_dispatch:
 
 permissions:
@@ -31,6 +33,19 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r website/requirements.txt
+      # The README and landing badges read this through shields.io's endpoint badge. Only the
+      # installers and portable zips count: the updater fetches its release feed on every update
+      # check and a package on every update, which would count one person many times.
+      - name: Count downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          total=$(gh api --paginate "repos/${{ github.repository }}/releases" \
+            --jq '.[].assets[] | select(.name | test("Setup|\\.zip$")) | .download_count' \
+            | awk '{ s += $1 } END { print s + 0 }')
+          printf '{"schemaVersion":1,"label":"downloads","message":"%s","color":"e9b949"}\n' "$total" \
+            > website/docs/downloads.json
+          cat website/docs/downloads.json
       - name: Build
         working-directory: website
         env:

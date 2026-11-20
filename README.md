@@ -1,6 +1,6 @@
 # Argonaut
 
-[![Total downloads](https://img.shields.io/github/downloads/sevanko90/Argonaut/total?label=downloads&color=e9b949)](https://github.com/sevanko90/Argonaut/releases)
+[![Total downloads](https://img.shields.io/endpoint?url=https%3A%2F%2Fargonautviewer.com%2Fdownloads.json)](https://github.com/sevanko90/Argonaut/releases)
 
 **Any file. Any size. On screen at once.**
 

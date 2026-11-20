@@ -22,7 +22,7 @@ data as hex. On top of that it has specialised views for the formats data people
 Plus value hints that decode dates, colours, JWTs and Base64 beside the value, background search,
 HTTP requests opened as documents, and a command line for opening part of a huge file.
 
-**[Download and documentation: sevanko90.github.io/Argonaut](https://sevanko90.github.io/Argonaut/)**
+**[Download and documentation: argonautviewer.com](https://argonautviewer.com/)**
 
 Windows and macOS builds update themselves; every version is on the
 [releases page](https://github.com/sevanko90/Argonaut/releases).

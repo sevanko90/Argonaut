@@ -1,6 +1,6 @@
 site_name: Argonaut
 site_description: A fast desktop viewer for big data files - JSON, NDJSON, XML, CSV, text and binary - that opens multi-gigabyte files at once.
-site_url: https://sevanko90.github.io/Argonaut/
+site_url: https://argonautviewer.com/
 repo_url: https://github.com/sevanko90/Argonaut
 repo_name: sevanko90/Argonaut
 edit_uri: edit/main/website/docs/

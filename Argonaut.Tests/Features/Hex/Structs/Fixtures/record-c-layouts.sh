@@ -1,6 +1,6 @@
 #!/bin/sh
 # Records Clang's layout of every struct in c-layouts.h for the two targets the struct decoder
-# knows, as "<name> <size> <alignment> <field offsets...>" in bytes. Run it from this folder after
+# knows, as "<name> <size> <alignment> <field offsets...>": sizes in bytes, offsets in bits. Run it from this folder after
 # changing c-layouts.h, and check the results in. Clang's own records, and a struct only a typedef
 # names (Clang calls it "unnamed"), are left out - the structs that contain one check its layout.
 set -e
@@ -17,13 +17,13 @@ record() {
         | clang -target "$1" -x c++ -std=c++17 -fsyntax-only \
             -Xclang -fdump-record-layouts-simple -Xclang -fdump-record-layouts-complete - 2>/dev/null \
         | awk '
-            /^Type: / { sub(/^Type: (struct|class) /, ""); sub(/^Type: /, ""); name = $0 }
+            /^Type: / { sub(/^Type: (struct|class|union) /, ""); sub(/^Type: /, ""); name = $0 }
             /^  Size:/ { split($0, a, ":"); size = a[2] / 8 }
             /^  Alignment:/ { split($0, a, ":"); align = a[2] / 8 }
-            /^  FieldOffsets:/ && name !~ /^(__|\(unnamed)/ {
+            /^  FieldOffsets:/ && name !~ /^__|\(/ {
                 line = $0; sub(/.*\[/, "", line); sub(/\].*/, "", line); gsub(/,/, "", line)
                 n = split(line, offsets, " "); out = name " " size " " align
-                for (i = 1; i <= n; i++) out = out " " offsets[i] / 8
+                for (i = 1; i <= n; i++) out = out " " offsets[i]
                 print out
             }' > "$2"
 }

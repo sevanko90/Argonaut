@@ -6,8 +6,8 @@ namespace Argonaut.Features.Hex.Structs;
 
 /// <summary>
 /// Evaluates the integer expressions a definition sizes its arrays with: literals in decimal, hex,
-/// binary and (in C) octal, with C's suffixes; named constants; and <c>+ - * / % &lt;&lt; &gt;&gt;</c>
-/// with parentheses. Anything else - <c>sizeof</c>, a cast, an unknown name - is not a constant.
+/// binary and (in C) octal, with C's suffixes; named constants; and <c>+ - * / % &lt;&lt; &gt;&gt;
+/// &amp; ^ | ~</c> at C's precedence, with parentheses. Anything else - <c>sizeof</c>, a cast, an unknown name - is not a constant.
 /// </summary>
 internal sealed class ConstantExpression
 {
@@ -39,7 +39,7 @@ internal sealed class ConstantExpression
         var expression = new ConstantExpression(lexemes, start, end, constants, octalLiterals);
         try
         {
-            if (start < end && expression.TryShift(out result) && expression.index == end)
+            if (start < end && expression.TryOr(out result) && expression.index == end)
                 return true;
         }
         catch (OverflowException)
@@ -91,6 +91,54 @@ internal sealed class ConstantExpression
     }
 
     private bool At(string symbol) => this.index < this.end && this.lexemes[this.index].Is(symbol);
+
+    private bool TryOr(out long value)
+    {
+        if (!TryXor(out value))
+            return false;
+
+        while (At("|"))
+        {
+            this.index++;
+            if (!TryXor(out long right))
+                return false;
+            value |= right;
+        }
+
+        return true;
+    }
+
+    private bool TryXor(out long value)
+    {
+        if (!TryAnd(out value))
+            return false;
+
+        while (At("^"))
+        {
+            this.index++;
+            if (!TryAnd(out long right))
+                return false;
+            value ^= right;
+        }
+
+        return true;
+    }
+
+    private bool TryAnd(out long value)
+    {
+        if (!TryShift(out value))
+            return false;
+
+        while (At("&"))
+        {
+            this.index++;
+            if (!TryShift(out long right))
+                return false;
+            value &= right;
+        }
+
+        return true;
+    }
 
     private bool TryShift(out long value)
     {
@@ -161,6 +209,14 @@ internal sealed class ConstantExpression
             return TryUnary(out value);
         }
 
+        if (At("~"))
+        {
+            this.index++;
+            bool read = TryUnary(out value);
+            value = ~value;
+            return read;
+        }
+
         return TryPrimary(out value);
     }
 
@@ -174,7 +230,7 @@ internal sealed class ConstantExpression
         if (lexeme.Is("("))
         {
             this.index++;
-            if (!TryShift(out value) || !At(")"))
+            if (!TryOr(out value) || !At(")"))
                 return false;
             this.index++;
             return true;

@@ -18,7 +18,7 @@ public sealed class StructLayoutCSharpTests
         Path.Combine(AppContext.BaseDirectory, "Features", "Hex", "Structs", "Fixtures", "CSharpLayouts.cs"))));
 
     private static IEnumerable<Type> FixtureTypes(string ns)
-        => typeof(StructLayoutCSharpTests).Assembly.GetTypes().Where(t => t.Namespace == ns && t.IsValueType && !t.IsNested);
+        => typeof(StructLayoutCSharpTests).Assembly.GetTypes().Where(t => t.Namespace == ns && t.IsValueType && !t.IsEnum && !t.IsNested);
 
     [Fact]
     public void TheFixture_ReadsAsCSharp_WithoutProblems()
@@ -82,6 +82,19 @@ public sealed class StructLayoutCSharpTests
         var bools = Lay("WinBools");
         Assert.Equal(4, bools.Fields.Single(f => f.Name == "B").Size);
         Assert.Equal(1, bools.Fields.Single(f => f.Name == "C").Size);
+    }
+
+    [Fact]
+    public void AnEnumField_KnowsItsEnum_AndIsStoredAsItsUnderlyingType()
+    {
+        var enums = Lay("Enums");
+        var access = enums.Fields.Single(f => f.Name == "Access");
+
+        Assert.Equal("Access", access.Enum!.Name);
+        Assert.True(access.Enum.IsFlags);
+        Assert.Equal([0L, 1, 2, 3], access.Enum.Members.Select(m => m.Value));
+        Assert.Equal(1, enums.Fields.Single(f => f.Name == "S").Size);
+        Assert.Equal(8, enums.Fields.Single(f => f.Name == "W").Size);
     }
 
     private static LaidStruct Lay(string name)

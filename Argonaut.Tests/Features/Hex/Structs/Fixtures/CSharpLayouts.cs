@@ -54,6 +54,36 @@ namespace Argonaut.Tests.Features.Hex.Structs.Fixtures.InMemory
     public struct HasEmpty { public byte A; public Empty E; public int B; }
 
     public struct FrameworkNames { public System.Byte A; public Int32 B; public System.Double C; public Char D; }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    public struct Pack1 { public byte A; public int B; public short C; public double D; }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 2)]
+    public struct Pack2 { public byte A; public int B; public byte C; public long D; }
+
+    [StructLayout(LayoutKind.Sequential, Size = 32)]
+    public struct Sized { public int A; public byte B; }
+
+    [StructLayout(LayoutKind.Explicit)]
+    public struct Overlay
+    {
+        [FieldOffset(0)] public int I;
+        [FieldOffset(0)] public float F;
+        [FieldOffset(4)] public byte B;
+        [FieldOffset(8)] public long L;
+    }
+
+    [StructLayout(LayoutKind.Explicit, Size = 24)]
+    public unsafe struct ExplicitSized { [FieldOffset(2)] public short A; [FieldOffset(8)] public fixed byte Bytes[4]; }
+
+    public enum Small : byte { A, B }
+
+    [Flags]
+    public enum Access { None = 0, Read = 1, Write = Read << 1, Both = Read | Write }
+
+    public enum Wide : long { Big = 1L << 40 }
+
+    public struct Enums { public byte A; public Small S; public Access Access; public Wide W; public byte B; }
 }
 
 namespace Argonaut.Tests.Features.Hex.Structs.Fixtures.Marshalled
@@ -65,6 +95,14 @@ namespace Argonaut.Tests.Features.Hex.Structs.Fixtures.Marshalled
         [MarshalAs(UnmanagedType.Bool)] public bool B;
         [MarshalAs(UnmanagedType.U1)] public bool C;
         public int D;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct WideText
+    {
+        public byte A;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 5)] public string Name;
+        public byte B;
     }
 
     [StructLayout(LayoutKind.Sequential)]

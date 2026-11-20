@@ -1,18 +1,43 @@
-Basic 24 8 0 4 8 16
-Tail 16 8 0 8
-Chars 16 4 0 1 2 4 8 12
-Longs 40 8 0 4 8 16 24 32 36
-Pointers 40 8 0 8 16 24 32
-Sizes 40 8 0 8 16 24 32
-FixedWidth 24 8 0 2 4 8 16 20
-Arrays 104 4 0 16 64 68
-Nested 64 8 0 8 32
-Tagged 16 4 0 4
-Holder 40 8 0 16 24
-Outer::Inner 16 8 0 8
-Outer 56 8 0 16 24
-Methods 8 4 0 4
-Access 16 8 0 4 8
+Basic 24 8 0 32 64 128
+Tail 16 8 0 64
+Chars 16 4 0 8 16 32 64 96
+Longs 40 8 0 32 64 128 192 256 288
+Pointers 40 8 0 64 128 192 256
+Sizes 40 8 0 64 128 192 256
+FixedWidth 24 8 0 16 32 64 128 160
+Arrays 104 4 0 128 512 544
+Nested 64 8 0 64 256
+Tagged 16 4 0 32
+Holder 40 8 0 128 192
+Outer::Inner 16 8 0 64
+Outer 56 8 0 128 192
+Methods 8 4 0 32
+Access 16 8 0 32 64
 Empty 1 1
-HasEmpty 8 4 0 1 4
-Sample 268 4 0 4 8 9
+HasEmpty 8 4 0 8 32
+Sample 268 4 0 32 64 72
+Packed1 15 1 0 8 40 56
+Packed2 16 2 0 16 48 64
+BackToPacked1 9 1 0 8
+Unpacked 16 8 0 64
+Pack4 12 4 0 32
+AttrPacked 7 1 0 8 40
+Aligned16 16 16 0
+FieldAligned 16 8 0 64 96
+HoldsAligned 32 16 0 128
+Number 8 8 0 0 0 0
+WithUnion 24 8 0 64 128
+AnonymousMembers 16 4 0 32 64 96
+Enums 56 8 0 32 64 96 128 192 256
+Bits 12 4 0 3 32 64
+MixedBits 12 4 0 32 64 80
+ZeroBits 8 4 0 32 32
+UnnamedBits 12 4 0 32 64
+StraddleBits 4 2 0 16 22
+BoolBits 16 8 0 1 2 64
+PackedBits 7 1 0 8 40
+BaseRecord 8 4 0 32
+DerivedRecord 12 4 64
+EmptyBase 1 1
+DerivedFromEmpty 4 4 0
+Deeper 16 4 96

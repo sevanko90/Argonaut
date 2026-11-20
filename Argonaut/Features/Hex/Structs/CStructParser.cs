@@ -5,10 +5,12 @@ using System.Linq;
 namespace Argonaut.Features.Hex.Structs;
 
 /// <summary>
-/// Reads the struct declarations of a C or C++ header: <c>struct</c> and <c>class</c> with their
-/// fields, <c>typedef</c> and <c>using</c> aliases, and the integer constants array lengths are
-/// written with (<c>#define</c>, <c>const</c>, <c>constexpr</c>). Functions, methods, globals and
-/// other preprocessor lines are skipped.
+/// Reads the struct declarations of a C or C++ header: <c>struct</c>, <c>class</c> and
+/// <c>union</c> with their fields and bitfields, a single base, <c>enum</c>s, <c>typedef</c> and
+/// <c>using</c> aliases, the integer constants array lengths are written with (<c>#define</c>,
+/// <c>const</c>, <c>constexpr</c>, enum members), and what changes a layout: <c>#pragma pack</c>,
+/// <c>packed</c>, <c>aligned</c> and <c>alignas</c>. Functions, methods, globals and other
+/// preprocessor lines are skipped.
 /// </summary>
 internal sealed class CStructParser(string source) : StructSourceParser(source)
 {
@@ -20,7 +22,22 @@ internal sealed class CStructParser(string source) : StructSourceParser(source)
 
     private static readonly HashSet<string> Qualifiers = ["const", "volatile", "mutable", "register", "inline", "extern"];
 
+    private readonly Stack<int?> packs = new();
+
+    // Whether the record being read is still plain data: set false by a constructor or a private
+    // or protected section, and saved around a nested record.
+    private bool plainData = true;
+    private int? pack;
     private int anonymousCount;
+
+    /// <summary>What attributes on a declaration ask for.</summary>
+    private struct Attributes
+    {
+        public bool Packed;
+        public int? Aligned;
+
+        public readonly int? Alignment(int? other) => Aligned is { } a && other is { } b ? Math.Max(a, b) : Aligned ?? other;
+    }
 
     protected override StructLanguage Language => StructLanguage.C;
 
@@ -52,14 +69,13 @@ internal sealed class CStructParser(string source) : StructSourceParser(source)
             {
                 ParseUsing();
             }
-            else if (lexeme.Is("struct") || lexeme.Is("class"))
+            else if (IsRecordKeyword(lexeme))
             {
-                ParseStructStatement(out _);
+                ParseRecordStatement(null);
             }
-            else if (lexeme.Is("union"))
+            else if (lexeme.Is("enum"))
             {
-                Report("Unions are not supported yet.", lexeme.Position);
-                SkipStatement();
+                ParseEnumStatement();
             }
             else if (lexeme.Is("namespace") || (lexeme.Is("extern") && PeekAhead(1).Kind == LexemeKind.Quoted && PeekAhead(2).Is("{")))
             {
@@ -89,10 +105,18 @@ internal sealed class CStructParser(string source) : StructSourceParser(source)
         }
     }
 
-    /// <summary>Reads <c>#define NAME value</c> when the value is an integer constant; every other
-    /// directive is ignored.</summary>
+    private static bool IsRecordKeyword(Lexeme lexeme) => lexeme.Is("struct") || lexeme.Is("class") || lexeme.Is("union");
+
+    /// <summary>Reads <c>#define NAME value</c> when the value is an integer constant, and
+    /// <c>#pragma pack</c>; every other directive is ignored.</summary>
     private void ReadDirective(Lexeme directive)
     {
+        if (directive.Text.StartsWith("pragma", StringComparison.Ordinal))
+        {
+            ReadPragma(StructLexer.Read(directive.Text["pragma".Length..]));
+            return;
+        }
+
         if (!directive.Text.StartsWith("define", StringComparison.Ordinal))
             return;
 
@@ -107,6 +131,99 @@ internal sealed class CStructParser(string source) : StructSourceParser(source)
 
         if (ConstantExpression.TryEvaluate(parts, 1, parts.Count - 1, Constants, octalLiterals: true, out long value))
             Constants[parts[0].Text] = value;
+    }
+
+    /// <summary><c>pack(n)</c>, <c>pack()</c>, <c>pack(push[, n])</c>, <c>pack(pop)</c>: the
+    /// packing every struct defined after it is laid out with.</summary>
+    private void ReadPragma(List<Lexeme> parts)
+    {
+        if (parts.Count < 3 || !parts[0].Is("pack") || !parts[1].Is("("))
+            return;
+
+        int? number = null;
+        bool push = false, pop = false;
+        for (int i = 2; i < parts.Count && !parts[i].Is(")"); i++)
+        {
+            if (parts[i].Is("push"))
+                push = true;
+            else if (parts[i].Is("pop"))
+                pop = true;
+            else if (parts[i].Kind == LexemeKind.Number && ConstantExpression.TryParseLiteral(parts[i].Text, true, out long n) && n > 0)
+                number = (int)n;
+        }
+
+        if (pop)
+        {
+            this.pack = this.packs.Count > 0 ? this.packs.Pop() : null;
+            return;
+        }
+
+        if (push)
+            this.packs.Push(this.pack);
+        if (number is not null || !push)
+            this.pack = number;
+    }
+
+    /// <summary>
+    /// Reads any attributes at the position: GCC's <c>__attribute__((packed, aligned(n)))</c>,
+    /// MSVC's <c>__declspec(align(n))</c>, <c>alignas(n)</c> and <c>[[ … ]]</c>, keeping what
+    /// changes a layout.
+    /// </summary>
+    private void ReadAttributes(ref Attributes attributes)
+    {
+        while (true)
+        {
+            if (Current.Is("__attribute__") || Current.Is("__declspec"))
+            {
+                Advance();
+                int close = FindClose(Mark);
+                if (close < 0)
+                    return;
+
+                while (Mark < close)
+                {
+                    var word = Advance();
+                    if (word.Is("packed") || word.Is("__packed__"))
+                        attributes.Packed = true;
+                    else if ((word.Is("aligned") || word.Is("__aligned__") || word.Is("align")) && Current.Is("("))
+                        attributes.Aligned = ReadAlignment() ?? attributes.Aligned;
+                }
+
+                Advance();
+            }
+            else if (Current.Is("alignas") || Current.Is("_Alignas"))
+            {
+                Advance();
+                if (Current.Is("("))
+                    attributes.Aligned = ReadAlignment() ?? attributes.Aligned;
+            }
+            else if (Current.Is("[") && PeekAhead(1).Is("["))
+            {
+                SkipBalanced();
+            }
+            else
+            {
+                return;
+            }
+        }
+    }
+
+    /// <summary>Reads <c>(n)</c> as an alignment, reporting one that is not a constant power of two.</summary>
+    private int? ReadAlignment()
+    {
+        var open = Current;
+        int close = FindClose(Mark);
+        Advance();
+        if (close < 0 || !TryEvaluateTo(close, out long value) || value <= 0 || (value & (value - 1)) != 0)
+        {
+            Report("An alignment must be a constant power of two.", open.Position);
+            if (close >= 0)
+                Advance();
+            return null;
+        }
+
+        Advance();
+        return (int)value;
     }
 
     private void SkipAngles()
@@ -158,26 +275,217 @@ internal sealed class CStructParser(string source) : StructSourceParser(source)
         return false;
     }
 
-    /// <summary>Reads <c>typedef</c>: a struct defined in it, an alias of a struct's tag, or an
-    /// alias of any other type.</summary>
-    private void ParseTypedef()
+    /// <summary>Whether a record keyword here starts a definition (a body or base list follows)
+    /// rather than naming a type.</summary>
+    private bool AtRecordDefinition()
     {
-        var position = Advance().Position;
-        if (Current.Is("union") || Current.Is("enum"))
+        int at = 1;
+        while (PeekAhead(at).Is("__attribute__") || PeekAhead(at).Is("__declspec") || PeekAhead(at).Is("alignas") || PeekAhead(at).Is("_Alignas"))
         {
-            if (Current.Is("union"))
-                Report("Unions are not supported yet.", Current.Position);
+            at++;
+            if (!PeekAhead(at).Is("("))
+                return false;
+
+            int close = FindClose(Mark + at);
+            if (close < 0)
+                return false;
+            at = close - Mark + 1;
+        }
+
+        if (PeekAhead(at).Is("{"))
+            return true;
+
+        if (PeekAhead(at).Kind == LexemeKind.Identifier && !PeekAhead(at).Is("final"))
+        {
+            at++;
+            if (PeekAhead(at).Is("final"))
+                at++;
+            return PeekAhead(at).Is("{") || PeekAhead(at).Is(":") || PeekAhead(at).Is("__attribute__");
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Reads a statement starting with <c>struct</c>, <c>class</c> or <c>union</c>: a definition,
+    /// with any declarators after it (added to <paramref name="fields"/> inside a struct); a
+    /// forward declaration; or, inside a struct, a field whose type is written with the keyword.
+    /// </summary>
+    private void ParseRecordStatement(List<FieldDeclaration>? fields)
+    {
+        if (!AtRecordDefinition())
+        {
+            if (fields is not null)
+                ParseFields(fields);
+            else
+                SkipStatement();
+            return;
+        }
+
+        var keyword = Current;
+        var defined = ParseRecordDefinition(out bool named);
+        if (defined is null)
+        {
             SkipStatement();
             return;
         }
 
-        TypeReference aliased;
-        StructDeclaration? defined = null;
-        if ((Current.Is("struct") || Current.Is("class")) && (PeekAhead(1).Is("{") || PeekAhead(2).Is("{") || PeekAhead(2).Is(":")))
+        if (Accept(";"))
         {
+            if (!named && fields is not null)
+            {
+                // An anonymous member: its fields read as the parent's, at its place.
+                fields.Add(new FieldDeclaration(string.Empty, new TypeReference(defined.Name), [], FieldStorage.Natural, keyword.Position));
+            }
+
+            return;
+        }
+
+        if (fields is not null)
+            ReadDeclarators(new TypeReference(defined.Name), fields, default);
+        else
+            SkipStatement();
+    }
+
+    private string NextAnonymousName() => $"<anonymous {++this.anonymousCount}>";
+
+    /// <summary>Reads <c>struct|class|union [attributes] [Name] [: Base] { … } [attributes]</c>,
+    /// adding the declaration; null when it cannot be read.</summary>
+    private StructDeclaration? ParseRecordDefinition(out bool named)
+    {
+        var keyword = Advance();
+        var attributes = new Attributes();
+        ReadAttributes(ref attributes);
+        named = AtIdentifier && !Current.Is("final");
+        string name = named ? Advance().Text : NextAnonymousName();
+        Accept("final");
+        ReadAttributes(ref attributes);
+
+        TypeReference? baseType = null;
+        if (Accept(":"))
+        {
+            var bases = new List<TypeReference>();
+            while (!AtEnd && !Current.Is("{"))
+            {
+                while (Current.Is("public") || Current.Is("private") || Current.Is("protected"))
+                    Advance();
+                if (Current.Is("virtual"))
+                {
+                    Report("Virtual inheritance is not supported.", Current.Position);
+                    return null;
+                }
+
+                if (!AtIdentifier && !Current.Is("::"))
+                    break;
+                bases.Add(new TypeReference(ReadQualifiedName()));
+                if (Current.Is("<"))
+                {
+                    Report("A template base is not supported.", Current.Position);
+                    return null;
+                }
+
+                if (!Accept(","))
+                    break;
+            }
+
+            if (bases.Count > 1)
+            {
+                Report("Only single inheritance is supported.", keyword.Position);
+                return null;
+            }
+
+            baseType = bases.FirstOrDefault();
+        }
+
+        if (!Accept("{"))
+        {
+            Report($"Expected {{ to open {name}.", Current.Position);
+            return null;
+        }
+
+        // Added before its fields are read, so a nested record's declaration comes after it.
+        var declaration = new StructDeclaration(name, [], keyword.Position);
+        Declarations.Add(declaration);
+
+        bool outerPlainData = this.plainData;
+        this.plainData = baseType is null;
+        var fields = new List<FieldDeclaration>();
+        while (!AtEnd && !Current.Is("}"))
+            ParseMember(fields, name);
+        Accept("}");
+        bool plainData = this.plainData;
+        this.plainData = outerPlainData;
+        ReadAttributes(ref attributes);
+
+        var complete = declaration with
+        {
+            Fields = fields,
+            Kind = keyword.Is("union") ? StructKind.Union : StructKind.Struct,
+            Pack = attributes.Packed ? 1 : this.pack,
+            Alignment = attributes.Aligned,
+            Base = baseType,
+            IsPlainData = plainData,
+        };
+        Declarations[Declarations.IndexOf(declaration)] = complete;
+        return complete;
+    }
+
+    /// <summary>Reads an enum definition and any declarators after it, or a field typed with
+    /// <c>enum Name</c>.</summary>
+    private void ParseEnumStatement(List<FieldDeclaration>? fields = null)
+    {
+        int mark = Mark;
+        var defined = TryParseEnumDefinition();
+        if (defined is null)
+        {
+            Rewind(mark);
+            if (fields is not null)
+                ParseFields(fields);
+            else
+                SkipStatement();
+            return;
+        }
+
+        if (Accept(";"))
+            return;
+
+        if (fields is not null)
+            ReadDeclarators(new TypeReference(defined.Name), fields, default);
+        else
+            SkipStatement();
+    }
+
+    /// <summary>Reads <c>enum [class|struct] [Name] [: type] { … }</c>, adding it; null when
+    /// this is not a definition.</summary>
+    private EnumDeclaration? TryParseEnumDefinition()
+    {
+        var keyword = Advance();
+        if (Current.Is("class") || Current.Is("struct"))
             Advance();
-            string? tag = AtIdentifier ? Advance().Text : null;
-            defined = ParseStructBody(tag ?? NextAnonymousName(), position);
+        string name = AtIdentifier ? Advance().Text : NextAnonymousName();
+
+        var underlying = new TypeReference("int");
+        if (Accept(":") && !TryReadType(out underlying, report: true))
+            return null;
+
+        if (!Current.Is("{"))
+            return null;
+
+        var declaration = new EnumDeclaration(name, underlying, ReadEnumMembers(), IsFlags: false, keyword.Position);
+        Enums.Add(declaration);
+        return declaration;
+    }
+
+    /// <summary>Reads <c>typedef</c>: a struct, union or enum defined in it, an alias of a tag, or
+    /// an alias of any other type.</summary>
+    private void ParseTypedef()
+    {
+        Advance();
+        TypeReference aliased;
+        string? anonymous = null;
+        if (IsRecordKeyword(Current) && AtRecordDefinition())
+        {
+            var defined = ParseRecordDefinition(out bool named);
             if (defined is null)
             {
                 SkipStatement();
@@ -185,6 +493,19 @@ internal sealed class CStructParser(string source) : StructSourceParser(source)
             }
 
             aliased = new TypeReference(defined.Name);
+            anonymous = named ? null : defined.Name;
+        }
+        else if (Current.Is("enum") && (PeekAhead(1).Is("{") || PeekAhead(2).Is("{") || PeekAhead(2).Is(":") || PeekAhead(1).Is(":")))
+        {
+            var defined = TryParseEnumDefinition();
+            if (defined is null)
+            {
+                SkipStatement();
+                return;
+            }
+
+            aliased = new TypeReference(defined.Name);
+            anonymous = defined.Name.StartsWith('<') ? defined.Name : null;
         }
         else if (!TryReadType(out aliased, report: true))
         {
@@ -192,7 +513,6 @@ internal sealed class CStructParser(string source) : StructSourceParser(source)
             return;
         }
 
-        bool named = false;
         while (!AtEnd && !Current.Is(";"))
         {
             int pointers = ReadPointers();
@@ -226,11 +546,15 @@ internal sealed class CStructParser(string source) : StructSourceParser(source)
                 return;
             }
 
-            if (defined is not null && !named && pointers == 0 && defined.Name.StartsWith('<'))
+            var ignored = new Attributes();
+            ReadAttributes(ref ignored);
+
+            if (anonymous is not null && pointers == 0 && !functionPointer)
             {
-                Rename(defined, nameLexeme.Text);
+                // The first plain name names a struct, union or enum declared without one.
+                RenameAnonymous(anonymous, nameLexeme.Text);
                 aliased = new TypeReference(nameLexeme.Text);
-                named = true;
+                anonymous = null;
             }
             else if (nameLexeme.Text != aliased.Name || pointers > 0)
             {
@@ -244,6 +568,20 @@ internal sealed class CStructParser(string source) : StructSourceParser(source)
         }
 
         Accept(";");
+    }
+
+    private void RenameAnonymous(string anonymous, string name)
+    {
+        int record = Declarations.FindIndex(d => d.Name == anonymous);
+        if (record >= 0)
+        {
+            Declarations[record] = Declarations[record] with { Name = name };
+            return;
+        }
+
+        int enumeration = Enums.FindIndex(e => e.Name == anonymous);
+        if (enumeration >= 0)
+            Enums[enumeration] = Enums[enumeration] with { Name = name };
     }
 
     /// <summary>Reads <c>using Name = type;</c> as an alias; any other <c>using</c> is skipped.</summary>
@@ -268,68 +606,7 @@ internal sealed class CStructParser(string source) : StructSourceParser(source)
         SkipStatement();
     }
 
-    /// <summary>
-    /// Reads a statement starting with <c>struct</c> or <c>class</c>: a definition, with any
-    /// declarators after it; a forward declaration; or, inside a struct, a field whose type is
-    /// written with the keyword. Returns the struct it defined, if it defined one.
-    /// </summary>
-    private void ParseStructStatement(out StructDeclaration? defined)
-    {
-        defined = null;
-        var keyword = Advance();
-        string? name = AtIdentifier ? Current.Text : null;
-        int bodyAt = name is null ? 0 : 1;
-        if (!PeekAhead(bodyAt).Is("{") && !PeekAhead(bodyAt).Is(":") && !(bodyAt == 1 && PeekAhead(1).Is("final")))
-        {
-            // A forward declaration, or a variable of an existing struct.
-            SkipStatement();
-            return;
-        }
-
-        if (name is not null)
-            Advance();
-        defined = ParseStructBody(name ?? NextAnonymousName(), keyword.Position);
-        if (defined is null)
-        {
-            SkipStatement();
-            return;
-        }
-
-        if (!Accept(";"))
-            SkipStatement();
-    }
-
-    private string NextAnonymousName() => $"<anonymous {++this.anonymousCount}>";
-
-    /// <summary>Reads a struct's body from its <c>{</c> (or base list) to its <c>}</c>, adding it
-    /// to the declarations; null when it cannot be read.</summary>
-    private StructDeclaration? ParseStructBody(string name, SourcePosition position)
-    {
-        Accept("final");
-        if (Current.Is(":"))
-        {
-            Report("Inheritance is not supported yet.", Current.Position);
-            while (!AtEnd && !Current.Is("{"))
-                Advance();
-        }
-
-        if (!Accept("{"))
-        {
-            Report($"Expected {{ to open {name}.", Current.Position);
-            return null;
-        }
-
-        var fields = new List<FieldDeclaration>();
-        while (!AtEnd && !Current.Is("}"))
-            ParseMember(fields);
-
-        Accept("}");
-        var declaration = new StructDeclaration(name, fields, position);
-        Declarations.Add(declaration);
-        return declaration;
-    }
-
-    private void ParseMember(List<FieldDeclaration> fields)
+    private void ParseMember(List<FieldDeclaration> fields, string recordName)
     {
         var lexeme = Current;
         if (lexeme.Kind == LexemeKind.Directive)
@@ -343,22 +620,29 @@ internal sealed class CStructParser(string source) : StructSourceParser(source)
 
         if ((lexeme.Is("public") || lexeme.Is("private") || lexeme.Is("protected")) && PeekAhead(1).Is(":"))
         {
+            this.plainData &= lexeme.Is("public");
             Advance();
             Advance();
             return;
         }
 
-        if ((lexeme.Is("struct") || lexeme.Is("class"))
-            && (PeekAhead(1).Is("{") || (PeekAhead(1).Kind == LexemeKind.Identifier && (PeekAhead(2).Is("{") || PeekAhead(2).Is(":")))))
+        if (lexeme.Is(recordName) && PeekAhead(1).Is("("))
         {
-            ParseNestedStruct(fields);
-            return;
-        }
-
-        if (lexeme.Is("union"))
-        {
-            Report("Unions are not supported yet.", lexeme.Position);
+            // A constructor.
+            this.plainData = false;
             SkipStatement();
+            return;
+        }
+
+        if (IsRecordKeyword(lexeme))
+        {
+            ParseRecordStatement(fields);
+            return;
+        }
+
+        if (lexeme.Is("enum"))
+        {
+            ParseEnumStatement(fields);
             return;
         }
 
@@ -381,8 +665,7 @@ internal sealed class CStructParser(string source) : StructSourceParser(source)
             return;
         }
 
-        if (lexeme.Is("enum") || lexeme.Is("friend") || lexeme.Is("template") || lexeme.Is("~") || lexeme.Is("operator")
-            || lexeme.Is("static_assert"))
+        if (lexeme.Is("friend") || lexeme.Is("template") || lexeme.Is("~") || lexeme.Is("operator") || lexeme.Is("static_assert"))
         {
             SkipStatement();
             return;
@@ -398,33 +681,12 @@ internal sealed class CStructParser(string source) : StructSourceParser(source)
         ParseFields(fields);
     }
 
-    /// <summary>Reads a struct defined inside another, and the fields declared with it
-    /// (<c>struct Inner { … } inner, pair[2];</c>).</summary>
-    private void ParseNestedStruct(List<FieldDeclaration> fields)
-    {
-        var keyword = Advance();
-        string? name = AtIdentifier ? Advance().Text : null;
-        var nested = ParseStructBody(name ?? NextAnonymousName(), keyword.Position);
-        if (nested is null)
-        {
-            SkipStatement();
-            return;
-        }
-
-        if (Accept(";"))
-        {
-            if (name is null)
-                Report("An anonymous struct without a field name is not supported yet.", keyword.Position);
-            return;
-        }
-
-        ReadDeclarators(new TypeReference(nested.Name), fields);
-    }
-
-    /// <summary>Reads a field declaration: a type, then one or more declarators. A method or
-    /// constructor is skipped.</summary>
+    /// <summary>Reads a field declaration: attributes, a type, then one or more declarators, or an
+    /// unnamed bitfield. A method or constructor is skipped.</summary>
     private void ParseFields(List<FieldDeclaration> fields)
     {
+        var attributes = new Attributes();
+        ReadAttributes(ref attributes);
         var start = Current;
         if (!TryReadType(out var type, report: true))
         {
@@ -432,6 +694,7 @@ internal sealed class CStructParser(string source) : StructSourceParser(source)
             return;
         }
 
+        ReadAttributes(ref attributes);
         if (Current.Is("(") && !PeekAhead(1).Is("*"))
         {
             // A constructor: its name read as the type.
@@ -439,17 +702,28 @@ internal sealed class CStructParser(string source) : StructSourceParser(source)
             return;
         }
 
-        if (Current.Is(";") && start.Kind != LexemeKind.Identifier)
+        if (Current.Is(":"))
         {
-            Advance();
+            // An unnamed bitfield: padding, or with width 0 a break to the type's boundary.
+            var colon = Advance();
+            if (!TryEvaluateExpression(out long width) || width < 0)
+            {
+                Report("A bitfield's width must be a constant of 0 or more.", colon.Position);
+                SkipStatement();
+                return;
+            }
+
+            fields.Add(new FieldDeclaration(string.Empty, type, [], FieldStorage.Natural, start.Position) { BitWidth = (int)width });
+            if (!Accept(";"))
+                SkipStatement();
             return;
         }
 
-        ReadDeclarators(type, fields);
+        ReadDeclarators(type, fields, attributes);
     }
 
-    /// <summary>Reads <c>*name[N][M] = init, *other;</c> after a field's type.</summary>
-    private void ReadDeclarators(TypeReference type, List<FieldDeclaration> fields)
+    /// <summary>Reads <c>*name[N][M] = init, *other, bits : 3;</c> after a field's type.</summary>
+    private void ReadDeclarators(TypeReference type, List<FieldDeclaration> fields, Attributes attributes)
     {
         while (!AtEnd)
         {
@@ -503,20 +777,33 @@ internal sealed class CStructParser(string source) : StructSourceParser(source)
                 lengths.Add(length);
             }
 
+            int? bitWidth = null;
             if (Current.Is(":"))
             {
-                Report("Bitfields are not supported yet.", Current.Position);
-                SkipStatement();
-                return;
+                var colon = Advance();
+                if (!TryEvaluateExpression(out long width) || width <= 0)
+                {
+                    Report("A named bitfield's width must be a constant of 1 or more.", colon.Position);
+                    SkipStatement();
+                    return;
+                }
+
+                bitWidth = (int)width;
             }
 
+            var fieldAttributes = attributes;
+            ReadAttributes(ref fieldAttributes);
             if (Accept("="))
                 SkipInitializer();
             else if (Current.Is("{"))
                 SkipBalanced();
 
             var fieldType = functionPointer ? new TypeReference("void", pointers) : type with { PointerDepth = type.PointerDepth + pointers };
-            fields.Add(new FieldDeclaration(name.Text, fieldType, lengths, FieldStorage.Natural, name.Position));
+            fields.Add(new FieldDeclaration(name.Text, fieldType, lengths, FieldStorage.Natural, name.Position)
+            {
+                BitWidth = bitWidth,
+                Alignment = fieldAttributes.Packed ? null : fieldAttributes.Aligned,
+            });
 
             if (Accept(","))
                 continue;
@@ -546,7 +833,8 @@ internal sealed class CStructParser(string source) : StructSourceParser(source)
     /// <summary>
     /// Reads a type: qualifiers, then either C's multi-word primitive (<c>unsigned long int</c>,
     /// spelled canonically as <c>unsigned long</c>), a type written with its keyword
-    /// (<c>struct Point</c>), or a name (<c>uint32_t</c>, <c>std::uint32_t</c>, <c>DWORD</c>).
+    /// (<c>struct Point</c>, <c>enum Mode</c>), or a name (<c>uint32_t</c>, <c>std::uint32_t</c>,
+    /// <c>DWORD</c>).
     /// </summary>
     private bool TryReadType(out TypeReference type, bool report)
     {
@@ -555,7 +843,7 @@ internal sealed class CStructParser(string source) : StructSourceParser(source)
             Advance();
 
         var start = Current;
-        if (Current.Is("struct") || Current.Is("class") || Current.Is("union") || Current.Is("enum"))
+        if (IsRecordKeyword(Current) || Current.Is("enum"))
         {
             Advance();
             if (!AtIdentifier)

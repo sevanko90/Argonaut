@@ -3,7 +3,8 @@ using Argonaut.Features.Hex.Structs;
 namespace Argonaut.Tests.Features.Hex.Structs;
 
 /// <summary>C layouts against Clang's: every struct in Fixtures/c-layouts.h, laid out for both
-/// targets, must match the size, alignment and field offsets record-c-layouts.sh recorded.</summary>
+/// targets, must match the size, alignment and field offsets (in bits, so bitfields are exact)
+/// record-c-layouts.sh recorded.</summary>
 public sealed class StructLayoutCTests
 {
     private static string Fixture(string name) => Path.Combine(AppContext.BaseDirectory, "Features", "Hex", "Structs", "Fixtures", name);
@@ -20,18 +21,26 @@ public sealed class StructLayoutCTests
 
         var expectations = File.ReadAllLines(Fixture($"c-layouts.{targetName}.txt")).Where(l => l.Length > 0).ToList();
         Assert.NotEmpty(expectations);
+        var mismatches = new List<string>();
         foreach (string line in expectations)
         {
             var parts = line.Split(' ');
             string name = parts[0].Split("::")[^1];
             var result = StructLayoutPass.Lay(definition, name, target);
-            Assert.True(result.Struct is not null, $"{name}: {result.Problem?.Message}");
+            if (result.Struct is not { } laid)
+            {
+                mismatches.Add($"{name}: {result.Problem?.Message}");
+                continue;
+            }
 
-            var laid = result.Struct!;
-            long[] offsets = parts[3..].Select(long.Parse).ToArray();
-            Assert.Equal((name, long.Parse(parts[1]), int.Parse(parts[2])), (name, laid.Size, laid.Alignment));
-            Assert.Equal(offsets, laid.Fields.Select(f => f.Offset).ToArray());
+            // Clang's "<name> <size> <alignment> <offsets in bits>", which the decoder must match.
+            string ours = string.Join(' ', new[] { parts[0], laid.Size.ToString(), laid.Alignment.ToString() }
+                .Concat(laid.Fields.Where(f => !f.IsBase).Select(f => f.BitPosition.ToString())));
+            if (ours != line)
+                mismatches.Add($"expected {line}\n     got {ours}");
         }
+
+        Assert.True(mismatches.Count == 0, string.Join("\n", mismatches));
     }
 
     [Fact]

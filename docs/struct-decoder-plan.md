@@ -187,8 +187,11 @@ many structs.
    `Marshal.OffsetOf` for `[MarshalAs]` fields, on `Fixtures/CSharpLayouts.cs`, which the tests
    both compile and parse); C layouts against `Fixtures/c-layouts.h`, recorded from Clang's
    `-fdump-record-layouts` for both LP64 and LLP64 by `record-c-layouts.sh` and checked in.
-2. [ ] Packing, explicit layout, unions, enums, bitfields, inheritance, the target setting.
+2. [x] Packing, explicit layout, unions, enums, bitfields, inheritance, the target setting.
    Tests: the same two sources of truth, plus MSVC's mixed-type bitfield rule from fixtures.
+   GCC and Clang reuse a non-POD base's tail padding and MSVC does not, so a struct records
+   whether it is plain data. `struct … } __attribute__((packed));` packs, as C compilers and GCC
+   do, though Clang ignores it in C++ - so that form is a unit test, not a Clang fixture.
 3. [ ] The tree: the struct row source, decoding rows, arithmetic arrays, padding rows, strings,
    enum names. Tests: a struct at an unaligned offset, an array of structs over a selection,
    fields past the end, both byte orders.

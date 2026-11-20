@@ -64,13 +64,13 @@ public sealed class StructParserTests
     }
 
     [Theory]
-    [InlineData("union U { int a; float b; };", "Unions are not supported yet.")]
-    [InlineData("struct A { int flag : 1; };", "Bitfields are not supported yet.")]
     [InlineData("struct A { virtual void f(); int x; };", "vtable")]
     [InlineData("struct A { int n; char data[]; };", "needs a length")]
     [InlineData("struct A { char data[COUNT]; };", "not a constant")]
-    [InlineData("struct A : B { int x; };", "Inheritance is not supported yet.")]
-    public void WhatCannotBeLaidOutYet_IsReported_AtItsPlace(string source, string expected)
+    [InlineData("struct A : B, C { int x; };", "single inheritance")]
+    [InlineData("struct A : virtual B { int x; };", "Virtual inheritance")]
+    [InlineData("struct alignas(3) A { int x; };", "power of two")]
+    public void WhatCannotBeLaidOut_IsReported_AtItsPlace(string source, string expected)
     {
         var problem = Assert.Single(StructParser.Parse(source, StructLanguage.C).Problems);
         Assert.Contains(expected, problem.Message);
@@ -126,6 +126,53 @@ public sealed class StructParserTests
         Assert.Equal("_ITEM", laid.Fields[2].Struct!.Name);
         Assert.Equal(2, laid.Fields[3].Size);
     }
+
+    [Fact]
+    public void PackedAfterTheBrace_PacksTheStruct_AsCCompilersDo()
+    {
+        // Clang ignores this form in C++ but packs in C, and GCC packs in both, so it packs here;
+        // it is kept out of the C++ fixture for that reason.
+        var definition = StructParser.Parse("struct A { char c; int i; } __attribute__((packed));");
+        var laid = StructLayoutPass.Lay(definition, "A", StructTarget.Lp64).Struct!;
+
+        Assert.Equal(5, laid.Size);
+        Assert.Equal(1, laid.Fields[1].Offset);
+    }
+
+    [Fact]
+    public void ABitfield_KnowsItsBits_WithinTheBytesItSpans()
+    {
+        var definition = StructParser.Parse("struct A { unsigned a : 3; unsigned b : 7; unsigned c : 22; };");
+        var laid = StructLayoutPass.Lay(definition, "A", StructTarget.Lp64).Struct!;
+        var b = laid.Fields[1];
+
+        Assert.Equal((0L, 3, 7, 2L), (b.Offset, b.BitOffset, b.BitWidth!.Value, b.Size));
+        Assert.Equal(10, laid.Fields[2].BitPosition);
+        Assert.Empty(laid.Padding);
+    }
+
+    [Fact]
+    public void AUnion_PutsEveryFieldAtItsStart_AndIsAsBigAsItsLargest()
+    {
+        var definition = StructParser.Parse("union U { char c; double d; int i[3]; };");
+        var laid = StructLayoutPass.Lay(definition, "U", StructTarget.Lp64).Struct!;
+
+        Assert.Equal(StructKind.Union, laid.Kind);
+        Assert.All(laid.Fields, f => Assert.Equal(0, f.Offset));
+        Assert.Equal(16, laid.Size);
+        Assert.Equal([new StructPadding(12, 4)], laid.Padding);
+    }
+
+    [Fact]
+    public void AnExplicitFieldWithoutAnOffset_IsReported()
+    {
+        var definition = StructParser.Parse("[StructLayout(LayoutKind.Explicit)] struct A { [FieldOffset(0)] public int X; public int Y; }");
+        Assert.Contains("needs a [FieldOffset]", StructLayoutPass.Lay(definition, "A", StructTarget.Lp64).Problem!.Message);
+    }
+
+    [Fact]
+    public void AutoLayout_IsReported()
+        => Assert.Contains("LayoutKind.Auto", Assert.Single(StructParser.Parse("[StructLayout(LayoutKind.Auto)] struct A { public int X; }").Problems).Message);
 
     [Fact]
     public void ALongDouble_IsRefused_ByName()

@@ -46,16 +46,76 @@ public enum FieldStorage
 }
 
 /// <summary>One field as declared: its type, and its array lengths outermost first (empty for a
-/// single value).</summary>
+/// single value). An empty name is a member without one: an anonymous struct or union, whose
+/// fields read as the parent's, or an unnamed bitfield, which only pads.</summary>
 public sealed record FieldDeclaration(
     string Name,
     TypeReference Type,
     IReadOnlyList<long> Lengths,
     FieldStorage Storage,
-    SourcePosition Position);
+    SourcePosition Position)
+{
+    /// <summary>A bitfield's width in bits; null for an ordinary field.</summary>
+    public int? BitWidth { get; init; }
 
-/// <summary>One struct as declared, its fields in declaration order.</summary>
-public sealed record StructDeclaration(string Name, IReadOnlyList<FieldDeclaration> Fields, SourcePosition Position);
+    /// <summary>Where C#'s <c>[FieldOffset]</c> puts the field, in an explicit layout.</summary>
+    public long? ExplicitOffset { get; init; }
+
+    /// <summary>The alignment <c>alignas</c> or <c>aligned</c> asks for, at least.</summary>
+    public int? Alignment { get; init; }
+}
+
+/// <summary>Whether a declaration's fields follow each other or share its start.</summary>
+public enum StructKind
+{
+    Struct,
+    Union,
+}
+
+/// <summary>One struct or union as declared, its fields in declaration order, with what its
+/// declaration says about laying it out.</summary>
+public sealed record StructDeclaration(string Name, IReadOnlyList<FieldDeclaration> Fields, SourcePosition Position)
+{
+    public StructKind Kind { get; init; } = StructKind.Struct;
+
+    /// <summary>The most any field is aligned to: <c>#pragma pack</c>, <c>packed</c> (1) or
+    /// C#'s <c>Pack</c>. Null when nothing limits it.</summary>
+    public int? Pack { get; init; }
+
+    /// <summary>The alignment <c>alignas</c> or <c>aligned</c> asks for the whole struct.</summary>
+    public int? Alignment { get; init; }
+
+    /// <summary>C#'s <c>Size</c>: the struct is at least this long.</summary>
+    public long? MinimumSize { get; init; }
+
+    /// <summary>C#'s <c>LayoutKind.Explicit</c>: every field placed by its <c>[FieldOffset]</c>.</summary>
+    public bool IsExplicit { get; init; }
+
+    /// <summary>C#'s <c>CharSet.Unicode</c>: a marshalled string is two bytes a character.</summary>
+    public bool HasWideStrings { get; init; }
+
+    /// <summary>The struct this one derives from, laid out first.</summary>
+    public TypeReference? Base { get; init; }
+
+    /// <summary>
+    /// Whether C++ counts this as plain old data for layout: no base, no constructor, no private
+    /// or protected section. GCC and Clang place a derived struct's fields in a base's tail
+    /// padding only when the base is not; MSVC never does.
+    /// </summary>
+    public bool IsPlainData { get; init; } = true;
+}
+
+/// <summary>A named value of an enum.</summary>
+public sealed record EnumMember(string Name, long Value);
+
+/// <summary>An enum as declared: the integer type it is stored as, and its values. A C# enum
+/// marked <c>[Flags]</c> says its values combine.</summary>
+public sealed record EnumDeclaration(
+    string Name,
+    TypeReference Underlying,
+    IReadOnlyList<EnumMember> Members,
+    bool IsFlags,
+    SourcePosition Position);
 
 /// <summary>
 /// What a pasted definition declares: its structs, the type aliases they may use (C's
@@ -66,25 +126,33 @@ public sealed record StructDeclaration(string Name, IReadOnlyList<FieldDeclarati
 public sealed class StructDefinition
 {
     private readonly Dictionary<string, StructDeclaration> byName = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, EnumDeclaration> enumsByName = new(StringComparer.Ordinal);
 
     internal StructDefinition(
         StructLanguage language,
         IReadOnlyList<StructDeclaration> declarations,
+        IReadOnlyList<EnumDeclaration> enums,
         IReadOnlyDictionary<string, TypeReference> aliases,
         IReadOnlyList<StructProblem> problems)
     {
         Language = language;
         Declarations = declarations;
+        Enums = enums;
         Aliases = aliases;
         Problems = problems;
         foreach (var declaration in declarations)
             this.byName.TryAdd(declaration.Name, declaration);
+        foreach (var declaration in enums)
+            this.enumsByName.TryAdd(declaration.Name, declaration);
     }
 
     public StructLanguage Language { get; }
 
     /// <summary>The structs declared, in the order they appear.</summary>
     public IReadOnlyList<StructDeclaration> Declarations { get; }
+
+    /// <summary>The enums declared, in the order they appear.</summary>
+    public IReadOnlyList<EnumDeclaration> Enums { get; }
 
     /// <summary>The type aliases declared, by name.</summary>
     public IReadOnlyDictionary<string, TypeReference> Aliases { get; }
@@ -94,4 +162,7 @@ public sealed class StructDefinition
     /// <summary>The struct named <paramref name="name"/>, or null when nothing of that name is
     /// declared.</summary>
     public StructDeclaration? Find(string name) => this.byName.GetValueOrDefault(name);
+
+    /// <summary>The enum named <paramref name="name"/>, or null.</summary>
+    public EnumDeclaration? FindEnum(string name) => this.enumsByName.GetValueOrDefault(name);
 }

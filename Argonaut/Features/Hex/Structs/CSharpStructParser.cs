@@ -100,6 +100,10 @@ internal sealed class CSharpStructParser(string source) : StructSourceParser(sou
             {
                 ParseStruct(attributes);
             }
+            else if (Current.Is("enum"))
+            {
+                ParseEnum(attributes);
+            }
             else
             {
                 SkipStatement();
@@ -139,7 +143,7 @@ internal sealed class CSharpStructParser(string source) : StructSourceParser(sou
         }
 
         var name = Advance();
-        ReportLayoutAttributes(attributes);
+        var layout = ReadStructLayout(attributes, new StructDeclaration(name.Text, [], keyword.Position));
         if (Current.Is("<"))
         {
             Report("Generic structs are not supported.", Current.Position);
@@ -173,7 +177,7 @@ internal sealed class CSharpStructParser(string source) : StructSourceParser(sou
         }
 
         Accept(";");
-        Declarations.Add(new StructDeclaration(name.Text, fields, keyword.Position));
+        Declarations.Add(layout with { Fields = fields });
     }
 
     /// <summary>A <c>record struct</c>'s parameters are its fields.</summary>
@@ -205,16 +209,84 @@ internal sealed class CSharpStructParser(string source) : StructSourceParser(sou
         Accept(")");
     }
 
-    private void ReportLayoutAttributes(List<Lexeme> attributes)
+    /// <summary>Applies <c>[StructLayout(LayoutKind.X, Pack = n, Size = n, CharSet = …)]</c>
+    /// to <paramref name="declaration"/>.</summary>
+    private StructDeclaration ReadStructLayout(List<Lexeme> attributes, StructDeclaration declaration)
     {
-        for (int i = 0; i < attributes.Count; i++)
+        int at = attributes.FindIndex(l => l.Is("StructLayout") || l.Is("StructLayoutAttribute"));
+        if (at < 0)
+            return declaration;
+
+        int depth = 0;
+        for (int i = at + 1; i < attributes.Count; i++)
         {
             var lexeme = attributes[i];
-            if (lexeme.Is("Explicit") || lexeme.Is("Auto") && i > 0 && attributes[i - 1].Is("."))
-                Report($"LayoutKind.{lexeme.Text} is not supported yet - the fields are laid out in sequence.", lexeme.Position);
-            else if ((lexeme.Is("Pack") || lexeme.Is("Size") || lexeme.Is("CharSet")) && i + 1 < attributes.Count && attributes[i + 1].Is("="))
-                Report($"StructLayout's {lexeme.Text} is not supported yet.", lexeme.Position);
+            if (lexeme.Is("("))
+                depth++;
+            else if (lexeme.Is(")") && --depth == 0)
+                break;
+            else if (lexeme.Is("LayoutKind") && i + 2 < attributes.Count && attributes[i + 1].Is("."))
+            {
+                var kind = attributes[i + 2];
+                if (kind.Is("Explicit"))
+                    declaration = declaration with { IsExplicit = true };
+                else if (kind.Is("Auto"))
+                    Report("LayoutKind.Auto lets the runtime reorder the fields - it cannot be laid out here.", kind.Position);
+            }
+            else if (lexeme.Is("CharSet") && i + 3 < attributes.Count && attributes[i + 1].Is("="))
+            {
+                // CharSet = CharSet.Unicode: the value is the last name before the next , or ).
+                int end = i + 2;
+                while (end + 1 < attributes.Count && !attributes[end + 1].Is(",") && !attributes[end + 1].Is(")"))
+                    end++;
+                declaration = declaration with { HasWideStrings = attributes[end].Is("Unicode") };
+            }
+            else if ((lexeme.Is("Pack") || lexeme.Is("Size")) && i + 2 < attributes.Count && attributes[i + 1].Is("="))
+            {
+                int end = i + 2;
+                while (end < attributes.Count && !attributes[end].Is(",") && !attributes[end].Is(")"))
+                    end++;
+                if (!ConstantExpression.TryEvaluate(attributes, i + 2, end, Constants, octalLiterals: false, out long value) || value < 0)
+                    Report($"{lexeme.Text} is not a constant that can be worked out here.", lexeme.Position);
+                else if (lexeme.Is("Size"))
+                    declaration = declaration with { MinimumSize = value };
+                else if (value is not (0 or 1 or 2 or 4 or 8 or 16 or 32 or 64 or 128))
+                    Report("Pack must be 0, or a power of two up to 128.", lexeme.Position);
+                else if (value > 0)
+                    declaration = declaration with { Pack = (int)value };
+            }
         }
+
+        return declaration;
+    }
+
+    /// <summary>Reads <c>enum Name [: type] { … }</c>; <c>[Flags]</c> says its values combine.</summary>
+    private void ParseEnum(List<Lexeme> attributes)
+    {
+        var keyword = Advance();
+        if (!AtIdentifier)
+        {
+            SkipStatement();
+            return;
+        }
+
+        var name = Advance();
+        var underlying = new TypeReference("int");
+        if (Accept(":") && !TryReadType(out underlying, out _))
+        {
+            SkipStatement();
+            return;
+        }
+
+        if (!Current.Is("{"))
+        {
+            SkipStatement();
+            return;
+        }
+
+        bool flags = attributes.Exists(l => l.Is("Flags") || l.Is("FlagsAttribute"));
+        Enums.Add(new EnumDeclaration(name.Text, underlying, ReadEnumMembers(), flags, keyword.Position));
+        Accept(";");
     }
 
     private void ParseMember(List<FieldDeclaration> fields, List<Lexeme> attributes)
@@ -240,7 +312,13 @@ internal sealed class CSharpStructParser(string source) : StructSourceParser(sou
             return;
         }
 
-        if (Current.Is("class") || Current.Is("interface") || Current.Is("enum") || Current.Is("delegate") || Current.Is("record")
+        if (Current.Is("enum"))
+        {
+            ParseEnum(attributes);
+            return;
+        }
+
+        if (Current.Is("class") || Current.Is("interface") || Current.Is("delegate") || Current.Is("record")
             || Current.Is("event") || Current.Is("operator") || Current.Is("implicit") || Current.Is("explicit") || Current.Is("~"))
         {
             SkipStatement();
@@ -278,7 +356,7 @@ internal sealed class CSharpStructParser(string source) : StructSourceParser(sou
 
         if (isFixed)
         {
-            ReadFixedBuffers(fields, type);
+            ReadFixedBuffers(fields, type, attributes);
             return;
         }
 
@@ -365,7 +443,7 @@ internal sealed class CSharpStructParser(string source) : StructSourceParser(sou
         SkipStatement();
     }
 
-    private void ReadFixedBuffers(List<FieldDeclaration> fields, TypeReference type)
+    private void ReadFixedBuffers(List<FieldDeclaration> fields, TypeReference type, List<Lexeme> attributes)
     {
         while (AtIdentifier)
         {
@@ -383,7 +461,7 @@ internal sealed class CSharpStructParser(string source) : StructSourceParser(sou
                 return;
             }
 
-            fields.Add(new FieldDeclaration(name.Text, type, [length], FieldStorage.Natural, name.Position));
+            fields.Add(new FieldDeclaration(name.Text, type, [length], FieldStorage.Natural, name.Position) { ExplicitOffset = ReadFieldOffset(attributes) });
             if (!Accept(","))
                 break;
         }
@@ -432,7 +510,24 @@ internal sealed class CSharpStructParser(string source) : StructSourceParser(sou
             lengths = [text.SizeConst!.Value];
         }
 
-        fields.Add(new FieldDeclaration(name.Text, type, lengths, storage, name.Position));
+        fields.Add(new FieldDeclaration(name.Text, type, lengths, storage, name.Position) { ExplicitOffset = ReadFieldOffset(attributes) });
+    }
+
+    /// <summary>Reads <c>[FieldOffset(n)]</c> among a field's attributes.</summary>
+    private long? ReadFieldOffset(List<Lexeme> attributes)
+    {
+        int at = attributes.FindIndex(l => l.Is("FieldOffset") || l.Is("FieldOffsetAttribute"));
+        if (at < 0 || at + 1 >= attributes.Count || !attributes[at + 1].Is("("))
+            return null;
+
+        int end = at + 2;
+        while (end < attributes.Count && !attributes[end].Is(")"))
+            end++;
+        if (ConstantExpression.TryEvaluate(attributes, at + 2, end, Constants, octalLiterals: false, out long offset) && offset >= 0)
+            return offset;
+
+        Report("FieldOffset is not a constant that can be worked out here.", attributes[at].Position);
+        return null;
     }
 
     /// <summary>Finds <c>MarshalAs(UnmanagedType.X, SizeConst = n)</c> among a field's attributes.</summary>

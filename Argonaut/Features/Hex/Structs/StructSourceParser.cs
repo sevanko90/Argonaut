@@ -21,6 +21,8 @@ internal abstract class StructSourceParser
 
     protected List<StructDeclaration> Declarations { get; } = [];
 
+    protected List<EnumDeclaration> Enums { get; } = [];
+
     protected Dictionary<string, TypeReference> Aliases { get; } = new(StringComparer.Ordinal);
 
     protected Dictionary<string, long> Constants { get; } = new(StringComparer.Ordinal);
@@ -62,7 +64,7 @@ internal abstract class StructSourceParser
     public StructDefinition Parse()
     {
         ParseDeclarations(insideBraces: false);
-        return new StructDefinition(Language, Declarations, Aliases, Problems);
+        return new StructDefinition(Language, Declarations, Enums, Aliases, Problems);
     }
 
     /// <summary>Reads declarations up to the end, or to a closing brace when inside a namespace's.</summary>
@@ -159,16 +161,22 @@ internal abstract class StructSourceParser
 
     /// <summary>Evaluates the expression from here up to, not including, <paramref name="end"/>,
     /// leaving the position at <paramref name="end"/> either way.</summary>
-    protected bool TryEvaluateTo(int end, out long value)
+    protected bool TryEvaluateTo(int end, out long value) => TryEvaluateTo(end, Constants, out value);
+
+    private bool TryEvaluateTo(int end, IReadOnlyDictionary<string, long> constants, out long value)
     {
-        bool read = ConstantExpression.TryEvaluate(this.lexemes, this.index, end, Constants, Language == StructLanguage.C, out value);
+        bool read = ConstantExpression.TryEvaluate(this.lexemes, this.index, end, constants, Language == StructLanguage.C, out value);
         this.index = end;
         return read;
     }
 
     /// <summary>Evaluates the expression up to the next <c>,</c>, <c>;</c> or <c>)</c> outside
     /// brackets, leaving the position there.</summary>
-    protected bool TryEvaluateExpression(out long value)
+    protected bool TryEvaluateExpression(out long value) => TryEvaluateExpression(Constants, out value);
+
+    /// <summary>As <see cref="TryEvaluateExpression(out long)"/>, naming
+    /// <paramref name="constants"/> rather than the definition's.</summary>
+    protected bool TryEvaluateExpression(IReadOnlyDictionary<string, long> constants, out long value)
     {
         int end = this.index;
         int depth = 0;
@@ -184,7 +192,7 @@ internal abstract class StructSourceParser
             end++;
         }
 
-        return TryEvaluateTo(end, out value);
+        return TryEvaluateTo(end, constants, out value);
     }
 
     /// <summary>Reads an array length in <c>[ ]</c>, the position at the <c>[</c>, reporting a
@@ -223,6 +231,54 @@ internal abstract class StructSourceParser
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Reads an enum's body from its <c>{</c> to its <c>}</c>: members counting up from 0 or from
+    /// the last value given, each value an expression that may name an earlier member. In C the
+    /// members are constants anywhere after, as an array length can use them.
+    /// </summary>
+    protected IReadOnlyList<EnumMember> ReadEnumMembers()
+    {
+        var members = new List<EnumMember>();
+        if (!Accept("{"))
+            return members;
+
+        var scope = new Dictionary<string, long>(Constants, StringComparer.Ordinal);
+        long next = 0;
+        while (!AtEnd && !Current.Is("}"))
+        {
+            if (Current.Is("["))
+            {
+                SkipBalanced();
+                continue;
+            }
+
+            if (!AtIdentifier)
+            {
+                Advance();
+                continue;
+            }
+
+            var name = Advance();
+            long value = next;
+            if (Accept("=") && !TryEvaluateExpression(scope, out value))
+            {
+                Report($"{name.Text}'s value is not a constant that can be worked out here.", name.Position);
+                value = next;
+            }
+
+            members.Add(new EnumMember(name.Text, value));
+            scope[name.Text] = value;
+            if (Language == StructLanguage.C)
+                Constants[name.Text] = value;
+            next = value + 1;
+            if (!Accept(","))
+                break;
+        }
+
+        Accept("}");
+        return members;
     }
 
     /// <summary>Renames a struct declared without a name once a declarator gives it one, as

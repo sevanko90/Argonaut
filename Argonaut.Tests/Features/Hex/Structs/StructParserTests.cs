@@ -88,6 +88,28 @@ public sealed class StructParserTests
         Assert.Contains(expected, problem.Message);
     }
 
+    [Theory]
+    [InlineData("struct A { public char[20] Name; public int After; }")]
+    [InlineData("struct A { public char[20] Name { get; set; } public int After; }")]
+    [InlineData("struct A { public char Name[20]; public int After; }")]
+    public void ACSharpCharArrayWithALength_IsStoredInPlace_TwoBytesACharacter(string source)
+    {
+        var definition = StructParser.Parse(source, StructLanguage.CSharp);
+        Assert.Empty(definition.Problems);
+
+        var laid = StructLayoutPass.Lay(definition, "A", StructTarget.Lp64).Struct!;
+        Assert.Equal(["Name", "After"], laid.Fields.Select(f => f.Name));
+        Assert.Equal(40, laid.Fields[0].Size);
+        Assert.Equal(40, laid.Fields[1].Offset);
+    }
+
+    [Fact]
+    public void ACSharpMemberThatCannotBeRead_IsReported_NotDropped()
+    {
+        var problem = Assert.Single(StructParser.Parse("struct A { public int; public int B; }", StructLanguage.CSharp).Problems);
+        Assert.Contains("Expected a field name", problem.Message);
+    }
+
     [Fact]
     public void AnUnknownType_FailsOnlyTheStructThatUsesIt()
     {

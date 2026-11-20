@@ -182,10 +182,11 @@ many structs.
 
 ## Steps
 
-1. [ ] Parser and layout for the C and C# subsets, without bitfields, unions, enums or packing.
-   Tests: C# layouts checked against the runtime (`Unsafe.ByteOffset` on an instance of the same
-   struct, compiled into the test); C layouts against fixtures recorded once from Clang's
-   `offsetof` for both LP64 and LLP64, checked in.
+1. [x] Parser and layout for the C and C# subsets, without bitfields, unions, enums or packing.
+   Tests: C# layouts checked against the runtime (`ldflda` offsets and `Unsafe.SizeOf`, or
+   `Marshal.OffsetOf` for `[MarshalAs]` fields, on `Fixtures/CSharpLayouts.cs`, which the tests
+   both compile and parse); C layouts against `Fixtures/c-layouts.h`, recorded from Clang's
+   `-fdump-record-layouts` for both LP64 and LLP64 by `record-c-layouts.sh` and checked in.
 2. [ ] Packing, explicit layout, unions, enums, bitfields, inheritance, the target setting.
    Tests: the same two sources of truth, plus MSVC's mixed-type bitfield rule from fixtures.
 3. [ ] The tree: the struct row source, decoding rows, arithmetic arrays, padding rows, strings,

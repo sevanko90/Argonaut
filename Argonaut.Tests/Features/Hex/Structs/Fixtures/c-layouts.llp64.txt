@@ -1,0 +1,18 @@
+Basic 24 8 0 4 8 16
+Tail 16 8 0 8
+Chars 16 4 0 1 2 4 8 12
+Longs 40 8 0 4 8 16 24 32 36
+Pointers 40 8 0 8 16 24 32
+Sizes 40 8 0 8 16 24 32
+FixedWidth 24 8 0 2 4 8 16 20
+Arrays 104 4 0 16 64 68
+Nested 64 8 0 8 32
+Tagged 16 4 0 4
+Holder 40 8 0 16 24
+Outer::Inner 16 8 0 8
+Outer 56 8 0 16 24
+Methods 8 4 0 4
+Access 16 8 0 4 8
+Empty 1 1
+HasEmpty 8 4 0 1 4
+Sample 268 4 0 4 8 9

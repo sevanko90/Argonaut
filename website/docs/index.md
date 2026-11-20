@@ -23,6 +23,8 @@ further.
 
 <span class="argo-platforms">Free and open source · Windows · macOS · Linux</span>
 
+![Total downloads](https://img.shields.io/github/downloads/sevanko90/Argonaut/total?label=downloads&color=e9b949){ .argo-downloads }
+
 </div>
 
 <div class="grid cards" markdown>

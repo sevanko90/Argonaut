@@ -137,3 +137,9 @@
     font-size: 1.8rem;
   }
 }
+
+.argo-hero .argo-downloads {
+  display: block;
+  margin: 0.6rem auto 0;
+  height: 20px;
+}

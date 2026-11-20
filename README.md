@@ -1,5 +1,7 @@
 # Argonaut
 
+[![Total downloads](https://img.shields.io/github/downloads/sevanko90/Argonaut/total?label=downloads&color=e9b949)](https://github.com/sevanko90/Argonaut/releases)
+
 **Any file. Any size. On screen at once.**
 
 Argonaut is a cross-platform desktop viewer for files that other tools choke on. Give it a 4 GB

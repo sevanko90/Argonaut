@@ -7,7 +7,7 @@ structs and arrays expanding in place. ("Tree" below means that view - the JSON 
 on the hex view (docs/hex-view-plan.md) and needs its caret, selection and `ByteReading` (steps 3
 and 6b) first; it is that plan's step 7.
 
-Status: proposed, nothing built.
+Status: planned for 2.5, all steps in one release; nothing built.
 
 ## Decided
 
@@ -18,11 +18,15 @@ Status: proposed, nothing built.
 - **The struct is laid out, then read.** Parsing produces declarations; a layout pass turns them
   into fields with offsets and sizes under the language's alignment rules; decoding reads each
   field's bytes only when its row is drawn. Layout never touches the document.
-- **It starts at the selection start** (the caret when nothing is selected) and covers
-  `sizeof(struct)` bytes. A selection longer than one struct offers to read it as an array of
-  `floor(length / sizeof)` of them.
-- **Endianness is a switch on the Struct tab**, little-endian by default. Neither language says
-  it in the definition, and unlike the Values tab a struct cannot show both orders at once.
+- **It follows the caret, as the Values tab does.** The struct is read from the selection start
+  (the caret when nothing is selected) and covers `sizeof(struct)` bytes. A selection at least two
+  structs long reads as an array of `floor(length / sizeof)` of them, without asking.
+- **A pin holds it in place.** Pinning fixes the struct where it is; the caret then moves inside
+  it, and the field holding the caret is highlighted in the tree and outlined in the dump.
+  Unpinning goes back to following the caret.
+- **The byte order is the Values tab's.** One LE/BE switch, shared by both tabs and remembered,
+  so the two never disagree about the same bytes. Neither language says the order in the
+  definition.
 - **Selecting in the character column or in another view works the same.** Raw and JSON reach
   the hex view's selection through `IByteRangeNavigable`, so "decode as struct" from them is a
   switch to Hex with the bytes already selected.
@@ -95,11 +99,12 @@ struct and the absolute offset.
   the rows on screen - the same as every other tree.
 - Fields past the end of the document show `-`.
 
-Check first: whether `Ui/Tree`'s `TreeSurface` can carry this. Its rows are positioned by byte
-offset, which a field has, but `TreeDocument` is built on a `SparseContainerIndex` and an
-`ITreeFormatReader` over text. If an arithmetic `ITreeFormatReader` over the layout fits, the
-struct tree gets selection, keyboard, find and the path bar for free; if it does not, a small
-tree of its own, drawn as a `RowSurface` and styled to match the JSON view, is the fallback.
+The tree is `Ui/Tree`'s `TreeSurface` over a struct row source. The surface reads rows through
+`ITreeRowSource`, not a document - `JsonDiffTree` is the precedent for a source that is not a
+`TreeDocument` - so the struct tree gets selection, keyboard, find and the path bar with it.
+Row keys cannot be document offsets (a struct and its first field share one, a union's members
+all do), so the source numbers its rows in a space of its own: a field's index in the layout,
+and an array element's arithmetically from its array's.
 
 ### Making the storage visible
 
@@ -150,23 +155,30 @@ which is itself a check. The sample is never saved into the definitions folder u
 
 ### In the hex view
 
-- The **Struct tab** of the hex view's side panel, right of the character column: the definition
-  editor above (collapsible once a definition is in), a picker of the types it declares, the
-  endianness and target switches, and the tree below. The panel's layout inside the tab is
-  chosen from screenshots.
-- **Field bands**: the mapped range is tinted in the grid, alternating per top-level field, so
-  the struct's shape shows in the dump. `HexSurface` draws them from the sorted field list,
-  finding the first visible field by binary search.
-- **Linked selection**: selecting a row selects its bytes in the grid and reveals them; moving
-  the caret in the grid selects the deepest field holding it.
+- The side panel has three tabs: **Values | Definition | Struct**.
+- The **Definition tab** is where definitions are pasted and edited: the editor, its parse
+  errors, Insert sample, Save, and the saved and recent definitions. A panel is too narrow to
+  hold an editor and a tree of any size together, so they get a tab each.
+- The **Struct tab** is the result: a picker of the declared types, the target switch, the pin,
+  and the tree. With no definition yet it says so and links to the Definition tab. The layout
+  inside both tabs is chosen from screenshots.
+- **The outline**: the mapped bytes - one struct or the whole array - are outlined in the dump
+  in the caret's style. No bands per field, to keep to the colour budget; field boundaries show
+  through the field outline below.
+- **The field outline**: hovering a row, or (pinned) moving the caret, outlines that field's
+  bytes inside the struct's. Selecting a row selects its bytes and reveals them; with the
+  struct pinned, moving the caret selects the deepest field holding it. `HexSurface` finds the
+  field from the sorted field list by binary search.
 - "Copy as JSON" copies the decoded struct (or the expanded part of an array of them).
 
 ### Keeping definitions
 
-Pasted definitions are kept as files in a definitions folder, as recipes and schemas are: a
-sandbox-aware folder, read through an injected store, never by static file access. The picker
-lists every type in every file there, so a header pasted once stays available. The struct picked
-for a document is not remembered - the same file may hold many structs.
+A pasted definition is used at once and kept only when saved: Save writes it to a definitions
+folder, as recipes and schemas are kept - a sandbox-aware folder, read through an injected store,
+never by static file access - so throwaway pastes never fill it. The Definition tab lists the
+saved definitions and the recently used ones; the Struct tab's picker lists every type in the
+definition in use. The struct picked for a document is not remembered - the same file may hold
+many structs.
 
 ## Steps
 
@@ -176,17 +188,18 @@ for a document is not remembered - the same file may hold many structs.
    `offsetof` for both LP64 and LLP64, checked in.
 2. [ ] Packing, explicit layout, unions, enums, bitfields, inheritance, the target setting.
    Tests: the same two sources of truth, plus MSVC's mixed-type bitfield rule from fixtures.
-3. [ ] The tree: the `TreeSurface` check, then decoding rows, arithmetic arrays, padding rows,
-   strings, enum names. Tests: a struct at an unaligned offset, an array of structs over a
-   selection, fields past the end, both endiannesses.
-4. [ ] The Struct tab in the hex view's side panel: editor, type picker, errors, mapping from the selection.
+3. [ ] The tree: the struct row source, decoding rows, arithmetic arrays, padding rows, strings,
+   enum names. Tests: a struct at an unaligned offset, an array of structs over a selection,
+   fields past the end, both byte orders.
+4. [ ] The side panel's tabs: Definition (editor, errors) and Struct (type picker, target, the
+   pin, following the caret, arrays from a long selection), byte order shared with Values.
    Visual pass from screenshots in both themes.
 5. [ ] The empty editor's Insert sample button (C# and C), and making the storage visible: size
    and offset on every row, padding rows, the struct's size and alignment, the per-type storage
    notes on hover. Tests: both samples lay out to 268 bytes with `Name` at 9; a
    `[MarshalAs(UnmanagedType.Bool)]` field is 4 bytes; `fixed char[256]` is 512.
-6. [ ] Field bands and linked selection.
-7. [ ] The definitions folder, and Copy as JSON.
+6. [ ] The outline in the dump, the field outline, and linked selection.
+7. [ ] Save, the definitions folder and recent definitions, and Copy as JSON.
 8. [ ] Architecture doc, roadmap.
 
 ## Not in this plan

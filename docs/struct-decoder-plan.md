@@ -192,9 +192,12 @@ many structs.
    GCC and Clang reuse a non-POD base's tail padding and MSVC does not, so a struct records
    whether it is plain data. `struct … } __attribute__((packed));` packs, as C compilers and GCC
    do, though Clang ignores it in C++ - so that form is a unit test, not a Clang fixture.
-3. [ ] The tree: the struct row source, decoding rows, arithmetic arrays, padding rows, strings,
+3. [x] The tree: the struct row source, decoding rows, arithmetic arrays, padding rows, strings,
    enum names. Tests: a struct at an unaligned offset, an array of structs over a selection,
-   fields past the end, both byte orders.
+   fields past the end, both byte orders. A row's key is its place in the fully expanded tree
+   (`StructNodes`), so positions are arithmetic; the scroll range is the mapping's bytes. The
+   offset gutters come with the tab (step 4): the surface caches a row's layout by its key, so a
+   tree whose mapping moves with the caret is replaced, not updated.
 4. [ ] The side panel's tabs: Definition (editor, errors) and Struct (type picker, target, the
    pin, following the caret, arrays from a long selection), byte order shared with Values.
    Visual pass from screenshots in both themes.

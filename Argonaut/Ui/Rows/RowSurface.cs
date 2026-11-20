@@ -274,7 +274,11 @@ public abstract class RowSurface : Control
         }
     }
 
-    protected override Size MeasureOverride(Size availableSize) => availableSize;
+    /// <summary>A surface fills what it is given, and asks for nothing on a side it is not
+    /// given a limit on - a Grid measures a cell spanning an Auto row with infinite height, and
+    /// infinity is not a size - so it takes whatever it is arranged to.</summary>
+    protected override Size MeasureOverride(Size availableSize)
+        => new(double.IsInfinity(availableSize.Width) ? 0 : availableSize.Width, double.IsInfinity(availableSize.Height) ? 0 : availableSize.Height);
 
     // ---- the render pass ------------------------------------------------------------------
 

@@ -111,10 +111,27 @@ public class TreeSurface : RowSurface
     private sealed record PaneLayout(TextLayout Layout, string Text, TextLayout? Marker,
         List<(int Start, int Length, object Link)>? Links, List<TrailingItem>? Trailing, double Width);
 
-    /// <summary>One row as laid out: a pane per side the painter draws, one for a plain tree.</summary>
-    private sealed record RowLayout(PaneLayout[] Panes)
+    /// <summary>One row as laid out: a pane per side the painter draws, one for a plain tree.
+    /// Disposed when it leaves the cache - nothing holds a row's layout past the call that
+    /// fetched it - so a cache dropped on every caret move does not leave its text for the
+    /// finalizer.</summary>
+    private sealed record RowLayout(PaneLayout[] Panes) : IDisposable
     {
         public PaneLayout First => Panes[0];
+
+        public void Dispose()
+        {
+            foreach (var pane in Panes)
+            {
+                pane.Layout.Dispose();
+                pane.Marker?.Dispose();
+                if (pane.Trailing is { } trailing)
+                {
+                    foreach (var item in trailing)
+                        item.Label.Dispose();
+                }
+            }
+        }
     }
 
     private readonly List<TreeRow> realized = new();
@@ -922,11 +939,16 @@ public class TreeSurface : RowSurface
         }
 
         foreach (var key in stale)
-            layouts.Remove(key);
+        {
+            if (layouts.Remove(key, out var dropped))
+                dropped.Dispose();
+        }
     }
 
     private void DropLayouts()
     {
+        foreach (var dropped in layouts.Values)
+            dropped.Dispose();
         layouts.Clear();
     }
 

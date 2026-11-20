@@ -23,6 +23,8 @@ further.
 
 <span class="argo-platforms">Free and open source · Windows · macOS · Linux</span>
 
+![Total downloads](https://img.shields.io/endpoint?url=https%3A%2F%2Fargonautviewer.com%2Fdownloads.json){ .argo-downloads }
+
 </div>
 
 <div class="grid cards" markdown>

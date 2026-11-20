@@ -110,3 +110,4 @@ BenchmarkDotNet.Artifacts/
 
 # Website build output (MkDocs)
 website/build/
+website/docs/downloads.json

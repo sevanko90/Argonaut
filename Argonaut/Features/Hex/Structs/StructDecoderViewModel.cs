@@ -16,7 +16,7 @@ public enum StructLanguageChoice
 }
 
 /// <summary>
-/// The side panel's Definition and Struct tabs: the pasted definition and what it declares, the
+/// The side panel's Structures and Struct tabs: the pasted definition and what it declares, the
 /// struct picked from it, and the tree of that struct read from the document.
 ///
 /// The struct follows the caret, as the Values tab does: it is read from the selection start (the
@@ -94,7 +94,7 @@ public sealed class StructDecoderViewModel : ObservableObject
         }
     }
 
-    /// <summary>The language the definition was read as, for the Definition tab to say.</summary>
+    /// <summary>The language the definition was read as, for the Structures tab to say.</summary>
     public string LanguageText => this.definition is null
         ? string.Empty
         : (this.definition.Language == StructLanguage.CSharp ? "C#" : "C / C++") + (this.language == StructLanguageChoice.Detect ? " (detected)" : string.Empty);
@@ -178,23 +178,28 @@ public sealed class StructDecoderViewModel : ObservableObject
     /// rows are the same: a surface lays its rows out again and keeps its place.</summary>
     public event EventHandler? Moved;
 
-    /// <summary>The mapped struct's size and alignment, and where it is: <c>Sample · 268 bytes,
-    /// align 4 · at 0x1F40</c>.</summary>
-    public string SummaryText
+    /// <summary>The tree's title: the struct mapped, or the array of them - <c>Sample</c>,
+    /// <c>Sample[3]</c>.</summary>
+    public string StructTitle => this.laid is not { } mapped ? string.Empty : this.count > 1 ? $"{mapped.Name}[{this.count}]" : mapped.Name;
+
+    /// <summary>Its size, alignment and place: <c>268 bytes · align 4 · at 0x1F40</c>.</summary>
+    public string StructDetail
     {
         get
         {
             if (this.laid is not { } mapped)
                 return string.Empty;
 
-            string what = this.count > 1 ? $"{mapped.Name}[{this.count}] · {this.count} × {mapped.Size} bytes" : $"{mapped.Name} · {mapped.Size} byte{(mapped.Size == 1 ? string.Empty : "s")}";
-            return $"{what}, align {mapped.Alignment} · at 0x{this.start:X}";
+            string size = $"{mapped.Size} byte{(mapped.Size == 1 ? string.Empty : "s")}";
+            return $"{(this.count > 1 ? $"{this.count} × {size}" : size)} · align {mapped.Alignment} · at 0x{this.start:X}";
         }
     }
 
+    public bool HasStruct => this.tree is not null;
+
     /// <summary>Why the picked struct cannot be shown, or what to do first; null when it shows.</summary>
     public string? Message => this.definition is null || Types.Count == 0
-        ? "Paste a C, C++ or C# struct on the Definition tab to read the bytes at the caret as it."
+        ? "Paste a C, C++ or C# struct on the Structures tab to read the bytes at the caret as it."
         : this.layoutProblem is { } problem
             ? (problem.Position == default ? problem.Message : $"{problem.Position.Line}:{problem.Position.Column}  {problem.Message}")
             : null;
@@ -227,6 +232,17 @@ public sealed class StructDecoderViewModel : ObservableObject
         this.bytes = null;
         Tree = null;
     }
+
+    private void NotifyStructShown()
+    {
+        OnPropertyChanged(nameof(StructTitle));
+        OnPropertyChanged(nameof(StructDetail));
+        OnPropertyChanged(nameof(HasStruct));
+    }
+
+    /// <summary>A new definition pasted in: tell its language from it again, whatever was chosen
+    /// for the last one.</summary>
+    public void DefinitionPasted() => Language = StructLanguageChoice.Detect;
 
     private void Parse()
     {
@@ -277,7 +293,7 @@ public sealed class StructDecoderViewModel : ObservableObject
         if (this.laid is not { } mapped || this.bytes is not { } source)
         {
             Tree = null;
-            OnPropertyChanged(nameof(SummaryText));
+            NotifyStructShown();
             return;
         }
 
@@ -294,6 +310,6 @@ public sealed class StructDecoderViewModel : ObservableObject
             Tree = new StructTree(new StructNodes(mapped, wanted), source, this.start, this.order, this.target);
         }
 
-        OnPropertyChanged(nameof(SummaryText));
+        NotifyStructShown();
     }
 }

@@ -24,7 +24,7 @@ public sealed class StructDecoderViewModelTests
         decoder.Follow(new MemoryByteSource(new byte[8]), 0, 0);
 
         Assert.Null(decoder.Tree);
-        Assert.Contains("Definition tab", decoder.Message);
+        Assert.Contains("Structures tab", decoder.Message);
     }
 
     [Fact]
@@ -52,7 +52,8 @@ public sealed class StructDecoderViewModelTests
         Assert.Same(tree, decoder.Tree);
         Assert.Equal(10, tree!.Start);
         Assert.Equal(1, moves);
-        Assert.Equal("Pair · 4 bytes, align 2 · at 0xA", decoder.SummaryText);
+        Assert.Equal("Pair", decoder.StructTitle);
+        Assert.Equal("4 bytes · align 2 · at 0xA", decoder.StructDetail);
     }
 
     [Fact]
@@ -68,7 +69,8 @@ public sealed class StructDecoderViewModelTests
         Assert.NotSame(single, decoder.Tree);
         Assert.Equal(1, closed);
         Assert.Equal(3, decoder.Tree!.Nodes.Count);
-        Assert.Equal("Pair[3] · 3 × 4 bytes, align 2 · at 0x8", decoder.SummaryText);
+        Assert.Equal("Pair[3]", decoder.StructTitle);
+        Assert.Equal("3 × 4 bytes · align 2 · at 0x8", decoder.StructDetail);
 
         decoder.Follow(bytes, 8, 7);
         Assert.Equal(1, decoder.Tree!.Nodes.Count);
@@ -126,6 +128,20 @@ public sealed class StructDecoderViewModelTests
 
         decoder.DefinitionText = "struct L { public long Value; }";
         Assert.False(decoder.ShowsTarget);
+    }
+
+    [Fact]
+    public void ANewPaste_TellsTheLanguageAgain()
+    {
+        var (decoder, _) = Decoder();
+        decoder.Language = StructLanguageChoice.CSharp;
+
+        decoder.DefinitionPasted();
+        decoder.DefinitionText = Pair;
+
+        Assert.Equal(StructLanguageChoice.Detect, decoder.Language);
+        Assert.Equal(0, decoder.SelectedLanguageIndex);
+        Assert.Equal("C / C++ (detected)", decoder.LanguageText);
     }
 
     [Fact]

@@ -17,8 +17,8 @@ namespace Argonaut.Features.Hex.Structs;
 /// and the row a key names never changes while the mapping does not. The scroll range is the
 /// mapping's bytes, as a document tree's is its document's.
 ///
-/// By default the struct and the structs in it are open, and arrays - which may be any length -
-/// closed. When the mapping moves - following the caret - only <see cref="Start"/> changes: the
+/// The root row - the struct, or the array of them - is always open; by default the structs in
+/// it are open too, and arrays - which may be any length - closed. When the mapping moves - following the caret - only <see cref="Start"/> changes: the
 /// rows, their keys and what is open stay, so the surface keeps its place and lays the rows out
 /// again (<c>TreeSurface.InvalidateRows</c>) rather than starting over with a new tree.
 /// Single-threaded, on the UI thread, like the surface.
@@ -78,10 +78,16 @@ public sealed class StructTree : ITreeRowSource
     {
         if (!node.IsContainer)
             return false;
+        if (node.Kind == StructNodeKind.Root)
+            return true;
         if (this.overrides.TryGetValue(node.Position, out bool expanded))
             return expanded;
         return node.Kind == StructNodeKind.Root || (!node.Value.IsArray && node.Kind == StructNodeKind.Field);
     }
+
+    /// <summary>The root - the struct, or the array of them - is the title its fields hang
+    /// from: always open, as a struct's braces always are.</summary>
+    public bool IsAlwaysOpen(in TreeRow row) => row.Detail is StructNode { Kind: StructNodeKind.Root };
 
     public void Toggle(in TreeRow row)
     {
@@ -97,7 +103,7 @@ public sealed class StructTree : ITreeRowSource
 
     private void Set(in StructNode node, bool expanded)
     {
-        if (node.IsContainer)
+        if (node.IsContainer && node.Kind != StructNodeKind.Root)
             this.overrides[node.Position] = expanded;
     }
 
@@ -319,27 +325,35 @@ internal sealed class StructTreeCursor(StructTree tree) : ITreeRowCursor
 }
 
 /// <summary>
-/// What a struct tree row says: <c>name: value</c>, the value coloured by what it is, then the
-/// field's type as a note - <c>int</c>, <c>char[16]</c>, <c>unsigned int : 3</c>. Padding rows say
-/// how many bytes they are.
+/// What a struct tree row says, in three columns lined up with its siblings' as a header reads:
+/// the name, the type (<c>int</c>, <c>char[16]</c>, <c>unsigned int : 3</c>) muted, and the
+/// value coloured by what it is. Padding rows say how many bytes they are.
 /// </summary>
 internal sealed class StructTreePainter(StructTree tree) : ITreeRowPainter
 {
+    /// <summary>The space between columns.</summary>
+    private const int Gap = 2;
+
     public void AppendRuns(in TreeRow row, List<TreeRun> runs)
     {
         if (row.Detail is not StructNode node)
             return;
 
         var value = tree.ValueOf(node);
-        if (node.Kind == StructNodeKind.Padding)
+        if (node.Kind == StructNodeKind.Root)
         {
-            runs.Add(new TreeRun("padding", TreeRunStyle.Comment));
-            runs.Add(new TreeRun(value.Text, TreeRunStyle.Note));
+            // The title the fields hang from, as a struct's name heads its braces.
+            runs.Add(new TreeRun(node.TypeColumn, TreeRunStyle.Name));
+            runs.Add(new TreeRun(new string(' ', Gap) + value.Text, TreeRunStyle.Hint));
             return;
         }
 
-        runs.Add(new TreeRun(LabelOf(node) + ": ", TreeRunStyle.Name));
-        runs.Add(new TreeRun(value.Text, value.Kind switch
+        var (labelWidth, typeWidth) = tree.Nodes.ColumnsOf(node.Parent);
+        bool padding = node.Kind == StructNodeKind.Padding;
+
+        runs.Add(new TreeRun(node.DisplayLabel.PadRight(labelWidth + Gap), padding ? TreeRunStyle.Comment : TreeRunStyle.Name));
+        runs.Add(new TreeRun(node.TypeColumn.PadRight(typeWidth + Gap), TreeRunStyle.Hint));
+        runs.Add(new TreeRun(value.Text, padding ? TreeRunStyle.Comment : value.Kind switch
         {
             StructTextKind.Number => TreeRunStyle.Number,
             StructTextKind.Text => TreeRunStyle.String,
@@ -347,28 +361,5 @@ internal sealed class StructTreePainter(StructTree tree) : ITreeRowPainter
             StructTextKind.Missing => TreeRunStyle.Comment,
             _ => TreeRunStyle.Plain,
         }));
-        runs.Add(new TreeRun(TypeText(node.Value), TreeRunStyle.Note));
-    }
-
-    private static string LabelOf(in StructNode node)
-    {
-        if (node.IsBase)
-            return $"(base {node.Label})";
-        if (!node.IsAnonymous)
-            return node.Label;
-        if (node.Value.BitWidth is not null)
-            return "(unnamed bits)";
-        return node.Value.Struct?.Kind == StructKind.Union ? "(union)" : "(struct)";
-    }
-
-    /// <summary>The type as declared: its name, the dimensions still to come, a bitfield's width.</summary>
-    internal static string TypeText(in StructValue value)
-    {
-        var text = new StringBuilder(value.TypeName);
-        for (int d = value.Dimension; d < value.Lengths.Count; d++)
-            text.Append('[').Append(value.Lengths[d]).Append(']');
-        if (value.BitWidth is { } width)
-            text.Append(" : ").Append(width);
-        return text.ToString();
     }
 }

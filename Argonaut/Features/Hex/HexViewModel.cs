@@ -132,7 +132,7 @@ public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDoc
             this.settings.SidePanelTab = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(ShowsValuesTab));
-            OnPropertyChanged(nameof(ShowsDefinitionTab));
+            OnPropertyChanged(nameof(ShowsStructuresTab));
             OnPropertyChanged(nameof(ShowsStructTab));
         }
     }
@@ -147,13 +147,13 @@ public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDoc
         }
     }
 
-    public bool ShowsDefinitionTab
+    public bool ShowsStructuresTab
     {
-        get => SidePanelTab == HexPanelTab.Definition;
+        get => SidePanelTab == HexPanelTab.Structures;
         set
         {
             if (value)
-                SidePanelTab = HexPanelTab.Definition;
+                SidePanelTab = HexPanelTab.Structures;
         }
     }
 
@@ -170,7 +170,7 @@ public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDoc
     /// <summary>The side panel's Values tab, reading the bytes at the selection start.</summary>
     public HexValuesViewModel Values { get; }
 
-    /// <summary>The side panel's Definition and Struct tabs: a pasted struct, read from the
+    /// <summary>The side panel's Structures and Struct tabs: a pasted struct, read from the
     /// selection start.</summary>
     public StructDecoderViewModel Structs { get; }
 

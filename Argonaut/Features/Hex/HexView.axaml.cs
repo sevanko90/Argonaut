@@ -188,6 +188,17 @@ public partial class HexView : UserControl
         ShowStructTree();
     }
 
+    /// <summary>A paste that replaces the whole definition - into an empty editor, or over all of
+    /// it - is a new definition: its language is told from it again. A paste into a definition
+    /// keeps the language chosen.</summary>
+    private void OnDefinitionPasting(object? sender, RoutedEventArgs e)
+    {
+        string text = DefinitionEditor.Text ?? string.Empty;
+        int selected = Math.Abs(DefinitionEditor.SelectionEnd - DefinitionEditor.SelectionStart);
+        if (text.Length == 0 || selected >= text.Length)
+            this.shown?.Structs.DefinitionPasted();
+    }
+
     private void OnStructsChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(StructDecoderViewModel.Tree))

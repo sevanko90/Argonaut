@@ -35,11 +35,16 @@ public sealed class StructTreeTests
         return rows;
     }
 
+    /// <summary>A row's text with its column padding closed up to one space - what it says, not
+    /// how it lines up (<see cref="Columns_LineUpAmongSiblings"/> checks that).</summary>
     private static string Text(StructTree tree, TreeRow row)
+        => new string(' ', row.Depth * 2) + System.Text.RegularExpressions.Regex.Replace(RawText(tree, row).TrimEnd(), " {2,}", " ");
+
+    private static string RawText(StructTree tree, TreeRow row)
     {
         var runs = new List<TreeRun>();
         tree.Painter.AppendRuns(row, runs);
-        return new string(' ', row.Depth * 2) + string.Join(string.Empty, runs.Select(r => r.Style == TreeRunStyle.Note ? " (" + r.Text + ")" : r.Text));
+        return string.Join(string.Empty, runs.Select(r => r.Text));
     }
 
     private static byte[] SampleBytes(int count, float ratio, bool enabled, string name)
@@ -59,12 +64,12 @@ public sealed class StructTreeTests
 
         Assert.Equal(
         [
-            "Sample: 4 fields (Sample)",
-            "  count: 42 (int32_t)",
-            "  ratio: 1.5 (float)",
-            "  enabled: true (bool)",
-            "  name: \"Argonaut\" (char[256])",
-            "  padding (3 bytes)",
+            "Sample 4 fields",
+            "  count int32_t 42",
+            "  ratio float 1.5",
+            "  enabled bool true",
+            "  name char[256] \"Argonaut\"",
+            "  padding 3 bytes",
         ], Rows(tree));
     }
 
@@ -74,9 +79,9 @@ public sealed class StructTreeTests
         var bytes = new byte[3].Concat(SampleBytes(-7, 0.25f, false, "x")).ToArray();
         var rows = Rows(Tree(Sample, "Sample", bytes, start: 3));
 
-        Assert.Equal("  count: -7 (int32_t)", rows[1]);
-        Assert.Equal("  ratio: 0.25 (float)", rows[2]);
-        Assert.Equal("  enabled: false (bool)", rows[3]);
+        Assert.Equal("  count int32_t -7", rows[1]);
+        Assert.Equal("  ratio float 0.25", rows[2]);
+        Assert.Equal("  enabled bool false", rows[3]);
     }
 
     [Fact]
@@ -84,9 +89,9 @@ public sealed class StructTreeTests
     {
         var rows = Rows(Tree("struct A { int a; int b; double c; };", "A", [1, 0, 0, 0, 2, 0]));
 
-        Assert.Equal("  a: 1 (int)", rows[1]);
-        Assert.Equal("  b: - (int)", rows[2]);
-        Assert.Equal("  c: - (double)", rows[3]);
+        Assert.Equal("  a int 1", rows[1]);
+        Assert.Equal("  b int -", rows[2]);
+        Assert.Equal("  c double -", rows[3]);
     }
 
     [Theory]
@@ -95,7 +100,7 @@ public sealed class StructTreeTests
     public void TheByteOrder_DecidesHowAFieldReads(ByteOrder order, string expected)
     {
         var rows = Rows(Tree("struct A { uint32_t value; };", "A", [1, 2, 3, 4], order: order));
-        Assert.Equal($"  value: {expected.Split(": ")[1]} (uint32_t)", rows[1]);
+        Assert.Equal($"  value uint32_t {expected.Split(": ")[1]}", rows[1]);
     }
 
     [Fact]
@@ -104,7 +109,7 @@ public sealed class StructTreeTests
         byte[] bytes = [1, 0, 2, 0, 3, 0];
         var tree = Tree("struct P { short v; };", "P", bytes, count: 3);
 
-        Assert.Equal(["P: 3 items (P[3])", "  [0]: 1 field (P)", "  [1]: 1 field (P)", "  [2]: 1 field (P)"], Rows(tree));
+        Assert.Equal(["P[3] 3 items", "  [0] P 1 field", "  [1] P 1 field", "  [2] P 1 field"], Rows(tree));
 
         var cursor = tree.NewCursor();
         cursor.MoveToStart();
@@ -112,7 +117,7 @@ public sealed class StructTreeTests
         cursor.MoveNext();
         tree.Toggle(cursor.Current);
 
-        Assert.Equal(["P: 3 items (P[3])", "  [0]: 1 field (P)", "  [1]: 1 field (P)", "    v: 2 (short)", "  [2]: 1 field (P)"], Rows(tree));
+        Assert.Equal(["P[3] 3 items", "  [0] P 1 field", "  [1] P 1 field", "    v short 2", "  [2] P 1 field"], Rows(tree));
     }
 
     [Fact]
@@ -152,9 +157,9 @@ public sealed class StructTreeTests
         var cursor = tree.NewCursor();
         long position = tree.Nodes.Child(tree.Nodes.Root, 500_000).Position;
         Assert.True(cursor.SeekTo(position));
-        Assert.Equal("  [500000]: 1 field (P)", Text(tree, cursor.Current));
+        Assert.Equal("  [500000] P 1 field", Text(tree, cursor.Current));
         Assert.True(cursor.MoveNext());
-        Assert.Equal("  [500001]: 1 field (P)", Text(tree, cursor.Current));
+        Assert.Equal("  [500001] P 1 field", Text(tree, cursor.Current));
     }
 
     [Fact]
@@ -177,7 +182,7 @@ public sealed class StructTreeTests
         var cursor = tree.NewCursor();
         tree.SeekScrollPosition(cursor, 6);
 
-        Assert.Equal("    b: 0 (short)", Text(tree, cursor.Current));
+        Assert.Equal("    b short 0", Text(tree, cursor.Current));
         Assert.Equal(6, tree.ScrollPosition(cursor.Current));
     }
 
@@ -192,11 +197,11 @@ public sealed class StructTreeTests
         byte[] bytes = [1, 7, 9, 0, 6, 0, 0, 0, 8, 0, 0, 0];
         var rows = Rows(Tree(source, "A", bytes));
 
-        Assert.Equal("  a: On (1) (Mode)", rows[1]);
-        Assert.Equal("  b: Auto (7) (Mode)", rows[2]);
-        Assert.Equal("  c: 9 (Mode)", rows[3]);
-        Assert.Equal("  d: Write | Run (6) (Access)", rows[5]);
-        Assert.Equal("  e: 8 (Access)", rows[6]);
+        Assert.Equal("  a Mode On (1)", rows[1]);
+        Assert.Equal("  b Mode Auto (7)", rows[2]);
+        Assert.Equal("  c Mode 9", rows[3]);
+        Assert.Equal("  d Access Write | Run (6)", rows[5]);
+        Assert.Equal("  e Access 8", rows[6]);
     }
 
     [Theory]
@@ -206,9 +211,9 @@ public sealed class StructTreeTests
     {
         var rows = Rows(Tree("struct B { unsigned short a : 3; short b : 4; bool c : 1; unsigned short d : 8; };", "B", bytes, order: order));
 
-        Assert.Equal($"  a: {a} (unsigned short : 3)", rows[1]);
-        Assert.Equal($"  b: {b} (short : 4)", rows[2]);
-        Assert.Equal($"  c: {(c == "1" ? "true" : "false")} (bool : 1)", rows[3]);
+        Assert.Equal($"  a unsigned short : 3 {a}", rows[1]);
+        Assert.Equal($"  b short : 4 {b}", rows[2]);
+        Assert.Equal($"  c bool : 1 {(c == "1" ? "true" : "false")}", rows[3]);
     }
 
     [Fact]
@@ -219,8 +224,8 @@ public sealed class StructTreeTests
         System.Text.Encoding.Unicode.GetBytes("wide").CopyTo(bytes, 16);
         var rows = Rows(Tree("struct T { char narrow[16]; char16_t wide[8]; };", "T", bytes));
 
-        Assert.Equal("  narrow: \"hi\\n\\\"x\\\"\" (char[16])", rows[1]);
-        Assert.Equal("  wide: \"wide\" (char16_t[8])", rows[2]);
+        Assert.Equal("  narrow char[16] \"hi\\n\\\"x\\\"\"", rows[1]);
+        Assert.Equal("  wide char16_t[8] \"wide\"", rows[2]);
     }
 
     [Fact]
@@ -232,9 +237,44 @@ public sealed class StructTreeTests
             """;
         var rows = Rows(Tree(source, "D", new byte[12]));
 
-        Assert.Equal("  (base Base): 1 field (Base)", rows[1]);
-        Assert.Equal("    id: 0 (int)", rows[2]);
-        Assert.StartsWith("  (union): 2 fields", rows[3]);
+        Assert.Equal("  (base Base) Base 1 field", rows[1]);
+        Assert.Equal("    id int 0", rows[2]);
+        Assert.StartsWith("  (union) ", rows[3]);
+        Assert.EndsWith(" 2 fields", rows[3]);
+    }
+
+    [Fact]
+    public void Columns_LineUpAmongSiblings()
+    {
+        var tree = Tree(Sample, "Sample", SampleBytes(42, 1.5f, true, "Argonaut"));
+        var cursor = tree.NewCursor();
+        var rows = new List<string>();
+        for (bool more = cursor.MoveToStart() && cursor.MoveNext(); more; more = cursor.MoveNext())
+            rows.Add(RawText(tree, cursor.Current));
+
+        Assert.Equal(
+        [
+            "count    int32_t    42",
+            "ratio    float      1.5",
+            "enabled  bool       true",
+            "name     char[256]  \"Argonaut\"",
+            "padding             3 bytes",
+        ], rows);
+    }
+
+    [Fact]
+    public void TheRoot_IsAlwaysOpen()
+    {
+        var tree = Tree(Sample, "Sample", new byte[268]);
+        var cursor = tree.NewCursor();
+        cursor.MoveToStart();
+
+        Assert.True(tree.IsAlwaysOpen(cursor.Current));
+        tree.Toggle(cursor.Current);
+        tree.SetExpanded(cursor.Current, false);
+        Assert.Equal(6, Rows(tree).Count);
+        Assert.True(cursor.MoveNext());
+        Assert.False(tree.IsAlwaysOpen(cursor.Current));
     }
 
     [Fact]
@@ -247,7 +287,6 @@ public sealed class StructTreeTests
         Assert.Equal(9, Rows(tree).Count);
 
         tree.CollapseDeep(cursor.Current);
-        tree.Toggle(cursor.Current);
         Assert.Equal(3, Rows(tree).Count);
     }
 }

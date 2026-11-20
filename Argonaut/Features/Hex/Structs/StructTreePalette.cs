@@ -27,6 +27,7 @@ public static class StructTreePalette
         Add(TreeRunStyle.Keyword, "AppJsonBoolBrush");
         Add(TreeRunStyle.Comment, "AppMutedTextBrush");
         Add(TreeRunStyle.Note, "AppSubtleIconBrush");
+        Add(TreeRunStyle.Hint, "AppSubtleIconBrush");
         surface.RunBrushes = brushes;
     }
 }

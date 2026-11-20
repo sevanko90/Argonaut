@@ -35,6 +35,10 @@ public sealed class StructTreeSurfaceTests
                 Assert.Equal(5, surface.RealizedRows.Count);
                 Assert.Equal(["P", "a", "v", "name", "padding"], surface.RealizedRows.Select(r => ((StructNode)r.Detail!).Label));
 
+                // Clicking the root's row does not close it.
+                surface.Toggle(surface.RealizedRows[0]);
+                Assert.Equal(5, surface.RealizedRows.Count);
+
                 // Down to the array, open it, and go to the end of it.
                 surface.Focus();
                 foreach (var key in new[] { Key.Down, Key.Down, Key.Down, Key.Right, Key.End })

@@ -170,7 +170,7 @@
                        Minimum="0" />
 
             <!-- The side panel: what the bytes at the caret read as - the standard readings on the
-                 Values tab, a pasted struct on the Struct tab, its definition on the Definition
+                 Values tab, a pasted struct on the Struct tab, its definition on the Structures
                  tab. Sized from the window, never from what it shows, so the dump never shifts:
                  it takes what the dump does not use, and keeps its minimum when the window is
                  narrow (HexView.FitSidePanel). -->
@@ -194,7 +194,7 @@
                         <Grid ColumnDefinitions="*,Auto" VerticalAlignment="Stretch">
                             <StackPanel Orientation="Horizontal" Spacing="2">
                                 <RadioButton Classes="paneltab" GroupName="HexPanelTabs" Content="Values" IsChecked="{Binding ShowsValuesTab}" />
-                                <RadioButton Classes="paneltab" GroupName="HexPanelTabs" Content="Definition" IsChecked="{Binding ShowsDefinitionTab}" />
+                                <RadioButton Classes="paneltab" GroupName="HexPanelTabs" Content="Structures" IsChecked="{Binding ShowsStructuresTab}" />
                                 <RadioButton Classes="paneltab" GroupName="HexPanelTabs" Content="Struct" IsChecked="{Binding ShowsStructTab}" />
                             </StackPanel>
                             <StackPanel Grid.Column="1"
@@ -311,8 +311,8 @@
                             </DockPanel>
                         </DockPanel>
 
-                        <!-- Definition: the struct pasted, how it was read, and what could not be. -->
-                        <DockPanel IsVisible="{Binding ShowsDefinitionTab}">
+                        <!-- Structures: the definition pasted, how it was read, and what could not be. -->
+                        <DockPanel IsVisible="{Binding ShowsStructuresTab}">
                             <DockPanel DataContext="{Binding Structs}" x:DataType="structs:StructDecoderViewModel" Margin="10,8,10,10">
                                 <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*" Margin="0,0,0,6">
                                     <ComboBox ItemsSource="{Binding LanguageNames}"
@@ -350,14 +350,15 @@
                                          VerticalContentAlignment="Top"
                                          FontSize="12"
                                          FontFamily="{DynamicResource AppMonoFontFamily}"
-                                         PlaceholderText="Paste a C, C++ or C# struct" />
+                                         PlaceholderText="Paste a C, C++ or C# struct"
+                                         PastingFromClipboard="OnDefinitionPasting" />
                             </DockPanel>
                         </DockPanel>
 
                         <!-- Struct: the bytes at the caret read as the struct picked. -->
                         <DockPanel IsVisible="{Binding ShowsStructTab}">
                             <DockPanel DataContext="{Binding Structs}" x:DataType="structs:StructDecoderViewModel">
-                                <StackPanel DockPanel.Dock="Top" Margin="10,8,10,6" Spacing="4">
+                                <StackPanel DockPanel.Dock="Top" Margin="10,8,10,8" Spacing="6">
                                     <Grid ColumnDefinitions="*,Auto,Auto" IsVisible="{Binding HasDefinition}">
                                         <ComboBox ItemsSource="{Binding Types}"
                                                   SelectedItem="{Binding SelectedType}"
@@ -387,17 +388,38 @@
                                             <icons:LucideIcon Data="{StaticResource Icon.Pin}" Size="13" />
                                         </ToggleButton>
                                     </Grid>
-                                    <TextBlock Text="{Binding SummaryText}"
-                                               FontSize="11"
-                                               FontFamily="{DynamicResource AppMonoFontFamily}"
-                                               Foreground="{DynamicResource AppMutedTextBrush}"
-                                               TextTrimming="CharacterEllipsis" />
                                     <TextBlock Text="{Binding Message}"
                                                IsVisible="{Binding HasMessage}"
                                                TextWrapping="Wrap"
                                                FontSize="12"
                                                Foreground="{DynamicResource AppMutedTextBrush}" />
                                 </StackPanel>
+
+                                <!-- The tree's title, as the dump's header: the struct, and its size,
+                                     alignment and place. -->
+                                <Border DockPanel.Dock="Top"
+                                        Height="24"
+                                        Padding="10,0"
+                                        IsVisible="{Binding HasStruct}"
+                                        Background="{DynamicResource AppChipBrush}"
+                                        BorderBrush="{DynamicResource AppSubtleIconBrush}"
+                                        BorderThickness="0,1,0,1">
+                                    <Grid ColumnDefinitions="Auto,*" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding StructTitle}"
+                                                   FontSize="12"
+                                                   FontWeight="SemiBold"
+                                                   FontFamily="{DynamicResource AppMonoFontFamily}"
+                                                   Foreground="{DynamicResource AppTextBrush}" />
+                                        <TextBlock Grid.Column="1"
+                                                   Margin="12,0,0,0"
+                                                   HorizontalAlignment="Right"
+                                                   Text="{Binding StructDetail}"
+                                                   FontSize="11"
+                                                   FontFamily="{DynamicResource AppMonoFontFamily}"
+                                                   Foreground="{DynamicResource AppMutedTextBrush}"
+                                                   TextTrimming="CharacterEllipsis" />
+                                    </Grid>
+                                </Border>
 
                                 <DockPanel>
                                     <ScrollBar x:Name="StructPanScrollBar"

@@ -590,7 +590,7 @@ public class TreeSurface : RowSurface
     /// <summary>Whether a pane draws the row's expand arrow: always for a plain tree, and in a
     /// pane only where the row has something on that side.</summary>
     private bool DrawsArrow(in TreeRow row, PaneLayout layout)
-        => row.Shape == TreeRowShape.Open && (PaneCount == 1 || layout.Text.Length > 0);
+        => row.Shape == TreeRowShape.Open && (PaneCount == 1 || layout.Text.Length > 0) && document?.IsAlwaysOpen(row) != true;
 
     /// <summary>The pane under a surface x.</summary>
     private int PaneAt(double x)
@@ -644,7 +644,7 @@ public class TreeSurface : RowSurface
     /// <summary>Expands or collapses the container of <paramref name="row"/>.</summary>
     public void Toggle(in TreeRow row)
     {
-        if (document is null || row.Shape == TreeRowShape.Leaf)
+        if (document is null || row.Shape == TreeRowShape.Leaf || document.IsAlwaysOpen(row))
             return;
 
         StartTurn(row);

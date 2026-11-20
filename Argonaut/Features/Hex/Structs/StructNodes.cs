@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 
 namespace Argonaut.Features.Hex.Structs;
 
@@ -64,6 +65,18 @@ public readonly record struct StructValue(
         field.Struct, field.Scalar, field.Enum, field.Lengths, 0, field.Stride, field.BitOffset, field.BitWidth, field.TypeName);
 
     public static StructValue Of(LaidStruct laid) => new(laid, null, null, [], 0, laid.Size, 0, null, laid.Name);
+
+    /// <summary>The type as declared: its name, the dimensions still to come, a bitfield's width -
+    /// <c>int</c>, <c>char[16]</c>, <c>unsigned int : 3</c>.</summary>
+    public string TypeText()
+    {
+        var text = new StringBuilder(TypeName);
+        for (int d = Dimension; d < Lengths.Count; d++)
+            text.Append('[').Append(Lengths[d]).Append(']');
+        if (BitWidth is { } width)
+            text.Append(" : ").Append(width);
+        return text.ToString();
+    }
 }
 
 /// <summary>
@@ -93,6 +106,28 @@ public readonly record struct StructNode(
 
     /// <summary>Whether the row is the base a C++ struct derives from.</summary>
     public bool IsBase { get; init; }
+
+    /// <summary>What the parent holds, so a row can line its columns up with its siblings'.</summary>
+    public StructValue Parent { get; init; }
+
+    /// <summary>The name a row shows: the field's, <c>[3]</c> for an element, or what an unnamed
+    /// member is - <c>(base Base)</c>, <c>(union)</c>, <c>(unnamed bits)</c>.</summary>
+    public string DisplayLabel
+    {
+        get
+        {
+            if (IsBase)
+                return $"(base {Label})";
+            if (!IsAnonymous)
+                return Label;
+            if (Value.BitWidth is not null)
+                return "(unnamed bits)";
+            return Value.Struct?.Kind == StructKind.Union ? "(union)" : "(struct)";
+        }
+    }
+
+    /// <summary>The type column's text; blank for padding.</summary>
+    public string TypeColumn => Kind == StructNodeKind.Padding ? string.Empty : Value.TypeText();
 }
 
 /// <summary>
@@ -108,6 +143,7 @@ public sealed class StructNodes
     private sealed record Items(StructNode[] Children, long Rows);
 
     private readonly Dictionary<LaidStruct, Items> items = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<LaidStruct, (int Label, int Type)> columns = new(ReferenceEqualityComparer.Instance);
 
     /// <param name="laid">The struct mapped.</param>
     /// <param name="count">How many of it, one after another: 1 reads one struct, more an array.</param>
@@ -147,11 +183,38 @@ public sealed class StructNodes
             var element = value.ElementValue;
             long rows = RowsOf(element);
             return new StructNode(StructNodeKind.Element, $"[{ordinal}]", element, node.Offset + ordinal * value.Stride,
-                node.Position + 1 + ordinal * rows, rows, ordinal);
+                node.Position + 1 + ordinal * rows, rows, ordinal) { Parent = value };
         }
 
         var child = ItemsOf(value.Struct!).Children[ordinal];
-        return child with { Offset = node.Offset + child.Offset, Position = node.Position + child.Position };
+        return child with { Offset = node.Offset + child.Offset, Position = node.Position + child.Position, Parent = value };
+    }
+
+    /// <summary>
+    /// How wide the name and type columns are among the children of <paramref name="container"/>,
+    /// in characters, so siblings' types and values line up: a struct's widest field name and type,
+    /// or an array's widest index and its element type.
+    /// </summary>
+    public (int Label, int Type) ColumnsOf(in StructValue container)
+    {
+        if (container.IsArray)
+            return ($"[{Math.Max(0, container.Count - 1)}]".Length, container.ElementValue.TypeText().Length);
+
+        if (container.Struct is not { } laid)
+            return (0, 0);
+
+        if (this.columns.TryGetValue(laid, out var known))
+            return known;
+
+        int label = 0, type = 0;
+        foreach (var child in ItemsOf(laid).Children)
+        {
+            label = Math.Max(label, child.DisplayLabel.Length);
+            type = Math.Max(type, child.TypeColumn.Length);
+        }
+
+        this.columns[laid] = (label, type);
+        return (label, type);
     }
 
     /// <summary>The child of <paramref name="node"/> whose rows hold <paramref name="position"/>,

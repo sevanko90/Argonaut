@@ -40,7 +40,7 @@ public sealed class HexViewSettings : ISettingsBlock<HexViewSettings>
 public enum HexPanelTab
 {
     Values,
-    Definition,
+    Structures,
     Struct,
 }
 

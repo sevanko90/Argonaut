@@ -155,12 +155,12 @@ which is itself a check. The sample is never saved into the definitions folder u
 
 ### In the hex view
 
-- The side panel has three tabs: **Values | Definition | Struct**.
-- The **Definition tab** is where definitions are pasted and edited: the editor, its parse
+- The side panel has three tabs: **Values | Structures | Struct**.
+- The **Structures tab** is where definitions are pasted and edited: the editor, its parse
   errors, Insert sample, Save, and the saved and recent definitions. A panel is too narrow to
   hold an editor and a tree of any size together, so they get a tab each.
 - The **Struct tab** is the result: a picker of the declared types, the target switch, the pin,
-  and the tree. With no definition yet it says so and links to the Definition tab. The layout
+  and the tree. With no definition yet it says so and links to the Structures tab. The layout
   inside both tabs is chosen from screenshots.
 - **The outline**: the mapped bytes - one struct or the whole array - are outlined in the dump
   in the caret's style. No bands per field, to keep to the colour budget; field boundaries show
@@ -175,7 +175,7 @@ which is itself a check. The sample is never saved into the definitions folder u
 
 A pasted definition is used at once and kept only when saved: Save writes it to a definitions
 folder, as recipes and schemas are kept - a sandbox-aware folder, read through an injected store,
-never by static file access - so throwaway pastes never fill it. The Definition tab lists the
+never by static file access - so throwaway pastes never fill it. The Structures tab lists the
 saved definitions and the recently used ones; the Struct tab's picker lists every type in the
 definition in use. The struct picked for a document is not remembered - the same file may hold
 many structs.
@@ -200,7 +200,7 @@ many structs.
    start moves - rows, keys and expansion are the same - so the surface lays its rows out again
    (`InvalidateRows`) and keeps its place; a new tree is made only when the rows change (another
    type, target or byte order, or an array of another length).
-4. [ ] The side panel's tabs: Definition (editor, errors) and Struct (type picker, target, the
+4. [ ] The side panel's tabs: Structures (editor, errors) and Struct (type picker, target, the
    pin, following the caret, arrays from a long selection), byte order shared with Values.
    Visual pass from screenshots in both themes.
 5. [ ] The empty editor's Insert sample button (C# and C), and making the storage visible: size

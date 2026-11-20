@@ -117,8 +117,8 @@ public sealed class HexViewTests
     [Fact]
     public Task TheTabShown_IsRemembered() => WithView((_, _, hex, _) =>
     {
-        hex.ShowsDefinitionTab = true;
-        Assert.Equal(HexPanelTab.Definition, hex.SidePanelTab);
+        hex.ShowsStructuresTab = true;
+        Assert.Equal(HexPanelTab.Structures, hex.SidePanelTab);
         Assert.False(hex.ShowsValuesTab);
         return Task.CompletedTask;
     });

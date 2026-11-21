@@ -463,7 +463,8 @@
                                            FontSize="12"
                                            Foreground="{DynamicResource AppMutedTextBrush}" />
 
-                                <DockPanel>
+                                <!-- Clipped: a row scrolled part way up would otherwise draw over the selector. -->
+                                <DockPanel ClipToBounds="True">
                                     <ScrollBar x:Name="StructPanScrollBar"
                                                DockPanel.Dock="Bottom"
                                                Orientation="Horizontal"

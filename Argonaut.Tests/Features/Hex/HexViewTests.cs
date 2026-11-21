@@ -98,6 +98,9 @@ public sealed class HexViewTests
         Assert.Same(tree, surface.Document);
         Assert.Equal(2, surface.RealizedRows.Count);
 
+        // A row scrolled part way up is cut off at the tree's top, not drawn over the selector.
+        Assert.True(((Control)surface.GetVisualParent()!).ClipToBounds);
+
         // Following the caret moves the same tree, drawn again without starting over.
         hex.Cursor.Place(0x40);
         Dispatcher.UIThread.RunJobs();

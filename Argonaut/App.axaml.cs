@@ -26,8 +26,8 @@ public partial class App : Application
 {
     private MainWindow? mainWindow;
 
-    // Debug builds log to a file for whoever is debugging them; anything else keeps nothing.
-    private readonly IDiagnosticLog log = CreateLog();
+    // Program owns the log, so a crash before this exists is recorded too.
+    private readonly IDiagnosticLog log;
 
     // macOS re-signals each CLI-launched path as its own IActivatableLifetime.Activated /
     // FileActivatedEventArgs on top of argv - one event per path, fired moments after this
@@ -37,6 +37,11 @@ public partial class App : Application
     // and each is consumed (removed) the first time a matching Activated event arrives, so
     // only genuine later "Open With" activations reach OpenInitialFileAsync.
     private readonly HashSet<string> startupArgPaths = new(StringComparer.OrdinalIgnoreCase);
+
+    public App(IDiagnosticLog log)
+    {
+        this.log = log;
+    }
 
     public override void Initialize()
     {
@@ -53,8 +58,6 @@ public partial class App : Application
             // handed down to what uses it.
             var settings = SettingsStore.Open(AppDataPaths.SettingsFile, AppDataPaths.SettingsSeedFile);
             desktop.Exit += (_, _) => settings.Save();
-            if (log is IDisposable ownedLog)
-                desktop.Exit += (_, _) => ownedLog.Dispose();
 
             var launcher = SystemLaunchers.ForThisBuild();
             var schemaCatalog = new JsonSchemaCatalog(JsonSchemaCatalog.BundledDirectoryBesideApp, AppDataPaths.SchemasDirectory,
@@ -135,15 +138,6 @@ public partial class App : Application
         };
 #else
         return null;
-#endif
-    }
-
-    private static IDiagnosticLog CreateLog()
-    {
-#if DEBUG
-        return new FileDiagnosticLog(AppDataPaths.DebugLogFile);
-#else
-        return NullDiagnosticLog.Instance;
 #endif
     }
 

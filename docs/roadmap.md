@@ -242,8 +242,13 @@ The XML tree view is built (see "The XML tree" in architecture.md). What remains
   file mapped in growing chunks. Only worth it for tens of MB over a slow connection.
 - **Find in the hex view** - byte patterns as well as text; to be specced first, open questions in
   [hex-view-plan.md](hex-view-plan.md) (Find).
-- **The structure decoder** - a pasted C/C++ or C# struct read over selected bytes as a tree, in the
-  hex view's side panel - [struct-decoder-plan.md](struct-decoder-plan.md).
+- **Struct decoder polish**, for point releases: the hover mark in the dump reads fainter in the
+  dark theme than in the light one; whether the pinned caret should select the deepest field
+  holding it (opening an array to its element) or stop at the field; the look of Open and Save.
+- **Structure templates** - what a struct definition cannot say: an array sized by an earlier
+  field, a NUL-terminated string of unknown length, a chunk list running to the end of the file,
+  an offset followed elsewhere. A language of its own, beyond the struct decoder
+  ([struct-decoder-plan.md](struct-decoder-plan.md), "Not in this plan").
 - **An image preview** for binary responses and files.
 - **HTML colouring in the raw view**, for HTML responses and error pages, which show as plain text.
 - **Ctrl+Shift+V to paste as a new document** while one is open. Plain Ctrl+V pastes only while

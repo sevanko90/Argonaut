@@ -7,7 +7,7 @@ structs and arrays expanding in place. ("Tree" below means that view - the JSON 
 on the hex view (docs/hex-view-plan.md) and needs its caret, selection and `ByteReading` (steps 3
 and 6b) first; it is that plan's step 7.
 
-Status: planned for 2.5, all steps in one release; steps 1-7 built.
+Status: built for 2.5, all steps in one release; further UX in point releases (see the roadmap).
 
 ## Decided
 
@@ -230,7 +230,7 @@ many structs.
    stop at the field is to be decided from use.
 7. [x] Save, the definitions folder and recent definitions, and Copy as JSON.
    Look chosen by the user: Open and Save as icons beside the language picker.
-8. [ ] Architecture doc, roadmap.
+8. [x] Architecture doc, roadmap.
 
 ## Not in this plan
 

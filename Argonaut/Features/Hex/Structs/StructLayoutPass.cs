@@ -79,6 +79,9 @@ public sealed record LaidStruct(
     /// <summary>Whether C++ counts it as plain old data, which decides whether a struct deriving
     /// from it may use its tail padding.</summary>
     public bool IsPlainData { get; init; } = true;
+
+    /// <summary>The language it was declared in, which says how its types are stored.</summary>
+    public StructLanguage Language { get; init; }
 }
 
 /// <summary>A struct laid out, or why it could not be.</summary>
@@ -188,6 +191,8 @@ public static class StructLayoutPass
         }
 
         public StructTarget Target => target;
+
+        public StructLanguage Language => definition.Language;
 
         /// <summary>What a field holds, its type's size and natural alignment, and the name to
         /// show for its type.</summary>
@@ -301,6 +306,7 @@ public static class StructLayoutPass
                 Kind = declaration.Kind,
                 DataSize = dataEnd,
                 IsPlainData = declaration.IsPlainData,
+                Language = pass.Language,
             };
         }
 

@@ -132,6 +132,33 @@
             <Setter Property="Background" Value="{DynamicResource AppAccentBrush}" />
             <Setter Property="Foreground" Value="{DynamicResource AppWindowBackgroundBrush}" />
         </Style>
+        <!-- The struct selector's name: a quiet button that opens the list of structs. -->
+        <Style Selector="Button.selector">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Padding" Value="6,2" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Button.selector:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource AppChipHoverBrush}" />
+        </Style>
+        <Style Selector="Button.structchip">
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Height" Value="22" />
+            <Setter Property="Padding" Value="7,0" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Foreground" Value="{DynamicResource AppMutedTextBrush}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AppSubtleIconBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
+        <Style Selector="Button.structchip:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource AppChipHoverBrush}" />
+        </Style>
     </UserControl.Styles>
     <Border Background="{DynamicResource AppWindowBackgroundBrush}" ClipToBounds="True">
         <Grid RowDefinitions="*,Auto,Auto" ColumnDefinitions="*,Auto,Auto">
@@ -342,84 +369,99 @@
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>
                                 </ScrollViewer>
-                                <TextBox x:Name="DefinitionEditor"
-                                         Text="{Binding DefinitionText}"
-                                         AcceptsReturn="True"
-                                         AcceptsTab="True"
-                                         TextWrapping="NoWrap"
-                                         VerticalContentAlignment="Top"
-                                         FontSize="12"
-                                         FontFamily="{DynamicResource AppMonoFontFamily}"
-                                         PlaceholderText="Paste a C, C++ or C# struct"
-                                         PastingFromClipboard="OnDefinitionPasting" />
+                                <Panel>
+                                    <TextBox x:Name="DefinitionEditor"
+                                             Text="{Binding DefinitionText}"
+                                             AcceptsReturn="True"
+                                             AcceptsTab="True"
+                                             TextWrapping="NoWrap"
+                                             VerticalContentAlignment="Top"
+                                             FontSize="12"
+                                             FontFamily="{DynamicResource AppMonoFontFamily}"
+                                             PlaceholderText="Paste a C, C++ or C# struct"
+                                             PastingFromClipboard="OnDefinitionPasting" />
+                                    <!-- The empty editor offers the sample, commented with where
+                                         each field sits. -->
+                                    <StackPanel                                                 HorizontalAlignment="Center"
+                                                VerticalAlignment="Center"
+                                                Spacing="8"
+                                                IsVisible="{Binding OffersSample}">
+                                        <TextBlock HorizontalAlignment="Center"
+                                                   Text="or start from a sample"
+                                                   FontSize="11"
+                                                   Foreground="{DynamicResource AppMutedTextBrush}" />
+                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="6">
+                                            <Button Padding="12,4" FontSize="12" Content="C# sample" Click="OnInsertCSharpSample" />
+                                            <Button Padding="12,4" FontSize="12" Content="C sample" Click="OnInsertCSample" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Panel>
                             </DockPanel>
                         </DockPanel>
 
                         <!-- Struct: the bytes at the caret read as the struct picked. -->
                         <DockPanel IsVisible="{Binding ShowsStructTab}">
                             <DockPanel DataContext="{Binding Structs}" x:DataType="structs:StructDecoderViewModel">
-                                <StackPanel DockPanel.Dock="Top" Margin="10,8,10,8" Spacing="6">
-                                    <Grid ColumnDefinitions="*,Auto,Auto" IsVisible="{Binding HasDefinition}">
-                                        <ComboBox ItemsSource="{Binding Types}"
-                                                  SelectedItem="{Binding SelectedType}"
-                                                  HorizontalAlignment="Stretch"
-                                                  MinHeight="24"
-                                                  FontSize="12"
-                                                  FontFamily="{DynamicResource AppMonoFontFamily}" />
-                                        <ComboBox Grid.Column="1"
-                                                  Margin="6,0,0,0"
-                                                  ItemsSource="{Binding Targets}"
-                                                  SelectedItem="{Binding Target}"
-                                                  IsVisible="{Binding ShowsTarget}"
-                                                  MinHeight="24"
-                                                  FontSize="12"
-                                                  ToolTip.Tip="What C leaves to the platform: the size of long, wchar_t and pointers, and how bitfields share storage">
-                                            <ComboBox.ItemTemplate>
-                                                <DataTemplate x:DataType="structs:StructTarget">
-                                                    <TextBlock Text="{Binding Name}" />
-                                                </DataTemplate>
-                                            </ComboBox.ItemTemplate>
-                                        </ComboBox>
-                                        <ToggleButton Grid.Column="2"
+                                <!-- The selector, in one strip above the tree: the struct, which opens the list of those
+                                     declared; its size, alignment and place; the target, for C; and the pin. -->
+                                <Border DockPanel.Dock="Top"
+                                        IsVisible="{Binding HasStruct}"
+                                        Height="30"
+                                        Padding="4,0,6,0"
+                                        Background="{DynamicResource AppChipBrush}"
+                                        BorderBrush="{DynamicResource AppSubtleIconBrush}"
+                                        BorderThickness="0,1,0,1">
+                                    <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="6">
+                                        <Button Classes="selector" ToolTip.Tip="Choose which declared struct to read">
+                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <TextBlock Text="{Binding StructTitle}"
+                                                           FontSize="12"
+                                                           FontWeight="SemiBold"
+                                                           FontFamily="{DynamicResource AppMonoFontFamily}"
+                                                           Foreground="{DynamicResource AppTextBrush}"
+                                                           VerticalAlignment="Center" />
+                                                <icons:LucideIcon Data="{StaticResource Icon.ChevronDown}"
+                                                                  Size="12"
+                                                                  Foreground="{DynamicResource AppMutedTextBrush}"
+                                                                  VerticalAlignment="Center" />
+                                            </StackPanel>
+                                            <Button.Flyout>
+                                                <MenuFlyout Placement="BottomEdgeAlignedLeft" Opening="OnStructTypesOpening" />
+                                            </Button.Flyout>
+                                        </Button>
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{Binding StructDetail}"
+                                                   FontSize="11"
+                                                   FontFamily="{DynamicResource AppMonoFontFamily}"
+                                                   Foreground="{DynamicResource AppMutedTextBrush}"
+                                                   VerticalAlignment="Center"
+                                                   HorizontalAlignment="Right"
+                                                   TextTrimming="CharacterEllipsis" />
+                                        <Button Grid.Column="2"
+                                                Classes="structchip"
+                                                Content="{Binding TargetShortName}"
+                                                IsVisible="{Binding ShowsTarget}"
+                                                ToolTip.Tip="What C leaves to the platform: the size of long, wchar_t and pointers, and how bitfields share storage">
+                                            <Button.Flyout>
+                                                <MenuFlyout Placement="BottomEdgeAlignedRight" Opening="OnStructTargetsOpening" />
+                                            </Button.Flyout>
+                                        </Button>
+                                        <ToggleButton Grid.Column="3"
                                                       Classes="pin"
-                                                      Margin="6,0,0,0"
+                                                      VerticalAlignment="Center"
                                                       IsChecked="{Binding IsPinned}"
                                                       ToolTip.Tip="Pin the struct where it is, so the caret can move inside it">
                                             <icons:LucideIcon Data="{StaticResource Icon.Pin}" Size="13" />
                                         </ToggleButton>
                                     </Grid>
-                                    <TextBlock Text="{Binding Message}"
-                                               IsVisible="{Binding HasMessage}"
-                                               TextWrapping="Wrap"
-                                               FontSize="12"
-                                               Foreground="{DynamicResource AppMutedTextBrush}" />
-                                </StackPanel>
-
-                                <!-- The tree's title, as the dump's header: the struct, and its size,
-                                     alignment and place. -->
-                                <Border DockPanel.Dock="Top"
-                                        Height="24"
-                                        Padding="10,0"
-                                        IsVisible="{Binding HasStruct}"
-                                        Background="{DynamicResource AppChipBrush}"
-                                        BorderBrush="{DynamicResource AppSubtleIconBrush}"
-                                        BorderThickness="0,1,0,1">
-                                    <Grid ColumnDefinitions="Auto,*" VerticalAlignment="Center">
-                                        <TextBlock Text="{Binding StructTitle}"
-                                                   FontSize="12"
-                                                   FontWeight="SemiBold"
-                                                   FontFamily="{DynamicResource AppMonoFontFamily}"
-                                                   Foreground="{DynamicResource AppTextBrush}" />
-                                        <TextBlock Grid.Column="1"
-                                                   Margin="12,0,0,0"
-                                                   HorizontalAlignment="Right"
-                                                   Text="{Binding StructDetail}"
-                                                   FontSize="11"
-                                                   FontFamily="{DynamicResource AppMonoFontFamily}"
-                                                   Foreground="{DynamicResource AppMutedTextBrush}"
-                                                   TextTrimming="CharacterEllipsis" />
-                                    </Grid>
                                 </Border>
+                                <TextBlock DockPanel.Dock="Top"
+                                           Margin="10,8,10,8"
+                                           Text="{Binding Message}"
+                                           IsVisible="{Binding HasMessage}"
+                                           TextWrapping="Wrap"
+                                           FontSize="12"
+                                           Foreground="{DynamicResource AppMutedTextBrush}" />
 
                                 <DockPanel>
                                     <ScrollBar x:Name="StructPanScrollBar"

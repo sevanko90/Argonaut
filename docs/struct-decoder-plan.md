@@ -7,7 +7,7 @@ structs and arrays expanding in place. ("Tree" below means that view - the JSON 
 on the hex view (docs/hex-view-plan.md) and needs its caret, selection and `ByteReading` (steps 3
 and 6b) first; it is that plan's step 7.
 
-Status: planned for 2.5, all steps in one release; nothing built.
+Status: planned for 2.5, all steps in one release; steps 1-5 built.
 
 ## Decided
 
@@ -113,21 +113,21 @@ C# `bool` a bit or an `int`? (Neither - a byte, 0 false and anything else true, 
 as a 4-byte `BOOL`; bits only come from C bitfields.) So the layout is shown, never left to be
 inferred:
 
-- Every row shows its type's **size and offset** (`Enabled: bool · 1 byte @ 8 = true`), and the
-  padding the layout adds shows as its own muted rows, so the offsets visibly add up to
-  `sizeof`.
-- Hovering a type names how it is stored for the language and target in use, from one table
-  beside the layout rules: "`bool` (C#): 1 byte, 0 = false, otherwise true; 4 bytes with
-  `[MarshalAs(UnmanagedType.Bool)]`", "`long` (C, LLP64): 4 bytes, signed".
-- The struct's line shows its total size and alignment (`Sample · 268 bytes, align 4`).
+- Every row shows its **offset** and type (`+8  Enabled  bool  true`), and the padding the
+  layout adds shows as its own muted rows, so the offsets visibly add up to `sizeof`.
+- Hovering a row names how its type is stored for the language and target in use, and its size
+  and place (`StructStorageNotes`): "`bool` (C#): 1 byte, 0 = false, otherwise true - not a bit,
+  and not the 4 bytes of `[MarshalAs(UnmanagedType.Bool)]`", "`long` (C, LLP64): 4 bytes,
+  signed". Sizes live there rather than on the row, to keep the row to what is read.
+- The selector shows the struct's total size and alignment (`268 bytes · align 4 · at 0x0`).
 
 The sample (below) is written to show these: its layout has trailing padding, and its comments
 say where each field sits.
 
 ### The sample
 
-The editor opens empty, with an **Insert sample** button that fills it with a small example in the
-chosen language - an `int`, a `float`, a `bool` and a 256-character array - commented with each
+The editor opens empty, with **C# sample** and **C sample** buttons centred in it that fill it
+with a small example in that language (its language is then detected, as a paste's is) - an `int`, a `float`, a `bool` and a 256-character array - commented with each
 field's offset and size:
 
 ```csharp
@@ -159,9 +159,10 @@ which is itself a check. The sample is never saved into the definitions folder u
 - The **Structures tab** is where definitions are pasted and edited: the editor, its parse
   errors, Insert sample, Save, and the saved and recent definitions. A panel is too narrow to
   hold an editor and a tree of any size together, so they get a tab each.
-- The **Struct tab** is the result: a picker of the declared types, the target switch, the pin,
-  and the tree. With no definition yet it says so and links to the Structures tab. The layout
-  inside both tabs is chosen from screenshots.
+- The **Struct tab** is the result: the selector and the tree. The selector is one strip above
+  the tree: the struct's name, which opens a menu of the declared structs; its size, alignment
+  and place; the target as a chip (C only), which opens a menu of targets; and the pin. With no
+  definition yet the tab says so and points to the Structures tab.
 - **The outline**: the mapped bytes - one struct or the whole array - are outlined in the dump
   in the caret's style. No bands per field, to keep to the colour budget; field boundaries show
   through the field outline below.
@@ -206,10 +207,12 @@ many structs.
    Look chosen by the user: the pickers and pin on one line; a title bar above the tree (struct
    name, then size, alignment and place); the root is not a row; rows in aligned name / type /
    value columns; an offset column. A paste over the whole definition re-detects its language.
-5. [ ] The empty editor's Insert sample button (C# and C), and making the storage visible: size
-   and offset on every row, padding rows, the struct's size and alignment, the per-type storage
-   notes on hover. Tests: both samples lay out to 268 bytes with `Name` at 9; a
-   `[MarshalAs(UnmanagedType.Bool)]` field is 4 bytes; `fixed char[256]` is 512.
+5. [x] The empty editor's sample buttons (C# and C), and making the storage visible: the
+   per-type storage notes on hover, with each row's size. Tests: both samples lay out to 268
+   bytes with `Name` at 9; a `[MarshalAs(UnmanagedType.Bool)]` field is 4 bytes; `fixed
+   char[256]` is 512; the notes for each kind of type.
+   Look chosen by the user: sizes in the hover note only, not on the row; the sample buttons in
+   the empty editor; the type picker, title bar and pin combined into one selector strip.
 6. [ ] The outline in the dump, the field outline, and linked selection.
 7. [ ] Save, the definitions folder and recent definitions, and Copy as JSON.
 8. [ ] Architecture doc, roadmap.

@@ -188,6 +188,41 @@ public partial class HexView : UserControl
         ShowStructTree();
     }
 
+    /// <summary>The selector's list of the structs declared, built as it opens; picking one
+    /// shows it.</summary>
+    private void OnStructTypesOpening(object? sender, EventArgs e)
+    {
+        if (sender is not MenuFlyout menu || this.shown?.Structs is not { } structs)
+            return;
+
+        menu.Items.Clear();
+        foreach (string name in structs.Types)
+        {
+            var item = new MenuItem { Header = name, ToggleType = MenuItemToggleType.Radio, IsChecked = name == structs.SelectedType, FontFamily = StructSurface.FontFamily };
+            item.Click += (_, _) => structs.SelectedType = name;
+            menu.Items.Add(item);
+        }
+    }
+
+    /// <summary>The target chip's choices, built as it opens.</summary>
+    private void OnStructTargetsOpening(object? sender, EventArgs e)
+    {
+        if (sender is not MenuFlyout menu || this.shown?.Structs is not { } structs)
+            return;
+
+        menu.Items.Clear();
+        foreach (var target in structs.Targets)
+        {
+            var item = new MenuItem { Header = target.Name, ToggleType = MenuItemToggleType.Radio, IsChecked = target == structs.Target };
+            item.Click += (_, _) => structs.Target = target;
+            menu.Items.Add(item);
+        }
+    }
+
+    private void OnInsertCSharpSample(object? sender, RoutedEventArgs e) => this.shown?.Structs.InsertSample(StructLanguage.CSharp);
+
+    private void OnInsertCSample(object? sender, RoutedEventArgs e) => this.shown?.Structs.InsertSample(StructLanguage.C);
+
     /// <summary>A paste that replaces the whole definition - into an empty editor, or over all of
     /// it - is a new definition: its language is told from it again. A paste into a definition
     /// keeps the language chosen.</summary>

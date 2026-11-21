@@ -340,7 +340,8 @@ internal sealed class StructTreeCursor(StructTree tree) : ITreeRowCursor
 /// <summary>
 /// What a struct tree row says, in three columns lined up with its siblings' as a header reads:
 /// the name, the type (<c>int</c>, <c>char[16]</c>, <c>unsigned int : 3</c>) muted, and the
-/// value coloured by what it is. Padding rows say how many bytes they are.
+/// value coloured by what it is. Padding rows say how many bytes they are. Hovering a row says
+/// how its type is stored (<see cref="StructStorageNotes"/>).
 /// </summary>
 internal sealed class StructTreePainter(StructTree tree) : ITreeRowPainter
 {
@@ -367,4 +368,8 @@ internal sealed class StructTreePainter(StructTree tree) : ITreeRowPainter
             _ => TreeRunStyle.Plain,
         }));
     }
+
+    /// <summary>How the row's type is stored, in the definition's language and the target.</summary>
+    public object? ToolTipFor(in TreeRow row)
+        => row.Detail is StructNode node ? StructStorageNotes.For(node, tree.Nodes.Struct.Language, tree.Target, tree.Order) : null;
 }

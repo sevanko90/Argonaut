@@ -77,8 +77,10 @@ public sealed class StructDecoderViewModel : ObservableObject
         get => this.definitionText;
         set
         {
-            if (SetField(ref this.definitionText, value ?? string.Empty))
-                Parse();
+            if (!SetField(ref this.definitionText, value ?? string.Empty))
+                return;
+            OnPropertyChanged(nameof(OffersSample));
+            Parse();
         }
     }
 
@@ -126,12 +128,17 @@ public sealed class StructDecoderViewModel : ObservableObject
         get => this.target;
         set
         {
-            if (value is not null && SetField(ref this.target, value))
-                Lay();
+            if (value is null || !SetField(ref this.target, value))
+                return;
+            OnPropertyChanged(nameof(TargetShortName));
+            Lay();
         }
     }
 
     public bool ShowsTarget => this.definition?.Language == StructLanguage.C;
+
+    /// <summary>The target as the selector's chip names it: <c>LP64</c>, <c>LLP64</c>.</summary>
+    public string TargetShortName => this.target.Name.Split(' ')[0];
 
     /// <summary>Whether the struct stays where it is while the caret moves.</summary>
     public bool IsPinned
@@ -243,6 +250,17 @@ public sealed class StructDecoderViewModel : ObservableObject
     /// <summary>A new definition pasted in: tell its language from it again, whatever was chosen
     /// for the last one.</summary>
     public void DefinitionPasted() => Language = StructLanguageChoice.Detect;
+
+    /// <summary>Whether the editor is empty, so the Structures tab offers the sample.</summary>
+    public bool OffersSample => string.IsNullOrWhiteSpace(this.definitionText);
+
+    /// <summary>Fills the editor with the sample in <paramref name="sampleLanguage"/>: a new
+    /// definition, so its language is told from it, as a paste's is.</summary>
+    public void InsertSample(StructLanguage sampleLanguage)
+    {
+        Language = StructLanguageChoice.Detect;
+        DefinitionText = StructSamples.For(sampleLanguage);
+    }
 
     private void Parse()
     {

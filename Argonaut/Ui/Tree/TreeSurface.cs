@@ -1627,7 +1627,8 @@ public class TreeSurface : RowSurface
         InvalidateVisual();
     }
 
-    /// <summary>Shows the tooltip of the gutter cell under the pointer, or none.</summary>
+    /// <summary>Shows the tooltip of the gutter cell under the pointer, or past the gutters the
+    /// row's own, or none.</summary>
     private void UpdateToolTip(Point point)
     {
         object? tip = null;
@@ -1647,6 +1648,9 @@ public class TreeSurface : RowSurface
 
                 left += gutter.Width;
             }
+
+            if (point.X >= left)
+                tip ??= document.Painter.ToolTipFor(hovered.Row);
         }
 
         SetToolTip(tip);

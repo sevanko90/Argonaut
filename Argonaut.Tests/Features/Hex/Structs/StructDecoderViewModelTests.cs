@@ -177,4 +177,34 @@ public sealed class StructDecoderViewModelTests
         Assert.Equal(1, closed);
         Assert.Null(hex.Structs.Tree);
     }
+
+    [Theory]
+    [InlineData(StructLanguage.CSharp, "C# (detected)")]
+    [InlineData(StructLanguage.C, "C / C++ (detected)")]
+    public void TheSample_FillsTheEmptyEditor_AndLaysOutTo268Bytes_WithItsNameAt9(StructLanguage language, string read)
+    {
+        var decoder = new StructDecoderViewModel(ByteOrder.Little);
+        decoder.Follow(new MemoryByteSource(new byte[300]), 0, 0);
+        Assert.True(decoder.OffersSample);
+
+        decoder.InsertSample(language);
+
+        Assert.False(decoder.OffersSample);
+        Assert.False(decoder.HasProblems, string.Join("; ", decoder.Problems));
+        Assert.Equal(read, decoder.LanguageText);
+        var laid = decoder.Tree!.Nodes.Struct;
+        Assert.Equal(268, laid.Size);
+        Assert.Equal(4, laid.Alignment);
+        Assert.Equal(9, laid.Fields.Single(f => f.Name.Equals("name", StringComparison.OrdinalIgnoreCase)).Offset);
+    }
+
+    [Fact]
+    public void TheCSample_AfterCSharpWasChosen_IsReadAsC()
+    {
+        var decoder = new StructDecoderViewModel(ByteOrder.Little) { Language = StructLanguageChoice.CSharp };
+        decoder.InsertSample(StructLanguage.C);
+        Assert.Equal(StructLanguageChoice.Detect, decoder.Language);
+        Assert.Equal("C / C++ (detected)", decoder.LanguageText);
+        Assert.False(decoder.HasProblems);
+    }
 }

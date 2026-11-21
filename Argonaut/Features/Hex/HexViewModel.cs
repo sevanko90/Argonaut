@@ -56,6 +56,13 @@ public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDoc
         {
             if (e.PropertyName == nameof(HexValuesViewModel.Order))
                 Structs.Order = Values.Order;
+            else if (e.PropertyName == nameof(HexValuesViewModel.HighlightedRange))
+                OnPropertyChanged(nameof(HighlightedRange));
+        };
+        Structs.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(StructDecoderViewModel.HighlightedField))
+                OnPropertyChanged(nameof(HighlightedRange));
         };
     }
 
@@ -217,6 +224,14 @@ public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDoc
         => Cursor.Caret is { IsEmpty: false } caret ? $"{caret.Length:N0} {(caret.Length == 1 ? "byte" : "bytes")}" : string.Empty;
 
     public ByteRange? SelectedByteRange => Cursor.Position;
+
+    /// <summary>The bytes the dump marks for the side panel: a reading hovered on the Values tab,
+    /// else the struct field hovered - or, pinned, holding the caret - on the Struct tab.</summary>
+    public ByteRange? HighlightedRange => Values.HighlightedRange ?? Structs.HighlightedField;
+
+    /// <summary>A row selected in the struct tree: its bytes selected in the dump and brought on
+    /// screen, the struct staying where it is.</summary>
+    public void SelectStructField(in StructNode node) => Cursor.Reveal(Structs.SelectField(node));
 
     /// <summary>Selects <paramref name="range"/> with the caret at its start and brings it on
     /// screen. Nothing to wait for: every place in a hex dump is arithmetic.</summary>

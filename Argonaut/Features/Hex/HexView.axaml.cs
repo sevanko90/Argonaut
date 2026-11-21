@@ -25,6 +25,8 @@ public partial class HexView : UserControl
         scrollBars = new RowScrollBars(Surface, VerticalScrollBar, PanScrollBar);
         structScrollBars = new RowScrollBars(StructSurface, StructVerticalScrollBar, StructPanScrollBar);
         StructSurface.LinkClicked += OnStructLinkClicked;
+        StructSurface.HoveredRowChanged += OnStructRowHovered;
+        StructSurface.SelectionChanged += OnStructRowSelected;
         DetachedFromVisualTree += (_, _) =>
         {
             scrollBars.Dispose();
@@ -174,6 +176,7 @@ public partial class HexView : UserControl
             this.shown.Grew -= OnDocumentGrew;
             this.shown.Structs.PropertyChanged -= OnStructsChanged;
             this.shown.Structs.Moved -= OnStructMoved;
+            this.shown.Structs.CaretFieldChanged -= OnStructCaretFieldChanged;
         }
 
         this.shown = DataContext as HexViewModel;
@@ -182,6 +185,7 @@ public partial class HexView : UserControl
             this.shown.Grew += OnDocumentGrew;
             this.shown.Structs.PropertyChanged += OnStructsChanged;
             this.shown.Structs.Moved += OnStructMoved;
+            this.shown.Structs.CaretFieldChanged += OnStructCaretFieldChanged;
         }
 
         Surface.Document = this.shown;
@@ -233,6 +237,39 @@ public partial class HexView : UserControl
         int selected = Math.Abs(DefinitionEditor.SelectionEnd - DefinitionEditor.SelectionStart);
         if (text.Length == 0 || selected >= text.Length)
             this.shown?.Structs.DefinitionPasted();
+    }
+
+    // Set while the tree is told to select the caret's field, so that selection is not taken as
+    // the user's and sent back to the dump.
+    private bool selectingCaretField;
+
+    /// <summary>The row under the pointer: its field is marked in the dump.</summary>
+    private void OnStructRowHovered(object? sender, EventArgs e)
+        => this.shown?.Structs.Hover(StructSurface.HoveredRow?.Detail is StructNode node ? node : null);
+
+    /// <summary>A row selected in the tree selects its bytes in the dump.</summary>
+    private void OnStructRowSelected(object? sender, EventArgs e)
+    {
+        if (!this.selectingCaretField && this.shown is { } hex && StructSurface.SelectedRow?.Detail is StructNode node)
+            hex.SelectStructField(node);
+    }
+
+    /// <summary>Pinned, the caret moved to another field: the tree selects it, opening what holds
+    /// it.</summary>
+    private void OnStructCaretFieldChanged(object? sender, EventArgs e)
+    {
+        if (this.shown?.Structs.CaretField is not { } node)
+            return;
+
+        this.selectingCaretField = true;
+        try
+        {
+            StructSurface.Reveal(node.Position, expandAncestors: true);
+        }
+        finally
+        {
+            this.selectingCaretField = false;
+        }
     }
 
     /// <summary>A struct row's "as text" / "as items" chip: the array reads the other way.</summary>

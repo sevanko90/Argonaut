@@ -164,6 +164,7 @@ public class TreeSurface : RowSurface
     // The row under the pointer, and which of its trailing items, if any: actions show on the
     // hovered row, and a clickable chip darkens under the pointer.
     private (long, bool)? hoveredKey;
+    private TreeRow? hoveredRow;
     private int hoveredItem = -1;
 
     // The link in a row's text under the pointer while the command modifier is held, drawn
@@ -282,6 +283,12 @@ public class TreeSurface : RowSurface
 
     /// <summary>A link run was clicked: the row, and the run's <see cref="TreeRun.Link"/>.</summary>
     public event EventHandler<TreeLinkClickedEventArgs>? LinkClicked;
+
+    /// <summary>The row under the pointer, or null.</summary>
+    public TreeRow? HoveredRow => hoveredRow;
+
+    /// <summary>Raised when the pointer moves onto another row, or off the rows.</summary>
+    public event EventHandler? HoveredRowChanged;
 
     /// <summary>An Alt-expand stopped at <see cref="DeepExpandRowBudget"/> rows.</summary>
     public event EventHandler? ExpandLimitReached;
@@ -1485,7 +1492,7 @@ public class TreeSurface : RowSurface
                 underline = new UnderlinedLink(hovered.Row.Key, pane, textLink.Start, textLink.Length);
             overLink = (trailing >= 0 && laid.Trailing![trailing].Link is not null) || underline is not null;
             bool overExpander = DrawsArrow(hovered.Row, laid) && IsOnExpander(laid, arrowX, point.X);
-            SetHover(hovered.Row.Key, trailing, overExpander ? pane : -1);
+            SetHover(hovered.Row, trailing, overExpander ? pane : -1);
         }
         else
         {
@@ -1616,15 +1623,20 @@ public class TreeSurface : RowSurface
         return -1;
     }
 
-    private void SetHover((long, bool)? key, int item, int expanderPane)
+    private void SetHover(TreeRow? row, int item, int expanderPane)
     {
+        var key = row?.Key;
         if (key == hoveredKey && item == hoveredItem && expanderPane == hoveredExpanderPane)
             return;
 
+        bool rowChanged = key != hoveredKey;
         hoveredKey = key;
+        hoveredRow = row;
         hoveredItem = item;
         hoveredExpanderPane = expanderPane;
         InvalidateVisual();
+        if (rowChanged)
+            HoveredRowChanged?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>Shows the tooltip of the gutter cell under the pointer, or past the gutters the

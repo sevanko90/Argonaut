@@ -181,7 +181,9 @@
                             SelectionBrush="{DynamicResource AppTextSelectionBrush}"
                             GroupSize="{Binding GroupSize}"
                             ReadsUtf8="{Binding ReadsUtf8}"
-                            HighlightRange="{Binding Values.HighlightedRange}" />
+                            HighlightRange="{Binding HighlightedRange}"
+                            OutlineRange="{Binding Structs.MappedRange}"
+                            OutlineFill="{DynamicResource AppStructFillBrush}" />
 
             <ScrollBar x:Name="VerticalScrollBar"
                        Grid.Column="1"

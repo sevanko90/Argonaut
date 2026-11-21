@@ -49,6 +49,15 @@ public sealed class StructDecoderViewModel : ObservableObject
     private long count = 1;
     private StructTree? tree;
 
+    // The field rows the dump marks: the one under the pointer, and - pinned - the one holding the
+    // caret.
+    private StructNode? hoveredField;
+    private StructNode? caretField;
+
+    // The bytes a row selected in the tree put in the dump's selection: the caret move that
+    // follows is the tree's own, not one for the struct to follow.
+    private ByteRange? ownSelection;
+
     public StructDecoderViewModel(ByteOrder order)
     {
         this.order = order;
@@ -146,8 +155,16 @@ public sealed class StructDecoderViewModel : ObservableObject
         get => this.isPinned;
         set
         {
-            if (!SetField(ref this.isPinned, value) || value)
+            if (!SetField(ref this.isPinned, value))
                 return;
+            if (value)
+            {
+                FindCaretField(this.caretStart);
+                return;
+            }
+
+            this.caretField = null;
+            OnPropertyChanged(nameof(HighlightedField));
             Map();
         }
     }
@@ -176,14 +193,59 @@ public sealed class StructDecoderViewModel : ObservableObject
         private set
         {
             var previous = this.tree;
-            if (SetField(ref this.tree, value))
-                previous?.Close();
+            if (!SetField(ref this.tree, value))
+                return;
+            previous?.Close();
+
+            // Rows of the old tree name nothing in the new one.
+            this.hoveredField = null;
+            this.caretField = null;
+            this.ownSelection = null;
+            OnPropertyChanged(nameof(HighlightedField));
         }
     }
 
     /// <summary>Raised when the tree reads from elsewhere, or reads its bytes differently, but its
     /// rows are the same: a surface lays its rows out again and keeps its place.</summary>
     public event EventHandler? Moved;
+
+    /// <summary>Raised when, pinned, the caret moves to another field: the tree selects
+    /// <see cref="CaretField"/>.</summary>
+    public event EventHandler? CaretFieldChanged;
+
+    /// <summary>The bytes the struct is read from - one struct, or the whole array - for the dump
+    /// to outline; null when nothing is mapped.</summary>
+    public ByteRange? MappedRange => this.tree is { } shown ? new ByteRange(shown.Start, shown.Nodes.Size) : null;
+
+    /// <summary>The field the dump marks inside the struct: the row under the pointer, else -
+    /// pinned - the field holding the caret.</summary>
+    public ByteRange? HighlightedField => (this.hoveredField ?? (this.isPinned ? this.caretField : null)) is { } node ? RangeOf(node) : null;
+
+    /// <summary>Pinned, the deepest field holding the caret; null when the caret is outside the
+    /// struct or nothing is pinned.</summary>
+    public StructNode? CaretField => this.caretField;
+
+    /// <summary>The row under the pointer in the tree, or null when it leaves.</summary>
+    public void Hover(StructNode? node)
+    {
+        if (Nullable.Equals(node, this.hoveredField))
+            return;
+        this.hoveredField = node;
+        OnPropertyChanged(nameof(HighlightedField));
+    }
+
+    /// <summary>
+    /// A row selected in the tree: its bytes, for the dump to select. The caret move that follows
+    /// is the tree's own, so the struct stays where it is rather than following it to the field.
+    /// </summary>
+    public ByteRange SelectField(in StructNode node)
+    {
+        var range = RangeOf(node);
+        this.ownSelection = range;
+        return range;
+    }
+
+    private ByteRange RangeOf(in StructNode node) => new((this.tree?.Start ?? 0) + node.Offset, Math.Max(1, node.Size));
 
     /// <summary>The tree's title: the struct mapped, or the array of them - <c>Sample</c>,
     /// <c>Sample[3]</c>.</summary>
@@ -220,10 +282,40 @@ public sealed class StructDecoderViewModel : ObservableObject
     public void Follow(IByteSource? source, long caret, long selection)
     {
         this.bytes = source;
+        bool own = this.ownSelection is { } chosen && chosen.Offset == caret && chosen.Length == selection && ReferenceEquals(source, this.tree?.Bytes);
+        this.ownSelection = null;
+        if (own)
+            return;
+
         this.caretStart = caret;
         this.selectionLength = selection;
         if (!this.isPinned)
             Map();
+        else
+            FindCaretField(caret);
+    }
+
+    /// <summary>Pinned: the deepest field holding <paramref name="offset"/>, told to the tree when
+    /// it changes.</summary>
+    private void FindCaretField(long offset)
+    {
+        StructNode? found = null;
+        if (this.tree is { } shown && offset >= shown.Start && offset < shown.Start + shown.Nodes.Size)
+        {
+            var nodes = shown.Nodes;
+            var node = nodes.Root;
+            while (nodes.ChildAtOffset(node, offset - shown.Start) is { } child)
+                node = child;
+            if (node.Kind != StructNodeKind.Root)
+                found = node;
+        }
+
+        if (Nullable.Equals(found, this.caretField))
+            return;
+        this.caretField = found;
+        OnPropertyChanged(nameof(HighlightedField));
+        if (found is not null)
+            CaretFieldChanged?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>The document grew: values past what had arrived may read now.</summary>
@@ -242,6 +334,7 @@ public sealed class StructDecoderViewModel : ObservableObject
 
     private void NotifyStructShown()
     {
+        OnPropertyChanged(nameof(MappedRange));
         OnPropertyChanged(nameof(StructTitle));
         OnPropertyChanged(nameof(StructDetail));
         OnPropertyChanged(nameof(HasStruct));

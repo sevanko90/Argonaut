@@ -207,4 +207,105 @@ public sealed class StructDecoderViewModelTests
         Assert.Equal("C / C++ (detected)", decoder.LanguageText);
         Assert.False(decoder.HasProblems);
     }
+
+    private const string Shaped = "struct Shaped { int16_t a; uint8_t bytes[4]; };";
+
+    [Fact]
+    public void TheMappedRange_IsTheStruct_OrTheWholeArray()
+    {
+        var (decoder, bytes) = Decoder();
+        decoder.Follow(bytes, 6, 0);
+        Assert.Equal(new ByteRange(6, 4), decoder.MappedRange);
+
+        decoder.Follow(bytes, 8, 12);
+        Assert.Equal(new ByteRange(8, 12), decoder.MappedRange);
+    }
+
+    [Fact]
+    public void AHoveredRow_MarksItsFieldsBytes_UntilThePointerLeaves()
+    {
+        var (decoder, bytes) = Decoder();
+        decoder.Follow(bytes, 10, 0);
+        var b = decoder.Tree!.Nodes.Child(decoder.Tree.Nodes.Root, 1);
+
+        decoder.Hover(b);
+        Assert.Equal(new ByteRange(12, 2), decoder.HighlightedField);
+
+        decoder.Hover(null);
+        Assert.Null(decoder.HighlightedField);
+    }
+
+    [Fact]
+    public void ARowSelectedInTheTree_SelectsItsBytes_WithoutTheStructFollowingTheCaretThere()
+    {
+        var (decoder, bytes) = Decoder();
+        decoder.Follow(bytes, 10, 0);
+        var b = decoder.Tree!.Nodes.Child(decoder.Tree.Nodes.Root, 1);
+
+        var range = decoder.SelectField(b);
+        decoder.Follow(bytes, range.Offset, range.Length);
+
+        Assert.Equal(new ByteRange(12, 2), range);
+        Assert.Equal(10, decoder.Tree.Start);
+
+        // The next caret move is the user's again.
+        decoder.Follow(bytes, 20, 0);
+        Assert.Equal(20, decoder.Tree.Start);
+    }
+
+    [Fact]
+    public void Pinned_TheCaretsFieldIsTheDeepestHoldingIt_AndMarked()
+    {
+        var (decoder, bytes) = Decoder(Shaped);
+        decoder.Follow(bytes, 8, 0);
+        decoder.IsPinned = true;
+        int told = 0;
+        decoder.CaretFieldChanged += (_, _) => told++;
+
+        decoder.Follow(bytes, 12, 0);
+        Assert.Equal("[2]", decoder.CaretField!.Value.Label);
+        Assert.Equal(new ByteRange(12, 1), decoder.HighlightedField);
+        Assert.Equal(1, told);
+
+        decoder.Follow(bytes, 12, 0);
+        Assert.Equal(1, told);
+
+        decoder.Follow(bytes, 40, 0);
+        Assert.Null(decoder.CaretField);
+        Assert.Null(decoder.HighlightedField);
+    }
+
+    [Fact]
+    public void Unpinned_NoFieldFollowsTheCaret()
+    {
+        var (decoder, bytes) = Decoder(Shaped);
+        decoder.Follow(bytes, 9, 0);
+        Assert.Null(decoder.CaretField);
+        Assert.Null(decoder.HighlightedField);
+    }
+
+    [Fact]
+    public void ANewTree_ForgetsTheRowsOfTheOld()
+    {
+        var (decoder, bytes) = Decoder();
+        decoder.Hover(decoder.Tree!.Nodes.Child(decoder.Tree.Nodes.Root, 0));
+        decoder.Follow(bytes, 0, 16);
+        Assert.Null(decoder.HighlightedField);
+    }
+
+    [Fact]
+    public async Task TheDump_MarksAHoveredReading_ElseAHoveredField()
+    {
+        using var origin = new MemoryByteOrigin(Enumerable.Range(0, 64).Select(i => (byte)i).ToArray(), "bytes");
+        var hex = new HexViewModel();
+        await hex.LoadAsync(origin);
+        hex.Structs.DefinitionText = Pair;
+        hex.Cursor.Place(4);
+        hex.Structs.Hover(hex.Structs.Tree!.Nodes.Child(hex.Structs.Tree.Nodes.Root, 1));
+        Assert.Equal(new ByteRange(6, 2), hex.HighlightedRange);
+
+        hex.Values.Highlight(hex.Values.Rows[0]);
+        Assert.Equal(hex.Values.HighlightedRange, hex.HighlightedRange);
+        hex.Dispose();
+    }
 }

@@ -7,7 +7,7 @@ structs and arrays expanding in place. ("Tree" below means that view - the JSON 
 on the hex view (docs/hex-view-plan.md) and needs its caret, selection and `ByteReading` (steps 3
 and 6b) first; it is that plan's step 7.
 
-Status: planned for 2.5, all steps in one release; steps 1-5 built.
+Status: planned for 2.5, all steps in one release; steps 1-6 built.
 
 ## Decided
 
@@ -163,13 +163,16 @@ which is itself a check. The sample is never saved into the definitions folder u
   the tree: the struct's name, which opens a menu of the declared structs; its size, alignment
   and place; the target as a chip (C only), which opens a menu of targets; and the pin. With no
   definition yet the tab says so and points to the Structures tab.
-- **The outline**: the mapped bytes - one struct or the whole array - are outlined in the dump
-  in the caret's style. No bands per field, to keep to the colour budget; field boundaries show
-  through the field outline below.
-- **The field outline**: hovering a row, or (pinned) moving the caret, outlines that field's
-  bytes inside the struct's. Selecting a row selects its bytes and reveals them; with the
-  struct pinned, moving the caret selects the deepest field holding it. `HexSurface` finds the
-  field from the sorted field list by binary search.
+- **The outline**: the mapped bytes - one struct or the whole array - are one shape in each
+  panel of the dump (`HexSurface.OutlineRange`): a dashed accent edge with corners rounded as
+  the selection's are, over a faint warm wash (`AppStructFillBrush`) under the selection and the
+  marks. No bands per field, to keep to the colour budget; field boundaries show through the
+  field mark below.
+- **The field mark**: hovering a row, or (pinned) moving the caret, marks that field's bytes
+  with the Values tab's hover mark - the dump shows one highlight for the side panel, from
+  whichever tab. Selecting a row selects its bytes and reveals them, and the struct stays where
+  it is; with the struct pinned, moving the caret selects the deepest field holding it, opening
+  what holds it.
 - "Copy as JSON" copies the decoded struct (or the expanded part of an array of them).
 
 ### Keeping definitions
@@ -213,7 +216,10 @@ many structs.
    char[256]` is 512; the notes for each kind of type.
    Look chosen by the user: sizes in the hover note only, not on the row; the sample buttons in
    the empty editor; the type picker, title bar and pin combined into one selector strip.
-6. [ ] The outline in the dump, the field outline, and linked selection.
+6. [x] The outline in the dump, the field mark, and linked selection.
+   Look chosen by the user: dashed accent edge with rounded corners, and a subtle warm fill
+   (amber at 18% light, 8% dark). Whether the pinned caret should select the deepest field or
+   stop at the field is to be decided from use.
 7. [ ] Save, the definitions folder and recent definitions, and Copy as JSON.
 8. [ ] Architecture doc, roadmap.
 

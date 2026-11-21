@@ -118,6 +118,36 @@ public sealed class HexViewTests
     });
 
     [Fact]
+    public Task TheDump_OutlinesTheStruct_AndATreeRowSelectsItsBytes() => WithView((window, view, hex, _) =>
+    {
+        hex.Structs.DefinitionText = "struct Run { uint8_t head; uint8_t body[20]; };";
+        hex.SidePanelTab = HexPanelTab.Struct;
+        var dump = Surface(view);
+
+        // One row, across a row's end, and two pieces where it barely crosses one: each draws.
+        foreach (long start in new long[] { 0, 0x0A, 0x1E })
+        {
+            hex.Cursor.Place(start);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(new ByteRange(start, 21), dump.OutlineRange);
+            window.CaptureRenderedFrame();
+        }
+
+        // A row selected in the tree selects its bytes; the struct stays put.
+        var tree = view.GetVisualDescendants().OfType<Argonaut.Ui.Tree.TreeSurface>().Single(s => s.Name == "StructSurface");
+        window.UpdateLayout();
+        tree.Focus();
+        window.KeyPress(Key.Down, RawInputModifiers.None, PhysicalKey.None, string.Empty);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(new ByteRange(0x1E, 1), hex.SelectedByteRange);
+        window.KeyPress(Key.Down, RawInputModifiers.None, PhysicalKey.None, string.Empty);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(new ByteRange(0x1F, 20), hex.SelectedByteRange);
+        Assert.Equal(0x1E, hex.Structs.Tree!.Start);
+        return Task.CompletedTask;
+    });
+
+    [Fact]
     public Task TheTabShown_IsRemembered() => WithView((_, _, hex, _) =>
     {
         hex.ShowsStructuresTab = true;

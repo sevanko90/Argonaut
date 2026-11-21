@@ -103,6 +103,14 @@ public sealed class HexSurface : RowSurface
     public static readonly StyledProperty<ByteRange?> HighlightRangeProperty =
         AvaloniaProperty.Register<HexSurface, ByteRange?>(nameof(HighlightRange));
 
+    /// <summary>Bytes outlined as one shape in both panels - the struct the side panel reads.</summary>
+    public static readonly StyledProperty<ByteRange?> OutlineRangeProperty =
+        AvaloniaProperty.Register<HexSurface, ByteRange?>(nameof(OutlineRange));
+
+    /// <summary>What the bytes inside <see cref="OutlineRange"/> are washed with, faintly.</summary>
+    public static readonly StyledProperty<IBrush?> OutlineFillProperty =
+        AvaloniaProperty.Register<HexSurface, IBrush?>(nameof(OutlineFill));
+
     /// <summary>Whether the character panel reads its bytes as UTF-8 (<see cref="HexUtf8"/>)
     /// rather than as ASCII.</summary>
     public static readonly StyledProperty<bool> ReadsUtf8Property =
@@ -160,6 +168,7 @@ public sealed class HexSurface : RowSurface
     private Pen? dividerPen;
     private Pen? groupPen;
     private Pen? caretPen;
+    private Pen? outlinePen;
     private IBrush? pointerFill;
     private IBrush? characterBand;
     private Pen? pointerEdge;
@@ -209,7 +218,7 @@ public sealed class HexSurface : RowSurface
     static HexSurface()
     {
         AffectsRender<HexSurface>(OtherByteForegroundProperty, ZeroByteForegroundProperty, PanelBackgroundProperty, DividerBrushProperty,
-            ByteMarkBrushProperty, ByteMarkForegroundProperty, RowMarkBrushProperty, HeaderLineBrushProperty, HighlightRangeProperty);
+            ByteMarkBrushProperty, ByteMarkForegroundProperty, RowMarkBrushProperty, HeaderLineBrushProperty, HighlightRangeProperty, OutlineRangeProperty, OutlineFillProperty);
     }
 
     public HexSurface()
@@ -269,6 +278,18 @@ public sealed class HexSurface : RowSurface
     {
         get => GetValue(HighlightRangeProperty);
         set => SetValue(HighlightRangeProperty, value);
+    }
+
+    public ByteRange? OutlineRange
+    {
+        get => GetValue(OutlineRangeProperty);
+        set => SetValue(OutlineRangeProperty, value);
+    }
+
+    public IBrush? OutlineFill
+    {
+        get => GetValue(OutlineFillProperty);
+        set => SetValue(OutlineFillProperty, value);
     }
 
     public bool ReadsUtf8
@@ -576,6 +597,7 @@ public sealed class HexSurface : RowSurface
         else if (change.Property == ByteMarkBrushProperty)
         {
             this.caretPen = null;
+            this.outlinePen = null;
             this.pointerFill = null;
             this.pointerEdge = null;
         }
@@ -974,10 +996,26 @@ public sealed class HexSurface : RowSurface
             using (context.PushClip(new Rect(0, RowsTop, width, RowsHeight)))
             {
                 DrawRowMark(context);
+
+                // The struct's shape: its fill under the selection and the marks, its dashed edge
+                // over them.
+                var outline = OutlineRange is { } outlined && ByteMarkBrush is { } accent ? OutlineShapes(first, last, outlined) : null;
+                if (outline is not null && OutlineFill is { } tint)
+                {
+                    foreach (var shape in outline)
+                        context.DrawGeometry(tint, null, shape);
+                }
+
                 DrawSelection(context, first, last);
                 DrawPointerMark(context, first, last);
                 if (HighlightRange is { } highlighted)
                     DrawRangeMark(context, first, last, highlighted);
+                if (outline is not null)
+                {
+                    this.outlinePen ??= new Pen(ByteMarkBrush, 1.25, dashStyle: new DashStyle([3, 2], 0));
+                    foreach (var shape in outline)
+                        context.DrawGeometry(null, this.outlinePen, shape);
+                }
 
                 for (long row = first; row <= last; row++)
                 {
@@ -1160,6 +1198,99 @@ public sealed class HexSurface : RowSurface
             foreach (bool inCharacters in (ReadOnlySpan<bool>)[false, true])
                 context.DrawRectangle(this.pointerFill, this.pointerEdge, new RoundedRect(MarkCell((a, b), top, inCharacters).Deflate(0.5), 4));
         }
+    }
+
+    /// <summary>
+    /// The shapes <paramref name="range"/> is outlined as, one or two in each panel: the run of
+    /// rows it covers, stepped in where it starts part way along its first row and ends part way
+    /// along its last - a rectangle on one row, two when it barely crosses a row's end - with
+    /// rounded corners, as the selection's marks have. Rows off screen are taken as whole rows just
+    /// beyond it, so the coordinates stay small however far away its ends are. Empty when none of
+    /// it is on screen.
+    /// </summary>
+    private List<Geometry> OutlineShapes(long first, long last, ByteRange range)
+    {
+        var shapes = new List<Geometry>(4);
+        if (range.Length <= 0)
+            return shapes;
+
+        long startRow = HexRows.RowOf(range.Offset), endRow = HexRows.RowOf(range.End - 1);
+        if (endRow < first || startRow > last)
+            return shapes;
+
+        int a = (int)(range.Offset - HexRows.StartOf(startRow));
+        int b = (int)(range.End - 1 - HexRows.StartOf(endRow));
+        if (startRow < first - 1)
+            (startRow, a) = (first - 1, 0);
+        if (endRow > last + 1)
+            (endRow, b) = (last + 1, HexRows.BytesPerRow - 1);
+
+        double TopOf(long row) => RowsTop + row * RowHeight - this.scrollTop + 1;
+        double BottomOf(long row) => TopOf(row) + RowHeight - 2;
+
+        foreach (bool inCharacters in (ReadOnlySpan<bool>)[false, true])
+        {
+            double Left(int column) => inCharacters ? CharacterCellLeft(column) - 0.5 : HexByteX(column) - 4;
+            double Right(int column) => inCharacters ? CharacterCellLeft(column + 1) + 0.5 : HexByteX(column) + 2 * this.charWidth + 4;
+            double rowLeft = Left(0), rowRight = Right(HexRows.BytesPerRow - 1);
+
+            if (startRow == endRow)
+            {
+                shapes.Add(Rounded([new(Left(a), TopOf(startRow)), new(Right(b), TopOf(startRow)), new(Right(b), BottomOf(endRow)), new(Left(a), BottomOf(endRow))]));
+            }
+            else if (endRow == startRow + 1 && b < a)
+            {
+                shapes.Add(Rounded([new(Left(a), TopOf(startRow)), new(rowRight, TopOf(startRow)), new(rowRight, BottomOf(startRow)), new(Left(a), BottomOf(startRow))]));
+                shapes.Add(Rounded([new(rowLeft, TopOf(endRow)), new(Right(b), TopOf(endRow)), new(Right(b), BottomOf(endRow)), new(rowLeft, BottomOf(endRow))]));
+            }
+            else
+            {
+                shapes.Add(Rounded([
+                    new(Left(a), TopOf(startRow)), new(rowRight, TopOf(startRow)), new(rowRight, TopOf(endRow)), new(Right(b), TopOf(endRow)),
+                    new(Right(b), BottomOf(endRow)), new(rowLeft, BottomOf(endRow)), new(rowLeft, BottomOf(startRow)), new(Left(a), BottomOf(startRow)),
+                ]));
+            }
+        }
+
+        return shapes;
+    }
+
+    /// <summary>A closed figure through <paramref name="corners"/> with each corner rounded, inner
+    /// steps as well as outer ones, by as much as the marks' corners are - less where an edge is
+    /// too short for it. A corner whose edges run straight on is left as it is.</summary>
+    private static StreamGeometry Rounded(ReadOnlySpan<Point> corners)
+    {
+        const double radius = 4;
+        var shape = new StreamGeometry();
+        using var figure = shape.Open();
+        int n = corners.Length;
+        for (int i = 0; i < n; i++)
+        {
+            var before = corners[(i + n - 1) % n];
+            var corner = corners[i];
+            var after = corners[(i + 1) % n];
+            double r = Math.Min(radius, Math.Min(Distance(before, corner), Distance(corner, after)) / 2);
+            var enter = Toward(corner, before, r);
+            var leave = Toward(corner, after, r);
+            if (i == 0)
+                figure.BeginFigure(enter, isFilled: true);
+            else
+                figure.LineTo(enter);
+            figure.QuadraticBezierTo(corner, leave);
+        }
+
+        figure.EndFigure(isClosed: true);
+        return shape;
+    }
+
+    private static double Distance(Point a, Point b) => Math.Abs(a.X - b.X) + Math.Abs(a.Y - b.Y);
+
+    /// <summary>The point <paramref name="by"/> from <paramref name="from"/> toward
+    /// <paramref name="to"/>, along an edge that is horizontal or vertical.</summary>
+    private static Point Toward(Point from, Point to, double by)
+    {
+        double length = Distance(from, to);
+        return length == 0 ? from : new Point(from.X + (to.X - from.X) * by / length, from.Y + (to.Y - from.Y) * by / length);
     }
 
     /// <summary>A solid block behind <paramref name="span"/> of row <paramref name="row"/> in one

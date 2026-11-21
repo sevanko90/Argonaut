@@ -43,6 +43,13 @@ public partial class App : Application
         this.log = log;
     }
 
+    /// <summary>For Avalonia's runtime XAML loader and the designer, which construct the app
+    /// themselves; they keep no log. The app itself is built by <c>Program</c>, with its log.</summary>
+    public App()
+        : this(NullDiagnosticLog.Instance)
+    {
+    }
+
     public override void Initialize()
     {
         AvaloniaXamlLoader.Load(this);

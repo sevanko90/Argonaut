@@ -29,6 +29,8 @@ public static class StructStorageNotes
                 .Append(" = ").Append(Bytes(value.Size)).Append(", element i at +i × ").Append(value.Stride).Append('.');
             if (!element.IsArray && element.Scalar is { Kind: StructScalarKind.Character })
                 note.Append(" Shown as text up to the first NUL.");
+            else if (StructValueText.CanReadAsText(node))
+                note.Append(" Shown as ASCII text up to the first NUL when its bytes are printable that far - C# code often holds a string in bytes - else as its items.");
             note.AppendLine().AppendLine();
             if (element.IsArray)
                 return note.Append(At(node)).ToString();

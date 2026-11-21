@@ -28,7 +28,8 @@ public readonly record struct StructText(string Text, StructTextKind Kind);
 
 /// <summary>
 /// Reads a node's bytes as its type: integers, floats, bools, characters, pointers, enums by name,
-/// bitfields by their bits, and character arrays as the string up to their first NUL. Reads with
+/// bitfields by their bits, and arrays of characters or bytes asked to read as text as the string
+/// up to their first NUL. Reads with
 /// <see cref="ByteReading"/>, as the Values tab does, so a field and the tab never disagree; each
 /// read copies at most a bounded number of bytes into a stack buffer.
 /// </summary>
@@ -41,15 +42,20 @@ public static class StructValueText
 
     /// <param name="bytes">The document.</param>
     /// <param name="start">Where the mapping starts in the document.</param>
-    public static StructText Read(IByteSource bytes, long start, in StructNode node, ByteOrder order, StructTarget target)
+    /// <param name="asText">Whether an array that <see cref="CanReadAsText"/> reads as text rather
+    /// than as its count of items.</param>
+    public static StructText Read(IByteSource bytes, long start, in StructNode node, ByteOrder order, StructTarget target, bool asText)
     {
         var value = node.Value;
         long at = start + node.Offset;
         if (node.Kind == StructNodeKind.Padding)
             return new StructText($"{node.Size} byte{(node.Size == 1 ? string.Empty : "s")}", StructTextKind.Summary);
 
-        if (value.IsArray && value.Scalar is { Kind: StructScalarKind.Character } character && value.Dimension == value.Lengths.Count - 1)
-            return ReadString(bytes, at, value.Count, character.Size);
+        if (asText && CanReadAsText(node))
+        {
+            var element = value.Scalar!;
+            return ReadString(bytes, at, value.Count, element.Size, element.Kind == StructScalarKind.Character ? null : Encoding.Latin1);
+        }
 
         if (value.IsArray)
             return new StructText($"{value.Count} item{(value.Count == 1 ? string.Empty : "s")}", StructTextKind.Summary);
@@ -76,6 +82,52 @@ public static class StructValueText
             return Bitfield(read, value, scalar, width, order, target);
 
         return Scalar(read, scalar, value.Enum, order, target);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="node"/> is an array that can be read as text: the innermost
+    /// dimension of an array of characters, or of 1-byte integers - which C# code often uses for a
+    /// string, having no 1-byte character.
+    /// </summary>
+    public static bool CanReadAsText(in StructNode node)
+    {
+        var value = node.Value;
+        return node.Kind != StructNodeKind.Padding && value.IsArray && value.Dimension == value.Lengths.Count - 1 && value.Struct is null && value.Enum is null
+            && value.Scalar is { Kind: StructScalarKind.Character } or { Kind: StructScalarKind.Signed or StructScalarKind.Unsigned, Size: 1 };
+    }
+
+    /// <summary>
+    /// Whether an array that can be read as text should be by default: a character array always;
+    /// a byte array when its bytes look like text - printable ASCII up to a NUL, or printable all
+    /// the way through. Looks at no more than <see cref="MaximumStringBytes"/> bytes.
+    /// </summary>
+    public static bool ReadsAsTextByDefault(IByteSource bytes, long start, in StructNode node)
+    {
+        if (!CanReadAsText(node))
+            return false;
+        if (node.Value.Scalar!.Kind == StructScalarKind.Character)
+            return true;
+
+        long at = start + node.Offset;
+        long wanted = Math.Min(node.Value.Count, MaximumStringBytes);
+        long available = Math.Max(0, Math.Min(wanted, bytes.AvailableLength - at));
+        if (at < 0 || available == 0)
+            return false;
+
+        Span<byte> buffer = stackalloc byte[MaximumStringBytes];
+        var read = buffer[..bytes.CopyTo(at, buffer[..(int)available])];
+        int printable = 0;
+        foreach (byte b in read)
+        {
+            if (b == 0)
+                return printable > 0;
+            if (b is not (>= 0x20 and <= 0x7E or (byte)'\t' or (byte)'\n' or (byte)'\r'))
+                return false;
+            printable++;
+        }
+
+        // No NUL in what was read: text if it was all of the array, or a run too long to be chance.
+        return printable > 0 && (read.Length == node.Value.Count || read.Length == MaximumStringBytes);
     }
 
     private static StructText Scalar(ReadOnlySpan<byte> read, StructScalar scalar, EnumDeclaration? enumeration, ByteOrder order, StructTarget target)
@@ -202,9 +254,10 @@ public static class StructValueText
         return new StructText(shown is null ? number : $"'{shown}' ({number})", StructTextKind.Text);
     }
 
-    /// <summary>A character array as text up to its first NUL, decoded by its width - UTF-8, UTF-16
-    /// or UTF-32 - and capped at <see cref="MaximumStringLength"/> characters.</summary>
-    private static StructText ReadString(IByteSource bytes, long at, long count, int width)
+    /// <summary>An array as text up to its first NUL, decoded by its width - UTF-8, UTF-16 or
+    /// UTF-32, or <paramref name="bytesAs"/> for bytes that are not characters - and capped at
+    /// <see cref="MaximumStringLength"/> characters.</summary>
+    private static StructText ReadString(IByteSource bytes, long at, long count, int width, Encoding? bytesAs)
     {
         long wanted = Math.Min(count * width, MaximumStringBytes - MaximumStringBytes % width);
         long available = Math.Max(0, Math.Min(wanted, bytes.AvailableLength - at));
@@ -218,7 +271,7 @@ public static class StructValueText
         while (end + width <= read.Length && !IsNul(read.Slice(end, width)))
             end += width;
 
-        var encoding = width switch
+        var encoding = bytesAs ?? width switch
         {
             1 => (Encoding)new UTF8Encoding(false, false),
             2 => Encoding.Unicode,

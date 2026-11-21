@@ -44,7 +44,8 @@ public sealed class StructTreeTests
     {
         var runs = new List<TreeRun>();
         tree.Painter.AppendRuns(row, runs);
-        return string.Join(string.Empty, runs.Select(r => r.Text));
+        // The chips after a row's text are drawn apart from it, so they are not part of what it says.
+        return string.Join(string.Empty, runs.Where(r => r.Style is not (TreeRunStyle.Note or TreeRunStyle.Chip or TreeRunStyle.Action)).Select(r => r.Text));
     }
 
     private static byte[] SampleBytes(int count, float ratio, bool enabled, string name)
@@ -285,5 +286,85 @@ public sealed class StructTreeTests
 
         tree.CollapseDeep(cursor.Current);
         Assert.Equal(2, Rows(tree).Count);
+    }
+
+    private const string Named = "struct Named { public int Id; public fixed byte Name[8]; }";
+
+    private static StructNode NameField(StructTree tree) => tree.Nodes.Child(tree.Nodes.Root, 1);
+
+    private static byte[] NamedBytes(params byte[] name)
+    {
+        var bytes = new byte[12];
+        name.CopyTo(bytes, 4);
+        return bytes;
+    }
+
+    [Fact]
+    public void AByteArray_OfPrintableTextUpToANul_ReadsAsText()
+    {
+        var tree = Tree(Named, "Named", NamedBytes("Jason"u8.ToArray()));
+        Assert.Equal("\"Jason\"", tree.ValueOf(NameField(tree)).Text);
+        Assert.True(tree.ReadsAsText(NameField(tree)));
+    }
+
+    [Fact]
+    public void AByteArray_PrintableAllTheWayThrough_ReadsAsText()
+    {
+        var tree = Tree(Named, "Named", NamedBytes("Argonaut"u8.ToArray()));
+        Assert.Equal("\"Argonaut\"", tree.ValueOf(NameField(tree)).Text);
+    }
+
+    [Theory]
+    [InlineData(new byte[] { 0x4A, 0x01, 0x6F, 0 })]
+    [InlineData(new byte[] { 0, 0x4A })]
+    [InlineData(new byte[] { 0xC3, 0xA9, 0 })]
+    public void AByteArray_ThatDoesNotLookLikeText_ReadsAsItsItems(byte[] name)
+    {
+        var tree = Tree(Named, "Named", NamedBytes(name));
+        Assert.Equal("8 items", tree.ValueOf(NameField(tree)).Text);
+    }
+
+    [Fact]
+    public void TheChip_SwitchesAnArrayEitherWay_AndTheSwitchIsKeptAsTheStructMoves()
+    {
+        var bytes = NamedBytes(0x4A, 0x01).Concat(NamedBytes("Medea"u8.ToArray())).ToArray();
+        var tree = Tree(Named, "Named", bytes);
+        var name = NameField(tree);
+        Assert.Equal("8 items", tree.ValueOf(name).Text);
+
+        tree.ToggleText(name);
+        Assert.Equal("\"J\\x01\"", tree.ValueOf(name).Text);
+
+        tree.Start = 12;
+        Assert.Equal("\"Medea\"", tree.ValueOf(name).Text);
+
+        tree.ToggleText(name);
+        Assert.Equal("8 items", tree.ValueOf(name).Text);
+    }
+
+    [Fact]
+    public void ACharArray_ReadsAsText_AndCanBeSwitchedToItsItems()
+    {
+        var tree = Tree(Sample, "Sample", SampleBytes(1, 1, true, "Argonaut"));
+        var name = tree.Nodes.Child(tree.Nodes.Root, 3);
+        Assert.Equal("\"Argonaut\"", tree.ValueOf(name).Text);
+
+        tree.ToggleText(name);
+        Assert.Equal("256 items", tree.ValueOf(name).Text);
+    }
+
+    [Fact]
+    public void OnlyArraysThatCanReadAsText_GetTheChip()
+    {
+        var tree = Tree("struct M { int n[2]; unsigned char b[2]; uint16_t w[2]; };", "M", new byte[16]);
+        var chips = new List<bool>();
+        for (long i = 0; i < 3; i++)
+        {
+            var runs = new List<TreeRun>();
+            tree.Painter.AppendRuns(tree.RowOf(tree.Nodes.Child(tree.Nodes.Root, i), 0, -1), runs);
+            chips.Add(runs.Any(r => r.Style == TreeRunStyle.Action && r.Link is StructTextSwitch));
+        }
+
+        Assert.Equal([false, true, false], chips);
     }
 }

@@ -28,6 +28,10 @@ public sealed class StructTree : ITreeRowSource
 {
     private readonly Dictionary<long, bool> overrides = new();
 
+    // The arrays switched between text and items, by position, where the switch differs from what
+    // they read as by default.
+    private readonly Dictionary<long, bool> textChoices = new();
+
     /// <param name="nodes">The mapped struct's rows.</param>
     /// <param name="bytes">The document, read for each row drawn - never released here.</param>
     /// <param name="start">Where the mapping starts in the document.</param>
@@ -167,7 +171,26 @@ public sealed class StructTree : ITreeRowSource
     public bool IsComplete => true;
 
     /// <summary>The value <paramref name="node"/> reads as.</summary>
-    public StructText ValueOf(in StructNode node) => StructValueText.Read(Bytes, Start, node, Order, Target);
+    public StructText ValueOf(in StructNode node) => StructValueText.Read(Bytes, Start, node, Order, Target, ReadsAsText(node));
+
+    /// <summary>Whether <paramref name="node"/> is an array that can be switched between text and
+    /// its items.</summary>
+    public bool CanReadAsText(in StructNode node) => StructValueText.CanReadAsText(node);
+
+    /// <summary>
+    /// Whether <paramref name="node"/> reads as text: as switched, or by default - a character
+    /// array always, a byte array when its bytes here look like text. The default is worked out
+    /// where the struct is, so a switch is kept as the caret moves but a default follows the bytes.
+    /// </summary>
+    public bool ReadsAsText(in StructNode node)
+        => this.textChoices.TryGetValue(node.Position, out bool chosen) ? chosen && CanReadAsText(node) : StructValueText.ReadsAsTextByDefault(Bytes, Start, node);
+
+    /// <summary>Switches <paramref name="node"/> between text and its items.</summary>
+    public void ToggleText(in StructNode node)
+    {
+        if (CanReadAsText(node))
+            this.textChoices[node.Position] = !ReadsAsText(node);
+    }
 
     /// <summary>The row <paramref name="node"/> is, for the surface.</summary>
     internal TreeRow RowOf(in StructNode node, int depth, long parentPosition)
@@ -367,9 +390,15 @@ internal sealed class StructTreePainter(StructTree tree) : ITreeRowPainter
             StructTextKind.Missing => TreeRunStyle.Comment,
             _ => TreeRunStyle.Plain,
         }));
+
+        if (tree.CanReadAsText(node))
+            runs.Add(new TreeRun(tree.ReadsAsText(node) ? "as items" : "as text", TreeRunStyle.Action, new StructTextSwitch(node)));
     }
 
     /// <summary>How the row's type is stored, in the definition's language and the target.</summary>
     public object? ToolTipFor(in TreeRow row)
         => row.Detail is StructNode node ? StructStorageNotes.For(node, tree.Nodes.Struct.Language, tree.Target, tree.Order) : null;
 }
+
+/// <summary>The link of a row's "as text" / "as items" chip: the array it switches.</summary>
+public sealed record StructTextSwitch(StructNode Node);

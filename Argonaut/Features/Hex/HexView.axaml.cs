@@ -24,6 +24,7 @@ public partial class HexView : UserControl
         InitializeComponent();
         scrollBars = new RowScrollBars(Surface, VerticalScrollBar, PanScrollBar);
         structScrollBars = new RowScrollBars(StructSurface, StructVerticalScrollBar, StructPanScrollBar);
+        StructSurface.LinkClicked += OnStructLinkClicked;
         DetachedFromVisualTree += (_, _) =>
         {
             scrollBars.Dispose();
@@ -232,6 +233,16 @@ public partial class HexView : UserControl
         int selected = Math.Abs(DefinitionEditor.SelectionEnd - DefinitionEditor.SelectionStart);
         if (text.Length == 0 || selected >= text.Length)
             this.shown?.Structs.DefinitionPasted();
+    }
+
+    /// <summary>A struct row's "as text" / "as items" chip: the array reads the other way.</summary>
+    private void OnStructLinkClicked(object? sender, Argonaut.Ui.Tree.TreeLinkClickedEventArgs e)
+    {
+        if (e.Link is not StructTextSwitch textSwitch || this.shown?.Structs.Tree is not { } tree)
+            return;
+
+        tree.ToggleText(textSwitch.Node);
+        StructSurface.InvalidateRows();
     }
 
     private void OnStructsChanged(object? sender, PropertyChangedEventArgs e)

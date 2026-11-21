@@ -308,4 +308,86 @@ public sealed class StructDecoderViewModelTests
         Assert.Equal(hex.Values.HighlightedRange, hex.HighlightedRange);
         hex.Dispose();
     }
+
+    private sealed class MemoryDefinitionStore : IStructDefinitionStore
+    {
+        public readonly Dictionary<(string, StructLanguage), string> Files = new();
+
+        public IReadOnlyList<StructDefinitionEntry> Enumerate()
+            => Files.Keys.OrderBy(k => k.Item1).Select(k => new StructDefinitionEntry(k.Item1, k.Item2, k.Item1)).ToList();
+
+        public string? Load(StructDefinitionEntry entry) => Files.GetValueOrDefault((entry.Name, entry.Language));
+
+        public StructDefinitionEntry Save(string name, StructLanguage language, string text)
+        {
+            Files[(name, language)] = text;
+            return new StructDefinitionEntry(name, language, name);
+        }
+
+        public void Delete(StructDefinitionEntry entry) => Files.Remove((entry.Name, entry.Language));
+
+        public void RevealFolder()
+        {
+        }
+    }
+
+    [Fact]
+    public void Save_KeepsTheDefinitionInItsLanguage_UnderTheStructsName()
+    {
+        var store = new MemoryDefinitionStore();
+        var decoder = new StructDecoderViewModel(ByteOrder.Little, store) { DefinitionText = Pair };
+        Assert.True(decoder.CanSave);
+        Assert.Equal("Pair", decoder.SuggestedName);
+
+        Assert.Null(decoder.Save("Pair"));
+
+        Assert.Equal(Pair, store.Files[("Pair", StructLanguage.C)]);
+        Assert.Equal("Pair", Assert.Single(decoder.Saved).Name);
+        Assert.Equal("A definition needs a name.", decoder.Save(" "));
+    }
+
+    [Fact]
+    public void WithoutAStore_NothingCanBeSaved()
+    {
+        var decoder = new StructDecoderViewModel(ByteOrder.Little) { DefinitionText = Pair };
+        Assert.False(decoder.CanSave);
+    }
+
+    [Fact]
+    public void OpeningASavedDefinition_ReadsItInItsLanguage_AndRemembersTheOneItReplaces()
+    {
+        var store = new MemoryDefinitionStore();
+        store.Save("Cs", StructLanguage.CSharp, "struct Cs { public int A; }");
+        var decoder = new StructDecoderViewModel(ByteOrder.Little, store) { DefinitionText = Pair };
+
+        Assert.True(decoder.Open(decoder.Saved[0]));
+
+        Assert.Equal("struct Cs { public int A; }", decoder.DefinitionText);
+        Assert.Equal(StructLanguageChoice.CSharp, decoder.Language);
+        Assert.Equal("Pair · C", Assert.Single(decoder.Recent).Label);
+    }
+
+    [Fact]
+    public void ARecentDefinition_OpensAgain_AndASampleIsNeverRemembered()
+    {
+        var recents = new RecentStructDefinitions();
+        var decoder = new StructDecoderViewModel(ByteOrder.Little, recents: recents);
+        decoder.InsertSample(StructLanguage.C);
+        decoder.DefinitionPasted();
+        decoder.DefinitionText = Pair;
+        Assert.Empty(decoder.Recent);
+
+        decoder.InsertSample(StructLanguage.CSharp);
+        decoder.Open(Assert.Single(decoder.Recent));
+        Assert.Equal(Pair, decoder.DefinitionText);
+    }
+
+    [Fact]
+    public void ClosingTheDocument_RemembersTheDefinition()
+    {
+        var recents = new RecentStructDefinitions();
+        var decoder = new StructDecoderViewModel(ByteOrder.Little, recents: recents) { DefinitionText = Pair };
+        decoder.Close();
+        Assert.Equal([Pair], recents.Entries);
+    }
 }

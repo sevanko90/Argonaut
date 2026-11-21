@@ -11,6 +11,7 @@ using Argonaut.Engine.Logging;
 using Argonaut.Engine.Saving;
 using Argonaut.Engine.Settings;
 using Argonaut.Engine.Transforms;
+using Argonaut.Features.Hex.Structs;
 using Argonaut.Features.Json.Schema;
 using Argonaut.Engine.Http;
 using Argonaut.Shell;
@@ -71,6 +72,7 @@ public partial class App : Application
                 revealDirectory: launcher.ShowFolder);
 
             var recipes = new RecipeFolderStore(RecipeFolderStore.BundledDirectoryBesideApp, AppDataPaths.RecipesDirectory);
+            var structDefinitions = new StructDefinitionFolderStore(AppDataPaths.StructDefinitionsDirectory, launcher.ShowFolder);
 
             // Sealed blocks replaced these unsealed path lists; dropping them is what keeps the
             // paths out of settings.json now that their replacements are sealed.
@@ -83,7 +85,8 @@ public partial class App : Application
                 SettingsSealers.ForThisPlatform(AppDataPaths.SealingKeyFile), FileAccesses.ForThisPlatform(),
                 new ResponseDownloader(new HttpClientFetcher(new System.Net.Http.HttpClient()), AppDataPaths.ResponsesDirectory),
                 new ResponseStore(AppDataPaths.ResponsesDirectory),
-                OpenedCopies());
+                OpenedCopies(),
+                structDefinitions);
             mainWindow = window;
             desktop.MainWindow = window;
 

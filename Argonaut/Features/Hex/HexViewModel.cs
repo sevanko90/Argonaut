@@ -41,7 +41,8 @@ public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDoc
     private IndexGrowthMonitor? growthMonitor;
     private long shownLength;
 
-    public HexViewModel(IDocumentExportActions? actions = null, HexViewSettings? settings = null)
+    public HexViewModel(IDocumentExportActions? actions = null, HexViewSettings? settings = null,
+        IStructDefinitionStore? structDefinitions = null, RecentStructDefinitions? recentStructs = null)
     {
         this.actions = actions;
         this.settings = settings ?? new HexViewSettings();
@@ -51,7 +52,7 @@ public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDoc
             this.settings.ValuesByteOrder,
             order => this.settings.ValuesByteOrder = order,
             (start, length) => Cursor.Select(new HexCaret(start, start + length)));
-        Structs = new StructDecoderViewModel(Values.Order);
+        Structs = new StructDecoderViewModel(Values.Order, structDefinitions, recentStructs);
         Values.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(HexValuesViewModel.Order))

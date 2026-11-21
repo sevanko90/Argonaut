@@ -30,6 +30,9 @@ public enum StructLanguageChoice
 /// </summary>
 public sealed class StructDecoderViewModel : ObservableObject
 {
+    private readonly IStructDefinitionStore? store;
+    private readonly RecentStructDefinitions recents;
+
     private string definitionText = string.Empty;
     private StructLanguageChoice language;
     private StructDefinition? definition;
@@ -58,9 +61,94 @@ public sealed class StructDecoderViewModel : ObservableObject
     // follows is the tree's own, not one for the struct to follow.
     private ByteRange? ownSelection;
 
-    public StructDecoderViewModel(ByteOrder order)
+    /// <param name="store">Where definitions are saved; null offers no saving.</param>
+    /// <param name="recents">The definitions used lately; null keeps them for this view only.</param>
+    public StructDecoderViewModel(ByteOrder order, IStructDefinitionStore? store = null, RecentStructDefinitions? recents = null)
     {
         this.order = order;
+        this.store = store;
+        this.recents = recents ?? new RecentStructDefinitions();
+        RefreshDefinitions();
+    }
+
+    /// <summary>The saved definitions, as the Structures tab lists them.</summary>
+    public IReadOnlyList<StructDefinitionEntry> Saved { get; private set; } = [];
+
+    /// <summary>The definitions used lately, most recent first.</summary>
+    public IReadOnlyList<RecentStructDefinition> Recent { get; private set; } = [];
+
+    public bool CanSave => this.store is not null && this.definition is not null;
+
+    public bool HasSavedOrRecent => Saved.Count > 0 || Recent.Count > 0;
+
+    /// <summary>What Save offers as the name: the struct picked, which is usually what the
+    /// definition is for.</summary>
+    public string SuggestedName => this.selectedType ?? "Definition";
+
+    /// <summary>Reads the saved definitions again - the folder may have changed outside the app -
+    /// and the recent ones.</summary>
+    public void RefreshDefinitions()
+    {
+        Saved = this.store?.Enumerate() ?? [];
+        Recent = this.recents.Entries.Select(RecentStructDefinition.Of).ToList();
+        OnPropertyChanged(nameof(Saved));
+        OnPropertyChanged(nameof(Recent));
+        OnPropertyChanged(nameof(HasSavedOrRecent));
+    }
+
+    /// <summary>Saves the definition as <paramref name="name"/> in the language it was read as;
+    /// null when saved, else why not.</summary>
+    public string? Save(string name)
+    {
+        if (this.store is null || this.definition is null)
+            return "There is no definition to save.";
+        if (string.IsNullOrWhiteSpace(name))
+            return "A definition needs a name.";
+
+        try
+        {
+            this.store.Save(name, this.definition.Language, this.definitionText);
+        }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+        {
+            return $"Could not save: {ex.Message}";
+        }
+
+        RefreshDefinitions();
+        return null;
+    }
+
+    /// <summary>Opens a saved definition in the editor, read as its file's language.</summary>
+    public bool Open(StructDefinitionEntry entry)
+    {
+        if (this.store?.Load(entry) is not { } text)
+            return false;
+
+        Replace(text, entry.Language == StructLanguage.CSharp ? StructLanguageChoice.CSharp : StructLanguageChoice.C);
+        return true;
+    }
+
+    /// <summary>Opens a recent definition in the editor, its language told from it.</summary>
+    public void Open(RecentStructDefinition recent) => Replace(recent.Text, StructLanguageChoice.Detect);
+
+    public void RevealDefinitionsFolder() => this.store?.RevealFolder();
+
+    /// <summary>Remembers the definition in the editor among the recent ones - when it is about to
+    /// be replaced, or the document closes. A sample, or one that declares nothing, is not.</summary>
+    public void RememberDefinition()
+    {
+        if (Types.Count == 0 || this.definitionText == StructSamples.CSharp || this.definitionText == StructSamples.C)
+            return;
+
+        this.recents.Remember(this.definitionText);
+        RefreshDefinitions();
+    }
+
+    private void Replace(string text, StructLanguageChoice language)
+    {
+        RememberDefinition();
+        Language = language;
+        DefinitionText = text;
     }
 
     /// <summary>The targets a C definition can be laid out for.</summary>
@@ -125,8 +213,10 @@ public sealed class StructDecoderViewModel : ObservableObject
         get => this.selectedType;
         set
         {
-            if (SetField(ref this.selectedType, value))
-                Lay();
+            if (!SetField(ref this.selectedType, value))
+                return;
+            OnPropertyChanged(nameof(SuggestedName));
+            Lay();
         }
     }
 
@@ -328,6 +418,7 @@ public sealed class StructDecoderViewModel : ObservableObject
     /// <summary>Before the document releases its source: a surface showing the tree lets go.</summary>
     public void Close()
     {
+        RememberDefinition();
         this.bytes = null;
         Tree = null;
     }
@@ -342,18 +433,18 @@ public sealed class StructDecoderViewModel : ObservableObject
 
     /// <summary>A new definition pasted in: tell its language from it again, whatever was chosen
     /// for the last one.</summary>
-    public void DefinitionPasted() => Language = StructLanguageChoice.Detect;
+    public void DefinitionPasted()
+    {
+        RememberDefinition();
+        Language = StructLanguageChoice.Detect;
+    }
 
     /// <summary>Whether the editor is empty, so the Structures tab offers the sample.</summary>
     public bool OffersSample => string.IsNullOrWhiteSpace(this.definitionText);
 
     /// <summary>Fills the editor with the sample in <paramref name="sampleLanguage"/>: a new
     /// definition, so its language is told from it, as a paste's is.</summary>
-    public void InsertSample(StructLanguage sampleLanguage)
-    {
-        Language = StructLanguageChoice.Detect;
-        DefinitionText = StructSamples.For(sampleLanguage);
-    }
+    public void InsertSample(StructLanguage sampleLanguage) => Replace(StructSamples.For(sampleLanguage), StructLanguageChoice.Detect);
 
     private void Parse()
     {
@@ -381,6 +472,8 @@ public sealed class StructDecoderViewModel : ObservableObject
         OnPropertyChanged(nameof(SelectedType));
         OnPropertyChanged(nameof(LanguageText));
         OnPropertyChanged(nameof(ShowsTarget));
+        OnPropertyChanged(nameof(CanSave));
+        OnPropertyChanged(nameof(SuggestedName));
         Lay();
     }
 
@@ -422,5 +515,23 @@ public sealed class StructDecoderViewModel : ObservableObject
         }
 
         NotifyStructShown();
+    }
+}
+
+/// <summary>A recent definition as the Structures tab lists it: the structs it declares and its
+/// language - <c>Header, Record · C</c> - and its text.</summary>
+public sealed record RecentStructDefinition(string Label, string Text)
+{
+    public static RecentStructDefinition Of(string text)
+    {
+        var read = StructParser.Parse(text);
+        var names = read.Declarations.Select(d => d.Name).Where(n => !n.StartsWith('<')).Distinct().ToList();
+        string structs = names.Count switch
+        {
+            0 => "(no structs)",
+            <= 3 => string.Join(", ", names),
+            _ => $"{string.Join(", ", names.Take(3))} +{names.Count - 3}",
+        };
+        return new RecentStructDefinition($"{structs} · {(read.Language == StructLanguage.CSharp ? "C#" : "C")}", text);
     }
 }

@@ -259,29 +259,59 @@ public static class StructValueText
     /// <see cref="MaximumStringLength"/> characters.</summary>
     private static StructText ReadString(IByteSource bytes, long at, long count, int width, Encoding? bytesAs)
     {
-        long wanted = Math.Min(count * width, MaximumStringBytes - MaximumStringBytes % width);
-        long available = Math.Max(0, Math.Min(wanted, bytes.AvailableLength - at));
-        if (available < width)
+        if (DecodeString(bytes, at, count, width, bytesAs, MaximumStringBytes) is not { } decoded)
             return new StructText("-", StructTextKind.Missing);
 
-        Span<byte> buffer = stackalloc byte[MaximumStringBytes];
-        var read = buffer[..bytes.CopyTo(at, buffer[..(int)(available - available % width)])];
+        string text = decoded.Text.Length > MaximumStringLength ? decoded.Text[..MaximumStringLength] : decoded.Text;
+        return new StructText(Quote(text) + (decoded.Cut ? "…" : string.Empty), StructTextKind.Text);
+    }
 
-        int end = 0;
-        while (end + width <= read.Length && !IsNul(read.Slice(end, width)))
-            end += width;
+    /// <summary>
+    /// <paramref name="node"/>, an array that <see cref="CanReadAsText"/>, as its text up to its
+    /// first NUL - unquoted and unescaped, for copying out - reading at most
+    /// <paramref name="maxBytes"/>; null when its bytes are past the end of the document.
+    /// </summary>
+    public static (string Text, bool Cut)? ReadText(IByteSource bytes, long start, in StructNode node, int maxBytes)
+    {
+        var element = node.Value.Scalar!;
+        return DecodeString(bytes, start + node.Offset, node.Value.Count, element.Size, element.Kind == StructScalarKind.Character ? null : Encoding.Latin1, maxBytes);
+    }
 
-        var encoding = bytesAs ?? width switch
+    /// <summary>Decodes up to the first NUL of an array of <paramref name="count"/> characters of
+    /// <paramref name="width"/> bytes, reading at most <paramref name="maxBytes"/> - on the stack
+    /// when that is small, else in a rented buffer. <c>Cut</c> says the read stopped at the cap
+    /// before a NUL or the array's end.</summary>
+    private static (string Text, bool Cut)? DecodeString(IByteSource bytes, long at, long count, int width, Encoding? bytesAs, int maxBytes)
+    {
+        long wanted = Math.Min(count * width, maxBytes - maxBytes % width);
+        long available = Math.Max(0, Math.Min(wanted, bytes.AvailableLength - at));
+        if (at < 0 || available < width)
+            return null;
+
+        int length = (int)(available - available % width);
+        byte[]? rented = length > MaximumStringBytes ? System.Buffers.ArrayPool<byte>.Shared.Rent(length) : null;
+        try
         {
-            1 => (Encoding)new UTF8Encoding(false, false),
-            2 => Encoding.Unicode,
-            _ => Encoding.UTF32,
-        };
-        string text = encoding.GetString(read[..end]);
-        if (text.Length > MaximumStringLength)
-            text = text[..MaximumStringLength];
-        bool cut = end == read.Length && read.Length < count * width;
-        return new StructText(Quote(text) + (cut ? "…" : string.Empty), StructTextKind.Text);
+            Span<byte> buffer = rented is null ? stackalloc byte[MaximumStringBytes] : rented;
+            var read = buffer[..bytes.CopyTo(at, buffer[..length])];
+
+            int end = 0;
+            while (end + width <= read.Length && !IsNul(read.Slice(end, width)))
+                end += width;
+
+            var encoding = bytesAs ?? width switch
+            {
+                1 => (Encoding)new UTF8Encoding(false, false),
+                2 => Encoding.Unicode,
+                _ => Encoding.UTF32,
+            };
+            return (encoding.GetString(read[..end]), end == read.Length && read.Length < count * width);
+        }
+        finally
+        {
+            if (rented is not null)
+                System.Buffers.ArrayPool<byte>.Shared.Return(rented);
+        }
     }
 
     private static bool IsNul(ReadOnlySpan<byte> character)

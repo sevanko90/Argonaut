@@ -7,7 +7,7 @@ structs and arrays expanding in place. ("Tree" below means that view - the JSON 
 on the hex view (docs/hex-view-plan.md) and needs its caret, selection and `ByteReading` (steps 3
 and 6b) first; it is that plan's step 7.
 
-Status: planned for 2.5, all steps in one release; steps 1-6 built.
+Status: planned for 2.5, all steps in one release; steps 1-7 built.
 
 ## Decided
 
@@ -173,15 +173,23 @@ which is itself a check. The sample is never saved into the definitions folder u
   whichever tab. Selecting a row selects its bytes and reveals them, and the struct stays where
   it is; with the struct pinned, moving the caret selects the deepest field holding it, opening
   what holds it.
-- "Copy as JSON" copies the decoded struct (or the expanded part of an array of them).
+- "Copy as JSON" copies the decoded struct or array (the selector's copy button) or one row
+  (the tree's menu): structs as objects, anonymous members and bases merged in, text arrays as
+  their full text, enums by name, pointers as strings, bytes past the end as null, padding left
+  out. Bounded at 200,000 values or 16 MB, saying so when it stops short.
 
 ### Keeping definitions
 
 A pasted definition is used at once and kept only when saved: Save writes it to a definitions
-folder, as recipes and schemas are kept - a sandbox-aware folder, read through an injected store,
-never by static file access - so throwaway pastes never fill it. The Structures tab lists the
-saved definitions and the recently used ones; the Struct tab's picker lists every type in the
-definition in use. The struct picked for a document is not remembered - the same file may hold
+folder (`Structs` in the app's data), as recipes and schemas are kept - a sandbox-aware folder,
+read through an injected `IStructDefinitionStore`, never by static file access - so throwaway
+pastes never fill it. Each is a file in its language, `Name.h` or `Name.cs`, so the folder is as
+useful outside the app, and a header dropped into it is listed. The Structures tab's Open menu
+lists the saved definitions, the recently used ones, deleting a saved one, and the folder.
+Recent definitions are the last 8 used, kept as their text sealed in the settings (a pasted
+header may be private code): one is remembered when another replaces it or the document
+closes; samples and anything over 64 KB never are. The Struct tab's picker lists every type in
+the definition in use. The struct picked for a document is not remembered - the same file may hold
 many structs.
 
 ## Steps
@@ -220,7 +228,8 @@ many structs.
    Look chosen by the user: dashed accent edge with rounded corners, and a subtle warm fill
    (amber at 18% light, 8% dark). Whether the pinned caret should select the deepest field or
    stop at the field is to be decided from use.
-7. [ ] Save, the definitions folder and recent definitions, and Copy as JSON.
+7. [x] Save, the definitions folder and recent definitions, and Copy as JSON.
+   Look chosen by the user: Open and Save as icons beside the language picker.
 8. [ ] Architecture doc, roadmap.
 
 ## Not in this plan

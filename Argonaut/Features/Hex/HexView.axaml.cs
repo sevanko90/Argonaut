@@ -1,10 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using Argonaut.Features.Hex.Structs;
 using Argonaut.Features.Hex.Values;
 using Argonaut.Ui.Notifications;
 using Argonaut.Ui.Rows;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
@@ -27,6 +29,7 @@ public partial class HexView : UserControl
         StructSurface.LinkClicked += OnStructLinkClicked;
         StructSurface.HoveredRowChanged += OnStructRowHovered;
         StructSurface.SelectionChanged += OnStructRowSelected;
+        StructSurface.ContextMenu = BuildStructMenu();
         DetachedFromVisualTree += (_, _) =>
         {
             scrollBars.Dispose();
@@ -193,35 +196,49 @@ public partial class HexView : UserControl
         ShowStructTree();
     }
 
-    /// <summary>The selector's list of the structs declared, built as it opens; picking one
-    /// shows it.</summary>
-    private void OnStructTypesOpening(object? sender, EventArgs e)
+    /// <summary>Shows <paramref name="items"/> as a menu under <paramref name="anchor"/>. A menu
+    /// is built when its button is clicked rather than as it opens: by the time a flyout raises
+    /// Opening it has already laid out what it holds, so items added then never show.</summary>
+    private static void ShowMenu(Control anchor, PlacementMode placement, IEnumerable<Control> items)
     {
-        if (sender is not MenuFlyout menu || this.shown?.Structs is not { } structs)
-            return;
+        var menu = new MenuFlyout { Placement = placement };
+        foreach (var item in items)
+            menu.Items.Add(item);
+        menu.ShowAt(anchor);
+    }
 
-        menu.Items.Clear();
+    /// <summary>The selector's list of the structs declared; picking one shows it.</summary>
+    private void OnStructTypesClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Control anchor && this.shown?.Structs is { } structs)
+            ShowMenu(anchor, PlacementMode.BottomEdgeAlignedLeft, StructTypeItems(structs));
+    }
+
+    internal IEnumerable<Control> StructTypeItems(StructDecoderViewModel structs)
+    {
         foreach (string name in structs.Types)
         {
             var item = new MenuItem { Header = name, ToggleType = MenuItemToggleType.Radio, IsChecked = name == structs.SelectedType, FontFamily = StructSurface.FontFamily };
             item.Click += (_, _) => structs.SelectedType = name;
-            menu.Items.Add(item);
+            yield return item;
         }
     }
 
-    /// <summary>The target chip's choices, built as it opens.</summary>
-    private void OnStructTargetsOpening(object? sender, EventArgs e)
+    /// <summary>The target chip's choices.</summary>
+    private void OnStructTargetsClick(object? sender, RoutedEventArgs e)
     {
-        if (sender is not MenuFlyout menu || this.shown?.Structs is not { } structs)
+        if (sender is not Control anchor || this.shown?.Structs is not { } structs)
             return;
 
-        menu.Items.Clear();
+        var items = new List<Control>();
         foreach (var target in structs.Targets)
         {
             var item = new MenuItem { Header = target.Name, ToggleType = MenuItemToggleType.Radio, IsChecked = target == structs.Target };
             item.Click += (_, _) => structs.Target = target;
-            menu.Items.Add(item);
+            items.Add(item);
         }
+
+        ShowMenu(anchor, PlacementMode.BottomEdgeAlignedRight, items);
     }
 
     private void OnInsertCSharpSample(object? sender, RoutedEventArgs e) => this.shown?.Structs.InsertSample(StructLanguage.CSharp);
@@ -237,6 +254,151 @@ public partial class HexView : UserControl
         int selected = Math.Abs(DefinitionEditor.SelectionEnd - DefinitionEditor.SelectionStart);
         if (text.Length == 0 || selected >= text.Length)
             this.shown?.Structs.DefinitionPasted();
+    }
+
+    /// <summary>The struct tree's menu: the row pressed on, or the whole struct, as JSON.</summary>
+    private ContextMenu BuildStructMenu()
+    {
+        var row = new MenuItem { Header = "Copy as JSON" };
+        row.Click += (_, _) =>
+        {
+            if (StructSurface.SelectedRow?.Detail is StructNode node)
+                _ = CopyStructJsonAsync(node, node.DisplayLabel);
+        };
+        var all = new MenuItem { Header = "Copy struct as JSON" };
+        all.Click += (_, _) => OnCopyStructAsJson(null, new RoutedEventArgs());
+        return new ContextMenu { Items = { row, all } };
+    }
+
+    /// <summary>The selector's copy button: the whole mapping - one struct, or the array.</summary>
+    private void OnCopyStructAsJson(object? sender, RoutedEventArgs e)
+    {
+        if (this.shown?.Structs is { Tree: { } tree } structs)
+            _ = CopyStructJsonAsync(tree.Nodes.Root, structs.StructTitle);
+    }
+
+    private async System.Threading.Tasks.Task CopyStructJsonAsync(StructNode node, string what)
+    {
+        if (this.shown?.Structs.Tree is not { } tree || TopLevel.GetTopLevel(this)?.Clipboard is not { } clipboard)
+            return;
+
+        var result = StructJsonWriter.Write(tree, node);
+        await clipboard.SetTextAsync(result.Json);
+        ToastService.Show(result.Truncated
+            ? $"Copied the first {StructJsonWriter.MaxValues:N0} values of {what} as JSON"
+            : $"Copied {what} as JSON");
+    }
+
+    /// <summary>The Open menu, read afresh each time since the folder may change outside the app.</summary>
+    private void OnOpenDefinitionClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Control anchor && this.shown?.Structs is { } structs)
+            ShowMenu(anchor, PlacementMode.BottomEdgeAlignedRight, DefinitionItems(structs));
+    }
+
+    /// <summary>The saved definitions, the recent ones, deleting a saved one, and the folder.</summary>
+    internal static List<Control> DefinitionItems(StructDecoderViewModel structs)
+    {
+        structs.RefreshDefinitions();
+        var items = new List<Control>();
+        MenuItem Section(string title) => new() { Header = title, IsEnabled = false, FontSize = 11 };
+        static string Name(StructDefinitionEntry entry) => $"{entry.Name} · {(entry.Language == StructLanguage.CSharp ? "C#" : "C")}";
+
+        if (structs.Saved.Count > 0)
+        {
+            items.Add(Section("Saved"));
+            foreach (var entry in structs.Saved)
+            {
+                var item = new MenuItem { Header = Name(entry) };
+                item.Click += (_, _) =>
+                {
+                    if (!structs.Open(entry))
+                        ToastService.Show($"Could not read {System.IO.Path.GetFileName(entry.FilePath)}");
+                };
+                items.Add(item);
+            }
+        }
+
+        if (structs.Recent.Count > 0)
+        {
+            if (items.Count > 0)
+                items.Add(new Separator());
+            items.Add(Section("Recent"));
+            foreach (var recent in structs.Recent)
+            {
+                var item = new MenuItem { Header = recent.Label };
+                item.Click += (_, _) => structs.Open(recent);
+                items.Add(item);
+            }
+        }
+
+        if (items.Count == 0)
+            items.Add(Section("Nothing saved or recent yet"));
+
+        items.Add(new Separator());
+        if (structs.Saved.Count > 0)
+        {
+            // Two levels deep, so a delete is never one slip of the pointer away.
+            var delete = new MenuItem { Header = "Delete saved" };
+            foreach (var entry in structs.Saved)
+            {
+                var item = new MenuItem { Header = Name(entry) };
+                item.Click += (_, _) =>
+                {
+                    if (structs.Delete(entry) is { } problem)
+                        ToastService.Show(problem);
+                    else
+                        ToastService.Show($"Deleted {System.IO.Path.GetFileName(entry.FilePath)}");
+                };
+                delete.Items.Add(item);
+            }
+
+            items.Add(delete);
+        }
+
+        var folder = new MenuItem { Header = "Open definitions folder" };
+        folder.Click += (_, _) => structs.RevealDefinitionsFolder();
+        items.Add(folder);
+        return items;
+    }
+
+    /// <summary>Save opens on the struct's name, all selected, so typing replaces it.</summary>
+    private void OnSaveDefinitionOpening(object? sender, EventArgs e)
+    {
+        SaveDefinitionName.Text = this.shown?.Structs.SuggestedName ?? string.Empty;
+        SaveDefinitionProblem.IsVisible = false;
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            SaveDefinitionName.Focus();
+            SaveDefinitionName.SelectAll();
+        });
+    }
+
+    private void OnSaveDefinitionKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter)
+            return;
+        SaveDefinition();
+        e.Handled = true;
+    }
+
+    private void OnSaveDefinitionClick(object? sender, RoutedEventArgs e) => SaveDefinition();
+
+    private void SaveDefinition()
+    {
+        if (this.shown?.Structs is not { } structs)
+            return;
+
+        string name = SaveDefinitionName.Text ?? string.Empty;
+        if (structs.Save(name) is { } problem)
+        {
+            SaveDefinitionProblem.Text = problem;
+            SaveDefinitionProblem.IsVisible = true;
+            return;
+        }
+
+        SaveDefinitionButton.Flyout?.Hide();
+        ToastService.Show($"Saved {name.Trim()}");
     }
 
     // Set while the tree is told to select the caret's field, so that selection is not taken as

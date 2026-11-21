@@ -343,7 +343,7 @@
                         <!-- Structures: the definition pasted, how it was read, and what could not be. -->
                         <DockPanel IsVisible="{Binding ShowsStructuresTab}">
                             <DockPanel DataContext="{Binding Structs}" x:DataType="structs:StructDecoderViewModel" Margin="10,8,10,10">
-                                <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*" Margin="0,0,0,6">
+                                <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,6">
                                     <ComboBox ItemsSource="{Binding LanguageNames}"
                                               SelectedIndex="{Binding SelectedLanguageIndex}"
                                               MinHeight="24"
@@ -353,7 +353,33 @@
                                                VerticalAlignment="Center"
                                                Text="{Binding LanguageText}"
                                                FontSize="11"
+                                               TextTrimming="CharacterEllipsis"
                                                Foreground="{DynamicResource AppMutedTextBrush}" />
+                                    <!-- Kept definitions: the saved and recent ones to open, and saving this one. -->
+                                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2">
+                                        <Button x:Name="OpenDefinitionButton"
+                                                Classes="orderreset"
+                                                Click="OnOpenDefinitionClick"
+                                                ToolTip.Tip="Open a saved or recent definition">
+                                            <icons:LucideIcon Data="{StaticResource Icon.Folder}" Size="13" />
+                                        </Button>
+                                        <Button x:Name="SaveDefinitionButton"
+                                                Classes="orderreset"
+                                                IsEnabled="{Binding CanSave}"
+                                                ToolTip.Tip="Save this definition to the definitions folder">
+                                            <icons:LucideIcon Data="{StaticResource Icon.Save}" Size="13" />
+                                            <Button.Flyout>
+                                                <Flyout Placement="BottomEdgeAlignedRight" Opening="OnSaveDefinitionOpening">
+                                                    <StackPanel Width="240" Spacing="6">
+                                                        <TextBlock Text="Save as" FontSize="12" />
+                                                        <TextBox x:Name="SaveDefinitionName" FontSize="12" KeyDown="OnSaveDefinitionKeyDown" />
+                                                        <TextBlock x:Name="SaveDefinitionProblem" FontSize="11" TextWrapping="Wrap" IsVisible="False" Foreground="{DynamicResource AppMutedTextBrush}" />
+                                                        <Button HorizontalAlignment="Right" Padding="12,4" FontSize="12" Content="Save" Click="OnSaveDefinitionClick" />
+                                                    </StackPanel>
+                                                </Flyout>
+                                            </Button.Flyout>
+                                        </Button>
+                                    </StackPanel>
                                 </Grid>
                                 <ScrollViewer DockPanel.Dock="Bottom"
                                               MaxHeight="120"
@@ -413,8 +439,8 @@
                                         Background="{DynamicResource AppChipBrush}"
                                         BorderBrush="{DynamicResource AppSubtleIconBrush}"
                                         BorderThickness="0,1,0,1">
-                                    <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="6">
-                                        <Button Classes="selector" ToolTip.Tip="Choose which declared struct to read">
+                                    <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="6">
+                                        <Button Classes="selector" Click="OnStructTypesClick" ToolTip.Tip="Choose which declared struct to read">
                                             <StackPanel Orientation="Horizontal" Spacing="6">
                                                 <TextBlock Text="{Binding StructTitle}"
                                                            FontSize="12"
@@ -427,9 +453,6 @@
                                                                   Foreground="{DynamicResource AppMutedTextBrush}"
                                                                   VerticalAlignment="Center" />
                                             </StackPanel>
-                                            <Button.Flyout>
-                                                <MenuFlyout Placement="BottomEdgeAlignedLeft" Opening="OnStructTypesOpening" />
-                                            </Button.Flyout>
                                         </Button>
                                         <TextBlock Grid.Column="1"
                                                    Text="{Binding StructDetail}"
@@ -441,14 +464,19 @@
                                                    TextTrimming="CharacterEllipsis" />
                                         <Button Grid.Column="2"
                                                 Classes="structchip"
+                                                Click="OnStructTargetsClick"
                                                 Content="{Binding TargetShortName}"
                                                 IsVisible="{Binding ShowsTarget}"
                                                 ToolTip.Tip="What C leaves to the platform: the size of long, wchar_t and pointers, and how bitfields share storage">
-                                            <Button.Flyout>
-                                                <MenuFlyout Placement="BottomEdgeAlignedRight" Opening="OnStructTargetsOpening" />
-                                            </Button.Flyout>
                                         </Button>
-                                        <ToggleButton Grid.Column="3"
+                                        <Button Grid.Column="3"
+                                                Classes="orderreset"
+                                                VerticalAlignment="Center"
+                                                Click="OnCopyStructAsJson"
+                                                ToolTip.Tip="Copy the struct as JSON">
+                                            <icons:LucideIcon Data="{StaticResource Icon.CopyValue}" Size="13" />
+                                        </Button>
+                                        <ToggleButton Grid.Column="4"
                                                       Classes="pin"
                                                       VerticalAlignment="Center"
                                                       IsChecked="{Binding IsPinned}"

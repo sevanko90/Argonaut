@@ -1,5 +1,6 @@
 using Argonaut.Engine.Bytes;
 using Argonaut.Features.Hex;
+using Argonaut.Features.Hex.Structs;
 using Argonaut.Tests.Support;
 using Avalonia.Controls;
 using Avalonia.Headless;
@@ -146,6 +147,51 @@ public sealed class HexViewTests
         Assert.Equal(0x1E, hex.Structs.Tree!.Start);
         return Task.CompletedTask;
     });
+
+    [Fact]
+    public Task TheStructPicker_ShowsTheDeclaredStructs_AndPickingOneShowsIt() => WithView((window, view, hex, _) =>
+    {
+        hex.Structs.DefinitionText = "struct In { char c; }; struct Out { In inner; int x; };";
+        hex.SidePanelTab = HexPanelTab.Struct;
+        Dispatcher.UIThread.RunJobs();
+        window.UpdateLayout();
+
+        var picker = view.GetVisualDescendants().OfType<Button>().Single(b => b.Classes.Contains("selector"));
+        picker.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+        window.UpdateLayout();
+
+        // What the menu draws, not only what it holds: items added as a flyout opens never show.
+        var drawn = DrawnMenuItems(view);
+        Assert.Equal(["In", "Out"], drawn.Select(m => m.Header));
+
+        var inItem = drawn.First(m => (string?)m.Header == "In");
+        inItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Assert.Equal("In", hex.Structs.SelectedType);
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task TheOpenMenu_ListsSavedAndRecent_AndDeletingIsASubmenu() => WithView((_, _, _, _) =>
+    {
+        var store = new StructDefinitionFolderStore(Path.Combine(Path.GetTempPath(), "ArgonautTestFiles", Guid.NewGuid().ToString("N")));
+        var structs = new Argonaut.Features.Hex.Structs.StructDecoderViewModel(Argonaut.Features.Hex.Values.ByteOrder.Little, store) { DefinitionText = "struct Pair { int a; };" };
+        structs.Save("Pair");
+        structs.InsertSample(StructLanguage.CSharp);
+
+        var items = HexView.DefinitionItems(structs);
+        var headers = items.Select(i => i is MenuItem m ? (string?)m.Header : "---").ToList();
+        Assert.Equal(["Saved", "Pair · C", "---", "Recent", "Pair · C", "---", "Delete saved", "Open definitions folder"], headers);
+
+        var delete = items.OfType<MenuItem>().Single(m => (string?)m.Header == "Delete saved");
+        ((MenuItem)delete.Items[0]!).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Assert.Empty(store.Enumerate());
+        return Task.CompletedTask;
+    });
+
+    /// <summary>The menu items drawn in the window, open menus included.</summary>
+    private static List<MenuItem> DrawnMenuItems(HexView view)
+        => TopLevel.GetTopLevel(view)!.GetVisualDescendants().OfType<MenuItem>().ToList();
 
     [Fact]
     public Task TheTabShown_IsRemembered() => WithView((_, _, hex, _) =>

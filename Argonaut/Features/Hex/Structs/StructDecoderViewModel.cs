@@ -133,6 +133,26 @@ public sealed class StructDecoderViewModel : ObservableObject
 
     public void RevealDefinitionsFolder() => this.store?.RevealFolder();
 
+    /// <summary>Deletes a saved definition; null when deleted, else why not. The editor keeps
+    /// what it holds.</summary>
+    public string? Delete(StructDefinitionEntry entry)
+    {
+        if (this.store is null)
+            return "There is nowhere definitions are saved.";
+
+        try
+        {
+            this.store.Delete(entry);
+        }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+        {
+            return $"Could not delete: {ex.Message}";
+        }
+
+        RefreshDefinitions();
+        return null;
+    }
+
     /// <summary>Remembers the definition in the editor among the recent ones - when it is about to
     /// be replaced, or the document closes. A sample, or one that declares nothing, is not.</summary>
     public void RememberDefinition()

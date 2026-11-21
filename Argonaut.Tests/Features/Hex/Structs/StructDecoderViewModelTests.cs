@@ -390,4 +390,17 @@ public sealed class StructDecoderViewModelTests
         decoder.Close();
         Assert.Equal([Pair], recents.Entries);
     }
+
+    [Fact]
+    public void DeletingASavedDefinition_RemovesIt_AndLeavesTheEditorAlone()
+    {
+        var store = new MemoryDefinitionStore();
+        store.Save("Pair", StructLanguage.C, Pair);
+        var decoder = new StructDecoderViewModel(ByteOrder.Little, store) { DefinitionText = Pair };
+
+        Assert.Null(decoder.Delete(decoder.Saved[0]));
+
+        Assert.Empty(decoder.Saved);
+        Assert.Equal(Pair, decoder.DefinitionText);
+    }
 }

@@ -29,6 +29,11 @@ public interface ITreeRowSource
 
     ITreeRowCursor NewCursor();
 
+    /// <summary>Whether <paramref name="row"/> is a container that is always open - a title the
+    /// rest hangs from, which collapsing would only hide everything behind. The surface draws it
+    /// without an arrow and does not toggle it.</summary>
+    bool IsAlwaysOpen(in TreeRow row) => false;
+
     /// <summary>Expands or collapses <paramref name="row"/>'s container.</summary>
     void Toggle(in TreeRow row);
 

@@ -5,6 +5,7 @@ using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Detection;
 using Argonaut.Engine.Indexing;
 using Argonaut.Engine.Text;
+using Argonaut.Features.Hex.Structs;
 using Argonaut.Features.Hex.Values;
 using Argonaut.Ui.Documents;
 using Argonaut.Ui.Documents.Navigation;
@@ -40,7 +41,8 @@ public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDoc
     private IndexGrowthMonitor? growthMonitor;
     private long shownLength;
 
-    public HexViewModel(IDocumentExportActions? actions = null, HexViewSettings? settings = null)
+    public HexViewModel(IDocumentExportActions? actions = null, HexViewSettings? settings = null,
+        IStructDefinitionStore? structDefinitions = null, RecentStructDefinitions? recentStructs = null)
     {
         this.actions = actions;
         this.settings = settings ?? new HexViewSettings();
@@ -50,6 +52,19 @@ public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDoc
             this.settings.ValuesByteOrder,
             order => this.settings.ValuesByteOrder = order,
             (start, length) => Cursor.Select(new HexCaret(start, start + length)));
+        Structs = new StructDecoderViewModel(Values.Order, structDefinitions, recentStructs);
+        Values.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(HexValuesViewModel.Order))
+                Structs.Order = Values.Order;
+            else if (e.PropertyName == nameof(HexValuesViewModel.HighlightedRange))
+                OnPropertyChanged(nameof(HighlightedRange));
+        };
+        Structs.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(StructDecoderViewModel.HighlightedField))
+                OnPropertyChanged(nameof(HighlightedRange));
+        };
     }
 
     public IByteOrigin? Origin => this.origin;
@@ -114,8 +129,58 @@ public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDoc
         }
     }
 
+    /// <summary>The side panel's tab shown, remembered.</summary>
+    public HexPanelTab SidePanelTab
+    {
+        get => this.settings.SidePanelTab;
+        set
+        {
+            if (value == this.settings.SidePanelTab)
+                return;
+            this.settings.SidePanelTab = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(ShowsValuesTab));
+            OnPropertyChanged(nameof(ShowsStructuresTab));
+            OnPropertyChanged(nameof(ShowsStructTab));
+        }
+    }
+
+    public bool ShowsValuesTab
+    {
+        get => SidePanelTab == HexPanelTab.Values;
+        set
+        {
+            if (value)
+                SidePanelTab = HexPanelTab.Values;
+        }
+    }
+
+    public bool ShowsStructuresTab
+    {
+        get => SidePanelTab == HexPanelTab.Structures;
+        set
+        {
+            if (value)
+                SidePanelTab = HexPanelTab.Structures;
+        }
+    }
+
+    public bool ShowsStructTab
+    {
+        get => SidePanelTab == HexPanelTab.Struct;
+        set
+        {
+            if (value)
+                SidePanelTab = HexPanelTab.Struct;
+        }
+    }
+
     /// <summary>The side panel's Values tab, reading the bytes at the selection start.</summary>
     public HexValuesViewModel Values { get; }
+
+    /// <summary>The side panel's Structures and Struct tabs: a pasted struct, read from the
+    /// selection start.</summary>
+    public StructDecoderViewModel Structs { get; }
 
     /// <summary>The caret and selection, moved by the surface and by reveals.</summary>
     public HexCursor Cursor { get; }
@@ -161,6 +226,14 @@ public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDoc
 
     public ByteRange? SelectedByteRange => Cursor.Position;
 
+    /// <summary>The bytes the dump marks for the side panel: a reading hovered on the Values tab,
+    /// else the struct field hovered - or, pinned, holding the caret - on the Struct tab.</summary>
+    public ByteRange? HighlightedRange => Values.HighlightedRange ?? Structs.HighlightedField;
+
+    /// <summary>A row selected in the struct tree: its bytes selected in the dump and brought on
+    /// screen, the struct staying where it is.</summary>
+    public void SelectStructField(in StructNode node) => Cursor.Reveal(Structs.SelectField(node));
+
     /// <summary>Selects <paramref name="range"/> with the caret at its start and brings it on
     /// screen. Nothing to wait for: every place in a hex dump is arithmetic.</summary>
     public Task RevealByteRangeAsync(ByteRange range)
@@ -198,11 +271,19 @@ public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDoc
     public bool TryReadSelection(out byte[] bytes)
     {
         bytes = [];
-        if (this.source is not { } from || Cursor.Caret is not { IsEmpty: false } caret || caret.Length > HexCopy.MaxBytes)
+        return Cursor.Caret is { IsEmpty: false } caret && TryRead(new ByteRange(caret.Start, caret.Length), out bytes);
+    }
+
+    /// <summary>The bytes of <paramref name="range"/>, for a copy - false when it is empty, runs
+    /// past the end, or is larger than <see cref="HexCopy.MaxBytes"/>.</summary>
+    public bool TryRead(ByteRange range, out byte[] bytes)
+    {
+        bytes = [];
+        if (this.source is not { } from || range.Length <= 0 || range.Length > HexCopy.MaxBytes)
             return false;
 
-        bytes = new byte[caret.Length];
-        return from.CopyTo(caret.Start, bytes) == bytes.Length;
+        bytes = new byte[range.Length];
+        return from.CopyTo(range.Offset, bytes) == bytes.Length;
     }
 
     private void OnCaretMoved(object? sender, EventArgs e)
@@ -211,6 +292,10 @@ public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDoc
         OnPropertyChanged(nameof(CaretSelectionText));
         OnPropertyChanged(nameof(CaretCharacterText));
         ReadValues();
+        if (Cursor.Caret is { } caret)
+            Structs.Follow(this.source, caret.IsEmpty ? caret.Byte : caret.Start, caret.Length);
+        else
+            Structs.Follow(this.source, 0, 0);
     }
 
     /// <summary>Reads what the Values tab shows - a selection of one to eight bytes, else the
@@ -297,6 +382,7 @@ public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDoc
         OnPropertyChanged(nameof(StatusDetail));
         OnPropertyChanged(nameof(Length));
         ReadValues();
+        Structs.Refresh();
         OnPropertyChanged(nameof(CaretCharacterText));
         Grew?.Invoke(this, EventArgs.Empty);
     }
@@ -323,6 +409,8 @@ public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDoc
             this.settling = null;
         }
 
+        // A surface showing the struct tree lets go before the bytes it reads are released.
+        Structs.Close();
         var held = this.source;
         this.source = null;
         held?.Release();

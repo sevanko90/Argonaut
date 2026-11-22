@@ -37,6 +37,8 @@
             <SolidColorBrush x:Key="AppTextSelectionBrush" Color="#C2D9FF" />
             <SolidColorBrush x:Key="AppEditMarkBrush" Color="#F59E0B" />
             <SolidColorBrush x:Key="AppChipBrush" Color="#EEEFF2" />
+            <!-- The faint warm wash over the bytes a struct is read from, in the hex dump. -->
+            <SolidColorBrush x:Key="AppStructFillBrush" Color="#2EF2C14E" />
             <SolidColorBrush x:Key="AppChipHoverBrush" Color="#E2E4E9" />
             <SolidColorBrush x:Key="AppIndentGuideBrush" Color="#E6E7EB" />
             <SolidColorBrush x:Key="AppJsonStringBrush" Color="#047857" />
@@ -156,6 +158,7 @@
             <SolidColorBrush x:Key="AppTextSelectionBrush" Color="#2F5F9F" />
             <SolidColorBrush x:Key="AppEditMarkBrush" Color="#F59E0B" />
             <SolidColorBrush x:Key="AppChipBrush" Color="#25262C" />
+            <SolidColorBrush x:Key="AppStructFillBrush" Color="#14F2C14E" />
             <SolidColorBrush x:Key="AppChipHoverBrush" Color="#30323A" />
             <SolidColorBrush x:Key="AppIndentGuideBrush" Color="#2A2C33" />
             <SolidColorBrush x:Key="AppJsonStringBrush" Color="#34D399" />

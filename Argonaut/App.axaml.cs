@@ -11,6 +11,7 @@ using Argonaut.Engine.Logging;
 using Argonaut.Engine.Saving;
 using Argonaut.Engine.Settings;
 using Argonaut.Engine.Transforms;
+using Argonaut.Features.Hex.Structs;
 using Argonaut.Features.Json.Schema;
 using Argonaut.Engine.Http;
 using Argonaut.Shell;
@@ -26,8 +27,8 @@ public partial class App : Application
 {
     private MainWindow? mainWindow;
 
-    // Debug builds log to a file for whoever is debugging them; anything else keeps nothing.
-    private readonly IDiagnosticLog log = CreateLog();
+    // Program owns the log, so a crash before this exists is recorded too.
+    private readonly IDiagnosticLog log;
 
     // macOS re-signals each CLI-launched path as its own IActivatableLifetime.Activated /
     // FileActivatedEventArgs on top of argv - one event per path, fired moments after this
@@ -37,6 +38,18 @@ public partial class App : Application
     // and each is consumed (removed) the first time a matching Activated event arrives, so
     // only genuine later "Open With" activations reach OpenInitialFileAsync.
     private readonly HashSet<string> startupArgPaths = new(StringComparer.OrdinalIgnoreCase);
+
+    public App(IDiagnosticLog log)
+    {
+        this.log = log;
+    }
+
+    /// <summary>For Avalonia's runtime XAML loader and the designer, which construct the app
+    /// themselves; they keep no log. The app itself is built by <c>Program</c>, with its log.</summary>
+    public App()
+        : this(NullDiagnosticLog.Instance)
+    {
+    }
 
     public override void Initialize()
     {
@@ -53,14 +66,13 @@ public partial class App : Application
             // handed down to what uses it.
             var settings = SettingsStore.Open(AppDataPaths.SettingsFile, AppDataPaths.SettingsSeedFile);
             desktop.Exit += (_, _) => settings.Save();
-            if (log is IDisposable ownedLog)
-                desktop.Exit += (_, _) => ownedLog.Dispose();
 
             var launcher = SystemLaunchers.ForThisBuild();
             var schemaCatalog = new JsonSchemaCatalog(JsonSchemaCatalog.BundledDirectoryBesideApp, AppDataPaths.SchemasDirectory,
                 revealDirectory: launcher.ShowFolder);
 
             var recipes = new RecipeFolderStore(RecipeFolderStore.BundledDirectoryBesideApp, AppDataPaths.RecipesDirectory);
+            var structDefinitions = new StructDefinitionFolderStore(AppDataPaths.StructDefinitionsDirectory, launcher.ShowFolder);
 
             // Sealed blocks replaced these unsealed path lists; dropping them is what keeps the
             // paths out of settings.json now that their replacements are sealed.
@@ -73,7 +85,8 @@ public partial class App : Application
                 SettingsSealers.ForThisPlatform(AppDataPaths.SealingKeyFile), FileAccesses.ForThisPlatform(),
                 new ResponseDownloader(new HttpClientFetcher(new System.Net.Http.HttpClient()), AppDataPaths.ResponsesDirectory),
                 new ResponseStore(AppDataPaths.ResponsesDirectory),
-                OpenedCopies());
+                OpenedCopies(),
+                structDefinitions);
             mainWindow = window;
             desktop.MainWindow = window;
 
@@ -135,15 +148,6 @@ public partial class App : Application
         };
 #else
         return null;
-#endif
-    }
-
-    private static IDiagnosticLog CreateLog()
-    {
-#if DEBUG
-        return new FileDiagnosticLog(AppDataPaths.DebugLogFile);
-#else
-        return NullDiagnosticLog.Instance;
 #endif
     }
 

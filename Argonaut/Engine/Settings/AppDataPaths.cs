@@ -39,6 +39,9 @@ internal static class AppDataPaths
     /// </summary>
     public static string RecipesDirectory => Path.Combine(Root, "Recipes");
 
+    /// <summary>The struct definitions the hex view's Structures tab saves.</summary>
+    public static string StructDefinitionsDirectory => Path.Combine(Root, "Structs");
+
     /// <summary>The diagnostic log a Debug build writes (see
     /// <see cref="Argonaut.Engine.Logging.FileDiagnosticLog"/>).</summary>
     /// <summary>Where downloaded responses are written and kept - the app's own folder, which the

@@ -24,12 +24,24 @@ public sealed class HexViewSettings : ISettingsBlock<HexViewSettings>
     /// <summary>Whether the side panel - the Values tab - is shown beside the dump.</summary>
     public bool ShowsSidePanel { get; set; } = true;
 
+    /// <summary>The side panel's tab last shown.</summary>
+    [JsonConverter(typeof(JsonStringEnumConverter<HexPanelTab>))]
+    public HexPanelTab SidePanelTab { get; set; } = HexPanelTab.Values;
+
     /// <summary>Whether the character column reads its bytes as UTF-8 rather than ASCII.</summary>
     public bool ReadsUtf8 { get; set; }
 
     /// <summary>The byte order the Values tab reads in: this machine's until one is chosen.</summary>
     [JsonConverter(typeof(JsonStringEnumConverter<ByteOrder>))]
     public ByteOrder ValuesByteOrder { get; set; } = HexValuesViewModel.SystemOrder;
+}
+
+/// <summary>The side panel's tabs.</summary>
+public enum HexPanelTab
+{
+    Values,
+    Structures,
+    Struct,
 }
 
 [JsonSerializable(typeof(HexViewSettings))]

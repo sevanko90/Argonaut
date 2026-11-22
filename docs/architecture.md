@@ -61,8 +61,30 @@ them). Keep this in sync when the ownership chain changes.
   over `IOriginExporter` (`Engine/Saving`), which copies through the origin on the background,
   and over `ISystemLauncher.OpenFile`. A document with no file of its own is staged for opening
   under its suggested name in the app's `Opened` folder, cleared at each start. The line-ending
-  indicator is not shown in Hex. Find in hex and the structure decoder are their own features:
-  [hex-view-plan.md](hex-view-plan.md), [struct-decoder-plan.md](struct-decoder-plan.md).
+  indicator is not shown in Hex. Find in hex is still to come: [hex-view-plan.md](hex-view-plan.md).
+- **The struct decoder** (`Features/Hex/Structs`) reads the bytes at the caret as a pasted C/C++
+  or C# struct, in the hex side panel's Structures (the definition) and Struct (the tree) tabs.
+  `StructParser` picks the language from the text and reads the declarations only - structs,
+  unions, enums, typedefs, bitfields, packing, `[StructLayout]`/`[FieldOffset]`/`[MarshalAs]` -
+  skipping anything else by brace matching, and reporting what it cannot read with its line and
+  column. `StructLayoutPass` lays a declared struct out under its language's rules and a
+  `StructTarget` (LP64 or LLP64: `long`, `wchar_t`, pointers, the bitfield rule) without touching
+  the document; the C layouts are checked against Clang's record layouts and the C# ones against
+  the runtime's, from fixtures. `StructNodes` works the rows out rather than storing them - a
+  row's key is its place in the fully expanded tree, and an array element's is arithmetic - so
+  an array of a million structs costs nothing until scrolled; `StructTree` is the
+  `ITreeRowSource` `TreeSurface` draws, reading each row's value as it is drawn through
+  `StructValueText`, which decodes with the Values tab's `ByteReading`. A 1-byte array reads as
+  text when its bytes are printable up to a NUL, and any text-capable array can be switched.
+  `StructDecoderViewModel` follows the caret (a selection of two or more structs reads as an
+  array of them), or stays pinned while the caret moves inside it; a move changes only where the
+  tree reads from, so the surface keeps its place. In the dump the struct is one outlined, washed
+  shape (`HexSurface.OutlineRange`) and the hovered field - or, pinned, the caret's - carries the
+  Values tab's mark; selecting a row selects its bytes, and pinned, the caret selects its field.
+  Hovering a row says how its type is stored (`StructStorageNotes`). Definitions are saved, one
+  `.h` or `.cs` file each, through `IStructDefinitionStore` (`StructDefinitionFolderStore`,
+  composed in `App`); the recent ones are kept as text in a sealed settings block
+  (`RecentStructDefinitions`). `StructJsonWriter` copies a struct or a row as JSON, bounded.
 - **Requests** (`Features/Requests`, `Engine/Http`). New request (empty state, toolbar,
   Ctrl/Cmd+L) opens the request pane. Ctrl/Cmd+L reaches the shell by bubbling, after the views:
   where the focused view has a go-to entry (the tree views' path bar, the hex view's offset) the

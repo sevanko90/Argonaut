@@ -1,4 +1,5 @@
 using System;
+using Argonaut.Features.Hex.Structs;
 using Argonaut.Engine.Detection;
 using System.ComponentModel;
 using System.Linq;
@@ -84,7 +85,7 @@ public partial class MainWindow : Window
     public MainWindow(ISettingsStore settings, JsonSchemaCatalog schemaCatalog, IDiagnosticLog log, Action? openLogFolder = null,
         IConfigLocationSource? configLocations = null, IRecipeStore? recipes = null, ISystemLauncher? launcher = null,
         ISettingsSealer? settingsSealer = null, IFileAccess? fileAccess = null, ResponseDownloader? responseDownloader = null,
-        ResponseStore? responseStore = null, IOriginExporter? exporter = null)
+        ResponseStore? responseStore = null, IOriginExporter? exporter = null, IStructDefinitionStore? structDefinitions = null)
     {
         InitializeComponent();
 
@@ -128,6 +129,7 @@ public partial class MainWindow : Window
             configLocations: configLocations,
             filterFiles: new SelectionFilterFiles(),
             recipes: recipes,
+            structDefinitions: structDefinitions,
             launcher: this.launcher);
         DataContext = viewModel;
         viewModel.PropertyChanged += OnViewModelPropertyChanged;

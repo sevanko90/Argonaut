@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Argonaut.Features.Hex.Structs;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Detection;
 using Argonaut.Engine.Indexing;
@@ -208,6 +209,8 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
     /// places to browse from. Without one there are none to offer.</param>
     /// <param name="recipes">The recipes the raw view offers. Without one it offers only the
     /// built-in encodings.</param>
+    /// <param name="structDefinitions">Where the hex view saves struct definitions. Without one
+    /// it offers no saving.</param>
     /// <param name="launcher">Opens the links the views' value hints offer. Without one they
     /// open nothing.</param>
     public MainWindowViewModel(ISettingsStore settings, JsonSchemaCatalog schemaCatalog, Func<string, Task<bool>> confirmReplace,
@@ -221,6 +224,7 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
         IConfigLocationSource? configLocations = null,
         ISelectionFilterFiles? filterFiles = null,
         IRecipeStore? recipes = null,
+        IStructDefinitionStore? structDefinitions = null,
         ISystemLauncher? launcher = null,
         ILineEndingDetector? lineEndings = null,
         ISettingsSealer? settingsSealer = null,
@@ -258,7 +262,7 @@ public sealed class MainWindowViewModel : ObservableObject, IRequestSender
             ? new DocumentExport(exporter, pickCopyDestination, launcher, log ?? NullDiagnosticLog.Instance)
             : null;
         var views = documentLoader is null
-            ? new DocumentViewCatalog(settings, schemaCatalog, this.lineNumbers, recipes, launcher, settingsSealer: settingsSealer, exportActions: exportActions)
+            ? new DocumentViewCatalog(settings, schemaCatalog, this.lineNumbers, recipes, launcher, settingsSealer: settingsSealer, exportActions: exportActions, structDefinitions: structDefinitions)
             : null;
         this.documentLoader = documentLoader ?? views!.LoadAsync;
         this.hostedDocumentLoader = hostedDocumentLoader ?? (views is null ? null : views.LoadHostedAsync);

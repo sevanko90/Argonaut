@@ -11,6 +11,8 @@
          OutputType=Exe, which collides with BenchmarkProgram.Main. -->
     <OutputType>Exe</OutputType>
     <GenerateProgramFile>false</GenerateProgramFile>
+    <!-- The struct decoder's C# layout fixtures declare fixed buffers and pointers. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>

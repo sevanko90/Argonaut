@@ -1,5 +1,6 @@
 using Argonaut.Engine.Bytes;
 using Argonaut.Features.Hex;
+using Argonaut.Features.Hex.Structs;
 using Argonaut.Tests.Support;
 using Avalonia.Controls;
 using Avalonia.Headless;
@@ -85,9 +86,188 @@ public sealed class HexViewTests
         }, CancellationToken.None);
     }
 
+    [Fact]
+    public Task TheStructTab_DrawsTheTree_AndACaretMoveKeepsIt_ReadingFromTheNewPlace() => WithView((window, view, hex, _) =>
+    {
+        hex.Structs.DefinitionText = "struct Pair { uint8_t a; uint8_t b; };";
+        hex.SidePanelTab = HexPanelTab.Struct;
+        Dispatcher.UIThread.RunJobs();
+        window.UpdateLayout();
+
+        var surface = view.GetVisualDescendants().OfType<Argonaut.Ui.Tree.TreeSurface>().Single(s => s.Name == "StructSurface");
+        var tree = hex.Structs.Tree!;
+        Assert.Same(tree, surface.Document);
+        Assert.Equal(2, surface.RealizedRows.Count);
+
+        // A row scrolled part way up is cut off at the tree's top, not drawn over the selector.
+        Assert.True(((Control)surface.GetVisualParent()!).ClipToBounds);
+
+        // Following the caret moves the same tree, drawn again without starting over.
+        hex.Cursor.Place(0x40);
+        Dispatcher.UIThread.RunJobs();
+        window.CaptureRenderedFrame();
+        Assert.Same(tree, surface.Document);
+        Assert.Equal(0x40, tree.Start);
+        Assert.Equal("64", tree.ValueOf(tree.Nodes.Child(tree.Nodes.Root, 0)).Text);
+
+        // A long selection is an array: a new tree.
+        hex.Cursor.Select(new HexCaret(0x40, 0x46));
+        Dispatcher.UIThread.RunJobs();
+        Assert.NotSame(tree, surface.Document);
+        Assert.Same(hex.Structs.Tree, surface.Document);
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task TheDump_OutlinesTheStruct_AndATreeRowSelectsItsBytes() => WithView((window, view, hex, _) =>
+    {
+        hex.Structs.DefinitionText = "struct Run { uint8_t head; uint8_t body[20]; };";
+        hex.SidePanelTab = HexPanelTab.Struct;
+        var dump = Surface(view);
+
+        // One row, across a row's end, and two pieces where it barely crosses one: each draws.
+        foreach (long start in new long[] { 0, 0x0A, 0x1E })
+        {
+            hex.Cursor.Place(start);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(new ByteRange(start, 21), dump.OutlineRange);
+            window.CaptureRenderedFrame();
+        }
+
+        // A row selected in the tree selects its bytes; the struct stays put.
+        var tree = view.GetVisualDescendants().OfType<Argonaut.Ui.Tree.TreeSurface>().Single(s => s.Name == "StructSurface");
+        window.UpdateLayout();
+        tree.Focus();
+        window.KeyPress(Key.Down, RawInputModifiers.None, PhysicalKey.None, string.Empty);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(new ByteRange(0x1E, 1), hex.SelectedByteRange);
+        window.KeyPress(Key.Down, RawInputModifiers.None, PhysicalKey.None, string.Empty);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(new ByteRange(0x1F, 20), hex.SelectedByteRange);
+        Assert.Equal(0x1E, hex.Structs.Tree!.Start);
+        return Task.CompletedTask;
+    });
+
+    /// <summary>A right-click inside the struct, with nothing selected, leaves the caret and the
+    /// struct where they are and offers the struct: its bytes, and it as JSON.</summary>
+    [Fact]
+    public Task ARightClickOnTheStruct_KeepsItInPlace_AndOffersItAsJson() => WithView((window, view, hex, _) =>
+    {
+        hex.Structs.DefinitionText = "struct Run { uint8_t head; uint8_t body[20]; };";
+        hex.SidePanelTab = HexPanelTab.Struct;
+        hex.Cursor.Place(0x10);
+        Dispatcher.UIThread.RunJobs();
+        window.UpdateLayout();
+        window.CaptureRenderedFrame();
+
+        var dump = Surface(view);
+        var at = Avalonia.VisualExtensions.TranslatePoint(dump, dump.CentreOfByte(4, inCharacters: false, screenRow: 1), window)!.Value;
+        window.MouseDown(at, MouseButton.Right, RawInputModifiers.RightMouseButton);
+        window.MouseUp(at, MouseButton.Right);
+        Dispatcher.UIThread.RunJobs();
+        window.UpdateLayout();
+
+        Assert.Equal(HexCaret.At(0x10), hex.Cursor.Caret);
+        Assert.Equal(0x10, hex.Structs.Tree!.Start);
+        Assert.True(dump.MenuIsOnOutline);
+        Assert.Equal(new ByteRange(0x10, 21), dump.MenuRange);
+        Assert.Contains("Copy struct as JSON", DrawnMenuItems(view).Select(m => m.Header as string));
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task TheStructPicker_ShowsTheDeclaredStructs_AndPickingOneShowsIt() => WithView((window, view, hex, _) =>
+    {
+        hex.Structs.DefinitionText = "struct In { char c; }; struct Out { In inner; int x; };";
+        hex.SidePanelTab = HexPanelTab.Struct;
+        Dispatcher.UIThread.RunJobs();
+        window.UpdateLayout();
+
+        var picker = view.GetVisualDescendants().OfType<Button>().Single(b => b.Classes.Contains("selector"));
+        picker.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+        window.UpdateLayout();
+
+        // What the menu draws, not only what it holds: items added as a flyout opens never show.
+        var drawn = DrawnMenuItems(view);
+        Assert.Equal(["In", "Out"], drawn.Select(m => m.Header));
+
+        var inItem = drawn.First(m => (string?)m.Header == "In");
+        inItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Assert.Equal("In", hex.Structs.SelectedType);
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task TheOpenMenu_ListsSavedAndRecent_AndDeletingIsASubmenu() => WithView((_, _, _, _) =>
+    {
+        var store = new StructDefinitionFolderStore(Path.Combine(Path.GetTempPath(), "ArgonautTestFiles", Guid.NewGuid().ToString("N")));
+        var structs = new Argonaut.Features.Hex.Structs.StructDecoderViewModel(Argonaut.Features.Hex.Values.ByteOrder.Little, store) { DefinitionText = "struct Pair { int a; };" };
+        structs.Save("Pair");
+        structs.InsertSample(StructLanguage.CSharp);
+
+        var items = HexView.DefinitionItems(structs);
+        var headers = items.Select(i => i is MenuItem m ? (string?)m.Header : "---").ToList();
+        Assert.Equal(["Saved", "Pair · C", "---", "Recent", "Pair · C", "---", "Delete saved", "Open definitions folder"], headers);
+
+        var delete = items.OfType<MenuItem>().Single(m => (string?)m.Header == "Delete saved");
+        ((MenuItem)delete.Items[0]!).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Assert.Empty(store.Enumerate());
+        return Task.CompletedTask;
+    });
+
+    /// <summary>The menu items drawn in the window, open menus included.</summary>
+    private static List<MenuItem> DrawnMenuItems(HexView view)
+        => TopLevel.GetTopLevel(view)!.GetVisualDescendants().OfType<MenuItem>().ToList();
+
+    [Fact]
+    public Task TheTabShown_IsRemembered() => WithView((_, _, hex, _) =>
+    {
+        hex.ShowsStructuresTab = true;
+        Assert.Equal(HexPanelTab.Structures, hex.SidePanelTab);
+        Assert.False(hex.ShowsValuesTab);
+        return Task.CompletedTask;
+    });
+
     private static TextBox Entry(HexView view) => view.GetVisualDescendants().OfType<TextBox>().Single(t => t.Name == "GoToEntry");
 
     private static HexSurface Surface(HexView view) => view.GetVisualDescendants().OfType<HexSurface>().Single();
+
+    private static Border SidePanel(HexView view) => view.GetVisualDescendants().OfType<Border>().Single(b => b.Name == "SidePanel");
+
+    private static void Relayout(Window window, double width)
+    {
+        window.Width = width;
+        Dispatcher.UIThread.RunJobs();
+        window.UpdateLayout();
+        Dispatcher.UIThread.RunJobs();
+        window.UpdateLayout();
+    }
+
+    [Fact]
+    public Task AWideWindow_KeepsTheDumpAtItsDrawnWidth_AndTheSidePanelTakesTheRest() => WithView((window, view, _, _) =>
+    {
+        Relayout(window, 2000);
+
+        var surface = Surface(view);
+        var panel = SidePanel(view);
+        Assert.Equal(surface.ContentWidth, surface.Bounds.Width, 0.5);
+        Assert.True(panel.Bounds.Width > HexView.SidePanelMinWidth);
+        Assert.Equal(view.Bounds.Width, panel.Bounds.Right, 0.5);
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task ANarrowWindow_KeepsTheSidePanelsMinimum_AndTheDumpGivesUpTheRoom() => WithView((window, view, _, _) =>
+    {
+        Relayout(window, 2000);
+        Relayout(window, 700);
+
+        var surface = Surface(view);
+        Assert.Equal(HexView.SidePanelMinWidth, SidePanel(view).Bounds.Width, 0.5);
+        Assert.True(surface.Bounds.Width < surface.ContentWidth);
+        return Task.CompletedTask;
+    });
 
     [Fact]
     public Task CommandL_OpensTheGoToEntry_AtTheCaret_AndTheWindowNeverSeesIt() => WithView((window, view, hex, newRequests) =>

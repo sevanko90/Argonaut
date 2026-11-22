@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Argonaut.Features.Hex.Structs;
 using Argonaut.Engine.Bytes;
 using Argonaut.Engine.Detection;
 using Argonaut.Engine.Progress;
@@ -64,13 +65,15 @@ public sealed class DocumentViewCatalog
     /// <param name="launcher">Opens the links the views' value hints offer; null opens none.</param>
     /// <param name="settingsSealer">Seals the remembered schema choices; null keeps them for this
     /// run only.</param>
+    /// <param name="structDefinitions">Where the hex view saves struct definitions; null offers
+    /// no saving. The recent ones are sealed by <paramref name="settingsSealer"/> too.</param>
     /// <param name="exportActions">What the hex view's toolbar offers - saving a copy, opening in
     /// another app; null offers neither.</param>
     /// <param name="schemaMatcher">Measures the schema catalog against each JSON document; one
     /// over the catalog's files, kept for the catalog's life, when null.</param>
     public DocumentViewCatalog(ISettingsStore settings, JsonSchemaCatalog schemaCatalog, LineNumberingPreference? lineNumbers = null,
         IRecipeStore? recipes = null, ISystemLauncher? launcher = null, ISchemaMatcher? schemaMatcher = null,
-        ISettingsSealer? settingsSealer = null, IDocumentExportActions? exportActions = null)
+        ISettingsSealer? settingsSealer = null, IDocumentExportActions? exportActions = null, IStructDefinitionStore? structDefinitions = null)
     {
         this.schemaCatalog = schemaCatalog;
         this.launcher = launcher;
@@ -81,6 +84,7 @@ public sealed class DocumentViewCatalog
         var schemaBindings = new SchemaBindings(settings.Get<SchemaBindingsBlock>(), settingsSealer);
         var rawView = settings.Get<RawViewSettings>();
         var hexView = settings.Get<HexViewSettings>();
+        var recentStructs = new RecentStructDefinitions(settings.Get<RecentStructDefinitionsBlock>(), settingsSealer);
 
         registrations =
         [
@@ -89,7 +93,7 @@ public sealed class DocumentViewCatalog
             (() => new XmlViewModel(xmlView, launcher), (vm, _, o, r) => ((XmlViewModel)vm).LoadAsync(o, r)),
             (() => new CsvViewModel(lineNumbers), (vm, k, o, r) => ((CsvViewModel)vm).LoadAsync(o, k == FileTypeDetector.FileKind.Tsv ? (byte)'\t' : (byte)',', r)),
             (() => new RawViewModel(rawView, lineNumbers: lineNumbers, recipes: recipes, launcher: launcher), (vm, _, o, r) => ((RawViewModel)vm).LoadAsync(o, r)),
-            (() => new HexViewModel(exportActions, hexView), (vm, _, o, _) => ((HexViewModel)vm).LoadAsync(o)),
+            (() => new HexViewModel(exportActions, hexView, structDefinitions, recentStructs), (vm, _, o, _) => ((HexViewModel)vm).LoadAsync(o)),
         ];
         kindToRegistration = BuildMap();
     }

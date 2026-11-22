@@ -64,6 +64,7 @@ nav:
       - JSON Schema: features/schema.md
       - Semantic JSON diff: features/diff.md
       - Text transforms: features/transforms.md
+      - Struct decoder: features/structs.md
   - Under the hood: under-the-hood.md
 
 markdown_extensions:

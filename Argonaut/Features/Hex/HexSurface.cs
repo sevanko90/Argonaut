@@ -9,6 +9,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
+using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Media.TextFormatting;
 using Avalonia.Threading;
@@ -32,9 +33,9 @@ public interface IHexDocument
     /// <summary>The caret and selection, which the surface draws and moves.</summary>
     HexCursor Cursor { get; }
 
-    /// <summary>The selected bytes, for a copy - false when nothing is selected or there is too
-    /// much (<see cref="HexCopy.MaxBytes"/>).</summary>
-    bool TryReadSelection(out byte[] bytes);
+    /// <summary>The bytes of <paramref name="range"/>, for a copy - false when it is empty, runs
+    /// past what is there, or is larger than <see cref="HexCopy.MaxBytes"/>.</summary>
+    bool TryRead(ByteRange range, out byte[] bytes);
 }
 
 /// <summary>
@@ -103,6 +104,14 @@ public sealed class HexSurface : RowSurface
     public static readonly StyledProperty<ByteRange?> HighlightRangeProperty =
         AvaloniaProperty.Register<HexSurface, ByteRange?>(nameof(HighlightRange));
 
+    /// <summary>Bytes outlined as one shape in both panels - the struct the side panel reads.</summary>
+    public static readonly StyledProperty<ByteRange?> OutlineRangeProperty =
+        AvaloniaProperty.Register<HexSurface, ByteRange?>(nameof(OutlineRange));
+
+    /// <summary>What the bytes inside <see cref="OutlineRange"/> are washed with, faintly.</summary>
+    public static readonly StyledProperty<IBrush?> OutlineFillProperty =
+        AvaloniaProperty.Register<HexSurface, IBrush?>(nameof(OutlineFill));
+
     /// <summary>Whether the character panel reads its bytes as UTF-8 (<see cref="HexUtf8"/>)
     /// rather than as ASCII.</summary>
     public static readonly StyledProperty<bool> ReadsUtf8Property =
@@ -160,6 +169,7 @@ public sealed class HexSurface : RowSurface
     private Pen? dividerPen;
     private Pen? groupPen;
     private Pen? caretPen;
+    private Pen? outlinePen;
     private IBrush? pointerFill;
     private IBrush? characterBand;
     private Pen? pointerEdge;
@@ -209,7 +219,7 @@ public sealed class HexSurface : RowSurface
     static HexSurface()
     {
         AffectsRender<HexSurface>(OtherByteForegroundProperty, ZeroByteForegroundProperty, PanelBackgroundProperty, DividerBrushProperty,
-            ByteMarkBrushProperty, ByteMarkForegroundProperty, RowMarkBrushProperty, HeaderLineBrushProperty, HighlightRangeProperty);
+            ByteMarkBrushProperty, ByteMarkForegroundProperty, RowMarkBrushProperty, HeaderLineBrushProperty, HighlightRangeProperty, OutlineRangeProperty, OutlineFillProperty);
     }
 
     public HexSurface()
@@ -217,6 +227,7 @@ public sealed class HexSurface : RowSurface
         Focusable = true;
         MeasureGeometry();
         ContextMenu = BuildCopyMenu();
+        AddHandler(ContextRequestedEvent, OnContextRequested, RoutingStrategies.Tunnel);
     }
 
     /// <summary>Whether the keys and a copy act in the character panel rather than the hex one.</summary>
@@ -269,6 +280,18 @@ public sealed class HexSurface : RowSurface
     {
         get => GetValue(HighlightRangeProperty);
         set => SetValue(HighlightRangeProperty, value);
+    }
+
+    public ByteRange? OutlineRange
+    {
+        get => GetValue(OutlineRangeProperty);
+        set => SetValue(OutlineRangeProperty, value);
+    }
+
+    public IBrush? OutlineFill
+    {
+        get => GetValue(OutlineFillProperty);
+        set => SetValue(OutlineFillProperty, value);
     }
 
     public bool ReadsUtf8
@@ -410,6 +433,11 @@ public sealed class HexSurface : RowSurface
     public override double ViewportFraction => ExtentHeight <= 0 ? 1 : Math.Min(1, RowsHeight / ExtentHeight);
 
     public override bool ShowsEnd => this.scrollTop >= MaxScrollTop - 0.5;
+
+    /// <summary>How wide the dump is drawn - the gutter and both panels - which is as wide as it
+    /// is ever useful to make the surface. Changes with the font and the document, as
+    /// <see cref="RowSurface.WidestRowWidth"/> does, and is announced the same way.</summary>
+    public double ContentWidth => this.gutterWidth + WidestRowWidth;
 
     /// <summary>The panels pan; the gutter stays.</summary>
     public override double PanViewportWidth => Math.Max(0, Bounds.Width - this.gutterWidth);
@@ -571,6 +599,7 @@ public sealed class HexSurface : RowSurface
         else if (change.Property == ByteMarkBrushProperty)
         {
             this.caretPen = null;
+            this.outlinePen = null;
             this.pointerFill = null;
             this.pointerEdge = null;
         }
@@ -588,15 +617,9 @@ public sealed class HexSurface : RowSurface
             return;
 
         this.keysInCharacters = hit.InCharacters;
+        // A right press opens the menu, which chooses what it acts on (OnContextRequested).
         if (point.Properties.IsRightButtonPressed)
-        {
-            // A right-click inside the selection copies it; elsewhere it moves the caret first,
-            // as a click would.
-            if (at.Caret is not { } caret || hit.Offset < caret.Start || hit.Offset >= caret.End)
-                at.Place(ClickStart(hit));
-            InvalidateVisual();
             return;
-        }
 
         if (!point.Properties.IsLeftButtonPressed)
             return;
@@ -609,6 +632,39 @@ public sealed class HexSurface : RowSurface
         InvalidateVisual();
         e.Handled = true;
     }
+
+    /// <summary>
+    /// What the menu a right-click on byte <paramref name="offset"/> opens acts on, moving the caret
+    /// only when the click is on nothing already marked: the selection when the click is inside
+    /// it; else the struct's outline when inside that, the caret and the struct left where they
+    /// are; else the caret, moved there as a click would move it.
+    /// </summary>
+    private ByteRange? ContextTarget(HexCursor at, long offset)
+    {
+        if (at.Caret is { IsEmpty: false } caret && offset >= caret.Start && offset < caret.End)
+        {
+            MenuIsOnOutline = false;
+            return new ByteRange(caret.Start, caret.Length);
+        }
+
+        if (OutlineRange is { } outline && offset >= outline.Offset && offset < outline.Offset + outline.Length)
+        {
+            MenuIsOnOutline = true;
+            return outline;
+        }
+
+        MenuIsOnOutline = false;
+        at.Place(HexRows.GroupStart(offset, StepIn(this.keysInCharacters)));
+        return at.Caret is { IsEmpty: false } placed ? new ByteRange(placed.Start, placed.Length) : null;
+    }
+
+    /// <summary>What the context menu's copies act on: what the right-click that opened it was on,
+    /// the selection when it was opened from the keyboard.</summary>
+    internal ByteRange? MenuRange { get; private set; }
+
+    /// <summary>Whether the right-click that opened the menu was on the struct's outline rather
+    /// than a selection - the host's cue to offer the struct itself.</summary>
+    public bool MenuIsOnOutline { get; private set; }
 
     /// <summary>
     /// What a left press on <paramref name="hit"/> does - the real pointer and the tests alike. A
@@ -864,7 +920,7 @@ public sealed class HexSurface : RowSurface
         }
         else if (e.Key == Key.C && command)
         {
-            _ = CopyAsync(this.keysInCharacters ? HexCopyForm.Text : HexCopyForm.Hex);
+            _ = CopyAsync(this.keysInCharacters ? HexCopyForm.Text : HexCopyForm.Hex, SelectedRange());
         }
         else if (e.Key == Key.Tab && !command)
         {
@@ -894,7 +950,7 @@ public sealed class HexSurface : RowSurface
         MenuItem Item(string header, HexCopyForm form)
         {
             var item = new MenuItem { Header = header };
-            item.Click += (_, _) => _ = CopyAsync(form);
+            item.Click += (_, _) => _ = CopyAsync(form, MenuRange);
             return item;
         }
 
@@ -910,18 +966,41 @@ public sealed class HexSurface : RowSurface
     }
 
     /// <summary>
-    /// Copies the selection in <paramref name="form"/>. Refuses rather than truncates when it is
-    /// larger than <see cref="HexCopy.MaxBytes"/>.
+    /// Chooses what the menu about to open acts on - tunnelling, so before the menu opens, which
+    /// some platforms do on the press and others on the release: what a right-click is on, or the
+    /// selection for a menu opened from the keyboard.
     /// </summary>
-    private async Task CopyAsync(HexCopyForm form)
+    private void OnContextRequested(object? sender, ContextRequestedEventArgs e)
     {
-        if (this.document is not { } from || this.cursor?.Caret is not { IsEmpty: false } caret)
+        if (this.cursor is { } at && e.TryGetPosition(this, out var position) && ByteAt(position) is { } hit)
+        {
+            this.keysInCharacters = hit.InCharacters;
+            MenuRange = ContextTarget(at, hit.Offset);
+            InvalidateVisual();
+            return;
+        }
+
+        MenuRange = SelectedRange();
+        MenuIsOnOutline = false;
+    }
+
+    private ByteRange? SelectedRange()
+        => this.cursor?.Caret is { IsEmpty: false } caret ? new ByteRange(caret.Start, caret.Length) : null;
+
+    /// <summary>
+    /// Copies <paramref name="range"/> - the selection, or the struct a right-click was on - in
+    /// <paramref name="form"/>. Refuses rather than truncates when it is larger than
+    /// <see cref="HexCopy.MaxBytes"/>.
+    /// </summary>
+    private async Task CopyAsync(HexCopyForm form, ByteRange? range)
+    {
+        if (this.document is not { } from || range is not { Length: > 0 } copied)
             return;
 
-        if (!from.TryReadSelection(out byte[] bytes))
+        if (!from.TryRead(copied, out byte[] bytes))
         {
-            if (caret.Length > HexCopy.MaxBytes)
-                ToastService.Show($"Selection is too large to copy ({caret.Length / (1024 * 1024)} MB).");
+            if (copied.Length > HexCopy.MaxBytes)
+                ToastService.Show($"{(copied == SelectedRange() ? "Selection" : "Struct")} is too large to copy ({copied.Length / (1024 * 1024)} MB).");
             return;
         }
 
@@ -969,10 +1048,26 @@ public sealed class HexSurface : RowSurface
             using (context.PushClip(new Rect(0, RowsTop, width, RowsHeight)))
             {
                 DrawRowMark(context);
+
+                // The struct's shape: its fill under the selection and the marks, its dashed edge
+                // over them.
+                var outline = OutlineRange is { } outlined && ByteMarkBrush is { } accent ? OutlineShapes(first, last, outlined) : null;
+                if (outline is not null && OutlineFill is { } tint)
+                {
+                    foreach (var shape in outline)
+                        context.DrawGeometry(tint, null, shape);
+                }
+
                 DrawSelection(context, first, last);
                 DrawPointerMark(context, first, last);
                 if (HighlightRange is { } highlighted)
                     DrawRangeMark(context, first, last, highlighted);
+                if (outline is not null)
+                {
+                    this.outlinePen ??= new Pen(ByteMarkBrush, 1.25, dashStyle: new DashStyle([3, 2], 0));
+                    foreach (var shape in outline)
+                        context.DrawGeometry(null, this.outlinePen, shape);
+                }
 
                 for (long row = first; row <= last; row++)
                 {
@@ -1155,6 +1250,99 @@ public sealed class HexSurface : RowSurface
             foreach (bool inCharacters in (ReadOnlySpan<bool>)[false, true])
                 context.DrawRectangle(this.pointerFill, this.pointerEdge, new RoundedRect(MarkCell((a, b), top, inCharacters).Deflate(0.5), 4));
         }
+    }
+
+    /// <summary>
+    /// The shapes <paramref name="range"/> is outlined as, one or two in each panel: the run of
+    /// rows it covers, stepped in where it starts part way along its first row and ends part way
+    /// along its last - a rectangle on one row, two when it barely crosses a row's end - with
+    /// rounded corners, as the selection's marks have. Rows off screen are taken as whole rows just
+    /// beyond it, so the coordinates stay small however far away its ends are. Empty when none of
+    /// it is on screen.
+    /// </summary>
+    private List<Geometry> OutlineShapes(long first, long last, ByteRange range)
+    {
+        var shapes = new List<Geometry>(4);
+        if (range.Length <= 0)
+            return shapes;
+
+        long startRow = HexRows.RowOf(range.Offset), endRow = HexRows.RowOf(range.End - 1);
+        if (endRow < first || startRow > last)
+            return shapes;
+
+        int a = (int)(range.Offset - HexRows.StartOf(startRow));
+        int b = (int)(range.End - 1 - HexRows.StartOf(endRow));
+        if (startRow < first - 1)
+            (startRow, a) = (first - 1, 0);
+        if (endRow > last + 1)
+            (endRow, b) = (last + 1, HexRows.BytesPerRow - 1);
+
+        double TopOf(long row) => RowsTop + row * RowHeight - this.scrollTop + 1;
+        double BottomOf(long row) => TopOf(row) + RowHeight - 2;
+
+        foreach (bool inCharacters in (ReadOnlySpan<bool>)[false, true])
+        {
+            double Left(int column) => inCharacters ? CharacterCellLeft(column) - 0.5 : HexByteX(column) - 4;
+            double Right(int column) => inCharacters ? CharacterCellLeft(column + 1) + 0.5 : HexByteX(column) + 2 * this.charWidth + 4;
+            double rowLeft = Left(0), rowRight = Right(HexRows.BytesPerRow - 1);
+
+            if (startRow == endRow)
+            {
+                shapes.Add(Rounded([new(Left(a), TopOf(startRow)), new(Right(b), TopOf(startRow)), new(Right(b), BottomOf(endRow)), new(Left(a), BottomOf(endRow))]));
+            }
+            else if (endRow == startRow + 1 && b < a)
+            {
+                shapes.Add(Rounded([new(Left(a), TopOf(startRow)), new(rowRight, TopOf(startRow)), new(rowRight, BottomOf(startRow)), new(Left(a), BottomOf(startRow))]));
+                shapes.Add(Rounded([new(rowLeft, TopOf(endRow)), new(Right(b), TopOf(endRow)), new(Right(b), BottomOf(endRow)), new(rowLeft, BottomOf(endRow))]));
+            }
+            else
+            {
+                shapes.Add(Rounded([
+                    new(Left(a), TopOf(startRow)), new(rowRight, TopOf(startRow)), new(rowRight, TopOf(endRow)), new(Right(b), TopOf(endRow)),
+                    new(Right(b), BottomOf(endRow)), new(rowLeft, BottomOf(endRow)), new(rowLeft, BottomOf(startRow)), new(Left(a), BottomOf(startRow)),
+                ]));
+            }
+        }
+
+        return shapes;
+    }
+
+    /// <summary>A closed figure through <paramref name="corners"/> with each corner rounded, inner
+    /// steps as well as outer ones, by as much as the marks' corners are - less where an edge is
+    /// too short for it. A corner whose edges run straight on is left as it is.</summary>
+    private static StreamGeometry Rounded(ReadOnlySpan<Point> corners)
+    {
+        const double radius = 4;
+        var shape = new StreamGeometry();
+        using var figure = shape.Open();
+        int n = corners.Length;
+        for (int i = 0; i < n; i++)
+        {
+            var before = corners[(i + n - 1) % n];
+            var corner = corners[i];
+            var after = corners[(i + 1) % n];
+            double r = Math.Min(radius, Math.Min(Distance(before, corner), Distance(corner, after)) / 2);
+            var enter = Toward(corner, before, r);
+            var leave = Toward(corner, after, r);
+            if (i == 0)
+                figure.BeginFigure(enter, isFilled: true);
+            else
+                figure.LineTo(enter);
+            figure.QuadraticBezierTo(corner, leave);
+        }
+
+        figure.EndFigure(isClosed: true);
+        return shape;
+    }
+
+    private static double Distance(Point a, Point b) => Math.Abs(a.X - b.X) + Math.Abs(a.Y - b.Y);
+
+    /// <summary>The point <paramref name="by"/> from <paramref name="from"/> toward
+    /// <paramref name="to"/>, along an edge that is horizontal or vertical.</summary>
+    private static Point Toward(Point from, Point to, double by)
+    {
+        double length = Distance(from, to);
+        return length == 0 ? from : new Point(from.X + (to.X - from.X) * by / length, from.Y + (to.Y - from.Y) * by / length);
     }
 
     /// <summary>A solid block behind <paramref name="span"/> of row <paramref name="row"/> in one

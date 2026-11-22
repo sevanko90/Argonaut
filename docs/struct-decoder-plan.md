@@ -7,7 +7,7 @@ structs and arrays expanding in place. ("Tree" below means that view - the JSON 
 on the hex view (docs/hex-view-plan.md) and needs its caret, selection and `ByteReading` (steps 3
 and 6b) first; it is that plan's step 7.
 
-Status: proposed, nothing built.
+Status: built for 2.5, all steps in one release; further UX in point releases (see the roadmap).
 
 ## Decided
 
@@ -18,11 +18,15 @@ Status: proposed, nothing built.
 - **The struct is laid out, then read.** Parsing produces declarations; a layout pass turns them
   into fields with offsets and sizes under the language's alignment rules; decoding reads each
   field's bytes only when its row is drawn. Layout never touches the document.
-- **It starts at the selection start** (the caret when nothing is selected) and covers
-  `sizeof(struct)` bytes. A selection longer than one struct offers to read it as an array of
-  `floor(length / sizeof)` of them.
-- **Endianness is a switch on the Struct tab**, little-endian by default. Neither language says
-  it in the definition, and unlike the Values tab a struct cannot show both orders at once.
+- **It follows the caret, as the Values tab does.** The struct is read from the selection start
+  (the caret when nothing is selected) and covers `sizeof(struct)` bytes. A selection at least two
+  structs long reads as an array of `floor(length / sizeof)` of them, without asking.
+- **A pin holds it in place.** Pinning fixes the struct where it is; the caret then moves inside
+  it, and the field holding the caret is highlighted in the tree and outlined in the dump.
+  Unpinning goes back to following the caret.
+- **The byte order is the Values tab's.** One LE/BE switch, shared by both tabs and remembered,
+  so the two never disagree about the same bytes. Neither language says the order in the
+  definition.
 - **Selecting in the character column or in another view works the same.** Raw and JSON reach
   the hex view's selection through `IByteRangeNavigable`, so "decode as struct" from them is a
   switch to Hex with the bytes already selected.
@@ -95,11 +99,12 @@ struct and the absolute offset.
   the rows on screen - the same as every other tree.
 - Fields past the end of the document show `-`.
 
-Check first: whether `Ui/Tree`'s `TreeSurface` can carry this. Its rows are positioned by byte
-offset, which a field has, but `TreeDocument` is built on a `SparseContainerIndex` and an
-`ITreeFormatReader` over text. If an arithmetic `ITreeFormatReader` over the layout fits, the
-struct tree gets selection, keyboard, find and the path bar for free; if it does not, a small
-tree of its own, drawn as a `RowSurface` and styled to match the JSON view, is the fallback.
+The tree is `Ui/Tree`'s `TreeSurface` over a struct row source. The surface reads rows through
+`ITreeRowSource`, not a document - `JsonDiffTree` is the precedent for a source that is not a
+`TreeDocument` - so the struct tree gets selection, keyboard, find and the path bar with it.
+Row keys cannot be document offsets (a struct and its first field share one, a union's members
+all do), so the source numbers its rows in a space of its own: a field's index in the layout,
+and an array element's arithmetically from its array's.
 
 ### Making the storage visible
 
@@ -108,21 +113,21 @@ C# `bool` a bit or an `int`? (Neither - a byte, 0 false and anything else true, 
 as a 4-byte `BOOL`; bits only come from C bitfields.) So the layout is shown, never left to be
 inferred:
 
-- Every row shows its type's **size and offset** (`Enabled: bool · 1 byte @ 8 = true`), and the
-  padding the layout adds shows as its own muted rows, so the offsets visibly add up to
-  `sizeof`.
-- Hovering a type names how it is stored for the language and target in use, from one table
-  beside the layout rules: "`bool` (C#): 1 byte, 0 = false, otherwise true; 4 bytes with
-  `[MarshalAs(UnmanagedType.Bool)]`", "`long` (C, LLP64): 4 bytes, signed".
-- The struct's line shows its total size and alignment (`Sample · 268 bytes, align 4`).
+- Every row shows its **offset** and type (`+8  Enabled  bool  true`), and the padding the
+  layout adds shows as its own muted rows, so the offsets visibly add up to `sizeof`.
+- Hovering a row names how its type is stored for the language and target in use, and its size
+  and place (`StructStorageNotes`): "`bool` (C#): 1 byte, 0 = false, otherwise true - not a bit,
+  and not the 4 bytes of `[MarshalAs(UnmanagedType.Bool)]`", "`long` (C, LLP64): 4 bytes,
+  signed". Sizes live there rather than on the row, to keep the row to what is read.
+- The selector shows the struct's total size and alignment (`268 bytes · align 4 · at 0x0`).
 
 The sample (below) is written to show these: its layout has trailing padding, and its comments
 say where each field sits.
 
 ### The sample
 
-The editor opens empty, with an **Insert sample** button that fills it with a small example in the
-chosen language - an `int`, a `float`, a `bool` and a 256-character array - commented with each
+The editor opens empty, with **C# sample** and **C sample** buttons centred in it that fill it
+with a small example in that language (its language is then detected, as a paste's is) - an `int`, a `float`, a `bool` and a 256-character array - commented with each
 field's offset and size:
 
 ```csharp
@@ -150,44 +155,82 @@ which is itself a check. The sample is never saved into the definitions folder u
 
 ### In the hex view
 
-- The **Struct tab** of the hex view's side panel, right of the character column: the definition
-  editor above (collapsible once a definition is in), a picker of the types it declares, the
-  endianness and target switches, and the tree below. The panel's layout inside the tab is
-  chosen from screenshots.
-- **Field bands**: the mapped range is tinted in the grid, alternating per top-level field, so
-  the struct's shape shows in the dump. `HexSurface` draws them from the sorted field list,
-  finding the first visible field by binary search.
-- **Linked selection**: selecting a row selects its bytes in the grid and reveals them; moving
-  the caret in the grid selects the deepest field holding it.
-- "Copy as JSON" copies the decoded struct (or the expanded part of an array of them).
+- The side panel has three tabs: **Values | Structures | Struct**.
+- The **Structures tab** is where definitions are pasted and edited: the editor, its parse
+  errors, Insert sample, Save, and the saved and recent definitions. A panel is too narrow to
+  hold an editor and a tree of any size together, so they get a tab each.
+- The **Struct tab** is the result: the selector and the tree. The selector is one strip above
+  the tree: the struct's name, which opens a menu of the declared structs; its size, alignment
+  and place; the target as a chip (C only), which opens a menu of targets; and the pin. With no
+  definition yet the tab says so and points to the Structures tab.
+- **The outline**: the mapped bytes - one struct or the whole array - are one shape in each
+  panel of the dump (`HexSurface.OutlineRange`): a dashed accent edge with corners rounded as
+  the selection's are, over a faint warm wash (`AppStructFillBrush`) under the selection and the
+  marks. No bands per field, to keep to the colour budget; field boundaries show through the
+  field mark below.
+- **The field mark**: hovering a row, or (pinned) moving the caret, marks that field's bytes
+  with the Values tab's hover mark - the dump shows one highlight for the side panel, from
+  whichever tab. Selecting a row selects its bytes and reveals them, and the struct stays where
+  it is; with the struct pinned, moving the caret selects the deepest field holding it, opening
+  what holds it.
+- "Copy as JSON" copies the decoded struct or array (the selector's copy button) or one row
+  (the tree's menu): structs as objects, anonymous members and bases merged in, text arrays as
+  their full text, enums by name, pointers as strings, bytes past the end as null, padding left
+  out. Bounded at 200,000 values or 16 MB, saying so when it stops short.
 
 ### Keeping definitions
 
-Pasted definitions are kept as files in a definitions folder, as recipes and schemas are: a
-sandbox-aware folder, read through an injected store, never by static file access. The picker
-lists every type in every file there, so a header pasted once stays available. The struct picked
-for a document is not remembered - the same file may hold many structs.
+A pasted definition is used at once and kept only when saved: Save writes it to a definitions
+folder (`Structs` in the app's data), as recipes and schemas are kept - a sandbox-aware folder,
+read through an injected `IStructDefinitionStore`, never by static file access - so throwaway
+pastes never fill it. Each is a file in its language, `Name.h` or `Name.cs`, so the folder is as
+useful outside the app, and a header dropped into it is listed. The Structures tab's Open menu
+lists the saved definitions, the recently used ones, deleting a saved one, and the folder.
+Recent definitions are the last 8 used, kept as their text sealed in the settings (a pasted
+header may be private code): one is remembered when another replaces it or the document
+closes; samples and anything over 64 KB never are. The Struct tab's picker lists every type in
+the definition in use. The struct picked for a document is not remembered - the same file may hold
+many structs.
 
 ## Steps
 
-1. [ ] Parser and layout for the C and C# subsets, without bitfields, unions, enums or packing.
-   Tests: C# layouts checked against the runtime (`Unsafe.ByteOffset` on an instance of the same
-   struct, compiled into the test); C layouts against fixtures recorded once from Clang's
-   `offsetof` for both LP64 and LLP64, checked in.
-2. [ ] Packing, explicit layout, unions, enums, bitfields, inheritance, the target setting.
+1. [x] Parser and layout for the C and C# subsets, without bitfields, unions, enums or packing.
+   Tests: C# layouts checked against the runtime (`ldflda` offsets and `Unsafe.SizeOf`, or
+   `Marshal.OffsetOf` for `[MarshalAs]` fields, on `Fixtures/CSharpLayouts.cs`, which the tests
+   both compile and parse); C layouts against `Fixtures/c-layouts.h`, recorded from Clang's
+   `-fdump-record-layouts` for both LP64 and LLP64 by `record-c-layouts.sh` and checked in.
+2. [x] Packing, explicit layout, unions, enums, bitfields, inheritance, the target setting.
    Tests: the same two sources of truth, plus MSVC's mixed-type bitfield rule from fixtures.
-3. [ ] The tree: the `TreeSurface` check, then decoding rows, arithmetic arrays, padding rows,
-   strings, enum names. Tests: a struct at an unaligned offset, an array of structs over a
-   selection, fields past the end, both endiannesses.
-4. [ ] The Struct tab in the hex view's side panel: editor, type picker, errors, mapping from the selection.
+   GCC and Clang reuse a non-POD base's tail padding and MSVC does not, so a struct records
+   whether it is plain data. `struct … } __attribute__((packed));` packs, as C compilers and GCC
+   do, though Clang ignores it in C++ - so that form is a unit test, not a Clang fixture.
+3. [x] The tree: the struct row source, decoding rows, arithmetic arrays, padding rows, strings,
+   enum names. Tests: a struct at an unaligned offset, an array of structs over a selection,
+   fields past the end, both byte orders. A row's key is its place in the fully expanded tree
+   (`StructNodes`), so positions are arithmetic; the scroll range is the mapping's bytes. The
+   offset gutters come with the tab (step 4). When the mapping follows the caret only the tree's
+   start moves - rows, keys and expansion are the same - so the surface lays its rows out again
+   (`InvalidateRows`) and keeps its place; a new tree is made only when the rows change (another
+   type, target or byte order, or an array of another length).
+4. [x] The side panel's tabs: Structures (editor, errors) and Struct (type picker, target, the
+   pin, following the caret, arrays from a long selection), byte order shared with Values.
    Visual pass from screenshots in both themes.
-5. [ ] The empty editor's Insert sample button (C# and C), and making the storage visible: size
-   and offset on every row, padding rows, the struct's size and alignment, the per-type storage
-   notes on hover. Tests: both samples lay out to 268 bytes with `Name` at 9; a
-   `[MarshalAs(UnmanagedType.Bool)]` field is 4 bytes; `fixed char[256]` is 512.
-6. [ ] Field bands and linked selection.
-7. [ ] The definitions folder, and Copy as JSON.
-8. [ ] Architecture doc, roadmap.
+   Look chosen by the user: the pickers and pin on one line; a title bar above the tree (struct
+   name, then size, alignment and place); the root is not a row; rows in aligned name / type /
+   value columns; an offset column. A paste over the whole definition re-detects its language.
+5. [x] The empty editor's sample buttons (C# and C), and making the storage visible: the
+   per-type storage notes on hover, with each row's size. Tests: both samples lay out to 268
+   bytes with `Name` at 9; a `[MarshalAs(UnmanagedType.Bool)]` field is 4 bytes; `fixed
+   char[256]` is 512; the notes for each kind of type.
+   Look chosen by the user: sizes in the hover note only, not on the row; the sample buttons in
+   the empty editor; the type picker, title bar and pin combined into one selector strip.
+6. [x] The outline in the dump, the field mark, and linked selection.
+   Look chosen by the user: dashed accent edge with rounded corners, and a subtle warm fill
+   (amber at 18% light, 8% dark). Whether the pinned caret should select the deepest field or
+   stop at the field is to be decided from use.
+7. [x] Save, the definitions folder and recent definitions, and Copy as JSON.
+   Look chosen by the user: Open and Save as icons beside the language picker.
+8. [x] Architecture doc, roadmap.
 
 ## Not in this plan
 

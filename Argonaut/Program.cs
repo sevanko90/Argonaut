@@ -1,6 +1,8 @@
 ﻿using Avalonia;
 using Avalonia.Media;
 using System;
+using Argonaut.Engine.Logging;
+using Argonaut.Engine.Settings;
 using Argonaut.Shell.CommandLine;
 using Velopack;
 
@@ -13,6 +15,22 @@ class Program
     // yet and stuff might break.
     [STAThread]
     public static void Main(string[] args)
+    {
+        // First, so that anything thrown from here on - startup included - leaves its reason in
+        // the log rather than only an OS crash report.
+        var log = CreateLog();
+        new UnhandledExceptionRecorder(log).Attach(AppDomain.CurrentDomain);
+        try
+        {
+            Run(args, log);
+        }
+        finally
+        {
+            (log as IDisposable)?.Dispose();
+        }
+    }
+
+    private static void Run(string[] args, IDiagnosticLog log)
     {
         // Must run before anything else touches Avalonia: handles a pending install/update
         // completion (e.g. Windows relaunching post-update) and then returns normally on a
@@ -45,13 +63,26 @@ class Program
             return;
         }
 
-        BuildAvaloniaApp()
+        BuildAvaloniaApp(log)
             .StartWithClassicDesktopLifetime(args);
     }
 
-    // Avalonia configuration, don't remove; also used by visual designer.
-    public static AppBuilder BuildAvaloniaApp()
-        => AppBuilder.Configure<App>()
+    /// <summary>Debug builds log to a file for whoever is debugging them; anything else keeps
+    /// nothing.</summary>
+    private static IDiagnosticLog CreateLog()
+    {
+#if DEBUG
+        return new FileDiagnosticLog(AppDataPaths.DebugLogFile);
+#else
+        return NullDiagnosticLog.Instance;
+#endif
+    }
+
+    // Avalonia configuration, don't remove; the visual designer calls this one, which keeps no log.
+    public static AppBuilder BuildAvaloniaApp() => BuildAvaloniaApp(NullDiagnosticLog.Instance);
+
+    private static AppBuilder BuildAvaloniaApp(IDiagnosticLog log)
+        => AppBuilder.Configure(() => new App(log))
             .UsePlatformDetect()
 #if DEBUG
             .WithDeveloperTools()

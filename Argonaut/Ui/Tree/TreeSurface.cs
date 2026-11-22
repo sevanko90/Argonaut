@@ -111,10 +111,27 @@ public class TreeSurface : RowSurface
     private sealed record PaneLayout(TextLayout Layout, string Text, TextLayout? Marker,
         List<(int Start, int Length, object Link)>? Links, List<TrailingItem>? Trailing, double Width);
 
-    /// <summary>One row as laid out: a pane per side the painter draws, one for a plain tree.</summary>
-    private sealed record RowLayout(PaneLayout[] Panes)
+    /// <summary>One row as laid out: a pane per side the painter draws, one for a plain tree.
+    /// Disposed when it leaves the cache - nothing holds a row's layout past the call that
+    /// fetched it - so a cache dropped on every caret move does not leave its text for the
+    /// finalizer.</summary>
+    private sealed record RowLayout(PaneLayout[] Panes) : IDisposable
     {
         public PaneLayout First => Panes[0];
+
+        public void Dispose()
+        {
+            foreach (var pane in Panes)
+            {
+                pane.Layout.Dispose();
+                pane.Marker?.Dispose();
+                if (pane.Trailing is { } trailing)
+                {
+                    foreach (var item in trailing)
+                        item.Label.Dispose();
+                }
+            }
+        }
     }
 
     private readonly List<TreeRow> realized = new();
@@ -147,6 +164,7 @@ public class TreeSurface : RowSurface
     // The row under the pointer, and which of its trailing items, if any: actions show on the
     // hovered row, and a clickable chip darkens under the pointer.
     private (long, bool)? hoveredKey;
+    private TreeRow? hoveredRow;
     private int hoveredItem = -1;
 
     // The link in a row's text under the pointer while the command modifier is held, drawn
@@ -265,6 +283,12 @@ public class TreeSurface : RowSurface
 
     /// <summary>A link run was clicked: the row, and the run's <see cref="TreeRun.Link"/>.</summary>
     public event EventHandler<TreeLinkClickedEventArgs>? LinkClicked;
+
+    /// <summary>The row under the pointer, or null.</summary>
+    public TreeRow? HoveredRow => hoveredRow;
+
+    /// <summary>Raised when the pointer moves onto another row, or off the rows.</summary>
+    public event EventHandler? HoveredRowChanged;
 
     /// <summary>An Alt-expand stopped at <see cref="DeepExpandRowBudget"/> rows.</summary>
     public event EventHandler? ExpandLimitReached;
@@ -573,7 +597,7 @@ public class TreeSurface : RowSurface
     /// <summary>Whether a pane draws the row's expand arrow: always for a plain tree, and in a
     /// pane only where the row has something on that side.</summary>
     private bool DrawsArrow(in TreeRow row, PaneLayout layout)
-        => row.Shape == TreeRowShape.Open && (PaneCount == 1 || layout.Text.Length > 0);
+        => row.Shape == TreeRowShape.Open && (PaneCount == 1 || layout.Text.Length > 0) && document?.IsAlwaysOpen(row) != true;
 
     /// <summary>The pane under a surface x.</summary>
     private int PaneAt(double x)
@@ -627,7 +651,7 @@ public class TreeSurface : RowSurface
     /// <summary>Expands or collapses the container of <paramref name="row"/>.</summary>
     public void Toggle(in TreeRow row)
     {
-        if (document is null || row.Shape == TreeRowShape.Leaf)
+        if (document is null || row.Shape == TreeRowShape.Leaf || document.IsAlwaysOpen(row))
             return;
 
         StartTurn(row);
@@ -922,11 +946,16 @@ public class TreeSurface : RowSurface
         }
 
         foreach (var key in stale)
-            layouts.Remove(key);
+        {
+            if (layouts.Remove(key, out var dropped))
+                dropped.Dispose();
+        }
     }
 
     private void DropLayouts()
     {
+        foreach (var dropped in layouts.Values)
+            dropped.Dispose();
         layouts.Clear();
     }
 
@@ -1463,7 +1492,7 @@ public class TreeSurface : RowSurface
                 underline = new UnderlinedLink(hovered.Row.Key, pane, textLink.Start, textLink.Length);
             overLink = (trailing >= 0 && laid.Trailing![trailing].Link is not null) || underline is not null;
             bool overExpander = DrawsArrow(hovered.Row, laid) && IsOnExpander(laid, arrowX, point.X);
-            SetHover(hovered.Row.Key, trailing, overExpander ? pane : -1);
+            SetHover(hovered.Row, trailing, overExpander ? pane : -1);
         }
         else
         {
@@ -1594,18 +1623,24 @@ public class TreeSurface : RowSurface
         return -1;
     }
 
-    private void SetHover((long, bool)? key, int item, int expanderPane)
+    private void SetHover(TreeRow? row, int item, int expanderPane)
     {
+        var key = row?.Key;
         if (key == hoveredKey && item == hoveredItem && expanderPane == hoveredExpanderPane)
             return;
 
+        bool rowChanged = key != hoveredKey;
         hoveredKey = key;
+        hoveredRow = row;
         hoveredItem = item;
         hoveredExpanderPane = expanderPane;
         InvalidateVisual();
+        if (rowChanged)
+            HoveredRowChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    /// <summary>Shows the tooltip of the gutter cell under the pointer, or none.</summary>
+    /// <summary>Shows the tooltip of the gutter cell under the pointer, or past the gutters the
+    /// row's own, or none.</summary>
     private void UpdateToolTip(Point point)
     {
         object? tip = null;
@@ -1625,6 +1660,9 @@ public class TreeSurface : RowSurface
 
                 left += gutter.Width;
             }
+
+            if (point.X >= left)
+                tip ??= document.Painter.ToolTipFor(hovered.Row);
         }
 
         SetToolTip(tip);

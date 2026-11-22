@@ -24,6 +24,10 @@ public interface ITreeRowPainter
     /// parent by the marker's width rather than the indent, and its children with it.</summary>
     string? Marker(in TreeRow row) => null;
 
+    /// <summary>What hovering <paramref name="row"/>'s text says, or null for nothing. Asked only
+    /// while the pointer rests on it, so it may decode.</summary>
+    object? ToolTipFor(in TreeRow row) => null;
+
     /// <summary>How many side-by-side panes each row has.</summary>
     int PaneCount => 1;
 

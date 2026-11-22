@@ -43,7 +43,7 @@ public sealed class HexSurfaceTests
 
         public HexCursor Cursor => field ??= new HexCursor(() => Length);
 
-        public bool TryReadSelection(out byte[] bytes)
+        public bool TryRead(ByteRange range, out byte[] bytes)
         {
             bytes = [];
             return false;
@@ -245,9 +245,9 @@ public sealed class HexSurfaceTests
 
         public HexCursor Cursor => field ??= new HexCursor(() => Length);
 
-        public bool TryReadSelection(out byte[] selected)
+        public bool TryRead(ByteRange range, out byte[] selected)
         {
-            selected = Cursor.Caret is { IsEmpty: false } caret ? bytes[(int)caret.Start..(int)caret.End] : [];
+            selected = range.Length > 0 ? bytes[(int)range.Offset..(int)(range.Offset + range.Length)] : [];
             return selected.Length > 0;
         }
     }
@@ -317,6 +317,64 @@ public sealed class HexSurfaceTests
         window.MouseMove(surface.CentreOfByte(10, inCharacters: false));
         window.MouseUp(surface.CentreOfByte(10, inCharacters: false), MouseButton.Left);
         Assert.Equal(new HexCaret(9, 11), cursor.Caret);
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task ARightClickInsideTheSelection_KeepsIt() => With(new FakeDocument(1000), (surface, window) =>
+    {
+        var cursor = surface.Document!.Cursor;
+        cursor.Select(new HexCaret(4, 40));
+
+        var at = surface.CentreOfByte(4, inCharacters: false, screenRow: 1);
+        window.MouseDown(at, MouseButton.Right, RawInputModifiers.RightMouseButton);
+        window.MouseUp(at, MouseButton.Right);
+        Assert.Equal(new HexCaret(4, 40), cursor.Caret);
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task ARightClickOutsideTheSelection_MovesTheCaretThere() => With(new FakeDocument(1000), (surface, window) =>
+    {
+        var cursor = surface.Document!.Cursor;
+        cursor.Select(new HexCaret(4, 40));
+
+        var at = surface.CentreOfByte(0, inCharacters: false, screenRow: 4);
+        window.MouseDown(at, MouseButton.Right, RawInputModifiers.RightMouseButton);
+        window.MouseUp(at, MouseButton.Right);
+        Assert.Equal(HexCaret.At(64), cursor.Caret);
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task ARightClickOnTheOutline_WithNothingSelected_LeavesTheCaret_AndTheMenuActsOnTheOutline() => With(new FakeDocument(1000), (surface, window) =>
+    {
+        var cursor = surface.Document!.Cursor;
+        cursor.Place(16);
+        surface.OutlineRange = new ByteRange(16, 40);
+
+        var at = surface.CentreOfByte(4, inCharacters: false, screenRow: 2);
+        window.MouseDown(at, MouseButton.Right, RawInputModifiers.RightMouseButton);
+        window.MouseUp(at, MouseButton.Right);
+        Assert.Equal(HexCaret.At(16), cursor.Caret);
+        Assert.Equal(new ByteRange(16, 40), surface.MenuRange);
+        Assert.True(surface.MenuIsOnOutline);
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task ARightClickOnASelectionInsideTheOutline_ActsOnTheSelection() => With(new FakeDocument(1000), (surface, window) =>
+    {
+        var cursor = surface.Document!.Cursor;
+        cursor.Select(new HexCaret(20, 24));
+        surface.OutlineRange = new ByteRange(16, 40);
+
+        var at = surface.CentreOfByte(5, inCharacters: false, screenRow: 1);
+        window.MouseDown(at, MouseButton.Right, RawInputModifiers.RightMouseButton);
+        window.MouseUp(at, MouseButton.Right);
+        Assert.Equal(new HexCaret(20, 24), cursor.Caret);
+        Assert.False(surface.MenuIsOnOutline);
+        Assert.Equal(new ByteRange(20, 4), surface.MenuRange);
         return Task.CompletedTask;
     });
 

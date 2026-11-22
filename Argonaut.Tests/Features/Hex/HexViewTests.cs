@@ -148,6 +148,33 @@ public sealed class HexViewTests
         return Task.CompletedTask;
     });
 
+    /// <summary>A right-click inside the struct, with nothing selected, leaves the caret and the
+    /// struct where they are and offers the struct: its bytes, and it as JSON.</summary>
+    [Fact]
+    public Task ARightClickOnTheStruct_KeepsItInPlace_AndOffersItAsJson() => WithView((window, view, hex, _) =>
+    {
+        hex.Structs.DefinitionText = "struct Run { uint8_t head; uint8_t body[20]; };";
+        hex.SidePanelTab = HexPanelTab.Struct;
+        hex.Cursor.Place(0x10);
+        Dispatcher.UIThread.RunJobs();
+        window.UpdateLayout();
+        window.CaptureRenderedFrame();
+
+        var dump = Surface(view);
+        var at = Avalonia.VisualExtensions.TranslatePoint(dump, dump.CentreOfByte(4, inCharacters: false, screenRow: 1), window)!.Value;
+        window.MouseDown(at, MouseButton.Right, RawInputModifiers.RightMouseButton);
+        window.MouseUp(at, MouseButton.Right);
+        Dispatcher.UIThread.RunJobs();
+        window.UpdateLayout();
+
+        Assert.Equal(HexCaret.At(0x10), hex.Cursor.Caret);
+        Assert.Equal(0x10, hex.Structs.Tree!.Start);
+        Assert.True(dump.MenuIsOnOutline);
+        Assert.Equal(new ByteRange(0x10, 21), dump.MenuRange);
+        Assert.Contains("Copy struct as JSON", DrawnMenuItems(view).Select(m => m.Header as string));
+        return Task.CompletedTask;
+    });
+
     [Fact]
     public Task TheStructPicker_ShowsTheDeclaredStructs_AndPickingOneShowsIt() => WithView((window, view, hex, _) =>
     {

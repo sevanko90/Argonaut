@@ -30,6 +30,7 @@ public partial class HexView : UserControl
         StructSurface.HoveredRowChanged += OnStructRowHovered;
         StructSurface.SelectionChanged += OnStructRowSelected;
         StructSurface.ContextMenu = BuildStructMenu();
+        OfferStructInDumpMenu();
         DetachedFromVisualTree += (_, _) =>
         {
             scrollBars.Dispose();
@@ -268,6 +269,21 @@ public partial class HexView : UserControl
         var all = new MenuItem { Header = "Copy struct as JSON" };
         all.Click += (_, _) => OnCopyStructAsJson(null, new RoutedEventArgs());
         return new ContextMenu { Items = { row, all } };
+    }
+
+    /// <summary>The dump's menu, opened on the struct's outline rather than a selection, offers
+    /// the struct as JSON beside its bytes.</summary>
+    private void OfferStructInDumpMenu()
+    {
+        if (Surface.ContextMenu is not { } menu)
+            return;
+
+        var separator = new Separator();
+        var json = new MenuItem { Header = "Copy struct as JSON" };
+        json.Click += (_, _) => OnCopyStructAsJson(null, new RoutedEventArgs());
+        menu.Items.Add(separator);
+        menu.Items.Add(json);
+        menu.Opening += (_, _) => separator.IsVisible = json.IsVisible = Surface.MenuIsOnOutline;
     }
 
     /// <summary>The selector's copy button: the whole mapping - one struct, or the array.</summary>

@@ -271,11 +271,19 @@ public sealed class HexViewModel : ObservableObject, IDocumentViewModel, IHexDoc
     public bool TryReadSelection(out byte[] bytes)
     {
         bytes = [];
-        if (this.source is not { } from || Cursor.Caret is not { IsEmpty: false } caret || caret.Length > HexCopy.MaxBytes)
+        return Cursor.Caret is { IsEmpty: false } caret && TryRead(new ByteRange(caret.Start, caret.Length), out bytes);
+    }
+
+    /// <summary>The bytes of <paramref name="range"/>, for a copy - false when it is empty, runs
+    /// past the end, or is larger than <see cref="HexCopy.MaxBytes"/>.</summary>
+    public bool TryRead(ByteRange range, out byte[] bytes)
+    {
+        bytes = [];
+        if (this.source is not { } from || range.Length <= 0 || range.Length > HexCopy.MaxBytes)
             return false;
 
-        bytes = new byte[caret.Length];
-        return from.CopyTo(caret.Start, bytes) == bytes.Length;
+        bytes = new byte[range.Length];
+        return from.CopyTo(range.Offset, bytes) == bytes.Length;
     }
 
     private void OnCaretMoved(object? sender, EventArgs e)

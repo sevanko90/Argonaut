@@ -9,6 +9,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
+using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Media.TextFormatting;
 using Avalonia.Threading;
@@ -32,9 +33,9 @@ public interface IHexDocument
     /// <summary>The caret and selection, which the surface draws and moves.</summary>
     HexCursor Cursor { get; }
 
-    /// <summary>The selected bytes, for a copy - false when nothing is selected or there is too
-    /// much (<see cref="HexCopy.MaxBytes"/>).</summary>
-    bool TryReadSelection(out byte[] bytes);
+    /// <summary>The bytes of <paramref name="range"/>, for a copy - false when it is empty, runs
+    /// past what is there, or is larger than <see cref="HexCopy.MaxBytes"/>.</summary>
+    bool TryRead(ByteRange range, out byte[] bytes);
 }
 
 /// <summary>
@@ -226,6 +227,7 @@ public sealed class HexSurface : RowSurface
         Focusable = true;
         MeasureGeometry();
         ContextMenu = BuildCopyMenu();
+        AddHandler(ContextRequestedEvent, OnContextRequested, RoutingStrategies.Tunnel);
     }
 
     /// <summary>Whether the keys and a copy act in the character panel rather than the hex one.</summary>
@@ -615,15 +617,9 @@ public sealed class HexSurface : RowSurface
             return;
 
         this.keysInCharacters = hit.InCharacters;
+        // A right press opens the menu, which chooses what it acts on (OnContextRequested).
         if (point.Properties.IsRightButtonPressed)
-        {
-            // A right-click inside the selection copies it; elsewhere it moves the caret first,
-            // as a click would.
-            if (at.Caret is not { } caret || hit.Offset < caret.Start || hit.Offset >= caret.End)
-                at.Place(ClickStart(hit));
-            InvalidateVisual();
             return;
-        }
 
         if (!point.Properties.IsLeftButtonPressed)
             return;
@@ -636,6 +632,39 @@ public sealed class HexSurface : RowSurface
         InvalidateVisual();
         e.Handled = true;
     }
+
+    /// <summary>
+    /// What the menu a right-click on byte <paramref name="offset"/> opens acts on, moving the caret
+    /// only when the click is on nothing already marked: the selection when the click is inside
+    /// it; else the struct's outline when inside that, the caret and the struct left where they
+    /// are; else the caret, moved there as a click would move it.
+    /// </summary>
+    private ByteRange? ContextTarget(HexCursor at, long offset)
+    {
+        if (at.Caret is { IsEmpty: false } caret && offset >= caret.Start && offset < caret.End)
+        {
+            MenuIsOnOutline = false;
+            return new ByteRange(caret.Start, caret.Length);
+        }
+
+        if (OutlineRange is { } outline && offset >= outline.Offset && offset < outline.Offset + outline.Length)
+        {
+            MenuIsOnOutline = true;
+            return outline;
+        }
+
+        MenuIsOnOutline = false;
+        at.Place(HexRows.GroupStart(offset, StepIn(this.keysInCharacters)));
+        return at.Caret is { IsEmpty: false } placed ? new ByteRange(placed.Start, placed.Length) : null;
+    }
+
+    /// <summary>What the context menu's copies act on: what the right-click that opened it was on,
+    /// the selection when it was opened from the keyboard.</summary>
+    internal ByteRange? MenuRange { get; private set; }
+
+    /// <summary>Whether the right-click that opened the menu was on the struct's outline rather
+    /// than a selection - the host's cue to offer the struct itself.</summary>
+    public bool MenuIsOnOutline { get; private set; }
 
     /// <summary>
     /// What a left press on <paramref name="hit"/> does - the real pointer and the tests alike. A
@@ -891,7 +920,7 @@ public sealed class HexSurface : RowSurface
         }
         else if (e.Key == Key.C && command)
         {
-            _ = CopyAsync(this.keysInCharacters ? HexCopyForm.Text : HexCopyForm.Hex);
+            _ = CopyAsync(this.keysInCharacters ? HexCopyForm.Text : HexCopyForm.Hex, SelectedRange());
         }
         else if (e.Key == Key.Tab && !command)
         {
@@ -921,7 +950,7 @@ public sealed class HexSurface : RowSurface
         MenuItem Item(string header, HexCopyForm form)
         {
             var item = new MenuItem { Header = header };
-            item.Click += (_, _) => _ = CopyAsync(form);
+            item.Click += (_, _) => _ = CopyAsync(form, MenuRange);
             return item;
         }
 
@@ -937,18 +966,41 @@ public sealed class HexSurface : RowSurface
     }
 
     /// <summary>
-    /// Copies the selection in <paramref name="form"/>. Refuses rather than truncates when it is
-    /// larger than <see cref="HexCopy.MaxBytes"/>.
+    /// Chooses what the menu about to open acts on - tunnelling, so before the menu opens, which
+    /// some platforms do on the press and others on the release: what a right-click is on, or the
+    /// selection for a menu opened from the keyboard.
     /// </summary>
-    private async Task CopyAsync(HexCopyForm form)
+    private void OnContextRequested(object? sender, ContextRequestedEventArgs e)
     {
-        if (this.document is not { } from || this.cursor?.Caret is not { IsEmpty: false } caret)
+        if (this.cursor is { } at && e.TryGetPosition(this, out var position) && ByteAt(position) is { } hit)
+        {
+            this.keysInCharacters = hit.InCharacters;
+            MenuRange = ContextTarget(at, hit.Offset);
+            InvalidateVisual();
+            return;
+        }
+
+        MenuRange = SelectedRange();
+        MenuIsOnOutline = false;
+    }
+
+    private ByteRange? SelectedRange()
+        => this.cursor?.Caret is { IsEmpty: false } caret ? new ByteRange(caret.Start, caret.Length) : null;
+
+    /// <summary>
+    /// Copies <paramref name="range"/> - the selection, or the struct a right-click was on - in
+    /// <paramref name="form"/>. Refuses rather than truncates when it is larger than
+    /// <see cref="HexCopy.MaxBytes"/>.
+    /// </summary>
+    private async Task CopyAsync(HexCopyForm form, ByteRange? range)
+    {
+        if (this.document is not { } from || range is not { Length: > 0 } copied)
             return;
 
-        if (!from.TryReadSelection(out byte[] bytes))
+        if (!from.TryRead(copied, out byte[] bytes))
         {
-            if (caret.Length > HexCopy.MaxBytes)
-                ToastService.Show($"Selection is too large to copy ({caret.Length / (1024 * 1024)} MB).");
+            if (copied.Length > HexCopy.MaxBytes)
+                ToastService.Show($"{(copied == SelectedRange() ? "Selection" : "Struct")} is too large to copy ({copied.Length / (1024 * 1024)} MB).");
             return;
         }
 

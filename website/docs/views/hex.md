@@ -30,6 +30,11 @@ at place after place:
   it by its own width, to walk through a run of values.
 - <kbd>Esc</kbd> or a double-click goes back to a single caret.
 
+## Reading structs
+
+Paste the C, C++ or C# struct that wrote the data, and the bytes at the caret read as that struct,
+field by field. See [Struct decoder](../features/structs.md).
+
 ## Copying
 
 <kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>Cmd</kbd>+<kbd>C</kbd> copies the selection as the active panel

@@ -89,27 +89,58 @@ over every fixture.
 Kaitai becomes the panel's third definition language beside C and C#: paste or open a `.ksy`, and
 it is detected (`meta:` and `seq:` at the top level) as a C# definition is.
 
-- **Where it reads from.** A C struct follows the caret; a `.ksy` usually describes a whole file,
-  so it opens pinned at offset 0 over the whole document. Unpinning makes it follow the caret,
-  reading from there - which is how a format embedded in another file is read.
+**Two placements**, because a spec describes either a whole file or a part of one:
+
+- **A whole file, pinned at byte 0.** The default for a `.ksy`. The root is the document's start
+  and the tree is the file's structure; the caret moving does not move the root.
+- **A part of a file, applied at the caret.** Unpinning makes the spec follow the caret as a C
+  struct does: the root is the caret, which is how a format embedded in another file (a header
+  inside a container, a record found by search) is read. A known start means no walk is needed to
+  reach it.
+
+**Following the caret in a whole-file spec.** The panel stays rooted at the file's root, and as
+the caret moves it asks Ksyrt which node holds that byte (`tree.Locate`): the ancestors of that
+node are expanded and it is scrolled into view - `header › records › [48,211] › payload` - rather
+than the user opening a million-element array by hand. A caret past where the structure has been
+indexed shows "Indexing structure… 34%" in the panel and fills in when the walk arrives, as the
+raw view does for a line past its index.
+
 - **Problems** show in the definition editor at their line and column, as C and C# problems do.
   An unsupported feature names itself.
 - **Imports** resolve against the definition's folder, and against the struct definition folder
   (`StructDefinitionFolderStore`), through Ksyrt's import resolver.
+- **A format that must be read from the start** - one whose big repeat is found only by parsing
+  every element (Ksyrt classifies each repeat from the spec) - says so when it is applied, so a
+  slow jump ahead is expected rather than a surprise.
 
 ### 2.4 Background work
 
-- Rows are drawn with a small budget. A pending value shows `…` and its work goes to a background
-  `Settle`; when it publishes, the row redraws through `RowSurface.OutsideRenderPass`, never from
-  inside the render pass.
-- A long `repeat-until` or `repeat: eos` is walked in the background, its count shown as
-  "at least n" and its rows available as the walk reaches them, with progress through the existing
-  reporter.
-- **This is a new background reader of the document's file**, so it joins the save
-  (`RawViewModel.SaveAsync`'s stop-and-join list, see CLAUDE.md) and the document session's
-  cancel → join → release order. Missing that fails saves on Windows only.
-- A growing source (a download still arriving) shows the not-yet-arrived state, and the tree
-  re-reads on the source's growth.
+Ksyrt produces the structure's index; Argonaut runs it. Ksyrt has no threads: it offers a
+`StructureWalk` that does one bounded slice per `Advance` call on whatever thread calls it, and
+keeps the checkpoints in its own graph. Everything about running a scan is Argonaut's, and already
+exists, so none of it is duplicated:
+
+- **A structure index is one more `IBackgroundIndex`.** Its scan body drives the walk -
+  `Advance(4 MB, stopping)` in a loop, progress through the existing reporter, and on `Incomplete`
+  the source's `WaitForLength` before carrying on (blocking stays Argonaut's, on the background
+  thread, as CLAUDE.md requires). It records nothing itself: the checkpoints are Ksyrt's.
+- **It starts when a whole-file spec is applied**, not when the caret jumps - as a file's lines
+  are indexed on open - so by the time the user scrolls halfway the walk has usually passed it. A
+  size-only walk runs at about the input's read speed.
+- **It is a new background reader of the document's file**, so it joins the document session's
+  cancel → join → release order and the save's stop-and-join list (`RawViewModel.SaveAsync`, see
+  CLAUDE.md). Missing that fails saves on Windows only.
+- **It is kept across view switches** through `KeptIndexes`: the finished checkpoints
+  (`tree.DetachIndex()`) are kept under the origin and a hash of the `.ksy` text, checked against
+  the origin's `ByteOriginVersion` like every kept index, and handed back to `spec.Open`. Leaving
+  Hex and coming back, or reapplying the same spec, does not walk again.
+- **Rows are drawn with a small budget.** A pending value shows `…` and its work goes to a
+  background `Settle`; when it publishes, the row redraws through `RowSurface.OutsideRenderPass`,
+  never from inside the render pass.
+- **A `repeat-until` or `repeat: eos`** shows its count as "at least n" while it is walked, its
+  rows available as the walk reaches them.
+- **A growing source** (a download still arriving) shows the not-yet-arrived state, and the walk
+  carries on as the source grows.
 
 ### 2.5 Seeing it in the dump
 

@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  packages: read
 
 jobs:
   publish:
@@ -28,6 +29,14 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+      - name: Add the Ksyrt feed
+        # Ksyrt is restored from GitHub Packages, which needs a login even for a public package;
+        # the workflow's own token reads it (packages: read, and the package's Actions access).
+        shell: bash
+        run: >
+          dotnet nuget add source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
+          --name ksyrt --username "${{ github.actor }}" --password "${{ secrets.GITHUB_TOKEN }}"
+          --store-password-in-clear-text
       - name: Publish
         if: matrix.os == 'ubuntu-latest'
         shell: bash

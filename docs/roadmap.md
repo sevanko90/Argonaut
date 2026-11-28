@@ -248,7 +248,8 @@ The XML tree view is built (see "The XML tree" in architecture.md). What remains
 - **Structure templates** - what a struct definition cannot say: an array sized by an earlier
   field, a NUL-terminated string of unknown length, a chunk list running to the end of the file,
   an offset followed elsewhere. A language of its own, beyond the struct decoder
-  ([struct-decoder-plan.md](struct-decoder-plan.md), "Not in this plan").
+  ([struct-decoder-plan.md](struct-decoder-plan.md), "Not in this plan"). Planned on Ksyrt, a
+  Kaitai Struct runtime of its own: [kaitai-interpreter-plan.md](kaitai-interpreter-plan.md).
 - **An image preview** for binary responses and files.
 - **HTML colouring in the raw view**, for HTML responses and error pages, which show as plain text.
 - **Ctrl+Shift+V to paste as a new document** while one is open. Plain Ctrl+V pastes only while

@@ -29,6 +29,24 @@
     <PackageReference Include="Velopack" Version="1.2.161" />
   </ItemGroup>
 
+  <!-- Ksyrt, the Kaitai Struct runtime (github.com/sevanko90/ksyrt), developed alongside the app.
+       Locally it is the checkout beside this one, as a project reference, so `dotnet run` builds
+       its current state and the debugger steps into it. In CI (GitHub Actions sets GITHUB_ACTIONS)
+       or without that checkout it is the package, restored from the GitHub Packages feed the
+       workflows add. KsyrtVersion is the CI package an edit to Ksyrt is published as: bump it when
+       the app needs a newer Ksyrt, or CI builds against the old one. -->
+  <PropertyGroup>
+    <KsyrtVersion>0.1.0-ci.2</KsyrtVersion>
+    <KsyrtProject>$(MSBuildThisFileDirectory)..\..\ksyrt\Ksyrt\Ksyrt.csproj</KsyrtProject>
+    <KsyrtFromProject Condition="'$(KsyrtFromProject)' == '' and '$(GITHUB_ACTIONS)' != 'true' and Exists('$(KsyrtProject)')">true</KsyrtFromProject>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(KsyrtFromProject)' == 'true'">
+    <ProjectReference Include="$(KsyrtProject)" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(KsyrtFromProject)' != 'true'">
+    <PackageReference Include="Ksyrt" Version="$(KsyrtVersion)" />
+  </ItemGroup>
+
   <ItemGroup>
     <!-- Schemas the app ships with; JsonSchemaCatalog enumerates them from the output folder. -->
     <Content Include="Schemas\**\*.json" CopyToOutputDirectory="PreserveNewest" />
